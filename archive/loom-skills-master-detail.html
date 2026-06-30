@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loom — Skills master-detail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#0b1120; --nav:#0a0f1c; --card:#131c2e; --border:#1e293b; --text:#e2e8f0; --bright:#f1f5f9; --muted:#64748b; --signal:#34d399; --warn:#fbbf24; --info:#38bdf8;
+    --cc:#D97757; --cx:#06B6D4; --oc:#8B5CF6; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body{height:100%;}
+  body { font-family:'Fira Sans',system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:13px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  .label { font-size:10px; font-weight:500; letter-spacing:0.06em; text-transform:uppercase; color:var(--muted); }
+  .mono { font-family:'Fira Code',monospace; }
+
+  .statusline { display:flex; align-items:center; gap:14px; height:32px; padding:0 18px; background:var(--nav); border-bottom:1px solid var(--border); font-size:11px; color:var(--muted); }
+  .statusline .brand { color:var(--signal); font-family:'Fira Code',monospace; font-weight:600; }
+  .statusline .v { color:var(--text); font-family:'Fira Code',monospace; }
+  .statusline .dot { width:6px; height:6px; border-radius:50%; background:var(--signal); box-shadow:0 0 6px var(--signal); margin-right:5px; }
+  .statusline .sync { margin-left:auto; display:flex; align-items:center; }
+
+  .shell { display:grid; grid-template-columns:208px 300px 1fr; height:calc(100% - 32px); }
+  .sidebar { background:var(--nav); border-right:1px solid var(--border); padding:14px 0; display:flex; flex-direction:column; gap:2px; }
+  .nav-item { display:flex; align-items:center; gap:10px; padding:8px 18px; color:var(--muted); font-size:13px; font-weight:500; border-left:2px solid transparent; }
+  .nav-item .ic { font-family:'Fira Code',monospace; font-size:14px; width:16px; text-align:center; }
+  .nav-item.active { color:var(--bright); border-left-color:var(--signal); background:linear-gradient(90deg, rgba(52,211,153,0.06), transparent); }
+  .nav-item.active .ic { color:var(--signal); }
+  .nav-section { padding:13px 18px 5px; }
+
+  /* master list */
+  .master { border-right:1px solid var(--border); overflow:auto; padding:14px 0; }
+  .mhead { display:flex; align-items:center; gap:8px; padding:0 14px 10px; }
+  .mhead .t { font-family:'Fira Code',monospace; font-size:14px; font-weight:600; color:var(--bright); }
+  .mhead .add { margin-left:auto; font-family:'Fira Code',monospace; font-size:11px; color:var(--signal); cursor:default; }
+  .group { margin-bottom:4px; }
+  .group-head { display:flex; align-items:center; gap:6px; padding:6px 14px; cursor:default; }
+  .group-head .arrow { color:var(--muted); font-size:9px; width:8px; }
+  .group-head .gn { font-family:'Fira Code',monospace; font-size:11px; color:var(--muted); }
+  .group-head .gcnt { font-family:'Fira Code',monospace; font-size:10px; color:var(--muted); margin-left:auto; }
+  .skill-row { display:flex; align-items:center; gap:8px; padding:5px 14px 5px 30px; cursor:default; border-left:2px solid transparent; }
+  .skill-row:hover { background:rgba(255,255,255,0.02); }
+  .skill-row.sel { background:linear-gradient(90deg, rgba(52,211,153,0.07), transparent); border-left-color:var(--signal); }
+  .skill-row .sdot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .sdot.green { background:var(--signal); } .sdot.dim { background:var(--muted); opacity:0.4; }
+  .skill-row .sn { font-family:'Fira Code',monospace; font-size:12px; color:var(--text); }
+  .skill-row.sel .sn { color:var(--bright); }
+
+  /* detail */
+  .detail { overflow:auto; padding:20px 26px; }
+  .d-title { display:flex; align-items:baseline; gap:12px; }
+  .d-title .nm { font-family:'Fira Code',monospace; font-size:20px; font-weight:600; color:var(--bright); letter-spacing:-0.01em; }
+  .d-title .badge { font-family:'Fira Code',monospace; font-size:10px; padding:2px 8px; border-radius:3px; background:rgba(52,211,153,0.12); color:var(--signal); border:1px solid color-mix(in srgb,var(--signal) 30%, transparent); }
+  .d-src { color:var(--muted); font-size:12px; margin-top:3px; }
+  .d-src .v { font-family:'Fira Code',monospace; color:var(--text); }
+
+  .section { margin-top:22px; }
+  .section .label { display:block; margin-bottom:9px; }
+
+  /* chip row */
+  .chips { display:flex; gap:10px; align-items:center; }
+  .chip { width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; border:1px solid transparent; border-radius:50%; transition:all .12s; }
+  .chip svg { width:15px; height:15px; }
+  .chip.active { background:var(--c); color:#fff; border-color:var(--c); }
+  .chip.inactive { background:transparent; color:var(--c); border-color:var(--c); }
+  .chip.inactive svg { opacity:0.5; }
+  .chip-hint { font-size:11px; color:var(--muted); margin-left:6px; }
+
+  /* projection paths */
+  .paths { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:14px 16px; font-family:'Fira Code',monospace; font-size:11.5px; line-height:1.9; }
+  .paths .src { color:var(--muted); }
+  .paths .src .k { color:var(--info); }
+  .paths .link { color:var(--text); }
+  .paths .sym { color:var(--signal); }
+  .paths .ag { display:inline-flex; align-items:center; gap:5px; }
+  .paths .agdot { width:8px; height:8px; border-radius:50%; }
+
+  /* preview */
+  .preview { background:var(--card); border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+  .preview-head { display:flex; align-items:center; gap:8px; padding:8px 14px; background:var(--nav); border-bottom:1px solid var(--border); }
+  .preview-head .tab { font-family:'Fira Code',monospace; font-size:11px; color:var(--bright); }
+  .preview-head .path { font-family:'Fira Code',monospace; font-size:10px; color:var(--muted); margin-left:auto; }
+  .preview-body { padding:14px 16px; font-family:'Fira Code',monospace; font-size:12px; line-height:1.7; }
+  .preview-body .fm { color:var(--muted); }
+  .preview-body .fmk { color:var(--info); }
+  .preview-body .fmv { color:var(--text); }
+  .preview-body .body { color:var(--text); margin-top:8px; }
+  .preview-body .body em { color:var(--muted); font-style:normal; }
+
+  @media (prefers-reduced-motion: reduce){ animate,animateMotion{display:none;} }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="ic-cc" viewBox="-10 -10 20 20"><path d="M0,-8.5 C1.6,-3 3.2,-1.6 8.5,0 C3.2,1.6 1.6,3 0,8.5 C-1.6,3 -3.2,1.6 -8.5,0 C-3.2,-1.6 -1.6,-3 0,-8.5 Z" fill="currentColor"/></symbol>
+  <symbol id="ic-cx" viewBox="-10 -10 20 20"><g fill="currentColor"><circle r="2.4"/><ellipse rx="1.7" ry="3.6" cy="-4.6"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(60)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(120)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(180)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(240)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(300)"/></g></symbol>
+  <symbol id="ic-oc" viewBox="-10 -10 20 20"><path d="M0,-8 L7,0 L0,8 L-7,0 Z" fill="currentColor"/></symbol>
+</svg>
+
+<div class="statusline">
+  <span class="brand">◆ loom</span><span class="v">default</span><span>·</span><span class="v">local</span>
+  <span class="sync"><span class="dot"></span>synced 2m ago</span>
+</div>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="nav-section"><span class="label">workspace</span></div>
+    <div class="nav-item active"><span class="ic">✦</span>Skills</div>
+    <div class="nav-item"><span class="ic">⌘</span>MCP servers</div>
+    <div class="nav-item"><span class="ic">⇅</span>Sync</div>
+    <div class="nav-section"><span class="label">system</span></div>
+    <div class="nav-item"><span class="ic">⚙</span>Settings</div>
+  </aside>
+
+  <!-- master list -->
+  <div class="master">
+    <div class="mhead"><span class="t">Skills</span><span class="add">+ source</span></div>
+    <div class="group">
+      <div class="group-head"><span class="arrow">▼</span><span class="gn">superpowers</span><span class="gcnt">4</span></div>
+      <div class="skill-row sel"><span class="sdot green"></span><span class="sn">brainstorming</span></div>
+      <div class="skill-row"><span class="sdot green"></span><span class="sn">test-driven-dev</span></div>
+      <div class="skill-row"><span class="sdot green"></span><span class="sn">systematic-debug</span></div>
+      <div class="skill-row"><span class="sdot dim"></span><span class="sn">deprecated-old</span></div>
+    </div>
+    <div class="group">
+      <div class="group-head"><span class="arrow">▼</span><span class="gn">local skills</span><span class="gcnt">2</span></div>
+      <div class="skill-row"><span class="sdot green"></span><span class="sn">frontend-design</span></div>
+      <div class="skill-row"><span class="sdot green"></span><span class="sn">my-helper</span></div>
+    </div>
+    <div class="group">
+      <div class="group-head"><span class="arrow">▼</span><span class="gn">playwright-helper</span><span class="gcnt">1</span></div>
+      <div class="skill-row"><span class="sdot green"></span><span class="sn">playwright-helper</span></div>
+    </div>
+  </div>
+
+  <!-- detail -->
+  <div class="detail">
+    <div class="d-title"><span class="nm">brainstorming</span><span class="badge">projected</span></div>
+    <div class="d-src">source: <span class="v">superpowers</span> · <span class="v">github:obra/superpowers</span> @ <span class="v">v5.1.4</span></div>
+
+    <div class="section">
+      <span class="label">projection targets · 点击切换</span>
+      <div class="chips">
+        <span class="chip active" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+        <span class="chip active" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+        <span class="chip active" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+        <span class="chip-hint">投影到 CC · CX · OC</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <span class="label">projection paths</span>
+      <div class="paths">
+        <div class="src"><span class="k">source</span>&nbsp;&nbsp;~/.loom/repos/default/remote-cache/superpowers/skills/brainstorming/</div>
+        <div class="link"><span class="sym">├─▶</span>&nbsp;<span class="ag"><span class="agdot" style="background:var(--cc)"></span></span>&nbsp;~/.claude/skills/superpowers-brainstorming/&nbsp;&nbsp;<span style="color:var(--muted)">symlink</span></div>
+        <div class="link"><span class="sym">├─▶</span>&nbsp;<span class="ag"><span class="agdot" style="background:var(--cx)"></span></span>&nbsp;~/.codex/skills/superpowers-brainstorming/&nbsp;&nbsp;<span style="color:var(--muted)">symlink</span></div>
+        <div class="link"><span class="sym">└─▶</span>&nbsp;<span class="ag"><span class="agdot" style="background:var(--oc)"></span></span>&nbsp;~/.opencode/skills/superpowers-brainstorming/&nbsp;&nbsp;<span style="color:var(--muted)">symlink</span></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <span class="label">preview</span>
+      <div class="preview">
+        <div class="preview-head"><span class="tab">SKILL.md</span><span class="path">remote-cache/superpowers/skills/brainstorming/SKILL.md</span></div>
+        <div class="preview-body">
+          <div class="fm">---</div>
+          <div class="fm"><span class="fmk">name:</span> <span class="fmv">brainstorming</span></div>
+          <div class="fm"><span class="fmk">description:</span> <span class="fmv">Help turn ideas into fully formed designs and</span></div>
+          <div class="fm"><span class="fmv">specs through natural collaborative dialogue.</span></div>
+          <div class="fm">---</div>
+          <div class="body">Help turn ideas into fully formed designs and specs through natural collaborative dialogue. Start by understanding the current project context, then ask questions one at a time to refine the idea. <em>…</em></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+    c.classList.toggle('active');
+    c.classList.toggle('inactive');
+  }));
+  document.querySelectorAll('.skill-row').forEach(r => r.addEventListener('click', () => {
+    document.querySelectorAll('.skill-row').forEach(x => x.classList.remove('sel'));
+    r.classList.add('sel');
+  }));
+</script>
+</body>
+</html>

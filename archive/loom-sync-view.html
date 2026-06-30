@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loom — Sync 视图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#0b1120; --nav:#0a0f1c; --card:#131c2e; --border:#1e293b; --text:#e2e8f0; --bright:#f1f5f9; --muted:#64748b; --signal:#34d399; --warn:#fbbf24; --error:#f87171; --info:#38bdf8;
+    --cc:#D97757; --cx:#06B6D4; --oc:#8B5CF6; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body{height:100%;}
+  body { font-family:'Fira Sans',system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:13px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  .label { font-size:10px; font-weight:500; letter-spacing:0.06em; text-transform:uppercase; color:var(--muted); }
+
+  .statusline { display:flex; align-items:center; gap:14px; height:32px; padding:0 18px; background:var(--nav); border-bottom:1px solid var(--border); font-size:11px; color:var(--muted); }
+  .statusline .brand { color:var(--signal); font-family:'Fira Code',monospace; font-weight:600; }
+  .statusline .v { color:var(--text); font-family:'Fira Code',monospace; }
+  .statusline .wdot { width:6px; height:6px; border-radius:50%; background:var(--warn); box-shadow:0 0 6px var(--warn); margin-right:5px; }
+  .statusline .sync { margin-left:auto; display:flex; align-items:center; }
+
+  .shell { display:grid; grid-template-columns:208px 1fr; height:calc(100% - 32px); }
+  .sidebar { background:var(--nav); border-right:1px solid var(--border); padding:14px 0; display:flex; flex-direction:column; gap:2px; }
+  .nav-item { display:flex; align-items:center; gap:10px; padding:8px 18px; color:var(--muted); font-size:13px; font-weight:500; border-left:2px solid transparent; }
+  .nav-item .ic { font-family:'Fira Code',monospace; font-size:14px; width:16px; text-align:center; }
+  .nav-item.active { color:var(--bright); border-left-color:var(--warn); background:linear-gradient(90deg, rgba(251,191,36,0.06), transparent); }
+  .nav-item.active .ic { color:var(--warn); }
+  .nav-section { padding:13px 18px 5px; }
+
+  .main { overflow:auto; padding:18px 26px; }
+  .page-title { font-family:'Fira Code',monospace; font-size:18px; font-weight:600; color:var(--bright); }
+
+  /* sync status bar */
+  .syncbar { display:flex; align-items:center; gap:14px; margin-top:12px; padding:11px 14px; background:rgba(251,191,36,0.06); border:1px solid color-mix(in srgb,var(--warn) 35%, transparent); border-radius:6px; }
+  .syncbar .icon { color:var(--warn); font-size:16px; }
+  .syncbar .msg { font-size:13px; color:var(--bright); }
+  .syncbar .msg b { color:var(--warn); }
+  .syncbar .acts { margin-left:auto; display:flex; gap:6px; }
+  .sbtn { font-family:'Fira Code',monospace; font-size:11px; padding:5px 11px; border-radius:4px; background:transparent; border:1px solid var(--border); color:var(--muted); cursor:default; }
+  .sbtn:hover { color:var(--text); border-color:var(--muted); }
+
+  /* conflict card */
+  .section { margin-top:22px; }
+  .section .label { display:block; margin-bottom:10px; }
+  .conf { background:var(--card); border:1px solid var(--border); border-radius:6px; overflow:hidden; margin-bottom:12px; }
+  .conf-head { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); background:var(--nav); }
+  .conf-head .src { font-family:'Fira Code',monospace; font-size:12px; color:var(--bright); }
+  .conf-head .dot { color:var(--muted); }
+  .conf-head .fld { font-family:'Fira Code',monospace; font-size:12px; color:var(--text); }
+  .conf-head .tag { margin-left:auto; font-family:'Fira Code',monospace; font-size:9px; padding:2px 7px; border-radius:3px; background:rgba(251,191,36,0.12); color:var(--warn); border:1px solid color-mix(in srgb,var(--warn) 30%, transparent); }
+
+  .three { display:grid; grid-template-columns:1fr 1fr 1fr; }
+  .col3 { padding:12px 14px; border-right:1px solid var(--border); cursor:default; position:relative; }
+  .col3:last-child { border-right:none; }
+  .col3 .clabel { font-family:'Fira Code',monospace; font-size:9px; letter-spacing:0.06em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+  .col3 .cval { font-family:'Fira Code',monospace; font-size:13px; color:var(--text); }
+  .col3 .cval.dim { color:var(--muted); }
+  .col3 .c chips { display:flex; gap:4px; }
+  .col3.selected { background:rgba(52,211,153,0.05); }
+  .col3.selected .clabel { color:var(--signal); }
+  .col3.selmark { position:absolute; top:10px; right:12px; width:14px; height:14px; border-radius:50%; border:1.5px solid var(--border); }
+  .col3.selected .selmark { border-color:var(--signal); background:var(--signal); }
+  .col3.selected .selmark::after { content:'✓'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#0b1120; font-size:9px; font-weight:700; }
+  .col3.middle { background:rgba(56,189,248,0.03); cursor:default; }
+  .col3.middle .cval { color:var(--signal); }
+  .col3.middle .clabel { color:var(--info); }
+  .conflict-val { color:var(--warn); }
+  .chips-sm { display:flex; gap:4px; align-items:center; }
+  .chip-sm { width:18px; height:18px; border-radius:4px; display:inline-flex; align-items:center; justify-content:center; }
+  .chip-sm svg { width:10px; height:10px; color:#fff; }
+
+  /* resolve bar */
+  .resolve { display:flex; gap:8px; align-items:center; margin-top:6px; }
+  .btn { font-family:'Fira Sans',sans-serif; font-size:12px; font-weight:500; padding:7px 14px; border-radius:4px; border:1px solid transparent; cursor:default; }
+  .btn-primary { background:var(--signal); color:#0b1120; }
+  .btn-ghost { background:transparent; color:var(--text); border-color:var(--border); }
+  .resolve .note { font-size:11px; color:var(--muted); margin-left:8px; }
+
+  /* event stream */
+  .events { border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+  .ev { display:grid; grid-template-columns:90px 130px 1fr; align-items:center; gap:12px; padding:8px 14px; border-bottom:1px solid var(--border); font-size:12px; }
+  .ev:last-child { border-bottom:none; }
+  .ev .time { font-family:'Fira Code',monospace; font-size:10px; color:var(--muted); }
+  .ev .machine { font-family:'Fira Code',monospace; font-size:10px; }
+  .ev .machine.me { color:var(--signal); }
+  .ev .machine.other { color:var(--info); }
+  .ev .desc { font-family:'Fira Code',monospace; font-size:11px; color:var(--text); }
+  .ev .desc .act { color:var(--signal); }
+  .ev .desc .act.add { color:var(--signal); } .ev .desc .act.del { color:var(--error); } .ev .desc .act.upd { color:var(--warn); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="ic-cc" viewBox="-10 -10 20 20"><path d="M0,-8.5 C1.6,-3 3.2,-1.6 8.5,0 C3.2,1.6 1.6,3 0,8.5 C-1.6,3 -3.2,1.6 -8.5,0 C-3.2,-1.6 -1.6,-3 0,-8.5 Z" fill="currentColor"/></symbol>
+  <symbol id="ic-cx" viewBox="-10 -10 20 20"><g fill="currentColor"><circle r="2.4"/><ellipse rx="1.7" ry="3.6" cy="-4.6"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(60)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(120)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(180)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(240)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(300)"/></g></symbol>
+  <symbol id="ic-oc" viewBox="-10 -10 20 20"><path d="M0,-8 L7,0 L0,8 L-7,0 Z" fill="currentColor"/></symbol>
+</svg>
+
+<div class="statusline">
+  <span class="brand">◆ loom</span><span class="v">default</span><span>·</span><span class="v">local</span>
+  <span class="sync"><span class="wdot"></span>2 conflicts need resolution</span>
+</div>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="nav-section"><span class="label">workspace</span></div>
+    <div class="nav-item"><span class="ic">✦</span>Skills</div>
+    <div class="nav-item"><span class="ic">⌘</span>MCP servers</div>
+    <div class="nav-item active"><span class="ic">⇅</span>Sync</div>
+    <div class="nav-section"><span class="label">system</span></div>
+    <div class="nav-item"><span class="ic">⚙</span>Settings</div>
+  </aside>
+
+  <main class="main">
+    <div class="page-title">Sync</div>
+
+    <div class="syncbar">
+      <span class="icon">⚠</span>
+      <span class="msg">拉取远程后检测到 <b>2 个字段冲突</b>（结构化 merge 无法自动合并）</span>
+      <div class="acts">
+        <button class="sbtn">Fetch</button>
+        <button class="sbtn">Pull</button>
+        <button class="sbtn">Push</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <span class="label">conflicts · 点 local / remote 选择保留哪方，中间显示合并结果</span>
+
+      <!-- conflict 1: scalar -->
+      <div class="conf">
+        <div class="conf-head"><span class="src">superpowers</span><span class="dot">·</span><span class="fld">ref</span><span class="tag">conflict</span></div>
+        <div class="three">
+          <div class="col3" data-side="local"><span class="selmark"></span><div class="clabel">local · this machine</div><div class="cval conflict-val">v5.1.4</div></div>
+          <div class="col3 middle"><div class="clabel">merge result</div><div class="cval" id="m1">v5.1.5</div></div>
+          <div class="col3 selected" data-side="remote"><span class="selmark"></span><div class="clabel">remote · macbook</div><div class="cval conflict-val">v5.1.5</div></div>
+        </div>
+      </div>
+
+      <!-- conflict 2: array (targets) -->
+      <div class="conf">
+        <div class="conf-head"><span class="src">playwright-helper</span><span class="dot">·</span><span class="fld">targets</span><span class="tag">conflict</span></div>
+        <div class="three">
+          <div class="col3" data-side="local"><span class="selmark"></span><div class="clabel">local · this machine</div><div class="chips-sm"><span class="chip-sm" style="background:var(--cc)"><svg><use href="#ic-cc"/></svg></span><span class="chip-sm" style="background:var(--cx)"><svg><use href="#ic-cx"/></svg></span></div></div>
+          <div class="col3 middle"><div class="clabel">merge result</div><div class="chips-sm" id="m2"><span class="chip-sm" style="background:var(--cc)"><svg><use href="#ic-cc"/></svg></span><span class="chip-sm" style="background:var(--cx)"><svg><use href="#ic-cx"/></svg></span><span class="chip-sm" style="background:var(--oc)"><svg><use href="#ic-oc"/></svg></span></div></div>
+          <div class="col3 selected" data-side="remote"><span class="selmark"></span><div class="clabel">remote · macbook</div><div class="chips-sm"><span class="chip-sm" style="background:var(--cc)"><svg><use href="#ic-cc"/></svg></span><span class="chip-sm" style="background:var(--cx)"><svg><use href="#ic-cx"/></svg></span><span class="chip-sm" style="background:var(--oc)"><svg><use href="#ic-oc"/></svg></span></div></div>
+        </div>
+      </div>
+
+      <div class="resolve">
+        <button class="btn btn-primary">Resolve 2 conflicts &amp; re-project</button>
+        <button class="btn btn-ghost">Abort pull</button>
+        <span class="note">解决后写回 sources.yaml → 重新投影 → push</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <span class="label">recent changes · git log 渲染成语义事件</span>
+      <div class="events">
+        <div class="ev"><span class="time">2m ago</span><span class="machine me">this machine</span><span class="desc"><span class="act">pulled</span> 3 commits from origin</span></div>
+        <div class="ev"><span class="time">1h ago</span><span class="machine other">macbook</span><span class="desc"><span class="act add">added source</span> my-claude-skills (github:me/my-claude-skills)</span></div>
+        <div class="ev"><span class="time">1h ago</span><span class="machine other">macbook</span><span class="desc"><span class="act upd">updated</span> superpowers.ref → v5.1.5</span></div>
+        <div class="ev"><span class="time">3h ago</span><span class="machine me">this machine</span><span class="desc"><span class="act upd">updated</span> playwright-helper.targets [+OC]</span></div>
+        <div class="ev"><span class="time">1d ago</span><span class="machine other">macbook</span><span class="desc"><span class="act del">removed source</span> old-experiments</span></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  document.querySelectorAll('.conf').forEach(conf => {
+    const local = conf.querySelector('[data-side="local"]');
+    const remote = conf.querySelector('[data-side="remote"]');
+    const middle = conf.querySelector('.middle');
+    const localVal = local.querySelector('.cval,.chips-sm').cloneNode(true);
+    const remoteVal = remote.querySelector('.cval,.chips-sm').cloneNode(true);
+    function pick(side) {
+      local.classList.toggle('selected', side === 'local');
+      remote.classList.toggle('selected', side === 'remote');
+      const m = middle.querySelector('.cval,.chips-sm');
+      m.replaceWith(side === 'local' ? localVal.cloneNode(true) : remoteVal.cloneNode(true));
+    }
+    local.addEventListener('click', () => pick('local'));
+    remote.addEventListener('click', () => pick('remote'));
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loom — Terminal Loom 视觉</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b1120;
+    --nav: #0a0f1c;
+    --card: #131c2e;
+    --border: #1e293b;
+    --text: #e2e8f0;
+    --text-bright: #f1f5f9;
+    --muted: #64748b;
+    --signal: #34d399;
+    --warn: #fbbf24;
+    --error: #f87171;
+    --info: #38bdf8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Fira Sans', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: 'Fira Code', monospace; }
+  .label { font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+
+  /* ===== top statusline ===== */
+  .statusline {
+    display: flex; align-items: center; gap: 18px;
+    height: 34px; padding: 0 20px;
+    background: var(--nav);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px; color: var(--muted);
+  }
+  .statusline .brand { color: var(--signal); font-family: 'Fira Code', monospace; font-weight: 600; letter-spacing: 0.02em; }
+  .statusline .sep { color: var(--border); }
+  .statusline .v { color: var(--text); font-family: 'Fira Code', monospace; }
+  .statusline .sync { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .statusline .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 8px rgba(52,211,153,0.6); }
+
+  /* ===== layout ===== */
+  .shell { display: grid; grid-template-columns: 208px 1fr; height: calc(100% - 34px); }
+  .sidebar {
+    background: var(--nav);
+    border-right: 1px solid var(--border);
+    padding: 16px 0;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 18px; color: var(--muted); font-size: 13px; font-weight: 500;
+    border-left: 2px solid transparent; cursor: default;
+  }
+  .nav-item .ic { font-family: 'Fira Code', monospace; font-size: 14px; width: 16px; text-align: center; }
+  .nav-item.active { color: var(--text-bright); border-left-color: var(--signal); background: linear-gradient(90deg, rgba(52,211,153,0.06), transparent); }
+  .nav-item.active .ic { color: var(--signal); }
+  .nav-section { padding: 14px 18px 6px; }
+
+  .main { padding: 22px 26px; overflow: auto; }
+  .page-title { font-family: 'Fira Code', monospace; font-size: 22px; font-weight: 600; color: var(--text-bright); letter-spacing: -0.01em; }
+  .page-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  /* ===== source card ===== */
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+    padding: 18px 20px; margin-top: 16px;
+  }
+  .card-head { display: flex; align-items: baseline; gap: 12px; }
+  .card-head .name { font-family: 'Fira Code', monospace; font-size: 16px; font-weight: 600; color: var(--text-bright); }
+  .card-head .ref { font-family: 'Fira Code', monospace; font-size: 12px; color: var(--signal); }
+  .kv { display: flex; gap: 8px; margin-top: 4px; font-size: 12px; }
+  .kv .k { color: var(--muted); font-family: 'Fira Code', monospace; }
+  .kv .v { color: var(--text); font-family: 'Fira Code', monospace; }
+
+  /* ===== projection signature ===== */
+  .proj { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .proj .label { margin-bottom: 6px; display: block; }
+  .proj svg { width: 100%; height: 116px; display: block; }
+
+  /* ===== member list ===== */
+  .members { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .member { display: flex; align-items: center; gap: 12px; padding: 7px 8px; border-radius: 4px; font-size: 13px; }
+  .member:hover { background: rgba(255,255,255,0.02); }
+  .member .mdot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .member .mname { font-family: 'Fira Code', monospace; color: var(--text); }
+  .member .mtargets { font-family: 'Fira Code', monospace; font-size: 11px; color: var(--muted); }
+  .member .mstate { margin-left: auto; font-size: 11px; font-family: 'Fira Code', monospace; }
+  .st-proj { color: var(--signal); }
+  .st-upd { color: var(--warn); }
+  .st-off { color: var(--muted); }
+  .mdot.green { background: var(--signal); box-shadow: 0 0 6px rgba(52,211,153,0.5); }
+  .mdot.yellow { background: var(--warn); box-shadow: 0 0 6px rgba(251,191,36,0.5); animation: pulse 2s ease-in-out infinite; }
+  .mdot.dim { background: var(--muted); opacity: 0.5; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* ===== buttons ===== */
+  .actions { display: flex; gap: 10px; margin-top: 18px; }
+  .btn { font-family: 'Fira Sans', sans-serif; font-size: 13px; font-weight: 500; padding: 7px 14px; border-radius: 4px; border: 1px solid transparent; cursor: default; }
+  .btn-primary { background: var(--signal); color: #0b1120; }
+  .btn-primary:hover { box-shadow: 0 0 12px rgba(52,211,153,0.4); }
+  .btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
+
+  /* ===== token strip ===== */
+  .tokens { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .tok-block .label { margin-bottom: 10px; display: block; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+  .sw { display: flex; flex-direction: column; gap: 4px; }
+  .sw .chip { width: 46px; height: 46px; border-radius: 5px; border: 1px solid var(--border); }
+  .sw .nm { font-family: 'Fira Code', monospace; font-size: 10px; color: var(--muted); }
+  .type-row { display: flex; align-items: baseline; gap: 14px; padding: 5px 0; border-bottom: 1px solid rgba(30,41,59,0.5); }
+  .type-row:last-child { border-bottom: none; }
+  .type-row .meta { font-family: 'Fira Code', monospace; font-size: 10px; color: var(--muted); width: 92px; flex-shrink: 0; }
+  .ts-display { font-family: 'Fira Code', monospace; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; color: var(--text-bright); }
+  .ts-h1 { font-family: 'Fira Sans', sans-serif; font-size: 18px; font-weight: 600; color: var(--text-bright); }
+  .ts-body { font-family: 'Fira Sans', sans-serif; font-size: 14px; color: var(--text); }
+  .ts-label { font-family: 'Fira Sans', sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .ts-code { font-family: 'Fira Code', monospace; font-size: 13px; color: var(--info); }
+
+  @media (prefers-reduced-motion: reduce) {
+    animateMotion, animate, animateTransform { display: none; }
+    .mdot.yellow { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="statusline">
+    <span class="brand">◆ loom</span>
+    <span class="sep">│</span>
+    <span>active repo</span><span class="v">default</span>
+    <span class="sep">│</span>
+    <span>profile</span><span class="v">local</span>
+    <span class="sync"><span class="dot"></span><span>synced 2m ago</span></span>
+  </div>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="nav-section"><span class="label">workspace</span></div>
+      <div class="nav-item active"><span class="ic">{} </span>Sources</div>
+      <div class="nav-item"><span class="ic">⌘</span>MCP servers</div>
+      <div class="nav-item"><span class="ic">✦</span>Skills</div>
+      <div class="nav-item"><span class="ic">⇅</span>Sync</div>
+      <div class="nav-section"><span class="label">system</span></div>
+      <div class="nav-item"><span class="ic">⚙</span>Settings</div>
+    </aside>
+
+    <main class="main">
+      <div class="page-title">superpowers</div>
+      <div class="page-sub">github:obra/superpowers · 12 of 14 members projected</div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="name">github:obra/superpowers</span>
+          <span class="ref">@ v5.1.4</span>
+        </div>
+        <div class="kv"><span class="k">scan:</span><span class="v">skills/*/SKILL.md</span></div>
+        <div class="kv"><span class="k">targets:</span><span class="v">claude-code, codex, opencode</span></div>
+
+        <!-- signature: projection lines -->
+        <div class="proj">
+          <span class="label">projection · manifest ──▶ agents</span>
+          <svg viewBox="0 0 520 116" preserveAspectRatio="xMinYMid meet" aria-label="projection from manifest to agents">
+            <!-- hairline paths -->
+            <path d="M70,58 C220,58 240,24 470,24" fill="none" stroke="#1e293b" stroke-width="1"/>
+            <path d="M70,58 C220,58 240,58 470,58" fill="none" stroke="#1e293b" stroke-width="1"/>
+            <path d="M70,58 C220,58 240,92 470,92" fill="none" stroke="#1e293b" stroke-width="1"/>
+
+            <!-- static midpoint glows (visible under reduced-motion too) -->
+            <circle cx="270" cy="41" r="2.5" fill="#34d399" opacity="0.35"/>
+            <circle cx="270" cy="58" r="2.5" fill="#34d399" opacity="0.35"/>
+            <circle cx="270" cy="75" r="2.5" fill="#34d399" opacity="0.35"/>
+
+            <!-- flowing light points -->
+            <circle r="3" fill="#34d399">
+              <animateMotion dur="2.6s" repeatCount="indefinite" path="M70,58 C220,58 240,24 470,24"/>
+            </circle>
+            <circle r="3" fill="#34d399">
+              <animateMotion dur="2.6s" begin="0.5s" repeatCount="indefinite" path="M70,58 C220,58 240,58 470,58"/>
+            </circle>
+            <circle r="3" fill="#34d399">
+              <animateMotion dur="2.6s" begin="1s" repeatCount="indefinite" path="M70,58 C220,58 240,92 470,92"/>
+            </circle>
+
+            <!-- manifest node -->
+            <rect x="18" y="46" width="52" height="24" rx="4" fill="#131c2e" stroke="#34d399" stroke-width="1"/>
+            <text x="44" y="61" text-anchor="middle" fill="#34d399" font-family="Fira Code, monospace" font-size="10">manifest</text>
+
+            <!-- agent nodes -->
+            <g>
+              <circle cx="470" cy="24" r="13" fill="#131c2e" stroke="#34d399" stroke-width="1"/>
+              <text x="470" y="28" text-anchor="middle" fill="#34d399" font-family="Fira Code, monospace" font-size="9">CC</text>
+            </g>
+            <g>
+              <circle cx="470" cy="58" r="13" fill="#131c2e" stroke="#34d399" stroke-width="1"/>
+              <text x="470" y="62" text-anchor="middle" fill="#34d399" font-family="Fira Code, monospace" font-size="9">CX</text>
+            </g>
+            <g>
+              <circle cx="470" cy="92" r="13" fill="#131c2e" stroke="#fbbf24" stroke-width="1"/>
+              <text x="470" y="96" text-anchor="middle" fill="#fbbf24" font-family="Fira Code, monospace" font-size="9">OC</text>
+              <circle cx="470" cy="92" r="13" fill="none" stroke="#fbbf24" stroke-width="1" opacity="0.5">
+                <animate attributeName="r" values="13;19;13" dur="2s" repeatCount="indefinite"/>
+                <animate attributeName="opacity" values="0.5;0;0.5" dur="2s" repeatCount="indefinite"/>
+              </circle>
+            </g>
+
+            <text x="470" y="112" text-anchor="middle" fill="#64748b" font-family="Fira Code, monospace" font-size="9">OC · update pending</text>
+          </svg>
+        </div>
+
+        <!-- member list -->
+        <div class="members">
+          <span class="label">members</span>
+          <div class="member" style="margin-top:8px">
+            <span class="mdot green"></span><span class="mname">brainstorming</span><span class="mtargets">→ CC · CX · OC</span><span class="mstate st-proj">projected</span>
+          </div>
+          <div class="member">
+            <span class="mdot green"></span><span class="mname">test-driven-development</span><span class="mtargets">→ CC · CX</span><span class="mstate st-proj">projected</span>
+          </div>
+          <div class="member">
+            <span class="mdot yellow"></span><span class="mname">playwright-helper</span><span class="mtargets">→ CC · CX · OC</span><span class="mstate st-upd">update → v5.1.5</span>
+          </div>
+          <div class="member">
+            <span class="mdot dim"></span><span class="mname">deprecated-old-skill</span><span class="mtargets">→ disabled</span><span class="mstate st-off">enabled: false</span>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn btn-primary">Check for updates</button>
+          <button class="btn btn-ghost">Edit members</button>
+          <button class="btn btn-ghost">Re-project</button>
+        </div>
+      </div>
+
+      <!-- token reference strip -->
+      <div class="tokens">
+        <div class="tok-block">
+          <span class="label">color tokens · dark</span>
+          <div class="swatches">
+            <div class="sw"><div class="chip" style="background:#0b1120"></div><span class="nm">bg</span></div>
+            <div class="sw"><div class="chip" style="background:#0a0f1c"></div><span class="nm">nav</span></div>
+            <div class="sw"><div class="chip" style="background:#131c2e"></div><span class="nm">card</span></div>
+            <div class="sw"><div class="chip" style="background:#1e293b"></div><span class="nm">border</span></div>
+            <div class="sw"><div class="chip" style="background:#e2e8f0"></div><span class="nm">text</span></div>
+            <div class="sw"><div class="chip" style="background:#64748b"></div><span class="nm">muted</span></div>
+            <div class="sw"><div class="chip" style="background:#34d399"></div><span class="nm">signal</span></div>
+            <div class="sw"><div class="chip" style="background:#fbbf24"></div><span class="nm">warn</span></div>
+            <div class="sw"><div class="chip" style="background:#f87171"></div><span class="nm">error</span></div>
+            <div class="sw"><div class="chip" style="background:#38bdf8"></div><span class="nm">info</span></div>
+          </div>
+        </div>
+        <div class="tok-block">
+          <span class="label">type scale · Fira family</span>
+          <div class="type-row"><span class="meta">display 28/700</span><span class="ts-display">Loom</span></div>
+          <div class="type-row"><span class="meta">h1 22/600</span><span class="ts-h1">Sources</span></div>
+          <div class="type-row"><span class="meta">body 14/400</span><span class="ts-body">配置一份，编织到多个 agent</span></div>
+          <div class="type-row"><span class="meta">label 12/500</span><span class="ts-label">PROJECTION</span></div>
+          <div class="type-row"><span class="meta">code 13/400</span><span class="ts-code">github:obra/superpowers</span></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

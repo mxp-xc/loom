@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loom — Add source 弹窗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#0b1120; --nav:#0a0f1c; --card:#131c2e; --border:#1e293b; --text:#e2e8f0; --bright:#f1f5f9; --muted:#64748b; --signal:#34d399; --warn:#fbbf24; --info:#38bdf8; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body{height:100%;}
+  body { font-family:'Fira Sans',system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:13px; line-height:1.55; -webkit-font-smoothing:antialiased; overflow:hidden; }
+  .label { font-size:10px; font-weight:500; letter-spacing:0.06em; text-transform:uppercase; color:var(--muted); }
+
+  /* blurred background (skills view) */
+  .bg { position:absolute; inset:0; filter:blur(3px) brightness(0.5); pointer-events:none; }
+  .bg .sl { display:flex; align-items:center; gap:14px; height:32px; padding:0 18px; background:var(--nav); border-bottom:1px solid var(--border); font-size:11px; color:var(--muted); }
+  .bg .sl .b { color:var(--signal); font-family:'Fira Code',monospace; font-weight:600; }
+  .bg .grid { display:grid; grid-template-columns:208px 1fr; height:calc(100% - 32px); }
+  .bg .sb { background:var(--nav); border-right:1px solid var(--border); padding:14px 0; }
+  .bg .ni { padding:8px 18px; color:var(--muted); font-size:13px; }
+  .bg .main { padding:20px 26px; }
+  .bg .pt { font-family:'Fira Code',monospace; font-size:20px; font-weight:600; color:var(--bright); }
+  .bg .grp { margin-top:18px; border:1px solid var(--border); border-radius:6px; padding:10px 14px; }
+  .bg .gh { font-family:'Fira Code',monospace; font-size:11px; color:var(--muted); }
+  .bg .sk { font-family:'Fira Code',monospace; font-size:11px; color:var(--text); padding:3px 0 3px 14px; }
+
+  .overlay { position:absolute; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; padding:20px; }
+
+  /* dialog */
+  .dlg { width:620px; max-height:88vh; background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:0 24px 60px rgba(0,0,0,0.6); display:flex; flex-direction:column; overflow:hidden; }
+  .dlg-head { display:flex; align-items:center; gap:14px; padding:14px 18px; border-bottom:1px solid var(--border); }
+  .dlg-head .t { font-family:'Fira Code',monospace; font-size:15px; font-weight:600; color:var(--bright); }
+  .steps { display:flex; align-items:center; gap:6px; margin-left:8px; }
+  .step { display:flex; align-items:center; gap:5px; font-family:'Fira Code',monospace; font-size:10px; color:var(--muted); }
+  .step .n { width:16px; height:16px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border); font-size:9px; }
+  .step.done .n { background:var(--signal); color:#0b1120; border-color:var(--signal); }
+  .step.cur .n { border-color:var(--signal); color:var(--signal); }
+  .step.cur { color:var(--text); }
+  .step .arr { color:var(--border); }
+  .x { margin-left:auto; color:var(--muted); cursor:default; font-size:16px; padding:2px 6px; }
+  .x:hover { color:var(--text); }
+
+  .dlg-body { padding:16px 18px; overflow:auto; flex:1; }
+  .row { display:grid; grid-template-columns:90px 1fr; align-items:center; gap:12px; margin-bottom:10px; }
+  .row .label { margin:0; }
+  .inp { background:var(--nav); border:1px solid var(--border); border-radius:4px; padding:7px 10px; color:var(--text); font-family:'Fira Code',monospace; font-size:12px; width:100%; }
+  .inp-wrap { display:flex; align-items:center; gap:8px; }
+  .inp-wrap .inp { flex:1; }
+  .inp-note { font-family:'Fira Code',monospace; font-size:10px; color:var(--signal); white-space:nowrap; }
+  .inp-note.muted { color:var(--muted); }
+
+  .scan-head { display:flex; align-items:center; gap:10px; margin:16px 0 8px; padding-top:14px; border-top:1px solid var(--border); }
+  .scan-head .t { font-family:'Fira Code',monospace; font-size:12px; color:var(--bright); }
+  .scan-head .cnt { font-family:'Fira Code',monospace; font-size:11px; color:var(--muted); }
+  .scan-head .cnt b { color:var(--signal); font-weight:500; }
+  .scan-head .selall { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); cursor:default; }
+
+  .clist { border:1px solid var(--border); border-radius:5px; overflow:hidden; }
+  .citem { display:grid; grid-template-columns:24px 1fr auto; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid var(--border); cursor:default; }
+  .citem:last-child { border-bottom:none; }
+  .citem:hover { background:rgba(255,255,255,0.02); }
+  .cbox { width:16px; height:16px; border-radius:3px; border:1px solid var(--border); display:inline-flex; align-items:center; justify-content:center; }
+  .cbox.on { background:var(--signal); border-color:var(--signal); }
+  .cbox.on::after { content:'✓'; color:#0b1120; font-size:11px; font-weight:700; }
+  .cbox.off { background:transparent; }
+  .cinfo { min-width:0; }
+  .cinfo .cn { font-family:'Fira Code',monospace; font-size:12px; color:var(--text); }
+  .cinfo .cd { font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ctag { font-family:'Fira Code',monospace; font-size:9px; padding:2px 6px; border-radius:2px; }
+  .ctag.new { background:rgba(52,211,153,0.12); color:var(--signal); border:1px solid color-mix(in srgb,var(--signal) 30%, transparent); }
+  .ctag.installed { background:rgba(100,116,139,0.15); color:var(--muted); border:1px solid var(--border); }
+  .citem.installed .cn { color:var(--muted); }
+
+  .dlg-foot { display:flex; align-items:center; gap:10px; padding:12px 18px; border-top:1px solid var(--border); background:var(--nav); }
+  .foot-note { font-size:11px; color:var(--muted); }
+  .foot-note b { color:var(--text); font-weight:500; }
+  .btn { font-family:'Fira Sans',sans-serif; font-size:12px; font-weight:500; padding:7px 14px; border-radius:4px; border:1px solid transparent; cursor:default; }
+  .btn-primary { background:var(--signal); color:#0b1120; }
+  .btn-primary:hover { box-shadow:0 0 10px rgba(52,211,153,0.4); }
+  .btn-ghost { background:transparent; color:var(--text); border-color:var(--border); }
+  .foot-actions { margin-left:auto; display:flex; gap:8px; }
+</style>
+</head>
+<body>
+  <!-- blurred background -->
+  <div class="bg">
+    <div class="sl"><span class="b">◆ loom</span><span>default · local</span><span style="margin-left:auto">synced 2m ago</span></div>
+    <div class="grid">
+      <div class="sb">
+        <div class="ni" style="color:var(--signal)">Skills</div>
+        <div class="ni">MCP servers</div>
+        <div class="ni">Sync</div>
+        <div class="ni">Settings</div>
+      </div>
+      <div class="main">
+        <div class="pt">Skills</div>
+        <div class="grp"><div class="gh">▼ superpowers</div><div class="sk">brainstorming</div><div class="sk">test-driven-dev</div></div>
+        <div class="grp"><div class="gh">▼ local skills</div><div class="sk">frontend-design</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- overlay + dialog -->
+  <div class="overlay">
+    <div class="dlg">
+      <div class="dlg-head">
+        <span class="t">Add source</span>
+        <div class="steps">
+          <span class="step done"><span class="n">✓</span>url</span><span class="arr">›</span>
+          <span class="step cur"><span class="n">2</span>select</span><span class="arr">›</span>
+          <span class="step"><span class="n">3</span>install</span>
+        </div>
+        <span class="x">✕</span>
+      </div>
+
+      <div class="dlg-body">
+        <div class="row">
+          <span class="label">repo url</span>
+          <div class="inp-wrap">
+            <input class="inp" value="github:obra/superpowers">
+            <span class="inp-note">✓ 14 skills</span>
+          </div>
+        </div>
+        <div class="row">
+          <span class="label">ref</span>
+          <div class="inp-wrap">
+            <input class="inp" value="v5.1.4">
+            <span class="inp-note muted">最新 tag</span>
+          </div>
+        </div>
+
+        <div class="scan-head">
+          <span class="t">scan · skills/*/SKILL.md</span>
+          <span class="cnt"><b>14</b> found · <b>12</b> new · 2 installed</span>
+          <span class="selall"><span class="cbox on" id="selall"></span>select all new</span>
+        </div>
+
+        <div class="clist">
+          <div class="citem"><span class="cbox on"></span><div class="cinfo"><div class="cn">brainstorming</div><div class="cd">Help turn ideas into fully formed designs and specs…</div></div><span class="ctag new">new</span></div>
+          <div class="citem"><span class="cbox on"></span><div class="cinfo"><div class="cn">test-driven-development</div><div class="cd">Use when implementing any feature or bugfix…</div></div><span class="ctag new">new</span></div>
+          <div class="citem"><span class="cbox on"></span><div class="cinfo"><div class="cn">systematic-debugging</div><div class="cd">Use when encountering any bug or test failure…</div></div><span class="ctag new">new</span></div>
+          <div class="citem"><span class="cbox on"></span><div class="cinfo"><div class="cn">writing-plans</div><div class="cd">Use when you have a spec for a multi-step task…</div></div><span class="ctag new">new</span></div>
+          <div class="citem"><span class="cbox on"></span><div class="cinfo"><div class="cn">executing-plans</div><div class="cd">Use when executing an implementation plan…</div></div><span class="ctag new">new</span></div>
+          <div class="citem"><span class="cbox on"></span><div class="cinfo"><div class="cn">verification-before-completion</div><div class="cd">Use when about to claim work is complete…</div></div><span class="ctag new">new</span></div>
+          <div class="citem"><span class="cbox on"></span><div class="cinfo"><div class="cn">using-git-worktrees</div><div class="cd">Use when starting feature work that needs isolation…</div></div><span class="ctag new">new</span></div>
+          <div class="citem installed"><span class="cbox off"></span><div class="cinfo"><div class="cn">some-old-skill</div><div class="cd">Already in another source…</div></div><span class="ctag installed">installed</span></div>
+        </div>
+      </div>
+
+      <div class="dlg-foot">
+        <span class="foot-note">将写 <b>sources.yaml</b> + clone 到 <b>remote-cache</b> + 按全局 targets 投影</span>
+        <div class="foot-actions">
+          <button class="btn btn-ghost">Cancel</button>
+          <button class="btn btn-primary">Install 12 skills</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  document.querySelectorAll('.citem').forEach(it => {
+    if (it.classList.contains('installed')) return;
+    it.addEventListener('click', () => {
+      const b = it.querySelector('.cbox');
+      b.classList.toggle('on');
+      b.classList.toggle('off');
+    });
+  });
+</script>
+</body>
+</html>

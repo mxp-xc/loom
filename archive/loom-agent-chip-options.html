@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loom — agent chip 方案对比</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#0b1120; --card:#131c2e; --border:#1e293b; --text:#e2e8f0; --bright:#f1f5f9; --muted:#64748b; --signal:#34d399; --warn:#fbbf24;
+    --cc:#D97757; --cx:#06B6D4; --oc:#8B5CF6; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Fira Sans',system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:13px; line-height:1.55; -webkit-font-smoothing:antialiased; padding:20px 28px 40px; }
+  h1 { font-family:'Fira Code',monospace; font-size:20px; font-weight:600; color:var(--bright); letter-spacing:-0.01em; }
+  .sub { color:var(--muted); font-size:12px; margin:2px 0 22px; }
+  .label { font-size:10px; font-weight:500; letter-spacing:0.06em; text-transform:uppercase; color:var(--muted); }
+  .scheme { background:var(--card); border:1px solid var(--border); border-radius:7px; padding:16px 18px; margin-bottom:16px; }
+  .scheme.rec { border-color: var(--signal); box-shadow: 0 0 0 1px var(--signal) inset; }
+  .scheme-head { display:flex; align-items:baseline; gap:10px; margin-bottom:4px; }
+  .scheme-head .nm { font-family:'Fira Code',monospace; font-size:14px; font-weight:600; color:var(--bright); }
+  .badge { font-family:'Fira Code',monospace; font-size:9px; padding:2px 7px; border-radius:3px; background:var(--signal); color:#0b1120; font-weight:600; letter-spacing:0.04em; }
+  .scheme-desc { color:var(--muted); font-size:12px; margin-bottom:14px; }
+
+  /* projection-line end nodes per scheme */
+  .nodes { display:flex; align-items:center; gap:18px; padding:10px 0 14px; border-bottom:1px solid var(--border); margin-bottom:12px; }
+  .nodes .label { margin-right:6px; }
+
+  /* member rows */
+  .member { display:grid; grid-template-columns: 12px 150px 1fr 90px; align-items:center; gap:12px; padding:7px 4px; border-radius:4px; }
+  .member:hover { background:rgba(255,255,255,0.02); }
+  .mdot { width:8px; height:8px; border-radius:50%; }
+  .mdot.green { background:var(--signal); box-shadow:0 0 5px rgba(52,211,153,0.5); }
+  .mdot.yellow { background:var(--warn); animation:pulse 2s ease-in-out infinite; }
+  .mdot.dim { background:var(--muted); opacity:0.45; }
+  .mname { font-family:'Fira Code',monospace; font-size:12px; color:var(--text); }
+  .chips { display:flex; gap:8px; }
+  .mstate { font-family:'Fira Code',monospace; font-size:10px; }
+  .st-proj { color:var(--signal); } .st-upd { color:var(--warn); } .st-off { color:var(--muted); }
+
+  /* shared chip base */
+  .chip { width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; border:1px solid transparent; transition:all .12s; flex-shrink:0; }
+  .chip svg { width:14px; height:14px; }
+  .chip .glyph { font-family:'Fira Code',monospace; font-size:10px; font-weight:600; }
+
+  /* Scheme A: circle, brand fill / brand outline */
+  .a { border-radius:50%; }
+  .a.active { background: var(--c); color:#fff; border-color:var(--c); }
+  .a.inactive { background:transparent; color:var(--c); border-color:var(--c); }
+  .a.inactive svg { opacity:0.5; }
+
+  /* Scheme B: rounded square */
+  .b { border-radius:5px; }
+  .b.active { background: var(--c); color:#fff; border-color:var(--c); }
+  .b.inactive { background:transparent; color:var(--c); border-color:var(--c); }
+  .b.inactive svg { opacity:0.5; }
+
+  /* Scheme C: circle + green active ring (keep green semantics) */
+  .c { border-radius:50%; }
+  .c.active { background: var(--c); color:#fff; border-color:var(--c); box-shadow: 0 0 0 2px var(--signal); }
+  .c.inactive { background:transparent; color:var(--muted); border-color:var(--border); }
+
+  /* node (projection endpoint) variants */
+  .node { width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border:1px solid; }
+  .node svg { width:17px; height:17px; }
+  .node.a, .node.b, .node.c { border-radius:50%; }
+  .node.b { border-radius:7px; }
+  .node.on { background: var(--c); color:#fff; border-color:var(--c); }
+  .node.off { background: transparent; color:var(--c); border-color:var(--c); }
+  .node.off svg { opacity:0.5; }
+  .node.upd { background: var(--c); color:#fff; border-color:var(--c); box-shadow: 0 0 0 0 var(--warn); animation:ring 2s infinite; }
+  @keyframes ring { 0%{box-shadow:0 0 0 0 rgba(251,191,36,0.6);} 100%{box-shadow:0 0 0 6px rgba(251,191,36,0);} }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+
+  .legend { display:flex; gap:14px; margin-top:16px; padding-top:12px; border-top:1px solid var(--border); flex-wrap:wrap; }
+  .lg { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); }
+  .lg .sw { width:14px; height:14px; border-radius:50%; }
+  .hint { font-size:11px; color:var(--muted); font-style:italic; margin-top:8px; }
+
+  @media (prefers-reduced-motion: reduce){ animate,animateMotion,animateTransform{display:none;} .mdot.yellow,.node.upd{animation:none;} }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="ic-cc" viewBox="-10 -10 20 20"><path d="M0,-8.5 C1.6,-3 3.2,-1.6 8.5,0 C3.2,1.6 1.6,3 0,8.5 C-1.6,3 -3.2,1.6 -8.5,0 C-3.2,-1.6 -1.6,-3 0,-8.5 Z" fill="currentColor"/></symbol>
+  <symbol id="ic-cx" viewBox="-10 -10 20 20"><g fill="currentColor"><circle r="2.4"/><ellipse rx="1.7" ry="3.6" cy="-4.6"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(60)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(120)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(180)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(240)"/><ellipse rx="1.7" ry="3.6" cy="-4.6" transform="rotate(300)"/></g></symbol>
+  <symbol id="ic-oc" viewBox="-10 -10 20 20"><path d="M0,-8 L7,0 L0,8 L-7,0 Z" fill="currentColor"/></symbol>
+</svg>
+
+<h1>agent chip · 方案对比</h1>
+<p class="sub">颜色编码 agent 身份（CC 橙 / CX 青 / OC 紫），填充 vs 线框编码投影状态。点击 chip 可切换。图标为示意，实现用官方 SVG。</p>
+
+<!-- ===== Scheme A ===== -->
+<div class="scheme rec">
+  <div class="scheme-head"><span class="nm">A · 圆形 · 品牌色填充/线框</span><span class="badge">推荐</span></div>
+  <div class="scheme-desc">选中=品牌色实心圆+白图标，未选=品牌色线框+半透明图标。圆形与投影线端节点统一，"agent=圆点"贯穿。陌生 agent 回退首字母灰圆。</div>
+
+  <div class="nodes">
+    <span class="label">projection 端</span>
+    <span class="node a on" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+    <span class="node a on" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+    <span class="node a upd" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    <span class="label" style="margin-left:10px">OC 脉冲黄=有更新</span>
+  </div>
+
+  <div class="member"><span class="mdot green"></span><span class="mname">brainstorming</span>
+    <span class="chips">
+      <span class="chip a active" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip a active" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip a active" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-proj">projected</span></div>
+  <div class="member"><span class="mdot green"></span><span class="mname">test-driven-dev</span>
+    <span class="chips">
+      <span class="chip a active" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip a active" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip a inactive" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-proj">projected</span></div>
+  <div class="member"><span class="mdot yellow"></span><span class="mname">playwright-helper</span>
+    <span class="chips">
+      <span class="chip a active" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip a active" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip a active" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-upd">update → v5.1.5</span></div>
+  <div class="member"><span class="mdot dim"></span><span class="mname">deprecated-old</span>
+    <span class="chips">
+      <span class="chip a inactive" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip a inactive" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip a inactive" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-off">disabled</span></div>
+
+  <div class="legend">
+    <div class="lg"><span class="sw" style="background:var(--cc)"></span>CC Claude Code</div>
+    <div class="lg"><span class="sw" style="background:var(--cx)"></span>CX Codex</div>
+    <div class="lg"><span class="sw" style="background:var(--oc)"></span>OC OpenCode</div>
+  </div>
+</div>
+
+<!-- ===== Scheme B ===== -->
+<div class="scheme">
+  <div class="scheme-head"><span class="nm">B · 圆角矩形 · 品牌色填充/线框</span></div>
+  <div class="scheme-desc">app-icon 风格小方块，承载 logo 更清晰。但矩形与投影线端圆形节点形状割裂，"agent=圆点"的统一感被打破。</div>
+
+  <div class="nodes">
+    <span class="label">projection 端</span>
+    <span class="node b on" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+    <span class="node b on" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+    <span class="node b upd" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+  </div>
+
+  <div class="member"><span class="mdot green"></span><span class="mname">brainstorming</span>
+    <span class="chips">
+      <span class="chip b active" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip b active" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip b active" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-proj">projected</span></div>
+  <div class="member"><span class="mdot green"></span><span class="mname">test-driven-dev</span>
+    <span class="chips">
+      <span class="chip b active" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip b active" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip b inactive" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-proj">projected</span></div>
+  <div class="member"><span class="mdot yellow"></span><span class="mname">playwright-helper</span>
+    <span class="chips">
+      <span class="chip b active" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip b active" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip b active" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-upd">update → v5.1.5</span></div>
+  <div class="member"><span class="mdot dim"></span><span class="mname">deprecated-old</span>
+    <span class="chips">
+      <span class="chip b inactive" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip b inactive" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip b inactive" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-off">disabled</span></div>
+</div>
+
+<!-- ===== Scheme C ===== -->
+<div class="scheme">
+  <div class="scheme-head"><span class="nm">C · 圆形 · 品牌色 + 绿色 active 环</span></div>
+  <div class="scheme-desc">保留"已投影=信号绿"语义：选中 chip 加绿色外环。信息冗余（品牌色+绿环双重编码），但绿色语义贯穿全应用更统一。未选=灰描边。</div>
+
+  <div class="nodes">
+    <span class="label">projection 端</span>
+    <span class="node c on" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+    <span class="node c on" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+    <span class="node c upd" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+  </div>
+
+  <div class="member"><span class="mdot green"></span><span class="mname">brainstorming</span>
+    <span class="chips">
+      <span class="chip c active" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip c active" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip c active" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-proj">projected</span></div>
+  <div class="member"><span class="mdot green"></span><span class="mname">test-driven-dev</span>
+    <span class="chips">
+      <span class="chip c active" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip c active" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip c inactive" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-proj">projected</span></div>
+  <div class="member"><span class="mdot yellow"></span><span class="mname">playwright-helper</span>
+    <span class="chips">
+      <span class="chip c active" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip c active" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip c active" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-upd">update → v5.1.5</span></div>
+  <div class="member"><span class="mdot dim"></span><span class="mname">deprecated-old</span>
+    <span class="chips">
+      <span class="chip c inactive" style="--c:var(--cc)"><svg><use href="#ic-cc"/></svg></span>
+      <span class="chip c inactive" style="--c:var(--cx)"><svg><use href="#ic-cx"/></svg></span>
+      <span class="chip c inactive" style="--c:var(--oc)"><svg><use href="#ic-oc"/></svg></span>
+    </span><span class="mstate st-off">disabled</span></div>
+  <div class="hint">未选 chip 用中性灰描边（非品牌色），仅选中时才露出品牌色+绿环</div>
+</div>
+
+<script>
+  document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+    const row = c.closest('.member');
+    c.classList.toggle('active');
+    c.classList.toggle('inactive');
+    const anyActive = row.querySelectorAll('.chip.active').length > 0;
+    const dot = row.querySelector('.mdot');
+    dot.classList.remove('green','yellow','dim');
+    dot.classList.add(anyActive ? 'green' : 'dim');
+  }));
+</script>
+</body>
+</html>
