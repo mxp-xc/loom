@@ -22,4 +22,14 @@ describe('compareVersion', () => {
     const r = compareVersion({ ref: 'main', pinned_commit: 'aaa' }, { tags: {}, head: 'aaa' })
     expect(r.hasUpdate).toBe(false)
   })
+  it('branch ref on tagged repo: head moved, no new tag => update via HEAD', () => {
+    const r = compareVersion({ ref: 'main', pinned_commit: 'aaa' }, { tags: { 'v5.1.4': 'aaa' }, head: 'bbb' })
+    expect(r.hasUpdate).toBe(true)
+    expect(r.latestCommit).toBe('bbb')
+    expect(r.latestTag).toBeUndefined()
+  })
+  it('branch ref on tagged repo: head unchanged => no update despite tags', () => {
+    const r = compareVersion({ ref: 'main', pinned_commit: 'aaa' }, { tags: { 'v5.1.4': 'aaa', 'v5.1.5': 'bbb' }, head: 'aaa' })
+    expect(r.hasUpdate).toBe(false)
+  })
 })

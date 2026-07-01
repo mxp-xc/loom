@@ -53,7 +53,21 @@ export async function syncPull(repoPath: string, git: IGit, fs: IFileSystem, log
       await fs.writeFile(dest, f.result.merged)
     }
     await git.add(repoPath, allResults.map(f => f.path))
-    await git.commit(repoPath, 'merge: pull from origin')
+    // Produce a commit that is a descendant of FETCH_HEAD so the subsequent
+    // push is fast-forward. If local HEAD == merge-base (pure fast-forward,
+    // no local commits), just move the ref to FETCH_HEAD. Otherwise create a
+    // real merge commit with two parents (HEAD + FETCH_HEAD).
+    const head = await git.revParseHead(repoPath)
+    const remoteTip = await git.revParse(repoPath, 'FETCH_HEAD')
+    if (head === base) {
+      await git.updateRef(repoPath, 'HEAD', remoteTip)
+      await git.checkout(repoPath, '.')
+    } else {
+      const tree = await git.writeTree(repoPath)
+      const mergeCommit = await git.commitTree(repoPath, tree, [head, remoteTip], 'merge: pull from origin')
+      await git.updateRef(repoPath, 'HEAD', mergeCommit)
+      await git.checkout(repoPath, '.')
+    }
   }
 
   return { files, varsFiles, textConflicts, clean }

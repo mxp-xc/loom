@@ -75,11 +75,30 @@ export class NodeGit implements IGit {
     return (await this.git(repoPath).raw(['rev-parse', 'HEAD'])).trim()
   }
 
+  async revParse(repoPath: string, ref: string): Promise<string> {
+    return (await this.git(repoPath).raw(['rev-parse', ref])).trim()
+  }
+
   async lsTree(repoPath: string, ref: string, dir: string): Promise<string[]> {
     const d = dir.endsWith('/') ? dir : dir + '/'
     try {
       const out = await this.git(repoPath).raw(['ls-tree', '-r', '--name-only', `${ref}:${d}`])
       return out.split('\n').map(s => s.trim()).filter(Boolean)
     } catch { return [] }
+  }
+
+  async commitTree(repoPath: string, tree: string, parents: string[], message: string): Promise<string> {
+    const args = ['commit-tree', tree, '-m', message]
+    for (const p of parents) { args.push('-p', p) }
+    return (await this.git(repoPath).raw(args)).trim()
+  }
+
+  async updateRef(repoPath: string, ref: string, commit: string): Promise<void> {
+    await this.git(repoPath).raw(['update-ref', ref, commit])
+  }
+
+  async writeTree(repoPath: string): Promise<string> {
+    // write-tree reflects the staged index. syncPull stages merged files via add() first.
+    return (await this.git(repoPath).raw(['write-tree'])).trim()
   }
 }

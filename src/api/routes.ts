@@ -147,7 +147,10 @@ export function registerRoutes(): Hono {
 
   app.put('/config', async (c) => {
     const { repoPath, level, field, value } = await c.req.json()
-    return c.json({ ok: true, repoPath, level, field, value })
+    // Not yet implemented: persisting config edits is a follow-up milestone.
+    // Return 501 so the WebUI can surface "save failed" instead of silently
+    // implying success.
+    return c.json({ ok: false, error: 'not_implemented', repoPath, level, field, value }, 501)
   })
 
   return app

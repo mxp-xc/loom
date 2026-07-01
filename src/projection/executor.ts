@@ -13,6 +13,11 @@ export interface ProjectionDeps {
   installedAgents: Set<AgentId>
   resolveSkillSrc: (link: ProjectionPlan['links'][number]) => string | null
   logger?: { error: (obj: unknown, msg: string) => void; warn?: (obj: unknown, msg: string) => void }
+  // Per-agent set of mcp ids loom projected last time (persisted by caller).
+  // Used to distinguish loom-managed entries (removable) from user-handwritten (preserved).
+  // Absent => first run / state lost: mergeMcp degrades to preserving all existing entries.
+  getManagedMcpIds?: (agent: AgentId) => Promise<Set<string>>
+  setManagedMcpIds?: (agent: AgentId, ids: string[]) => Promise<void>
 }
 
 export type ProjectionResult = { ok: true } | { ok: false; failure: ProjectionFailure }
@@ -49,7 +54,8 @@ export async function executeProjection(
         builtDests.add(dest)
       }
     }
-    // Phase B: clean stale links
+    // Phase B: clean stale links for skills still in manifest but no longer projected
+    // (enabled:false etc). Orphaned links from deleted skills are cleaned in Phase C.
     for (const link of plan.links) {
       for (const agent of installedAgents) {
         const dest = join(agentSkillsDir(agent), link.skillId)
@@ -58,18 +64,25 @@ export async function executeProjection(
         else if (await fs.exists(dest)) { deps.logger?.warn?.({ dest, skillId: link.skillId }, 'skip cleanup: target is real file/dir') }
       }
     }
+    // Phase C: clean orphaned links — skills deleted from manifest entirely.
+    // Scan each installed agent's skills dir; any loom-projected link whose id is
+    // not in the current plan's link set is removed. Non-link real dirs are skipped.
+    await cleanOrphanedLinks(plan, installedAgents, fs, deps.logger)
     // MCP config
     for (const agent of Object.keys(adapters) as AgentId[]) {
       const adapter = adapters[agent]
       if (!adapter) continue
       const file = agentMcpFile(agent)
       const fragments = resolveMcpFragments(plan.mcpEntries, manifest.mcp, agent, varsCtx, deps.logger)
-      if (fragments.length === 0) continue
+      // Even with no fragments we must still remove managed entries the manifest deleted.
+      const managedIds = await deps.getManagedMcpIds?.(agent) ?? new Set<string>()
+      if (fragments.length === 0 && managedIds.size === 0) continue
       const backup = await fs.exists(file) ? await fs.readFile(file) : null
       journal.undos.push({ kind: 'restoreMcp', path: file, backup })
       const existing = await adapter.readMcp(fs)
-      const merged = mergeMcp(existing, fragments)
+      const merged = mergeMcp(existing, fragments, managedIds)
       await adapter.writeMcp(fs, merged)
+      await deps.setManagedMcpIds?.(agent, fragments.map(f => f.id))
     }
     return { ok: true }
   } catch (originalError) {
@@ -81,6 +94,28 @@ export async function executeProjection(
     }
     deps.logger?.error({ err: originalError, rollbackReport: { undone, rollbackFailures } }, 'projection failed, rolled back')
     return { ok: false, failure: { failedStep: 'projection', originalError, rollbackReport: { undone, rollbackFailures } } }
+  }
+}
+
+async function cleanOrphanedLinks(
+  plan: ProjectionPlan,
+  installedAgents: Set<AgentId>,
+  fs: IFileSystem,
+  logger?: ProjectionDeps['logger'],
+): Promise<void> {
+  // Collect skill ids that the current plan references (projected or not).
+  const planSkillIds = new Set(plan.links.map(l => l.skillId))
+  for (const agent of installedAgents) {
+    const skillsDir = agentSkillsDir(agent)
+    let entries: string[]
+    try { entries = await fs.readDir(skillsDir) } catch { continue } // dir may not exist yet
+    for (const name of entries) {
+      if (planSkillIds.has(name)) continue
+      const dest = join(skillsDir, name)
+      if (await fs.isLink(dest)) { await fs.removeLink(dest) }
+      // real file/dir is left untouched (user data)
+      else if (await fs.exists(dest)) { logger?.warn?.({ dest }, 'skip orphan cleanup: target is real file/dir') }
+    }
   }
 }
 
