@@ -1,9 +1,19 @@
 import type { SkillSource } from './types.js'
 
-export interface RemoteRef { tags: Record<string, string>; head: string }
-export interface VersionStatus { hasUpdate: boolean; latestTag?: string; latestCommit: string }
+export interface RemoteRef {
+  tags: Record<string, string>
+  head: string
+}
+export interface VersionStatus {
+  hasUpdate: boolean
+  latestTag?: string
+  latestCommit: string
+}
 
-export function compareVersion(local: Pick<SkillSource, 'ref' | 'pinned_commit'>, remote: RemoteRef): VersionStatus {
+export function compareVersion(
+  local: Pick<SkillSource, 'ref' | 'pinned_commit'>,
+  remote: RemoteRef,
+): VersionStatus {
   const tagKeys = Object.keys(remote.tags)
   // If the user tracks a branch (ref is not a known tag), compare against
   // remote HEAD even when the repo has tags. Only compare tags when ref
@@ -20,8 +30,17 @@ export function compareVersion(local: Pick<SkillSource, 'ref' | 'pinned_commit'>
 }
 
 function semverCompare(a: string, b: string): number {
-  const pa = a.replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0)
-  const pb = b.replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0)
-  for (let i = 0; i < 3; i++) { const d = (pa[i] ?? 0) - (pb[i] ?? 0); if (d !== 0) return d }
+  const pa = a
+    .replace(/^v/, '')
+    .split('.')
+    .map((n) => parseInt(n, 10) || 0)
+  const pb = b
+    .replace(/^v/, '')
+    .split('.')
+    .map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < 3; i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d !== 0) return d
+  }
   return 0
 }

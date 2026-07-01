@@ -5,8 +5,15 @@ import { join } from 'node:path'
 import { agentConfigDir, agentSkillsDir, agentMcpFile } from '../../src/adapters/paths'
 
 let home: string
-beforeEach(async () => { home = await mkdtemp(join(tmpdir(), 'home-')); vi.stubEnv('HOME', home); vi.stubEnv('USERPROFILE', home) })
-afterEach(async () => { vi.unstubAllEnvs(); await rm(home, { recursive: true, force: true }) })
+beforeEach(async () => {
+  home = await mkdtemp(join(tmpdir(), 'home-'))
+  vi.stubEnv('HOME', home)
+  vi.stubEnv('USERPROFILE', home)
+})
+afterEach(async () => {
+  vi.unstubAllEnvs()
+  await rm(home, { recursive: true, force: true })
+})
 
 describe('agent paths', () => {
   it('claude-code: <home>/.claude, CLAUDE_CONFIG_DIR override', () => {

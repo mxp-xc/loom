@@ -3,7 +3,11 @@ import type { IProcess } from '../../ports/process.js'
 
 export class NodeProcess implements IProcess {
   async isInstalled(agentId: string): Promise<boolean> {
-    const map: Record<string, string> = { 'claude-code': 'claude', 'codex': 'codex', 'opencode': 'opencode' }
+    const map: Record<string, string> = {
+      'claude-code': 'claude',
+      codex: 'codex',
+      opencode: 'opencode',
+    }
     const bin = map[agentId]
     if (!bin) return false
     try {

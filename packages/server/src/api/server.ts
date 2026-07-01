@@ -10,7 +10,8 @@ export function createApp(): Hono {
   const app = new Hono()
   app.use('*', logger())
   app.route('/api', registerRoutes())
-  const dist = process.env.LOOM_WEB_DIST ?? fileURLToPath(new URL('../../../web/dist/', import.meta.url))
+  const dist =
+    process.env.LOOM_WEB_DIST ?? fileURLToPath(new URL('../../../web/dist/', import.meta.url))
   app.use('/assets/*', serveStatic({ root: dist }))
   app.get('/favicon.ico', (c) => c.body(null, 204))
   app.get('*', async (c) => {
@@ -22,6 +23,8 @@ export function createApp(): Hono {
 
 export function startApiServer(port = Number(process.env.LOOM_PORT ?? 3000)) {
   return import('@hono/node-server').then(({ serve }) =>
-    serve({ fetch: createApp().fetch, port }, (info) => console.log(`Loom API on http://localhost:${info.port}`)),
+    serve({ fetch: createApp().fetch, port }, (info) =>
+      console.log(`Loom API on http://localhost:${info.port}`),
+    ),
   )
 }

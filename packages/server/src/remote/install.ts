@@ -5,7 +5,12 @@ import type { IFileSystem } from '../ports/fs.js'
 import { resolveGitUrl } from './resolve-url.js'
 
 export async function installSkill(
-  git: IGit, fs: IFileSystem, url: string, ref: string, repoPath: string, sourceId: string,
+  git: IGit,
+  fs: IFileSystem,
+  url: string,
+  ref: string,
+  repoPath: string,
+  sourceId: string,
 ): Promise<{ pinned_commit: string; cacheDir: string }> {
   const cacheDir = join(repoPath, 'remote-cache', sourceId)
   if (await fs.exists(cacheDir)) await rm(cacheDir, { recursive: true, force: true })

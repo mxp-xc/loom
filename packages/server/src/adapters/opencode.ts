@@ -30,7 +30,8 @@ export class OpenCodeAdapter implements IAgentAdapter {
   async writeMcp(fs: IFileSystem, merged: Record<string, McpFragment>): Promise<void> {
     const file = agentMcpFile('opencode')
     let config: Record<string, unknown> = {}
-    if (await fs.exists(file)) config = JSON.parse(await fs.readFile(file)) as Record<string, unknown>
+    if (await fs.exists(file))
+      config = JSON.parse(await fs.readFile(file)) as Record<string, unknown>
     const mcp: Record<string, unknown> = {}
     for (const [name, f] of Object.entries(merged)) mcp[name] = toAgentEntry(f)
     config.mcp = mcp

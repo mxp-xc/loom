@@ -13,7 +13,7 @@ export function mergeMcp(
   managedIds?: Set<string>,
 ): Record<string, McpFragment> {
   const out: Record<string, McpFragment> = {}
-  const fragmentIds = new Set(fragments.map(f => f.id))
+  const fragmentIds = new Set(fragments.map((f) => f.id))
   const managed = managedIds ?? new Set<string>()
   // Preserve user-handwritten entries: existing ids loom never managed.
   for (const [id, f] of Object.entries(existing)) {

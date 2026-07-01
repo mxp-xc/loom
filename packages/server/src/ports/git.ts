@@ -18,6 +18,8 @@ export interface IGit {
   commitTree(repoPath: string, tree: string, parents: string[], message: string): Promise<string>
   // Update a ref to point at a commit (fast-forward only, no merge). Used to ff to FETCH_HEAD.
   updateRef(repoPath: string, ref: string, commit: string): Promise<void>
+  // Reset working tree and index to match a ref (used for initial pull).
+  resetHard(repoPath: string, ref: string): Promise<void>
   // Write the working-tree content of a path into the object store, return its tree hash.
   // For syncPull we write the full repo tree (worktree index) so merge results land in history.
   writeTree(repoPath: string): Promise<string>

@@ -6,15 +6,25 @@ import { registerRoutes } from '../../src/api/routes'
 const memFiles: Record<string, string> = {}
 
 const memFs = {
-  readFile: vi.fn(async (p: string) => { const n = p.replace(/\\/g, '/'); if (!(n in memFiles)) throw new Error('not found'); return memFiles[n] }),
-  writeFile: vi.fn(async (p: string, c: string) => { memFiles[p.replace(/\\/g, '/')] = c }),
+  readFile: vi.fn(async (p: string) => {
+    const n = p.replace(/\\/g, '/')
+    if (!(n in memFiles)) throw new Error('not found')
+    return memFiles[n]
+  }),
+  writeFile: vi.fn(async (p: string, c: string) => {
+    memFiles[p.replace(/\\/g, '/')] = c
+  }),
   exists: vi.fn(async (p: string) => p.replace(/\\/g, '/') in memFiles),
   readDir: vi.fn(async () => []),
   mkdir: vi.fn(async () => {}),
 }
 
-vi.mock('../../src/projection/executor.js', () => ({ executeProjection: vi.fn(async () => ({ ok: true })) }))
-vi.mock('../../src/sync/pull.js', () => ({ syncPull: vi.fn(async () => ({ files: [], varsFiles: [], textConflicts: [], clean: true })) }))
+vi.mock('../../src/projection/executor.js', () => ({
+  executeProjection: vi.fn(async () => ({ ok: true })),
+}))
+vi.mock('../../src/sync/pull.js', () => ({
+  syncPull: vi.fn(async () => ({ files: [], varsFiles: [], textConflicts: [], clean: true })),
+}))
 vi.mock('../../src/sync/push.js', () => ({ syncPush: vi.fn(async () => ({ ok: true })) }))
 vi.mock('@loom/core', () => ({
   loadRepoManifest: vi.fn(() => ({ repoConfig: {}, errors: [] })),
@@ -22,12 +32,24 @@ vi.mock('@loom/core', () => ({
   buildManifest: vi.fn(),
   planProjection: vi.fn(),
 }))
-vi.mock('../../src/platform/node/index.js', () => ({ createNodePlatform: vi.fn(() => ({ fs: memFs, git: {}, proc: {} })) }))
+vi.mock('../../src/platform/node/index.js', () => ({
+  createNodePlatform: vi.fn(() => ({ fs: memFs, git: {}, proc: {} })),
+}))
 vi.mock('../../src/platform/node/init.js', () => ({ initLoom: vi.fn() }))
 vi.mock('../../src/remote/discover.js', () => ({
   discoverSkills: vi.fn(async () => [
-    { name: 'brainstorming', description: 'desc', path: '/tmp/skills/brainstorming', installed: false },
-    { name: 'test-driven-development', description: 'desc2', path: '/tmp/skills/tdd', installed: true },
+    {
+      name: 'brainstorming',
+      description: 'desc',
+      path: '/tmp/skills/brainstorming',
+      installed: false,
+    },
+    {
+      name: 'test-driven-development',
+      description: 'desc2',
+      path: '/tmp/skills/tdd',
+      installed: true,
+    },
   ]),
 }))
 
@@ -50,7 +72,10 @@ describe('routes file-init safety', () => {
     const res = await app.request('/api/mcp', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repoPath: '/tmp/r1', server: { id: 'test', type: 'stdio', command: 'echo' } }),
+      body: JSON.stringify({
+        repoPath: '/tmp/r1',
+        server: { id: 'test', type: 'stdio', command: 'echo' },
+      }),
     })
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -62,7 +87,8 @@ describe('DELETE endpoints', () => {
   const app = new Hono().route('/api', registerRoutes())
 
   it('DELETE /api/sources removes a source by url', async () => {
-    memFiles['/tmp/r2/skills.yaml'] = 'sources:\n  - url: https://github.com/test/repo\n    ref: main\nskills: []\n'
+    memFiles['/tmp/r2/skills.yaml'] =
+      'sources:\n  - url: https://github.com/test/repo\n    ref: main\nskills: []\n'
     const res = await app.request('/api/sources', {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
@@ -124,7 +150,8 @@ describe('targets update', () => {
   const app = new Hono().route('/api', registerRoutes())
 
   it('POST /api/mcp/targets updates targets for an mcp server', async () => {
-    memFiles['/tmp/r5/mcp.yaml'] = '- id: srv1\n  type: stdio\n  command: echo\n  targets:\n    - claude-code\n'
+    memFiles['/tmp/r5/mcp.yaml'] =
+      '- id: srv1\n  type: stdio\n  command: echo\n  targets:\n    - claude-code\n'
     const res = await app.request('/api/mcp/targets', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -146,7 +173,12 @@ describe('PUT /config', () => {
     const res = await app.request('/api/config', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repoPath: '/tmp/r6', level: 'repo', field: 'profile', value: 'default' }),
+      body: JSON.stringify({
+        repoPath: '/tmp/r6',
+        level: 'repo',
+        field: 'profile',
+        value: 'default',
+      }),
     })
     expect(res.status).toBe(200)
     const body = await res.json()

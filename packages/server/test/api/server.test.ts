@@ -17,7 +17,10 @@ beforeEach(async () => {
   await writeFile(join(webuiDist, 'assets', 'app.js'), 'console.log(1)')
   process.env.LOOM_WEB_DIST = webuiDist
 })
-afterEach(async () => { delete process.env.LOOM_WEB_DIST; await rm(webuiDist, { recursive: true, force: true }).catch(() => {}) })
+afterEach(async () => {
+  delete process.env.LOOM_WEB_DIST
+  await rm(webuiDist, { recursive: true, force: true }).catch(() => {})
+})
 
 describe('createApp', () => {
   it('GET /api/health returns ok', async () => {

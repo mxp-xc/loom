@@ -10,7 +10,10 @@ import { resolveGitUrl } from './resolve-url.js'
 const DEFAULT_IGNORE = ['**/.git/**', '**/node_modules/**', '**/.cache/**']
 
 export async function discoverSkills(
-  git: IGit, fs: IFileSystem, url: string, installed: Set<string> = new Set(),
+  git: IGit,
+  fs: IFileSystem,
+  url: string,
+  installed: Set<string> = new Set(),
 ): Promise<(SkillMeta & { installed: boolean })[]> {
   const tmp = await mkdtemp(join(tmpdir(), 'discover-'))
   try {
@@ -19,7 +22,8 @@ export async function discoverSkills(
     const repoId = deriveRepoId(url)
     const out: (SkillMeta & { installed: boolean })[] = []
     for (const m of matches) {
-      const dir = dirname(m), dirName = basename(dir)
+      const dir = dirname(m),
+        dirName = basename(dir)
       const meta = parseSkillMeta(await fs.readFile(join(tmp, m)), dirName, join(tmp, dir))
       if (meta) out.push({ ...meta, installed: installed.has(`${repoId}-${dirName}`) })
     }
@@ -31,5 +35,8 @@ export async function discoverSkills(
 
 function deriveRepoId(url: string): string {
   const parts = url.split(':')
-  return parts[parts.length - 1].split('/').pop()!.replace(/\.git$/, '')
+  return parts[parts.length - 1]
+    .split('/')
+    .pop()!
+    .replace(/\.git$/, '')
 }

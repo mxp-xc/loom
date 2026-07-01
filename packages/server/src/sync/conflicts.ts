@@ -24,6 +24,12 @@ export interface TextFileConflict {
 export function groupConflicts(file: string, conflicts: Conflict[]): ConflictGroup {
   return {
     file,
-    items: conflicts.map(c => ({ path: c.path, field: c.field, base: c.base, ours: c.ours, theirs: c.theirs })),
+    items: conflicts.map((c) => ({
+      path: c.path,
+      field: c.field,
+      base: c.base,
+      ours: c.ours,
+      theirs: c.theirs,
+    })),
   }
 }

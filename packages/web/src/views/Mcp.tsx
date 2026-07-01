@@ -1,26 +1,43 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
+import Toast from '@/components/Toast'
 
 interface McpServer {
-  id: string; type: string; command?: string; args?: string[]
-  url?: string; headers?: Record<string, string>; env?: Record<string, string>
+  id: string
+  type: string
+  command?: string
+  args?: string[]
+  url?: string
+  headers?: Record<string, string>
+  env?: Record<string, string>
   targets?: string[]
 }
-interface ManifestData { mcp: McpServer[]; config: { targets?: string[] }; errors: string[] }
+interface ManifestData {
+  mcp: McpServer[]
+  config: { targets?: string[] }
+  errors: string[]
+}
 
 const AGENTS = ['claude-code', 'codex', 'opencode'] as const
-type Agent = typeof AGENTS[number]
-const agentShort = (a: string) => a === 'claude-code' ? 'CC' : a === 'codex' ? 'CX' : 'OC'
-const agentColor = (a: string) => a === 'claude-code' ? 'var(--cc)' : a === 'codex' ? 'var(--cx)' : 'var(--oc)'
+type Agent = (typeof AGENTS)[number]
+const agentShort = (a: string) => (a === 'claude-code' ? 'CC' : a === 'codex' ? 'CX' : 'OC')
+const agentColor = (a: string) =>
+  a === 'claude-code' ? 'var(--cc)' : a === 'codex' ? 'var(--cx)' : 'var(--oc)'
 
 const MCP_TYPES = ['stdio', 'sse', 'http'] as const
-type McpType = typeof MCP_TYPES[number]
+type McpType = (typeof MCP_TYPES)[number]
 
 const inputStyle: React.CSSProperties = {
-  marginTop: 4, width: '100%', padding: '7px 10px', fontSize: 13,
-  fontFamily: "'Fira Code', monospace", borderRadius: 4,
-  border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
+  marginTop: 4,
+  width: '100%',
+  padding: '7px 10px',
+  fontSize: 13,
+  fontFamily: "'JetBrains Mono', monospace",
+  borderRadius: 'var(--radius)',
+  border: '1px solid var(--border)',
+  background: 'var(--bg)',
+  color: 'var(--text)',
   outline: 'none',
 }
 
@@ -39,31 +56,65 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   const [srvUrl, setSrvUrl] = useState('')
   const [srvTargets, setSrvTargets] = useState<string[]>([])
   const [copied, setCopied] = useState(false)
+  const [toastMsg, setToastMsg] = useState<string | null>(null)
+
+  const showToast = (msg: string) => setToastMsg(msg)
 
   const load = () => {
     setError(null)
-    api.getManifest(repoPath).then((m) => setManifest(m as ManifestData)).catch((e) => setError(e instanceof Error ? e.message : String(e)))
+    api
+      .getManifest(repoPath)
+      .then((m) => setManifest(m as ManifestData))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }
   useEffect(load, [repoPath])
+  useEffect(() => {
+    if (!selected && manifest?.mcp?.length) setSelected(manifest.mcp[0].id)
+  }, [manifest, selected])
 
   const project = async () => {
     setProjecting(true)
-    try { await api.project({ repoPath }); load() }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
-    finally { setProjecting(false) }
+    try {
+      await api.project({ repoPath })
+      showToast('投影完成')
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setProjecting(false)
+    }
   }
 
   const resetAddForm = () => {
-    setAddErr(null); setSrvId(''); setSrvType('stdio'); setSrvCommand(''); setSrvArgs(''); setSrvUrl(''); setSrvTargets([])
+    setAddErr(null)
+    setSrvId('')
+    setSrvType('stdio')
+    setSrvCommand('')
+    setSrvArgs('')
+    setSrvUrl('')
+    setSrvTargets([])
   }
-  const openAdd = () => { resetAddForm(); setAddOpen(true) }
+  const openAdd = () => {
+    resetAddForm()
+    setAddOpen(true)
+  }
   const closeAdd = () => setAddOpen(false)
 
   const handleAddServer = async () => {
-    if (!srvId.trim()) { setAddErr('id 不能为空'); return }
-    if (srvType === 'stdio' && !srvCommand.trim()) { setAddErr('command 不能为空'); return }
-    if (srvType !== 'stdio' && !srvUrl.trim()) { setAddErr('url 不能为空'); return }
-    setAddBusy(true); setAddErr(null)
+    if (!srvId.trim()) {
+      setAddErr('id 不能为空')
+      return
+    }
+    if (srvType === 'stdio' && !srvCommand.trim()) {
+      setAddErr('command 不能为空')
+      return
+    }
+    if (srvType !== 'stdio' && !srvUrl.trim()) {
+      setAddErr('url 不能为空')
+      return
+    }
+    setAddBusy(true)
+    setAddErr(null)
     try {
       const server: any = { id: srvId.trim(), type: srvType }
       if (srvType === 'stdio') {
@@ -75,40 +126,84 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
       }
       if (srvTargets.length > 0) server.targets = srvTargets
       await api.addMcpServer({ repoPath, server })
-      closeAdd(); load()
-    } catch (e) { setAddErr(e instanceof Error ? e.message : String(e)) }
-    finally { setAddBusy(false) }
+      closeAdd()
+      load()
+    } catch (e) {
+      setAddErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAddBusy(false)
+    }
   }
 
   const toggleTarget = (a: Agent) => {
-    setSrvTargets(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a])
+    setSrvTargets((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]))
   }
 
   const agents = manifest?.config?.targets ?? []
-  const allAgents: Agent[] = AGENTS.filter(a => agents.includes(a))
-  if (allAgents.length === 0) allAgents.push(...AGENTS)
+  const allAgents: Agent[] = [...AGENTS]
 
-  const selectedServer = manifest?.mcp?.find(s => s.id === selected)
+  const selectedServer = manifest?.mcp?.find((s) => s.id === selected)
 
-  const handleToggleTarget = async (agent: Agent, server: McpServer | undefined = selectedServer) => {
+  const handleToggleTarget = async (
+    agent: Agent,
+    server: McpServer | undefined = selectedServer,
+  ) => {
     if (!server) return
     const currentTargets = server.targets ?? agents
     const newTargets = currentTargets.includes(agent)
-      ? currentTargets.filter(a => a !== agent)
+      ? currentTargets.filter((a) => a !== agent)
       : [...currentTargets, agent]
     try {
       await api.updateMcpTargets({ repoPath, id: server.id, targets: newTargets })
       load()
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
   }
 
   const handleCopy = () => {
     if (!selectedServer) return
     const text = JSON.stringify([selectedServer], null, 2)
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopied(true)
+        showToast('已拷贝到剪贴板')
+        setTimeout(() => setCopied(false), 2000)
+      })
+      .catch(() => showToast('拷贝失败'))
   }
+
+  // 内联 SVG 剪贴板图标
+  const ClipboardIcon = ({ size = 14 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="8" y="2" width="8" height="4" rx="1" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    </svg>
+  )
+  const CheckIcon = ({ size = 14 }: { size?: number }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
 
   return (
     <div>
@@ -118,23 +213,63 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           <div className="page-sub">{manifest?.mcp?.length ?? 0} servers</div>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button className="add-btn" onClick={openAdd}>+ Add server</button>
+          <button className="add-btn" onClick={openAdd}>
+            + Add server
+          </button>
           <button className="add-btn" onClick={project} disabled={projecting}>
             {projecting ? '投影中…' : '+ 投影'}
           </button>
         </div>
       </div>
 
-      {error && <div style={{ marginTop: 12, fontFamily: "'Fira Code', monospace", fontSize: 13, color: 'var(--error)' }}>{error}</div>}
-
-      {manifest?.mcp?.length === 0 && manifest && (
-        <div style={{ marginTop: 18, padding: 32, border: '1px solid var(--border)', borderRadius: 6, textAlign: 'center', color: 'var(--muted)' }}>
-          <p style={{ fontSize: 14 }}>还没有配置 MCP Server</p>
-          <p style={{ marginTop: 4, fontFamily: "'Fira Code', monospace", fontSize: 12 }}>点击右上 <b>+ Add server</b> 添加</p>
+      {error && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: '8px 14px',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 13,
+            color: 'var(--error)',
+            border: '1px solid var(--error)',
+            borderRadius: 'var(--radius-card)',
+            background: 'rgba(220,38,38,0.06)',
+          }}
+        >
+          {error}
         </div>
       )}
 
-      <div style={{ marginTop: 18, display: 'grid', gridTemplateColumns: '360px 1fr', gap: 0, minHeight: 400, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', background: 'var(--card)' }}>
+      {manifest?.mcp?.length === 0 && manifest && (
+        <div
+          style={{
+            marginTop: 18,
+            padding: 32,
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-card)',
+            textAlign: 'center',
+            color: 'var(--muted)',
+          }}
+        >
+          <p style={{ fontSize: 14 }}>还没有配置 MCP Server</p>
+          <p style={{ marginTop: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
+            点击右上 <b>+ Add server</b> 添加
+          </p>
+        </div>
+      )}
+
+      <div
+        style={{
+          marginTop: 18,
+          display: 'grid',
+          gridTemplateColumns: '360px 1fr',
+          gap: 0,
+          minHeight: 400,
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-card)',
+          overflow: 'hidden',
+          background: 'var(--card)',
+        }}
+      >
         {/* List */}
         <div className="mlist" style={{ borderRight: '1px solid var(--border)' }}>
           {manifest?.mcp?.map((srv) => {
@@ -152,12 +287,21 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                   <span className="mcnt">{srvAgents.length}/3</span>
                 </div>
                 <div className="mcp-bottom">
-                  <span className="mcmd">{srv.type === 'stdio' ? `${srv.command} ${srv.args?.join(' ') ?? ''}` : srv.url}</span>
-                  {allAgents.map(a => (
-                    <span key={a} className={'tg ' + (srvAgents.includes(a) ? 'on' : 'off')}
+                  <span className="mcmd">
+                    {srv.type === 'stdio' ? `${srv.command} ${srv.args?.join(' ') ?? ''}` : srv.url}
+                  </span>
+                  {allAgents.map((a) => (
+                    <span
+                      key={a}
+                      className={'tg ' + (srvAgents.includes(a) ? 'on' : 'off')}
                       style={{ ['--c' as string]: agentColor(a), cursor: 'pointer' }}
-                      onClick={(e) => { e.stopPropagation(); handleToggleTarget(a, srv) }}
-                    >{agentShort(a)}</span>
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleToggleTarget(a, srv)
+                      }}
+                    >
+                      {agentShort(a)}
+                    </span>
                   ))}
                 </div>
               </div>
@@ -170,22 +314,48 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           {selectedServer ? (
             <>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-                <span className="page-title" style={{ fontSize: 16 }}>{selectedServer.id}</span>
-                <span className={'mtype' + (selectedServer.type !== 'stdio' ? ' remote' : '')}>{selectedServer.type}</span>
-                <button className="gbtn" onClick={handleCopy} style={{ marginLeft: 'auto' }}>
-                  {copied ? '✓' : '📋'}
+                <span className="page-title" style={{ fontSize: 16 }}>
+                  {selectedServer.id}
+                </span>
+                <span className={'mtype' + (selectedServer.type !== 'stdio' ? ' remote' : '')}>
+                  {selectedServer.type}
+                </span>
+                <button
+                  className="gbtn"
+                  onClick={handleCopy}
+                  title="拷贝配置 JSON"
+                  style={{
+                    marginLeft: 'auto',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '4px 10px',
+                  }}
+                >
+                  {copied ? <CheckIcon /> : <ClipboardIcon />}
+                  <span style={{ fontSize: 11 }}>{copied ? '已拷贝' : '拷贝'}</span>
                 </button>
               </div>
               <div style={{ marginTop: 16 }}>
                 <span className="label">targets</span>
                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  {allAgents.map(a => {
+                  {allAgents.map((a) => {
                     const srvAgents = selectedServer.targets ?? agents
                     return (
-                      <span key={a} className={'tg ' + (srvAgents.includes(a) ? 'on' : 'off')}
-                        style={{ ['--c' as string]: agentColor(a), width: 40, height: 40, fontSize: 12, cursor: 'pointer' }}
+                      <span
+                        key={a}
+                        className={'tg ' + (srvAgents.includes(a) ? 'on' : 'off')}
+                        style={{
+                          ['--c' as string]: agentColor(a),
+                          width: 40,
+                          height: 40,
+                          fontSize: 12,
+                          cursor: 'pointer',
+                        }}
                         onClick={() => handleToggleTarget(a)}
-                      >{agentShort(a)}</span>
+                      >
+                        {agentShort(a)}
+                      </span>
                     )
                   })}
                 </div>
@@ -194,50 +364,111 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                 <>
                   <div style={{ marginTop: 16 }}>
                     <span className="label">command</span>
-                    <div style={{ marginTop: 4, fontFamily: "'Fira Code', monospace", fontSize: 13, color: 'var(--text)' }}>{selectedServer.command}</div>
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: 13,
+                        color: 'var(--text)',
+                      }}
+                    >
+                      {selectedServer.command}
+                    </div>
                   </div>
                   {selectedServer.args && (
                     <div style={{ marginTop: 12 }}>
                       <span className="label">args</span>
-                      <div style={{ marginTop: 4, fontFamily: "'Fira Code', monospace", fontSize: 13, color: 'var(--text)' }}>{selectedServer.args.join(' ')}</div>
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: 13,
+                          color: 'var(--text)',
+                        }}
+                      >
+                        {selectedServer.args.join(' ')}
+                      </div>
                     </div>
                   )}
                 </>
               ) : (
                 <div style={{ marginTop: 16 }}>
                   <span className="label">url</span>
-                  <div style={{ marginTop: 4, fontFamily: "'Fira Code', monospace", fontSize: 13, color: 'var(--text)' }}>{selectedServer.url}</div>
+                  <div
+                    style={{
+                      marginTop: 4,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 13,
+                      color: 'var(--text)',
+                    }}
+                  >
+                    {selectedServer.url}
+                  </div>
                 </div>
               )}
               {selectedServer.env && Object.keys(selectedServer.env).length > 0 && (
                 <div style={{ marginTop: 12 }}>
                   <span className="label">env</span>
-                  <div style={{ marginTop: 4, fontFamily: "'Fira Code', monospace", fontSize: 12, color: 'var(--muted)' }}>
-                    {Object.entries(selectedServer.env).map(([k, v]) => <div key={k}>{k}: {v}</div>)}
+                  <div
+                    style={{
+                      marginTop: 4,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 12,
+                      color: 'var(--muted)',
+                    }}
+                  >
+                    {Object.entries(selectedServer.env).map(([k, v]) => (
+                      <div key={k}>
+                        {k}: {v}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
-              {selectedServer.type !== 'stdio' && selectedServer.headers && Object.keys(selectedServer.headers).length > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <span className="label">headers</span>
-                  <div style={{ marginTop: 4, fontFamily: "'Fira Code', monospace", fontSize: 12, color: 'var(--muted)' }}>
-                    {Object.entries(selectedServer.headers).map(([k, v]) => <div key={k}>{k}: {v}</div>)}
+              {selectedServer.type !== 'stdio' &&
+                selectedServer.headers &&
+                Object.keys(selectedServer.headers).length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <span className="label">headers</span>
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: 12,
+                        color: 'var(--muted)',
+                      }}
+                    >
+                      {Object.entries(selectedServer.headers).map(([k, v]) => (
+                        <div key={k}>
+                          {k}: {v}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
               <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-                <button className="gbtn" style={{ color: 'var(--error)' }} onClick={async () => {
-                  if (!selectedServer) return
-                  try {
-                    await api.deleteMcpServer({ repoPath, id: selectedServer.id })
-                    setSelected(null)
-                    load()
-                  } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
-                }}>删除</button>
+                <button
+                  className="gbtn"
+                  style={{ color: 'var(--error)' }}
+                  onClick={async () => {
+                    if (!selectedServer) return
+                    try {
+                      await api.deleteMcpServer({ repoPath, id: selectedServer.id })
+                      setSelected(null)
+                      load()
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : String(e))
+                    }
+                  }}
+                >
+                  删除
+                </button>
               </div>
             </>
           ) : (
-            <div style={{ color: 'var(--muted)', textAlign: 'center', paddingTop: 60 }}>选择左侧 MCP server 查看详情</div>
+            <div style={{ color: 'var(--muted)', textAlign: 'center', paddingTop: 60 }}>
+              选择左侧 MCP server 查看详情
+            </div>
           )}
         </div>
       </div>
@@ -245,25 +476,50 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
       {/* Add Server Modal */}
       <Modal open={addOpen} onClose={closeAdd} title="Add MCP Server">
         {addErr && (
-          <div style={{ marginBottom: 12, padding: 8, borderRadius: 4, fontSize: 12, fontFamily: "'Fira Code', monospace", color: 'var(--error)', border: '1px solid var(--error)', background: 'var(--card)' }}>{addErr}</div>
+          <div
+            style={{
+              marginBottom: 12,
+              padding: 8,
+              borderRadius: 'var(--radius)',
+              fontSize: 12,
+              fontFamily: "'JetBrains Mono', monospace",
+              color: 'var(--error)',
+              border: '1px solid var(--error)',
+              background: 'var(--card)',
+            }}
+          >
+            {addErr}
+          </div>
         )}
 
         <div style={{ marginBottom: 14 }}>
-          <span className="label">id <span style={{ color: 'var(--error)' }}>*</span></span>
-          <input value={srvId} onChange={e => setSrvId(e.target.value)} placeholder="my-mcp-server" style={inputStyle} />
+          <span className="label">
+            id <span style={{ color: 'var(--error)' }}>*</span>
+          </span>
+          <input
+            value={srvId}
+            onChange={(e) => setSrvId(e.target.value)}
+            placeholder="my-mcp-server"
+            style={inputStyle}
+          />
         </div>
 
         <div style={{ marginBottom: 14 }}>
           <span className="label">type</span>
           <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-            {MCP_TYPES.map(t => (
+            {MCP_TYPES.map((t) => (
               <button
                 key={t}
                 onClick={() => setSrvType(t)}
                 style={{
-                  flex: 1, padding: '6px 0', fontSize: 11, fontFamily: "'Fira Code', monospace",
-                  fontWeight: 600, borderRadius: 4, border: '1px solid var(--border)',
-                  background: srvType === t ? 'var(--nav)' : 'transparent',
+                  flex: 1,
+                  padding: '6px 0',
+                  fontSize: 11,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontWeight: 600,
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--border)',
+                  background: srvType === t ? 'var(--bg)' : 'transparent',
                   color: srvType === t ? 'var(--bright)' : 'var(--muted)',
                   cursor: 'pointer',
                 }}
@@ -277,29 +533,58 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         {srvType === 'stdio' ? (
           <>
             <div style={{ marginBottom: 14 }}>
-              <span className="label">command <span style={{ color: 'var(--error)' }}>*</span></span>
-              <input value={srvCommand} onChange={e => setSrvCommand(e.target.value)} placeholder="npx" style={inputStyle} />
+              <span className="label">
+                command <span style={{ color: 'var(--error)' }}>*</span>
+              </span>
+              <input
+                value={srvCommand}
+                onChange={(e) => setSrvCommand(e.target.value)}
+                placeholder="npx"
+                style={inputStyle}
+              />
             </div>
             <div style={{ marginBottom: 18 }}>
-              <span className="label">args <span style={{ color: 'var(--muted)' }}>(空格分隔)</span></span>
-              <input value={srvArgs} onChange={e => setSrvArgs(e.target.value)} placeholder="-y @modelcontextprotocol/server-filesystem /path" style={inputStyle} />
+              <span className="label">
+                args <span style={{ color: 'var(--muted)' }}>(空格分隔)</span>
+              </span>
+              <input
+                value={srvArgs}
+                onChange={(e) => setSrvArgs(e.target.value)}
+                placeholder="-y @modelcontextprotocol/server-filesystem /path"
+                style={inputStyle}
+              />
             </div>
           </>
         ) : (
           <div style={{ marginBottom: 18 }}>
-            <span className="label">url <span style={{ color: 'var(--error)' }}>*</span></span>
-            <input value={srvUrl} onChange={e => setSrvUrl(e.target.value)} placeholder="http://localhost:3001/sse" style={inputStyle} />
+            <span className="label">
+              url <span style={{ color: 'var(--error)' }}>*</span>
+            </span>
+            <input
+              value={srvUrl}
+              onChange={(e) => setSrvUrl(e.target.value)}
+              placeholder="http://localhost:3001/sse"
+              style={inputStyle}
+            />
           </div>
         )}
 
         <div style={{ marginBottom: 18 }}>
-          <span className="label">targets <span style={{ color: 'var(--muted)' }}>(可选)</span></span>
+          <span className="label">
+            targets <span style={{ color: 'var(--muted)' }}>(可选)</span>
+          </span>
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-            {AGENTS.map(a => (
+            {AGENTS.map((a) => (
               <span
                 key={a}
                 className={'tg ' + (srvTargets.includes(a) ? 'on' : 'off')}
-                style={{ ['--c' as string]: agentColor(a), width: 40, height: 40, fontSize: 12, cursor: 'pointer' }}
+                style={{
+                  ['--c' as string]: agentColor(a),
+                  width: 40,
+                  height: 40,
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
                 onClick={() => toggleTarget(a)}
               >
                 {agentShort(a)}
@@ -308,10 +593,16 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           </div>
         </div>
 
-        <button className="add-btn" onClick={handleAddServer} disabled={addBusy} style={{ width: '100%' }}>
+        <button
+          className="add-btn"
+          onClick={handleAddServer}
+          disabled={addBusy}
+          style={{ width: '100%' }}
+        >
           {addBusy ? '添加中…' : '添加 MCP Server'}
         </button>
       </Modal>
+      {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg(null)} />}
     </div>
   )
 }

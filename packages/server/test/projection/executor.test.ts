@@ -10,22 +10,33 @@ import type { ProjectionPlan, Manifest, AgentId } from '@loom/core'
 let home: string
 let srcDir: string
 beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), 'home-')); vi.stubEnv('HOME', home); vi.stubEnv('USERPROFILE', home)
+  home = await mkdtemp(join(tmpdir(), 'home-'))
+  vi.stubEnv('HOME', home)
+  vi.stubEnv('USERPROFILE', home)
   srcDir = await mkdtemp(join(tmpdir(), 'src-'))
   await mkdir(join(srcDir, 'frontend-design'), { recursive: true })
   await writeFile(join(srcDir, 'frontend-design', 'SKILL.md'), 'x')
 })
-afterEach(async () => { vi.unstubAllEnvs(); await Promise.all([rm(home, { recursive: true, force: true }), rm(srcDir, { recursive: true, force: true })]) })
+afterEach(async () => {
+  vi.unstubAllEnvs()
+  await Promise.all([
+    rm(home, { recursive: true, force: true }),
+    rm(srcDir, { recursive: true, force: true }),
+  ])
+})
 
 const plan: ProjectionPlan = {
   links: [{ skillId: 'frontend-design', source: 'local', targets: ['claude-code'] }],
   mcpEntries: [{ id: 'playwright', targets: ['claude-code'] }],
-  skippedAgents: [], strategy: 'link',
+  skippedAgents: [],
+  strategy: 'link',
 }
 const manifest: Manifest = {
   skills: { sources: [], skills: [{ id: 'frontend-design' }] },
   mcp: [{ id: 'playwright', type: 'stdio', command: 'npx', args: ['p'], targets: ['claude-code'] }],
-  vars: { default: {}, active: {} }, config: { targets: ['claude-code'] }, errors: [],
+  vars: { default: {}, active: {} },
+  config: { targets: ['claude-code'] },
+  errors: [],
 }
 const varsCtx = { env: {}, activeProfile: {}, defaultProfile: {} }
 const installed = new Set<AgentId>(['claude-code'])
@@ -34,20 +45,31 @@ describe('executeProjection', () => {
   it('success: builds skill links + writes MCP', async () => {
     const fs = new NodeFileSystem()
     const res = await executeProjection(plan, manifest, varsCtx, {
-      fs, adapters: { 'claude-code': new ClaudeCodeAdapter() }, installedAgents: installed,
+      fs,
+      adapters: { 'claude-code': new ClaudeCodeAdapter() },
+      installedAgents: installed,
       resolveSkillSrc: (l) => join(srcDir, 'frontend-design'),
     })
     expect(res.ok).toBe(true)
     expect(await fs.exists(join(home, '.claude', 'skills', 'frontend-design'))).toBe(true)
-    expect(JSON.parse(await fs.readFile(join(home, '.claude.json'))).mcpServers.playwright.command).toBe('npx')
+    expect(
+      JSON.parse(await fs.readFile(join(home, '.claude.json'))).mcpServers.playwright.command,
+    ).toBe('npx')
   })
   it('failure rolls back: removes built links + restores MCP backup', async () => {
     const fs = new NodeFileSystem()
-    await fs.writeFile(join(home, '.claude.json'), JSON.stringify({ mcpServers: { existing: { type: 'stdio', command: 'old' } } }))
+    await fs.writeFile(
+      join(home, '.claude.json'),
+      JSON.stringify({ mcpServers: { existing: { type: 'stdio', command: 'old' } } }),
+    )
     const failing = new ClaudeCodeAdapter()
-    failing.writeMcp = async () => { throw new Error('simulated write failure') }
+    failing.writeMcp = async () => {
+      throw new Error('simulated write failure')
+    }
     const res = await executeProjection(plan, manifest, varsCtx, {
-      fs, adapters: { 'claude-code': failing }, installedAgents: installed,
+      fs,
+      adapters: { 'claude-code': failing },
+      installedAgents: installed,
       resolveSkillSrc: (l) => join(srcDir, 'frontend-design'),
     })
     expect(res.ok).toBe(false)
@@ -59,13 +81,21 @@ describe('executeProjection', () => {
   it('enabled:false member: cleans pre-existing link, does not build', async () => {
     const fs = new NodeFileSystem()
     await fs.mkdir(join(home, '.claude', 'skills'), true)
-    await fs.createLink(join(srcDir, 'frontend-design'), join(home, '.claude', 'skills', 'frontend-design'))
+    await fs.createLink(
+      join(srcDir, 'frontend-design'),
+      join(home, '.claude', 'skills', 'frontend-design'),
+    )
     expect(await fs.isLink(join(home, '.claude', 'skills', 'frontend-design'))).toBe(true)
     const disabledPlan: ProjectionPlan = {
-      links: [{ skillId: 'frontend-design', source: 'local', targets: [] }], mcpEntries: [], skippedAgents: [], strategy: 'link',
+      links: [{ skillId: 'frontend-design', source: 'local', targets: [] }],
+      mcpEntries: [],
+      skippedAgents: [],
+      strategy: 'link',
     }
     const res = await executeProjection(disabledPlan, { ...manifest, mcp: [] }, varsCtx, {
-      fs, adapters: { 'claude-code': new ClaudeCodeAdapter() }, installedAgents: installed,
+      fs,
+      adapters: { 'claude-code': new ClaudeCodeAdapter() },
+      installedAgents: installed,
       resolveSkillSrc: () => null,
     })
     expect(res.ok).toBe(true)
@@ -81,11 +111,19 @@ describe('executeProjection', () => {
       ],
     }
     const planUndef: ProjectionPlan = {
-      links: [], mcpEntries: [{ id: 'broken', targets: ['claude-code'] }, { id: 'ok', targets: ['claude-code'] }], skippedAgents: [], strategy: 'link',
+      links: [],
+      mcpEntries: [
+        { id: 'broken', targets: ['claude-code'] },
+        { id: 'ok', targets: ['claude-code'] },
+      ],
+      skippedAgents: [],
+      strategy: 'link',
     }
     const logs: string[] = []
     const res = await executeProjection(planUndef, manifestUndef, varsCtx, {
-      fs, adapters: { 'claude-code': new ClaudeCodeAdapter() }, installedAgents: installed,
+      fs,
+      adapters: { 'claude-code': new ClaudeCodeAdapter() },
+      installedAgents: installed,
       resolveSkillSrc: () => null,
       logger: { error: (o) => logs.push(JSON.stringify(o)), warn: () => {} },
     })
@@ -93,13 +131,15 @@ describe('executeProjection', () => {
     const mcp = JSON.parse(await fs.readFile(join(home, '.claude.json')))
     expect(mcp.mcpServers.broken).toBeUndefined()
     expect(mcp.mcpServers.ok.command).toBe('npx')
-    expect(logs.some(l => l.includes('broken'))).toBe(true)
+    expect(logs.some((l) => l.includes('broken'))).toBe(true)
   })
   it('manifest errors: rejects projection before any IO', async () => {
     const fs = new NodeFileSystem()
     const badManifest: Manifest = { ...manifest, errors: ['mcp[0].command: required'] }
     const res = await executeProjection(plan, badManifest, varsCtx, {
-      fs, adapters: { 'claude-code': new ClaudeCodeAdapter() }, installedAgents: installed,
+      fs,
+      adapters: { 'claude-code': new ClaudeCodeAdapter() },
+      installedAgents: installed,
       resolveSkillSrc: (l) => join(srcDir, 'frontend-design'),
     })
     expect(res.ok).toBe(false)
@@ -110,7 +150,9 @@ describe('executeProjection', () => {
     const fs = new NodeFileSystem()
     const copyPlan: ProjectionPlan = { ...plan, strategy: 'copy' }
     const res = await executeProjection(copyPlan, manifest, varsCtx, {
-      fs, adapters: { 'claude-code': new ClaudeCodeAdapter() }, installedAgents: installed,
+      fs,
+      adapters: { 'claude-code': new ClaudeCodeAdapter() },
+      installedAgents: installed,
       resolveSkillSrc: (l) => join(srcDir, 'frontend-design'),
     })
     expect(res.ok).toBe(true)

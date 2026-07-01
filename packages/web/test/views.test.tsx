@@ -12,21 +12,38 @@ vi.mock('../src/lib/api', () => ({
     project: vi.fn(async () => ({ ok: true })),
     syncPull: vi.fn(async () => ({ clean: true, files: [], textConflicts: [] })),
     syncPush: vi.fn(async () => ({ ok: true })),
+    syncApply: vi.fn(async () => ({ ok: true })),
+    getSyncRemote: vi.fn(async () => ({ remoteUrl: null })),
+    setSyncRemote: vi.fn(async () => ({ ok: true })),
     getConfig: vi.fn(async () => ({ effective: {}, repo: {}, local: {} })),
-    getManifest: vi.fn(async () => ({ skills: { sources: [], skills: [] }, mcp: [], vars: { default: {}, active: {} }, config: { targets: ['claude-code', 'codex'] }, errors: [] })),
+    getManifest: vi.fn(async () => ({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['claude-code', 'codex'] },
+      errors: [],
+    })),
   },
 }))
 
 describe('Skills view', () => {
   it('renders heading and project button', async () => {
-    render(<MemoryRouter><Skills repoPath="/tmp/r" /></MemoryRouter>)
+    render(
+      <MemoryRouter>
+        <Skills repoPath="/tmp/r" />
+      </MemoryRouter>,
+    )
     expect(await screen.findByText('投影', { exact: false })).toBeDefined()
   })
 })
 
 describe('Sync view', () => {
   it('renders pull and push buttons', () => {
-    render(<MemoryRouter><Sync repoPath="/tmp/r" /></MemoryRouter>)
+    render(
+      <MemoryRouter>
+        <Sync repoPath="/tmp/r" />
+      </MemoryRouter>,
+    )
     expect(screen.getByText('⇅ 拉取', { exact: true })).toBeDefined()
     expect(screen.getByText('↑ 上传', { exact: true })).toBeDefined()
   })

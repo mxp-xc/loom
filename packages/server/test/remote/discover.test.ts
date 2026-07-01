@@ -8,8 +8,12 @@ import { NodeFileSystem } from '../../src/platform/node/fs'
 import type { IGit } from '../../src/ports/git'
 
 let srcTmp: string
-beforeAll(async () => { srcTmp = await mkdtemp(join(tmpdir(), 'discsrc-')) })
-afterAll(async () => { await rm(srcTmp, { recursive: true, force: true }).catch(() => {}) })
+beforeAll(async () => {
+  srcTmp = await mkdtemp(join(tmpdir(), 'discsrc-'))
+})
+afterAll(async () => {
+  await rm(srcTmp, { recursive: true, force: true }).catch(() => {})
+})
 
 describe('resolveGitUrl', () => {
   it('github:owner/repo -> https URL', () => {
@@ -27,12 +31,27 @@ describe('resolveGitUrl', () => {
 describe('discoverSkills', () => {
   it('shallow clone + scan + parse frontmatter, filter invalid name, mark installed', async () => {
     await mkdir(join(srcTmp, 'skills', 'brainstorming'), { recursive: true })
-    await writeFile(join(srcTmp, 'skills', 'brainstorming', 'SKILL.md'), '---\nname: brainstorming\ndescription: A skill\n---\nbody\n')
+    await writeFile(
+      join(srcTmp, 'skills', 'brainstorming', 'SKILL.md'),
+      '---\nname: brainstorming\ndescription: A skill\n---\nbody\n',
+    )
     await mkdir(join(srcTmp, 'skills', 'bad-name'), { recursive: true })
-    await writeFile(join(srcTmp, 'skills', 'bad-name', 'SKILL.md'), '---\nname: BadName\ndescription: x\n---\n')
-    const mockGit = { clone: async (_u: string, dest: string) => { await cp(srcTmp, dest, { recursive: true }) } } as unknown as IGit
-    const members = await discoverSkills(mockGit, new NodeFileSystem(), 'github:obra/superpowers', new Set(['superpowers-brainstorming']))
-    expect(members.map(m => m.name)).toEqual(['brainstorming'])
+    await writeFile(
+      join(srcTmp, 'skills', 'bad-name', 'SKILL.md'),
+      '---\nname: BadName\ndescription: x\n---\n',
+    )
+    const mockGit = {
+      clone: async (_u: string, dest: string) => {
+        await cp(srcTmp, dest, { recursive: true })
+      },
+    } as unknown as IGit
+    const members = await discoverSkills(
+      mockGit,
+      new NodeFileSystem(),
+      'github:obra/superpowers',
+      new Set(['superpowers-brainstorming']),
+    )
+    expect(members.map((m) => m.name)).toEqual(['brainstorming'])
     expect(members[0].description).toBe('A skill')
     expect(members[0].installed).toBe(true)
   })

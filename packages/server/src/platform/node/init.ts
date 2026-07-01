@@ -8,7 +8,7 @@ const SKELETON = {
   skills: `sources: []\nskills: []\n`,
   mcp: `[]\n`,
   varsDefault: `# default profile vars\n# browsers_path: ~/.cache/ms-playwright\n# work_root: ~/projects\n`,
-  repoConfig: `# repo-level config (synced via git)\nprofile: local\ntargets: [claude-code, codex]\nprojection:\n  strategy: link\nupdate_check:\n  enabled: true\n  interval: 6h\n`,
+  repoConfig: `# repo-level config (synced via git)\nprofile: local\ntargets: [claude-code, codex, opencode]\nprojection:\n  strategy: link\nupdate_check:\n  enabled: true\n  interval: 6h\n`,
 }
 
 export async function initLoom(homePath: string, fs: IFileSystem, git: IGit): Promise<void> {
@@ -20,7 +20,9 @@ export async function initLoom(homePath: string, fs: IFileSystem, git: IGit): Pr
   await fs.mkdir(join(repo, 'vars'), true)
   await fs.mkdir(join(repo, 'assets', 'skills'), true)
   await fs.mkdir(join(repo, 'remote-cache'), true)
-  const ensure = async (p: string, content: string) => { if (!(await fs.exists(p))) await fs.writeFile(p, content) }
+  const ensure = async (p: string, content: string) => {
+    if (!(await fs.exists(p))) await fs.writeFile(p, content)
+  }
   await ensure(join(repo, '.gitignore'), SKELETON.gitignore)
   await ensure(join(repo, 'skills.yaml'), SKELETON.skills)
   await ensure(join(repo, 'mcp.yaml'), SKELETON.mcp)

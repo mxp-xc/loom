@@ -3,7 +3,11 @@ import { parseSkillMeta } from '../../src/remote/frontmatter'
 
 describe('parseSkillMeta', () => {
   it('parses frontmatter name + description', () => {
-    const m = parseSkillMeta('---\nname: brainstorming\ndescription: A skill\n---\nbody', 'brainstorming', '/p')
+    const m = parseSkillMeta(
+      '---\nname: brainstorming\ndescription: A skill\n---\nbody',
+      'brainstorming',
+      '/p',
+    )
     expect(m).not.toBeNull()
     expect(m!.name).toBe('brainstorming')
     expect(m!.description).toBe('A skill')
@@ -19,6 +23,8 @@ describe('parseSkillMeta', () => {
     expect(parseSkillMeta('---\nname: bad name\n---\n', 'dir', '/p')).toBeNull()
   })
   it('accepts valid name with hyphens', () => {
-    expect(parseSkillMeta('---\nname: my-cool-skill\n---\n', 'dir', '/p')!.name).toBe('my-cool-skill')
+    expect(parseSkillMeta('---\nname: my-cool-skill\n---\n', 'dir', '/p')!.name).toBe(
+      'my-cool-skill',
+    )
   })
 })

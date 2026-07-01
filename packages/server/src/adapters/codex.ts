@@ -16,7 +16,16 @@ export class CodexAdapter implements IAgentAdapter {
     const servers = (raw.mcp_servers ?? {}) as Record<string, any>
     const out: Record<string, McpFragment> = {}
     for (const [name, s] of Object.entries(servers)) {
-      out[name] = { id: name, type: s.type ?? 'stdio', command: s.command, args: s.args, env: s.env, url: s.url, headers: s.headers, targets: [] }
+      out[name] = {
+        id: name,
+        type: s.type ?? 'stdio',
+        command: s.command,
+        args: s.args,
+        env: s.env,
+        url: s.url,
+        headers: s.headers,
+        targets: [],
+      }
     }
     return out
   }

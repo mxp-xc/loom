@@ -23,24 +23,59 @@ export function loadRepoManifest(files: Record<string, string>): RepoManifest {
 
 const AgentIdSchema = z.enum(['claude-code', 'codex', 'opencode'])
 const McpServerSchema = z.discriminatedUnion('type', [
-  z.object({ id: z.string().min(1), type: z.literal('stdio'), command: z.string().min(1), args: z.array(z.string()).optional(), env: z.record(z.string()).optional(), targets: z.array(AgentIdSchema).optional() }),
-  z.object({ id: z.string().min(1), type: z.literal('sse'), url: z.string().min(1), headers: z.record(z.string()).optional(), env: z.record(z.string()).optional(), targets: z.array(AgentIdSchema).optional() }),
-  z.object({ id: z.string().min(1), type: z.literal('http'), url: z.string().min(1), headers: z.record(z.string()).optional(), env: z.record(z.string()).optional(), targets: z.array(AgentIdSchema).optional() }),
+  z.object({
+    id: z.string().min(1),
+    type: z.literal('stdio'),
+    command: z.string().min(1),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string()).optional(),
+    targets: z.array(AgentIdSchema).optional(),
+  }),
+  z.object({
+    id: z.string().min(1),
+    type: z.literal('sse'),
+    url: z.string().min(1),
+    headers: z.record(z.string()).optional(),
+    env: z.record(z.string()).optional(),
+    targets: z.array(AgentIdSchema).optional(),
+  }),
+  z.object({
+    id: z.string().min(1),
+    type: z.literal('http'),
+    url: z.string().min(1),
+    headers: z.record(z.string()).optional(),
+    env: z.record(z.string()).optional(),
+    targets: z.array(AgentIdSchema).optional(),
+  }),
 ])
 const SkillSourceSchema = z.object({
-  url: z.string().min(1), ref: z.string().min(1), pinned_commit: z.string().optional(), scan: z.string().optional(),
-  members: z.array(z.object({ name: z.string().min(1), enabled: z.boolean().optional(), targets: z.array(AgentIdSchema).optional() })).optional(),
+  url: z.string().min(1),
+  ref: z.string().min(1),
+  pinned_commit: z.string().optional(),
+  scan: z.string().optional(),
+  members: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        enabled: z.boolean().optional(),
+        targets: z.array(AgentIdSchema).optional(),
+      }),
+    )
+    .optional(),
 })
 
 export function validateManifest(m: RepoManifest): string[] {
   const errs: string[] = []
   m.skills.sources.forEach((s, i) => {
     const r = SkillSourceSchema.safeParse(s)
-    if (!r.success) for (const iss of r.error.issues) errs.push(`source[${i}].${iss.path.join('.')}: ${iss.message}`)
+    if (!r.success)
+      for (const iss of r.error.issues)
+        errs.push(`source[${i}].${iss.path.join('.')}: ${iss.message}`)
   })
   m.mcp.forEach((s, i) => {
     const r = McpServerSchema.safeParse(s)
-    if (!r.success) for (const iss of r.error.issues) errs.push(`mcp[${i}].${iss.path.join('.')}: ${iss.message}`)
+    if (!r.success)
+      for (const iss of r.error.issues) errs.push(`mcp[${i}].${iss.path.join('.')}: ${iss.message}`)
   })
   return errs
 }
@@ -50,7 +85,8 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 function deepMerge<T>(repo: T, local: unknown): T {
-  if (!isPlainObject(repo) || !isPlainObject(local)) return (local === undefined ? repo : local) as T
+  if (!isPlainObject(repo) || !isPlainObject(local))
+    return (local === undefined ? repo : local) as T
   const out: Record<string, unknown> = { ...repo }
   for (const k of Object.keys(local)) {
     out[k] = deepMerge(repo[k], (local as Record<string, unknown>)[k])

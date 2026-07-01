@@ -28,10 +28,13 @@ export default function Settings({ repoPath }: { repoPath: string }) {
     return () => {
       cancelled = true
     }
- }, [repoPath])
+  }, [repoPath])
 
   const reload = () => {
-    api.getConfig(repoPath).then((c) => setCfg(c as Config)).catch((e) => setError(e instanceof Error ? e.message : String(e)))
+    api
+      .getConfig(repoPath)
+      .then((c) => setCfg(c as Config))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }
 
   if (error) {
@@ -48,7 +51,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
   const fields = level === 'repo' ? allFields.filter((f) => f !== 'active_repo') : allFields
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="space-y-5 p-6">
       <div>
         <h1 className="page-title">Settings</h1>
         <p className="page-sub">查看和调试各层级的配置项</p>
@@ -60,24 +63,30 @@ export default function Settings({ repoPath }: { repoPath: string }) {
           <TabsTrigger value="local">本地级</TabsTrigger>
         </TabsList>
         <TabsContent value={level} className="mt-2 space-y-2">
-          <div className="rounded-md border overflow-hidden" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
-            <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--border)', background: 'var(--nav)' }}>
+          <div
+            className="overflow-hidden rounded-md border"
+            style={{ borderColor: 'var(--border)', background: 'var(--card)' }}
+          >
+            <div
+              className="border-b px-4 py-3"
+              style={{ borderColor: 'var(--border)', background: 'var(--nav)' }}
+            >
               <span className="label">配置项</span>
             </div>
             <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-          {fields.map((f) => (
-            <ConfigField
-              key={f}
-              name={f}
-              level={level}
-              value={(cfg[level] as Record<string, unknown>)[f]}
-              inRepo={f in cfg.repo}
-              inLocal={f in cfg.local}
-             fixed={f === 'active_repo'}
-              repoPath={repoPath}
-              onSaved={reload}
-           />
-          ))}
+              {fields.map((f) => (
+                <ConfigField
+                  key={f}
+                  name={f}
+                  level={level}
+                  value={(cfg[level] as Record<string, unknown>)[f]}
+                  inRepo={f in cfg.repo}
+                  inLocal={f in cfg.local}
+                  fixed={f === 'active_repo'}
+                  repoPath={repoPath}
+                  onSaved={reload}
+                />
+              ))}
             </div>
           </div>
         </TabsContent>

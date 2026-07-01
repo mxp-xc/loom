@@ -37,9 +37,18 @@ export interface McpServer {
   targets?: AgentId[]
 }
 
-export interface ProjectionConfig { strategy: 'link' | 'copy' }
-export interface UpdateCheckConfig { enabled: boolean; interval: string }
-export interface ProxyConfig { http?: string; https?: string; no_proxy?: string }
+export interface ProjectionConfig {
+  strategy: 'link' | 'copy'
+}
+export interface UpdateCheckConfig {
+  enabled: boolean
+  interval: string
+}
+export interface ProxyConfig {
+  http?: string
+  https?: string
+  no_proxy?: string
+}
 
 export interface Config {
   profile?: string
@@ -50,7 +59,9 @@ export interface Config {
   proxy?: ProxyConfig
 }
 
-export interface VarsFile { [key: string]: string }
+export interface VarsFile {
+  [key: string]: string
+}
 
 export interface Manifest {
   skills: SkillsManifest

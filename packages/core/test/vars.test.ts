@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { resolveVars } from '../src/vars'
 
-const ctx = { env: { TOKEN: 'env-tok' }, activeProfile: { TOKEN: 'active-tok', ONLY_ACTIVE: 'a' }, defaultProfile: { ONLY_DEFAULT: 'd', browsers_path: '/p' } }
+const ctx = {
+  env: { TOKEN: 'env-tok' },
+  activeProfile: { TOKEN: 'active-tok', ONLY_ACTIVE: 'a' },
+  defaultProfile: { ONLY_DEFAULT: 'd', browsers_path: '/p' },
+}
 
 describe('resolveVars', () => {
   it('env beats profile', () => {

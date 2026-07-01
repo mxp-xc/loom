@@ -56,16 +56,19 @@ describe('NodeFileSystem', () => {
     expect(await fs.isLink(link)).toBe(false)
   })
 
-  it.skipIf(platform() !== 'win32')('Windows junction: removeLink does not recursively delete target', async () => {
-    const target = join(root, 'target')
-    await mkdir(target)
-    await writeFile(join(target, 'f.txt'), 'keep')
-    const link = join(root, 'link')
-    const fs = new NodeFileSystem()
-    await fs.createLink(target, link)
-    await fs.removeLink(link)
-    expect(await fs.exists(join(target, 'f.txt'))).toBe(true)
-  })
+  it.skipIf(platform() !== 'win32')(
+    'Windows junction: removeLink does not recursively delete target',
+    async () => {
+      const target = join(root, 'target')
+      await mkdir(target)
+      await writeFile(join(target, 'f.txt'), 'keep')
+      const link = join(root, 'link')
+      const fs = new NodeFileSystem()
+      await fs.createLink(target, link)
+      await fs.removeLink(link)
+      expect(await fs.exists(join(target, 'f.txt'))).toBe(true)
+    },
+  )
 
   it('createLink replaces existing link to new target', async () => {
     const targetA = join(root, 'a')
@@ -93,21 +96,24 @@ describe('NodeFileSystem', () => {
     expect(await new NodeFileSystem().exists(join(dest, 'sub', 'g.txt'))).toBe(true)
   })
 
-  it.skipIf(platform() === 'win32')('createLink replaces a broken symlink (stale target) to a new target', async () => {
-    const target1 = join(root, 't1')
-    await mkdir(target1)
-    const link = join(root, 'link')
-    const fs = new NodeFileSystem()
-    await fs.createLink(target1, link)
-    await rm(target1, { recursive: true, force: true })
-    // link is now broken: still a link on disk, but stat-following exists() is false
-    expect(await fs.isLink(link)).toBe(true)
-    expect(await fs.exists(link)).toBe(false)
-    const target2 = join(root, 't2')
-    await mkdir(target2)
-    await writeFile(join(target2, 'f'), 'B')
-    await expect(fs.createLink(target2, link)).resolves.toEqual({ fallback: null })
-    expect(await fs.isLink(link)).toBe(true)
-    expect(await fs.exists(join(link, 'f'))).toBe(true)
-  })
+  it.skipIf(platform() === 'win32')(
+    'createLink replaces a broken symlink (stale target) to a new target',
+    async () => {
+      const target1 = join(root, 't1')
+      await mkdir(target1)
+      const link = join(root, 'link')
+      const fs = new NodeFileSystem()
+      await fs.createLink(target1, link)
+      await rm(target1, { recursive: true, force: true })
+      // link is now broken: still a link on disk, but stat-following exists() is false
+      expect(await fs.isLink(link)).toBe(true)
+      expect(await fs.exists(link)).toBe(false)
+      const target2 = join(root, 't2')
+      await mkdir(target2)
+      await writeFile(join(target2, 'f'), 'B')
+      await expect(fs.createLink(target2, link)).resolves.toEqual({ fallback: null })
+      expect(await fs.isLink(link)).toBe(true)
+      expect(await fs.exists(join(link, 'f'))).toBe(true)
+    },
+  )
 })

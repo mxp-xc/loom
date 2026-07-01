@@ -55,16 +55,19 @@ export class NodeGit implements IGit {
     await this.git(repoPath).commit(msg)
   }
 
-async push(repoPath: string): Promise<{ ok: boolean; nonFastForward?: boolean; message?: string }> {
-  try {
-    await this.git(repoPath).push('origin', 'HEAD')
-    return { ok: true }
-  } catch (e: any) {
-    const msg = String(e?.message ?? e)
-    const nonFastForward = /non-fast-forward|fetch first|updates were rejected because the tip/i.test(msg)
-    return { ok: false, nonFastForward, message: msg }
+  async push(
+    repoPath: string,
+  ): Promise<{ ok: boolean; nonFastForward?: boolean; message?: string }> {
+    try {
+      await this.git(repoPath).push('origin', 'HEAD')
+      return { ok: true }
+    } catch (e: any) {
+      const msg = String(e?.message ?? e)
+      const nonFastForward =
+        /non-fast-forward|fetch first|updates were rejected because the tip/i.test(msg)
+      return { ok: false, nonFastForward, message: msg }
+    }
   }
-}
 
   async status(repoPath: string): Promise<{ dirty: boolean }> {
     const s = await this.git(repoPath).status()
@@ -87,18 +90,34 @@ async push(repoPath: string): Promise<{ ok: boolean; nonFastForward?: boolean; m
     const d = dir.endsWith('/') ? dir : dir + '/'
     try {
       const out = await this.git(repoPath).raw(['ls-tree', '-r', '--name-only', `${ref}:${d}`])
-      return out.split('\n').map(s => s.trim()).filter(Boolean)
-    } catch { return [] }
+      return out
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    } catch {
+      return []
+    }
   }
 
-  async commitTree(repoPath: string, tree: string, parents: string[], message: string): Promise<string> {
+  async commitTree(
+    repoPath: string,
+    tree: string,
+    parents: string[],
+    message: string,
+  ): Promise<string> {
     const args = ['commit-tree', tree, '-m', message]
-    for (const p of parents) { args.push('-p', p) }
+    for (const p of parents) {
+      args.push('-p', p)
+    }
     return (await this.git(repoPath).raw(args)).trim()
   }
 
   async updateRef(repoPath: string, ref: string, commit: string): Promise<void> {
     await this.git(repoPath).raw(['update-ref', ref, commit])
+  }
+
+  async resetHard(repoPath: string, ref: string): Promise<void> {
+    await this.git(repoPath).raw(['reset', '--hard', ref])
   }
 
   async writeTree(repoPath: string): Promise<string> {

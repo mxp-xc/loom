@@ -16,7 +16,11 @@ export function createDeps(repoPath: string, installedAgents: Set<AgentId>): Pro
   const stateFile = join(home, '.loom', 'state', basenameRepo(repoPath), 'projected-mcp.json')
   const fs = platform.fs
   const readState = async (): Promise<Record<string, string[]>> => {
-    try { return JSON.parse(await fs.readFile(stateFile)) as Record<string, string[]> } catch { return {} }
+    try {
+      return JSON.parse(await fs.readFile(stateFile)) as Record<string, string[]>
+    } catch {
+      return {}
+    }
   }
   const writeState = async (data: Record<string, string[]>): Promise<void> => {
     await fs.mkdir(dirname(stateFile), true)
@@ -24,7 +28,11 @@ export function createDeps(repoPath: string, installedAgents: Set<AgentId>): Pro
   }
   return {
     fs,
-    adapters: { 'claude-code': new ClaudeCodeAdapter(), 'codex': new CodexAdapter(), 'opencode': new OpenCodeAdapter() },
+    adapters: {
+      'claude-code': new ClaudeCodeAdapter(),
+      codex: new CodexAdapter(),
+      opencode: new OpenCodeAdapter(),
+    },
     installedAgents,
     resolveSkillSrc: (link) => {
       if (link.source === 'local') return join(repoPath, 'assets', 'skills', link.skillId)
@@ -43,6 +51,10 @@ export function createDeps(repoPath: string, installedAgents: Set<AgentId>): Pro
 
 function basenameRepo(repoPath: string): string {
   // Derive a stable state dir name from the repo path's last segment.
-  const seg = repoPath.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'default'
+  const seg =
+    repoPath
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() ?? 'default'
   return seg || 'default'
 }

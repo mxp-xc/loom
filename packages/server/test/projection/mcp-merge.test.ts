@@ -58,7 +58,9 @@ describe('mergeMcp', () => {
     expect(merged.user).toBeDefined()
   })
   it('type change: stdio to sse cleans old-type fields (command/args gone)', () => {
-    const existing: Record<string, McpFragment> = { a: { id: 'a', type: 'stdio', command: 'c', args: ['x'] } }
+    const existing: Record<string, McpFragment> = {
+      a: { id: 'a', type: 'stdio', command: 'c', args: ['x'] },
+    }
     const fragments: McpFragment[] = [{ id: 'a', type: 'sse', url: 'https://x' }]
     const merged = mergeMcp(existing, fragments)
     expect(merged.a.type).toBe('sse')
