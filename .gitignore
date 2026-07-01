@@ -4,3 +4,27 @@
 
 # temp scratch
 temp/
+
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+Thumbs.db
+
+# env
+.env
+.env.*
+!.env.example
+.playwright-cli/

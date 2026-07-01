@@ -1,0 +1,4 @@
+packages:
+  - webui
+allowBuilds:
+  esbuild: true
