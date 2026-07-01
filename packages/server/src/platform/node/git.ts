@@ -1,0 +1,108 @@
+import { simpleGit, type SimpleGit } from 'simple-git'
+import type { IGit } from '../../ports/git.js'
+
+export class NodeGit implements IGit {
+  private git(path?: string): SimpleGit {
+    return simpleGit(path)
+  }
+
+  async init(repoPath: string): Promise<void> {
+    await this.git(repoPath).raw(['init', '-b', 'main'])
+  }
+
+  async fetch(repoPath: string): Promise<void> {
+    // Use raw to ensure FETCH_HEAD is set — simple-git's .fetch() wrapper
+    // doesn't reliably create FETCH_HEAD for merge-base lookups.
+    // Don't hardcode 'origin' — fetch without naming a remote uses the
+    // configured default remote and still sets FETCH_HEAD.
+    await this.git(repoPath).raw(['fetch', 'origin', '--tags'])
+  }
+
+  async mergeBase(repoPath: string, a: string, b: string): Promise<string> {
+    const r = await this.git(repoPath).raw(['merge-base', a, b])
+    return r.trim()
+  }
+
+  async lsRemote(url: string): Promise<{ tags: Record<string, string>; head: string }> {
+    const out = await this.git().listRemote([url])
+    const tags: Record<string, string> = {}
+    let head = ''
+    for (const line of out.split('\n').filter(Boolean)) {
+      const [sha, ref] = line.split(/\s+/)
+      if (ref === 'HEAD') head = sha
+      else if (ref?.startsWith('refs/tags/')) {
+        const name = ref.slice('refs/tags/'.length).replace(/\^\{\}$/, '')
+        tags[name] = sha
+      }
+    }
+    return { tags, head }
+  }
+
+  async clone(url: string, dest: string, shallow = false): Promise<void> {
+    const args = shallow ? ['--depth', '1'] : []
+    await this.git().clone(url, dest, args.length ? args : undefined)
+  }
+
+  async checkout(repoPath: string, ref: string): Promise<void> {
+    await this.git(repoPath).checkout(ref)
+  }
+
+  async add(repoPath: string, paths: string[]): Promise<void> {
+    await this.git(repoPath).add(paths)
+  }
+
+  async commit(repoPath: string, msg: string): Promise<void> {
+    await this.git(repoPath).commit(msg)
+  }
+
+async push(repoPath: string): Promise<{ ok: boolean; nonFastForward?: boolean; message?: string }> {
+  try {
+    await this.git(repoPath).push('origin', 'HEAD')
+    return { ok: true }
+  } catch (e: any) {
+    const msg = String(e?.message ?? e)
+    const nonFastForward = /non-fast-forward|fetch first|updates were rejected because the tip/i.test(msg)
+    return { ok: false, nonFastForward, message: msg }
+  }
+}
+
+  async status(repoPath: string): Promise<{ dirty: boolean }> {
+    const s = await this.git(repoPath).status()
+    return { dirty: !s.isClean() }
+  }
+
+  async show(repoPath: string, ref: string, path: string): Promise<string> {
+    return (await this.git(repoPath).raw(['show', `${ref}:${path}`])).trimEnd()
+  }
+
+  async revParseHead(repoPath: string): Promise<string> {
+    return (await this.git(repoPath).raw(['rev-parse', 'HEAD'])).trim()
+  }
+
+  async revParse(repoPath: string, ref: string): Promise<string> {
+    return (await this.git(repoPath).raw(['rev-parse', ref])).trim()
+  }
+
+  async lsTree(repoPath: string, ref: string, dir: string): Promise<string[]> {
+    const d = dir.endsWith('/') ? dir : dir + '/'
+    try {
+      const out = await this.git(repoPath).raw(['ls-tree', '-r', '--name-only', `${ref}:${d}`])
+      return out.split('\n').map(s => s.trim()).filter(Boolean)
+    } catch { return [] }
+  }
+
+  async commitTree(repoPath: string, tree: string, parents: string[], message: string): Promise<string> {
+    const args = ['commit-tree', tree, '-m', message]
+    for (const p of parents) { args.push('-p', p) }
+    return (await this.git(repoPath).raw(args)).trim()
+  }
+
+  async updateRef(repoPath: string, ref: string, commit: string): Promise<void> {
+    await this.git(repoPath).raw(['update-ref', ref, commit])
+  }
+
+  async writeTree(repoPath: string): Promise<string> {
+    // write-tree reflects the staged index. syncPull stages merged files via add() first.
+    return (await this.git(repoPath).raw(['write-tree'])).trim()
+  }
+}

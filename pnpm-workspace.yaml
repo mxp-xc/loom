@@ -1,4 +1,4 @@
 packages:
-  - webui
+  - packages/*
 allowBuilds:
   esbuild: true

@@ -1,38 +1,21 @@
 {
   "name": "loom",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"pnpm --filter @loom/server dev\" \"pnpm --filter @loom/web dev\"",
+    "dev:web": "concurrently -n api,web -c blue,green \"pnpm --filter @loom/server dev\" \"pnpm --filter @loom/web dev\"",
+    "dev:api": "pnpm --filter @loom/server dev",
+    "start": "pnpm --filter @loom/server start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev:api": "node --import tsx src/index.ts",
-    "dev:web": "pnpm --filter webui dev",
-    "dev": "pnpm run dev:api & pnpm run dev:web",
-    "start": "node --import tsx src/index.ts"
+    "build": "pnpm -r run build",
+    "build:web": "pnpm --filter @loom/web build"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^6.6.3",
-    "@testing-library/react": "^16.1.0",
-    "@types/js-yaml": "^4.0.9",
-    "@types/node": "^22.0.0",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "js-yaml": "^4.1.0",
-    "jsdom": "^26.0.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^6.30.0",
-    "simple-git": "^3.25.0",
-    "tsx": "^4.22.4",
-    "typescript": "^5.5.0",
-    "vitest": "^2.0.0"
-  },
-  "dependencies": {
-    "@hono/node-server": "^2.0.6",
-    "gray-matter": "^4.0.3",
-    "hono": "^4.12.27",
-    "smol-toml": "^1.7.0",
-    "tinyglobby": "^0.2.17",
-    "zod": "^3.23.0"
+    "concurrently": "^10.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^2.1.0"
   }
 }

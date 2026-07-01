@@ -1,14 +1,16 @@
 import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
 
-const webuiSrc = resolve(dirname(fileURLToPath(import.meta.url)), 'webui', 'src')
+const webSrc = fileURLToPath(new URL('./packages/web/src/', import.meta.url))
 
 export default defineConfig({
-  esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
   resolve: {
-    alias: { '@': webuiSrc },
-    dedupe: ['react', 'react-dom', 'react-router-dom'],
+    alias: { '@': webSrc },
   },
-  test: { environment: 'node', globals: true },
+  test: {
+    projects: ['packages/*'],
+    coverage: { include: ['packages/*/src/**'] },
+    testTimeout: 30000,
+    globals: true,
+  },
 })

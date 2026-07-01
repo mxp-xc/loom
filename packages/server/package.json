@@ -1,0 +1,27 @@
+{
+  "name": "@loom/server",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": { "types": "./src/index.ts", "import": "./src/index.ts" } },
+  "scripts": {
+    "dev": "node --import tsx src/index.ts",
+    "start": "node --import tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@loom/core": "workspace:*",
+    "@hono/node-server": "^2.0.6",
+    "gray-matter": "^4.0.3",
+    "hono": "^4.12.27",
+    "js-yaml": "^4.1.0",
+    "simple-git": "^3.25.0",
+    "smol-toml": "^1.7.0",
+    "tinyglobby": "^0.2.17"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.22.4",
+    "vitest": "^2.1.0"
+  }
+}
