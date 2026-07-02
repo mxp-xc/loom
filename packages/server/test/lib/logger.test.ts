@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { createLogger, cleanupOldLogs } from './logger.js'
+import { createLogger, cleanupOldLogs } from '../../src/lib/logger.js'
 import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
