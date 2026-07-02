@@ -1,14 +1,28 @@
 import { Hono } from 'hono'
-import { logger } from 'hono/logger'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { registerRoutes } from './routes.js'
+import { logger } from '../lib/logger.js'
+
+const requestLogger = logger.child('api')
 
 export function createApp(): Hono {
   const app = new Hono()
-  app.use('*', logger())
+  // Custom request logging — replaces hono/logger so requests go to the file too
+  app.use('*', async (c, next) => {
+    const start = Date.now()
+    await next()
+    const duration = Date.now() - start
+    requestLogger.info('request', {
+      method: c.req.method,
+      path: c.req.path,
+      status: c.res.status,
+      duration: `${duration}ms`,
+    })
+  })
+
   app.route('/api', registerRoutes())
   const dist =
     process.env.LOOM_WEB_DIST ?? fileURLToPath(new URL('../../../web/dist/', import.meta.url))
@@ -24,7 +38,7 @@ export function createApp(): Hono {
 export function startApiServer(port = Number(process.env.LOOM_PORT ?? 3000)) {
   return import('@hono/node-server').then(({ serve }) =>
     serve({ fetch: createApp().fetch, port }, (info) =>
-      console.log(`Loom API on http://localhost:${info.port}`),
+      logger.info('server started', { port: info.port }),
     ),
   )
 }

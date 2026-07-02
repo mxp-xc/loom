@@ -13,6 +13,7 @@ dist/
 
 # logs
 *.log
+logs/
 npm-debug.log*
 pnpm-debug.log*
 

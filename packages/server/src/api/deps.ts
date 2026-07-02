@@ -5,6 +5,9 @@ import { CodexAdapter } from '../adapters/codex.js'
 import { OpenCodeAdapter } from '../adapters/opencode.js'
 import type { ProjectionDeps } from '../projection/executor.js'
 import type { AgentId } from '@loom/core'
+import { logger } from '../lib/logger.js'
+
+const projectionLogger = logger.child('projection')
 
 export function createDeps(repoPath: string, installedAgents: Set<AgentId>): ProjectionDeps {
   const platform = createNodePlatform()
@@ -39,7 +42,10 @@ export function createDeps(repoPath: string, installedAgents: Set<AgentId>): Pro
       const { repoId, memberName } = link.source
       return join(repoPath, 'remote-cache', repoId, 'skills', memberName)
     },
-    logger: { error: (o, m) => console.error(m, o), warn: (o, m) => console.warn(m, o) },
+    logger: {
+      error: (o, m) => projectionLogger.error(m, o),
+      warn: (o, m) => projectionLogger.warn(m, o),
+    },
     getManagedMcpIds: async (agent) => new Set((await readState())[agent] ?? []),
     setManagedMcpIds: async (agent, ids) => {
       const data = await readState()

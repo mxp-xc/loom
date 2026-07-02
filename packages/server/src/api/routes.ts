@@ -20,6 +20,12 @@ import { createNodePlatform } from '../platform/node/index.js'
 import { initLoom } from '../platform/node/init.js'
 import { createDeps } from './deps.js'
 
+import { logger } from '../lib/logger.js'
+
+const apiLogger = logger.child('api')
+const syncLogger = logger.child('sync')
+const remoteLogger = logger.child('remote')
+
 async function readRepoFiles(
   fs: {
     readFile: (p: string) => Promise<string>
@@ -148,6 +154,7 @@ export function registerRoutes(): Hono {
   app.post('/project', async (c) => {
     const body = await c.req.json()
     const repoPath = body.repoPath
+    apiLogger.info('projection started', { repoPath })
     const { proc } = createNodePlatform()
     // Detect installed agents
     const allAgents: AgentId[] =
@@ -179,20 +186,28 @@ export function registerRoutes(): Hono {
       defaultProfile: mf.vars.default,
     }
     const res = await executeProjection(plan, mf, varsCtx, deps)
+    if (res.ok) {
+      apiLogger.info('projection completed', { repoPath })
+    } else {
+      apiLogger.error('projection failed', { repoPath, step: res.failure.failedStep, err: res.failure.originalError })
+    }
     return c.json(res)
   })
 
   app.post('/sync/pull', async (c) => {
     try {
       const { repoPath } = await c.req.json()
+      syncLogger.info('pull started', { repoPath })
       const { git, fs } = createNodePlatform()
       const res = await syncPull(repoPath, git, fs, {
-        error: (o, m) => console.error(m, o),
-        warn: (o, m) => console.warn(m, o),
+        error: (o, m) => syncLogger.error(m, o),
+        warn: (o, m) => syncLogger.warn(m, o),
       })
+      syncLogger.info('pull completed', { repoPath, clean: res.clean })
       return c.json({ ok: true, ...res })
     } catch (e) {
       const msg = String(e?.message ?? e)
+      syncLogger.error('pull failed', { err: e, repoPath: c.req.path })
       const noRemote =
         /no remote|could not find remote|not a git repository|does not appear to be a git/i.test(
           msg,
@@ -204,13 +219,16 @@ export function registerRoutes(): Hono {
   app.post('/sync/apply', async (c) => {
     try {
       const { repoPath, resolutions } = await c.req.json()
+      syncLogger.info('apply resolutions', { repoPath, count: Object.keys(resolutions ?? {}).length })
       const { git, fs } = createNodePlatform()
       await applyResolutions(repoPath, git, fs, resolutions, {
-        error: (o, m) => console.error(m, o),
-        warn: (o, m) => console.warn(m, o),
+        error: (o, m) => syncLogger.error(m, o),
+        warn: (o, m) => syncLogger.warn(m, o),
       })
+      syncLogger.info('apply completed', { repoPath })
       return c.json({ ok: true })
     } catch (e) {
+      syncLogger.error('apply failed', { err: e })
       const msg = String(e?.message ?? e)
       return c.json({ ok: false, error: 'apply_failed', message: msg })
     }
@@ -219,6 +237,7 @@ export function registerRoutes(): Hono {
   app.post('/sync/push', async (c) => {
     try {
       const { repoPath } = await c.req.json()
+      syncLogger.info('push started', { repoPath })
       const { git } = createNodePlatform()
       // Auto-commit uncommitted yaml changes before pushing
       const status = await git.status(repoPath)
@@ -227,8 +246,10 @@ export function registerRoutes(): Hono {
         await git.commit(repoPath, 'loom: sync changes')
       }
       const res = await syncPush(repoPath, git)
+      syncLogger.info('push completed', { repoPath, ok: res.ok })
       return c.json(res)
     } catch (e) {
+      syncLogger.error('push failed', { err: e })
       const msg = String(e?.message ?? e)
       const noRemote =
         /no remote|could not find remote|not a git repository|does not appear to be a git/i.test(
@@ -240,13 +261,21 @@ export function registerRoutes(): Hono {
 
   app.post('/install', async (c) => {
     const { url, ref, repoPath, sourceId } = await c.req.json()
+    remoteLogger.info('install skill', { url, ref, repoPath, sourceId })
     const { git, fs } = createNodePlatform()
-    const res = await installSkill(git, fs, url, ref, repoPath, sourceId)
-    return c.json(res)
+    try {
+      const res = await installSkill(git, fs, url, ref, repoPath, sourceId)
+      remoteLogger.info('install completed', { url, sourceId, commit: res.pinned_commit })
+      return c.json(res)
+    } catch (e) {
+      remoteLogger.error('install failed', { err: e, url, sourceId })
+      return c.json({ ok: false, error: 'install_failed', message: String(e?.message ?? e) })
+    }
   })
 
   app.post('/update', async (c) => {
     const { sources } = await c.req.json()
+    remoteLogger.info('check updates', { count: sources?.length ?? 0 })
     const { git } = createNodePlatform()
     const updates = await checkUpdates(sources, git)
     return c.json({ updates })
@@ -254,17 +283,24 @@ export function registerRoutes(): Hono {
 
   app.post('/update/perform', async (c) => {
     const body = await c.req.json()
+    remoteLogger.info('perform update', { source: body.source?.url, newRef: body.newRef, repoPath: body.repoPath })
     const { git, fs } = createNodePlatform()
-    const res = await performUpdate(
-      git,
-      fs,
-      body.source,
-      body.newRef,
-      body.repoPath,
-      body.sourceId,
-      body.oldMembers,
-    )
-    return c.json(res)
+    try {
+      const res = await performUpdate(
+        git,
+        fs,
+        body.source,
+        body.newRef,
+        body.repoPath,
+        body.sourceId,
+        body.oldMembers,
+      )
+      remoteLogger.info('update completed', { source: body.source?.url, commit: res.pinned_commit })
+      return c.json(res)
+    } catch (e) {
+      remoteLogger.error('update failed', { err: e, source: body.source?.url })
+      return c.json({ ok: false, error: 'update_failed', message: String(e?.message ?? e) })
+    }
   })
 
   app.get('/config', async (c) => {
@@ -367,7 +403,7 @@ export function registerRoutes(): Hono {
       await fs.writeFile(skillFile, content)
       return c.json({ ok: true, path: skillFile })
     } catch (e) {
-      logger.error({ err: e }, 'Failed to save skill content')
+      apiLogger.error('failed to save skill content', { err: e })
       return c.json({ ok: false, error: 'write_failed', message: String(e?.message ?? e) })
     }
   })
@@ -433,7 +469,7 @@ export function registerRoutes(): Hono {
         await installSkill(git, fs, url, ref, repoPath, sourceId)
       } catch (installErr) {
         // Clone failure shouldn't block source creation; user can retry via check/scan
-        console.error('auto-install failed for source', url, installErr)
+        remoteLogger.error('auto-install failed for source', { err: installErr, url })
       }
       return c.json({ ok: true, source: { url, ref } })
     } catch (e) {
