@@ -7,7 +7,6 @@
     "useDefineForClassFields": true,
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
-    "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] },
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
