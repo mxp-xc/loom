@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,green \"pnpm --filter @loom/server dev\" \"pnpm --filter @loom/web dev\"",
-    "dev:web": "concurrently -n api,web -c blue,green \"pnpm --filter @loom/server dev\" \"pnpm --filter @loom/web dev\"",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "node scripts/dev.mjs",
     "dev:api": "pnpm --filter @loom/server dev",
     "start": "pnpm --filter @loom/server start",
     "test": "vitest run",
