@@ -6,6 +6,7 @@ import type { IGit } from '../ports/git.js'
 import type { IFileSystem } from '../ports/fs.js'
 import { parseSkillMeta, type SkillMeta } from './frontmatter.js'
 import { resolveGitUrl } from './resolve-url.js'
+import { deriveRepoId } from '@loom/core'
 
 const DEFAULT_IGNORE = ['**/.git/**', '**/node_modules/**', '**/.cache/**']
 
@@ -31,12 +32,4 @@ export async function discoverSkills(
   } finally {
     await rm(tmp, { recursive: true, force: true })
   }
-}
-
-function deriveRepoId(url: string): string {
-  const parts = url.split(':')
-  return parts[parts.length - 1]
-    .split('/')
-    .pop()!
-    .replace(/\.git$/, '')
 }

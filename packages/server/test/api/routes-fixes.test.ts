@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
 import * as yaml from 'js-yaml'
-import { registerRoutes } from '../../src/api/routes'
+import { registerRoutes } from '../../src/api/router'
 
 const memFiles: Record<string, string> = {}
 
@@ -26,12 +26,16 @@ vi.mock('../../src/sync/pull.js', () => ({
   syncPull: vi.fn(async () => ({ files: [], varsFiles: [], textConflicts: [], clean: true })),
 }))
 vi.mock('../../src/sync/push.js', () => ({ syncPush: vi.fn(async () => ({ ok: true })) }))
-vi.mock('@loom/core', () => ({
-  loadRepoManifest: vi.fn(() => ({ repoConfig: {}, errors: [] })),
-  mergeConfig: vi.fn((repo: Record<string, unknown>) => ({ ...repo })),
-  buildManifest: vi.fn(),
-  planProjection: vi.fn(),
-}))
+vi.mock('@loom/core', async () => {
+  const actual = await vi.importActual<typeof import('@loom/core')>('@loom/core')
+  return {
+    ...actual,
+    loadRepoManifest: vi.fn(() => ({ repoConfig: {}, errors: [] })),
+    mergeConfig: vi.fn((repo: Record<string, unknown>) => ({ ...repo })),
+    buildManifest: vi.fn(),
+    planProjection: vi.fn(),
+  }
+})
 vi.mock('../../src/platform/node/index.js', () => ({
   createNodePlatform: vi.fn(() => ({ fs: memFs, git: {}, proc: {} })),
 }))

@@ -3,7 +3,7 @@ import { serveStatic } from '@hono/node-server/serve-static'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { registerRoutes } from './routes.js'
+import { registerRoutes } from './router.js'
 import { logger } from '../lib/logger.js'
 
 const requestLogger = logger.child('api')

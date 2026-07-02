@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { api } from '@/lib/api'
 import { ConfigField, type ConfigLevel } from '@/components/ConfigField'
+import { useViewError } from '@/hooks/useViewError'
 
 type Config = {
   effective: Record<string, unknown>
@@ -11,7 +12,7 @@ type Config = {
 
 export default function Settings({ repoPath }: { repoPath: string }) {
   const [cfg, setCfg] = useState<Config | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { error, setError } = useViewError()
   const [level, setLevel] = useState<ConfigLevel>('effective')
 
   useEffect(() => {
@@ -23,7 +24,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
         if (!cancelled) setCfg(c as Config)
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+        if (!cancelled) setError(e)
       })
     return () => {
       cancelled = true
@@ -34,7 +35,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
     api
       .getConfig(repoPath)
       .then((c) => setCfg(c as Config))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(e))
   }
 
   if (error) {

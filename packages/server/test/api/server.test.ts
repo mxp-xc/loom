@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import { createApp } from '../../src/api/server'
 
-vi.mock('../../src/api/routes.js', () => ({
+vi.mock('../../src/api/router.js', () => ({
   registerRoutes: () => new Hono().get('/health', (c) => c.json({ ok: true })),
 }))
 

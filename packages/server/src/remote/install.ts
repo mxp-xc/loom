@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { IGit } from '../ports/git.js'
 import type { IFileSystem } from '../ports/fs.js'
 import { resolveGitUrl } from './resolve-url.js'
+import { cacheDirFor } from './cache.js'
 
 // Windows often holds a brief lock on freshly-touched directories (antivirus,
 // pending handles, git child processes). Retry with backoff before giving up.
@@ -44,7 +45,7 @@ export async function installSkill(
   repoPath: string,
   sourceId: string,
 ): Promise<{ pinned_commit: string; cacheDir: string }> {
-  const cacheDir = join(repoPath, 'remote-cache', sourceId)
+  const cacheDir = cacheDirFor(repoPath, sourceId)
   if (await fs.exists(cacheDir)) await rmRetry(cacheDir)
   try {
     await git.clone(resolveGitUrl(url), cacheDir, false)

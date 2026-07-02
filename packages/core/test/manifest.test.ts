@@ -21,6 +21,18 @@ describe('loadRepoManifest', () => {
   })
 })
 
+describe('loadRepoManifest safeParse', () => {
+  it('does not throw on malformed source (missing ref)', () => {
+    const files = {
+      'skills.yaml': 'sources:\n  - url: https://github.com/test/repo\n',
+    }
+    const result = loadRepoManifest(files)
+    expect(result.skills.sources).toHaveLength(1)
+    expect(result.skills.sources[0].url).toBe('https://github.com/test/repo')
+    // should not throw — error collected in validateManifest
+  })
+})
+
 describe('validateManifest (zod discriminatedUnion)', () => {
   it('flags mcp stdio missing command', () => {
     const m = loadRepoManifest({

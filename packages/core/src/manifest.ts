@@ -1,16 +1,16 @@
 import yaml from 'js-yaml'
 import { z } from 'zod'
-import type { Config, RepoManifest, Manifest, VarsFile } from './types.js'
+import type { Config, RepoManifest, Manifest } from './types.js'
 
 export function loadRepoManifest(files: Record<string, string>): RepoManifest {
-  const parse = <T>(p: string, fallback: T): T => {
+  const parse = (p: string, fallback: unknown): unknown => {
     const raw = files[p]
     if (raw === undefined) return fallback
-    return yaml.load(raw) as T
+    return yaml.load(raw)
   }
   const skills = parse('skills.yaml', { sources: [], skills: [] })
   const mcp = parse('mcp.yaml', [])
-  const varsFiles: Record<string, VarsFile> = {}
+  const varsFiles: Record<string, unknown> = {}
   for (const path of Object.keys(files)) {
     if (path.startsWith('vars/') && path.endsWith('.yaml')) {
       const profile = path.slice('vars/'.length, -'.yaml'.length)
@@ -18,11 +18,11 @@ export function loadRepoManifest(files: Record<string, string>): RepoManifest {
     }
   }
   const repoConfig = parse('config.yaml', {})
-  return { skills, mcp, varsFiles, repoConfig }
+  return { skills, mcp, varsFiles, repoConfig } as RepoManifest
 }
 
-const AgentIdSchema = z.enum(['claude-code', 'codex', 'opencode'])
-const McpServerSchema = z.discriminatedUnion('type', [
+export const AgentIdSchema = z.enum(['claude-code', 'codex', 'opencode'])
+export const McpServerSchema = z.discriminatedUnion('type', [
   z.object({
     id: z.string().min(1),
     type: z.literal('stdio'),
@@ -48,20 +48,17 @@ const McpServerSchema = z.discriminatedUnion('type', [
     targets: z.array(AgentIdSchema).optional(),
   }),
 ])
-const SkillSourceSchema = z.object({
+export const SkillMemberOverrideSchema = z.object({
+  name: z.string().min(1),
+  enabled: z.boolean().optional(),
+  targets: z.array(AgentIdSchema).optional(),
+})
+export const SkillSourceSchema = z.object({
   url: z.string().min(1),
   ref: z.string().min(1),
   pinned_commit: z.string().optional(),
   scan: z.string().optional(),
-  members: z
-    .array(
-      z.object({
-        name: z.string().min(1),
-        enabled: z.boolean().optional(),
-        targets: z.array(AgentIdSchema).optional(),
-      }),
-    )
-    .optional(),
+  members: z.array(SkillMemberOverrideSchema).optional(),
 })
 
 export function validateManifest(m: RepoManifest): string[] {

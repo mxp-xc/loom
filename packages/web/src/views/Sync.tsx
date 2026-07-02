@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import Toast from '@/components/Toast'
+import { useToast } from '@/hooks/useToast'
+import { useViewError } from '@/hooks/useViewError'
 
 const ERROR_MAP: Record<string, string> = {
   no_remote: '未配置远程仓库，请先在下方配置 git remote URL',
@@ -32,7 +34,7 @@ function translateError(msg: string): string {
 export default function Sync({ repoPath }: { repoPath: string }) {
   const [pull, setPull] = useState<unknown>(null)
   const [push, setPush] = useState<unknown>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { error, setError } = useViewError()
   const [busy, setBusy] = useState<string | null>(null)
   const [savedRemote, setSavedRemote] = useState<string>('')
   const [remoteInput, setRemoteInput] = useState<string>('')
@@ -41,7 +43,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
   const [remoteErr, setRemoteErr] = useState<string | null>(null)
 
   const [resolutions, setResolutions] = useState<Record<string, 'ours' | 'theirs'>>({})
-  const [toast, setToast] = useState<string | null>(null)
+  const { toast, showToast, dismiss } = useToast()
 
   // Load remote URL on mount
   useEffect(() => {
@@ -273,9 +275,9 @@ export default function Sync({ repoPath }: { repoPath: string }) {
                 await api.syncApply(repoPath, resolutions)
                 setPull(null)
                 setResolutions({})
-                setToast('冲突已解决并合并')
+                showToast('冲突已解决并合并')
               } catch (e) {
-                setError(e instanceof Error ? e.message : String(e))
+                setError(e)
               } finally {
                 setBusy(null)
               }
@@ -500,7 +502,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
           </span>
         </div>
       )}
-      {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+      {toast && <Toast message={toast} onClose={dismiss} />}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
-import { registerRoutes } from '../../src/api/routes'
+import { registerRoutes } from '../../src/api/router'
 
 vi.mock('../../src/projection/executor.js', () => ({
   executeProjection: vi.fn(async () => ({ ok: true })),

@@ -124,4 +124,25 @@ export class NodeGit implements IGit {
     // write-tree reflects the staged index. syncPull stages merged files via add() first.
     return (await this.git(repoPath).raw(['write-tree'])).trim()
   }
+
+  async addOrUpdateRemote(repoPath: string, remoteUrl: string): Promise<void> {
+    const sg = simpleGit(repoPath)
+    try {
+      await sg.raw(['remote', 'add', 'origin', remoteUrl])
+    } catch {
+      // origin already exists, update the URL
+      await sg.raw(['remote', 'set-url', 'origin', remoteUrl])
+    }
+  }
+
+  async getRemoteUrl(repoPath: string): Promise<string | null> {
+    try {
+      const sg = simpleGit(repoPath)
+      const out = await sg.raw(['remote', 'get-url', 'origin'])
+      const trimmed = out.trim()
+      return trimmed || null
+    } catch {
+      return null
+    }
+  }
 }

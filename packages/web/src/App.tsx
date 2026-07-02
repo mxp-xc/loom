@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { api } from './lib/api'
-import Skills from './views/Skills'
+import Skills from './views/skills/Skills'
 import Mcp from './views/Mcp'
 import Sync from './views/Sync'
 import Settings from './views/Settings'
+import { useManifest } from './hooks/useManifest'
+import { useViewError } from './hooks/useViewError'
 
 function ThemeSwitcher() {
   const { theme, setTheme } = useTheme()
@@ -50,67 +52,11 @@ function ThemeSwitcher() {
 
 import { useTheme } from './theme'
 
-export default function App() {
-  const [repoPath, setRepoPath] = useState<string | null>(null)
-  const [activeRepo, setActiveRepo] = useState<string>('')
-  const [profile, setProfile] = useState<string>('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api
-      .init()
-      .then((res) => {
-        setRepoPath(res.repoPath)
-        setActiveRepo(res.active_repo)
-        api
-          .getManifest(res.repoPath)
-          .then((m: any) => setProfile(m.config?.profile ?? ''))
-          .catch(() => {})
-        setLoading(false)
-      })
-      .catch((e) => {
-        setError(e instanceof Error ? e.message : String(e))
-        setLoading(false)
-      })
-  }, [])
-
-  if (loading)
-    return (
-      <div
-        style={{
-          display: 'flex',
-          height: '100vh',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'var(--bg)',
-          color: 'var(--muted)',
-        }}
-      >
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14 }}>
-          ◆ loom initializing…
-        </span>
-      </div>
-    )
-  if (error)
-    return (
-      <div
-        style={{
-          display: 'flex',
-          height: '100vh',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'var(--bg)',
-          color: 'var(--error)',
-        }}
-      >
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14 }}>
-          初始化失败: {error}
-        </span>
-      </div>
-    )
-  if (!repoPath) return null
-
+// Rendered once init resolves and repoPath is known, so useManifest can be
+// called unconditionally and share its cache with the active view.
+function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string }) {
+  const { manifest } = useManifest(repoPath)
+  const profile = manifest?.config?.profile ?? ''
   return (
     <>
       <div className="statusline">
@@ -166,4 +112,63 @@ export default function App() {
       </div>
     </>
   )
+}
+
+export default function App() {
+  const [repoPath, setRepoPath] = useState<string | null>(null)
+  const [activeRepo, setActiveRepo] = useState<string>('')
+  const [loading, setLoading] = useState(true)
+  const { error, setError } = useViewError()
+
+  useEffect(() => {
+    api
+      .init()
+      .then((res) => {
+        setRepoPath(res.repoPath)
+        setActiveRepo(res.active_repo)
+        setLoading(false)
+      })
+      .catch((e) => {
+        setError(e)
+        setLoading(false)
+      })
+  }, [])
+
+  if (loading)
+    return (
+      <div
+        style={{
+          display: 'flex',
+          height: '100vh',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--bg)',
+          color: 'var(--muted)',
+        }}
+      >
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14 }}>
+          ◆ loom initializing…
+        </span>
+      </div>
+    )
+  if (error)
+    return (
+      <div
+        style={{
+          display: 'flex',
+          height: '100vh',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--bg)',
+          color: 'var(--error)',
+        }}
+      >
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14 }}>
+          初始化失败: {error}
+        </span>
+      </div>
+    )
+  if (!repoPath) return null
+
+  return <Shell repoPath={repoPath} activeRepo={activeRepo} />
 }

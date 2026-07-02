@@ -2,7 +2,7 @@ import { glob } from 'tinyglobby'
 import { join, dirname, basename } from 'node:path'
 import type { IFileSystem } from '../ports/fs.js'
 import type { SkillSource, AgentId, Manifest } from '@loom/core'
-import { planProjection, type ProjectionPlan, type LinkPlan } from '@loom/core'
+import { planProjection, deriveRepoId, type ProjectionPlan, type LinkPlan } from '@loom/core'
 
 const DEFAULT_IGNORE = ['**/.git/**', '**/node_modules/**', '**/.cache/**']
 
@@ -60,12 +60,4 @@ export function resolveFullLinks(
 
   const allSkipped = [...new Set([...base.skippedAgents, ...skipped])]
   return { links, mcpEntries: base.mcpEntries, skippedAgents: allSkipped, strategy: base.strategy }
-}
-
-function deriveRepoId(url: string): string {
-  const parts = url.split(':')
-  return parts[parts.length - 1]
-    .split('/')
-    .pop()!
-    .replace(/\.git$/, '')
 }

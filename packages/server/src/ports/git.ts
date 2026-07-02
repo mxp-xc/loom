@@ -23,4 +23,8 @@ export interface IGit {
   // Write the working-tree content of a path into the object store, return its tree hash.
   // For syncPull we write the full repo tree (worktree index) so merge results land in history.
   writeTree(repoPath: string): Promise<string>
+
+  // Remote config operations (used by /sync/remote endpoints)
+  addOrUpdateRemote(repoPath: string, remoteUrl: string): Promise<void>
+  getRemoteUrl(repoPath: string): Promise<string | null>
 }

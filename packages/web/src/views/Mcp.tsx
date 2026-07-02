@@ -2,48 +2,22 @@ import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
 import Toast from '@/components/Toast'
+import { AGENTS, agentShort, agentColor, type AgentId } from '@/lib/agents'
+import { inputStyle } from '@/lib/styles'
+import { type McpServer, type McpType } from '@loom/core'
+import { useManifest } from '@/hooks/useManifest'
+import { useToast } from '@/hooks/useToast'
+import { useViewError } from '@/hooks/useViewError'
 
-interface McpServer {
-  id: string
-  type: string
-  command?: string
-  args?: string[]
-  url?: string
-  headers?: Record<string, string>
-  env?: Record<string, string>
-  targets?: string[]
-}
-interface ManifestData {
-  mcp: McpServer[]
-  config: { targets?: string[] }
-  errors: string[]
-}
-
-const AGENTS = ['claude-code', 'codex', 'opencode'] as const
-type Agent = (typeof AGENTS)[number]
-const agentShort = (a: string) => (a === 'claude-code' ? 'CC' : a === 'codex' ? 'CX' : 'OC')
-const agentColor = (a: string) =>
-  a === 'claude-code' ? 'var(--cc)' : a === 'codex' ? 'var(--cx)' : 'var(--oc)'
-
-const MCP_TYPES = ['stdio', 'sse', 'http'] as const
-type McpType = (typeof MCP_TYPES)[number]
-
-const inputStyle: React.CSSProperties = {
-  marginTop: 4,
-  width: '100%',
-  padding: '7px 10px',
-  fontSize: 13,
-  fontFamily: "'JetBrains Mono', monospace",
-  borderRadius: 'var(--radius)',
-  border: '1px solid var(--border)',
-  background: 'var(--bg)',
-  color: 'var(--text)',
-  outline: 'none',
-}
+const MCP_TYPES: McpType[] = ['stdio', 'sse', 'http']
 
 export default function Mcp({ repoPath }: { repoPath: string }) {
-  const [manifest, setManifest] = useState<ManifestData | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { error, setError } = useViewError()
+  const { manifest, reload } = useManifest(repoPath, {
+    onError: setError,
+    onSuccess: () => setError(null),
+  })
+  const { toast, showToast, dismiss } = useToast()
   const [selected, setSelected] = useState<string | null>(null)
   const [projecting, setProjecting] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -56,18 +30,6 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   const [srvUrl, setSrvUrl] = useState('')
   const [srvTargets, setSrvTargets] = useState<string[]>([])
   const [copied, setCopied] = useState(false)
-  const [toastMsg, setToastMsg] = useState<string | null>(null)
-
-  const showToast = (msg: string) => setToastMsg(msg)
-
-  const load = () => {
-    setError(null)
-    api
-      .getManifest(repoPath)
-      .then((m) => setManifest(m as ManifestData))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-  }
-  useEffect(load, [repoPath])
   useEffect(() => {
     if (!selected && manifest?.mcp?.length) setSelected(manifest.mcp[0].id)
   }, [manifest, selected])
@@ -77,9 +39,9 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     try {
       await api.project({ repoPath })
       showToast('投影完成')
-      load()
+      reload()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(e)
     } finally {
       setProjecting(false)
     }
@@ -127,7 +89,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
       if (srvTargets.length > 0) server.targets = srvTargets
       await api.addMcpServer({ repoPath, server })
       closeAdd()
-      load()
+      reload()
     } catch (e) {
       setAddErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -135,17 +97,17 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     }
   }
 
-  const toggleTarget = (a: Agent) => {
+  const toggleTarget = (a: AgentId) => {
     setSrvTargets((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]))
   }
 
   const agents = manifest?.config?.targets ?? []
-  const allAgents: Agent[] = [...AGENTS]
+  const allAgents: AgentId[] = [...AGENTS]
 
   const selectedServer = manifest?.mcp?.find((s) => s.id === selected)
 
   const handleToggleTarget = async (
-    agent: Agent,
+    agent: AgentId,
     server: McpServer | undefined = selectedServer,
   ) => {
     if (!server) return
@@ -155,9 +117,9 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
       : [...currentTargets, agent]
     try {
       await api.updateMcpTargets({ repoPath, id: server.id, targets: newTargets })
-      load()
+      reload()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(e)
     }
   }
 
@@ -294,13 +256,13 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                     <span
                       key={a}
                       className={'tg ' + (srvAgents.includes(a) ? 'on' : 'off')}
-                      style={{ ['--c' as string]: agentColor(a), cursor: 'pointer' }}
+                      style={{ ['--c' as string]: agentColor[a], cursor: 'pointer' }}
                       onClick={(e) => {
                         e.stopPropagation()
                         handleToggleTarget(a, srv)
                       }}
                     >
-                      {agentShort(a)}
+                      {agentShort[a]}
                     </span>
                   ))}
                 </div>
@@ -346,7 +308,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                         key={a}
                         className={'tg ' + (srvAgents.includes(a) ? 'on' : 'off')}
                         style={{
-                          ['--c' as string]: agentColor(a),
+                          ['--c' as string]: agentColor[a],
                           width: 40,
                           height: 40,
                           fontSize: 12,
@@ -354,7 +316,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                         }}
                         onClick={() => handleToggleTarget(a)}
                       >
-                        {agentShort(a)}
+                        {agentShort[a]}
                       </span>
                     )
                   })}
@@ -455,9 +417,9 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                     try {
                       await api.deleteMcpServer({ repoPath, id: selectedServer.id })
                       setSelected(null)
-                      load()
+                      reload()
                     } catch (e) {
-                      setError(e instanceof Error ? e.message : String(e))
+                      setError(e)
                     }
                   }}
                 >
@@ -579,7 +541,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                 key={a}
                 className={'tg ' + (srvTargets.includes(a) ? 'on' : 'off')}
                 style={{
-                  ['--c' as string]: agentColor(a),
+                  ['--c' as string]: agentColor[a],
                   width: 40,
                   height: 40,
                   fontSize: 12,
@@ -587,7 +549,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                 }}
                 onClick={() => toggleTarget(a)}
               >
-                {agentShort(a)}
+                {agentShort[a]}
               </span>
             ))}
           </div>
@@ -602,7 +564,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           {addBusy ? '添加中…' : '添加 MCP Server'}
         </button>
       </Modal>
-      {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg(null)} />}
+      {toast && <Toast message={toast} onClose={dismiss} />}
     </div>
   )
 }

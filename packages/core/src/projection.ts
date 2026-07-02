@@ -1,4 +1,4 @@
-import type { Manifest, AgentId, Config, SkillSource } from './types.js'
+import type { Manifest, AgentId, Config } from './types.js'
 
 export interface LinkPlan {
   skillId: string
@@ -37,7 +37,7 @@ export function planProjection(
     links.push({ skillId: s.id, source: 'local', targets: activeTargets(globalTargets) })
   }
   for (const src of manifest.skills.sources) {
-    const repoId = deriveRepoId(src)
+    const repoId = deriveRepoId(src.url)
     const members = src.members?.length ? src.members : []
     for (const m of members) {
       const ts = activeTargets(m.enabled === false ? [] : (m.targets ?? globalTargets))
@@ -62,10 +62,9 @@ export function planProjection(
   }
 }
 
-function deriveRepoId(src: SkillSource): string {
-  const parts = src.url.split(':')
-  const path = parts[parts.length - 1]
-  return path
+export function deriveRepoId(url: string): string {
+  const parts = url.split(':')
+  return parts[parts.length - 1]
     .split('/')
     .pop()!
     .replace(/\.git$/, '')

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import Skills from '../src/views/Skills'
+import Skills from '../src/views/skills/Skills'
 import Sync from '../src/views/Sync'
 
 vi.mock('../src/lib/api', () => ({
