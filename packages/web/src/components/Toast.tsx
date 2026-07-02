@@ -24,7 +24,7 @@ export default function Toast({ message, onClose, duration = 3000, icon }: Toast
         position: 'fixed',
         top: 48,
         right: 24,
-        zIndex: 999,
+        zIndex: 1001,
         display: 'flex',
         alignItems: 'center',
         gap: 8,

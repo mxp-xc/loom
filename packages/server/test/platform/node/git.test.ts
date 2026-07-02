@@ -51,6 +51,13 @@ describe('NodeGit', () => {
     expect(r.head).toBeTruthy()
     expect(r.tags['v1.0.0']).toBeTruthy()
   })
+  it('lsRemote returns branches and tags', async () => {
+    const git = new NodeGit()
+    const result = await git.lsRemote(bare)
+    expect(result.head).toBeTruthy()
+    expect(result.branches).toContain('main')
+    expect(result.tags['v1.0.0']).toBeTruthy()
+  })
   it('push reports nonFastForward when remote ahead', async () => {
     const dest = await mkdtemp(join(tmpdir(), 'push-'))
     created.push(dest)

@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import Toast from '@/components/Toast'
 import { api } from '@/lib/api'
+import { Button } from '@/components/ui/button'
+import { Plus, RefreshCw } from 'lucide-react'
 import { useManifest } from '@/hooks/useManifest'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
@@ -9,6 +11,7 @@ import SkillSourceList from './SkillSourceList'
 import GlobalTargetsBar from './GlobalTargetsBar'
 import MemberScanModal from './MemberScanModal'
 import SkillDetailEditor from './SkillDetailEditor'
+import EditSourceModal from './EditSourceModal'
 import AddSkillModal from './AddSkillModal'
 import type { SkillDetail } from './types'
 
@@ -23,6 +26,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
   const [addOpen, setAddOpen] = useState(false)
   const [scanSource, setScanSource] = useState<SkillSource | null>(null)
   const [detail, setDetail] = useState<SkillDetail | null>(null)
+  const [editSource, setEditSource] = useState<SkillSource | null>(null)
 
   const project = async () => {
     setProjecting(true)
@@ -58,12 +62,14 @@ export default function Skills({ repoPath }: { repoPath: string }) {
           </div>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button className="add-btn" onClick={() => setAddOpen(true)}>
-            + Add skill
-          </button>
-          <button className="add-btn" onClick={project} disabled={projecting}>
+          <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
+            <Plus className="h-3.5 w-3.5" />
+            Add skill
+          </Button>
+          <Button variant="secondary" size="sm" onClick={project} disabled={projecting}>
+            <RefreshCw className="h-3.5 w-3.5" />
             {projecting ? '投影中…' : '投影'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -135,6 +141,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
             setError={setError}
             onOpenDetail={setDetail}
             onOpenScan={setScanSource}
+            onOpenEdit={setEditSource}
           />
         </>
       )}
@@ -163,6 +170,16 @@ export default function Skills({ repoPath }: { repoPath: string }) {
         repoPath={repoPath}
         reload={reload}
         onClose={() => setAddOpen(false)}
+      />
+      <EditSourceModal
+        repoPath={repoPath}
+        source={editSource}
+        showToast={showToast}
+        onClose={() => setEditSource(null)}
+        onSaved={() => {
+          setEditSource(null)
+          reload()
+        }}
       />
     </div>
   )

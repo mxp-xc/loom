@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
 import { deriveRepoId, type SkillSource } from '@loom/core'
@@ -192,22 +193,22 @@ export default function MemberScanModal({
             </div>
           )}
           <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              className="add-btn"
+            <Button
+              variant="primary"
               onClick={() => handleConfirm([...selected])}
               disabled={saving}
               style={{ flex: 1 }}
             >
               {saving ? '保存中…' : `保存 (${selected.size})`}
-            </button>
-            <button
-              className="add-btn"
+            </Button>
+            <Button
+              variant="secondary"
               onClick={onClose}
               disabled={saving}
               style={{ flex: '0 0 auto' }}
             >
               取消
-            </button>
+            </Button>
           </div>
         </div>
       )}

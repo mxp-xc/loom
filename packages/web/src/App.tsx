@@ -7,6 +7,9 @@ import Sync from './views/Sync'
 import Settings from './views/Settings'
 import { useManifest } from './hooks/useManifest'
 import { useViewError } from './hooks/useViewError'
+import { useTheme } from './theme'
+import { Button } from '@/components/ui/button'
+import { Sun, Moon, Monitor } from 'lucide-react'
 
 function ThemeSwitcher() {
   const { theme, setTheme } = useTheme()
@@ -16,17 +19,14 @@ function ThemeSwitcher() {
       <span className="label">theme</span>
       <div style={{ display: 'flex', gap: '4px', marginTop: '8px' }}>
         {modes.map((m) => (
-          <button
+          <Button
             key={m}
+            variant="ghost"
+            size="xs"
             onClick={() => setTheme(m)}
             style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: 10,
-              fontWeight: 700,
               padding: '3px 8px',
-              borderRadius: 'var(--radius)',
               border: '1px solid transparent',
-              cursor: 'pointer',
               transition: 'all var(--dur) var(--ease)',
               ...(theme === m
                 ? {
@@ -42,15 +42,19 @@ function ThemeSwitcher() {
                   }),
             }}
           >
-            {m === 'light' ? '☀' : m === 'dark' ? '●' : '◐'}
-          </button>
+            {m === 'light' ? (
+              <Sun className="h-3 w-3" />
+            ) : m === 'dark' ? (
+              <Moon className="h-3 w-3" />
+            ) : (
+              <Monitor className="h-3 w-3" />
+            )}
+          </Button>
         ))}
       </div>
     </div>
   )
 }
-
-import { useTheme } from './theme'
 
 // Rendered once init resolves and repoPath is known, so useManifest can be
 // called unconditionally and share its cache with the active view.

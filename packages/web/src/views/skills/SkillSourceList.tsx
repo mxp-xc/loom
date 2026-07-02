@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { api } from '@/lib/api'
 import { AGENTS, agentShort, agentColor, type AgentId } from '@/lib/agents'
 import { deriveRepoId, type SkillSource, type Manifest } from '@loom/core'
+import { Button } from '@/components/ui/button'
+import { ChevronDown, MoreHorizontal, RefreshCw, Pencil, Trash2, ScanLine } from 'lucide-react'
 import type { SkillDetail } from './types'
 
 interface Props {
@@ -12,19 +14,9 @@ interface Props {
   setError: (e: unknown) => void
   onOpenDetail: (d: SkillDetail) => void
   onOpenScan: (src: SkillSource) => void
+  onOpenEdit: (src: SkillSource) => void
 }
 
-const menuBtnStyle: React.CSSProperties = {
-  width: '100%',
-  textAlign: 'left',
-  padding: '8px 12px',
-  border: 'none',
-  background: 'none',
-  cursor: 'pointer',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: 11,
-  color: 'var(--text)',
-}
 const menuStyle: React.CSSProperties = {
   position: 'absolute',
   zIndex: 10,
@@ -34,6 +26,12 @@ const menuStyle: React.CSSProperties = {
   boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
   minWidth: 120,
 }
+
+const chevronStyle = (isCollapsed: boolean): React.CSSProperties => ({
+  color: 'var(--signal)',
+  transition: 'transform var(--dur) var(--ease)',
+  transform: isCollapsed ? 'rotate(-90deg)' : 'none',
+})
 
 const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
   <span
@@ -54,16 +52,27 @@ export default function SkillSourceList({
   setError,
   onOpenDetail,
   onOpenScan,
+  onOpenEdit,
 }: Props) {
   const [checking, setChecking] = useState<string | null>(null)
   const [updates, setUpdates] = useState<Record<string, string>>({})
   const [updating, setUpdating] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   const agents = manifest.config?.targets ?? []
   const allAgents: AgentId[] = [...AGENTS]
   const sourceCount = manifest.skills.sources.length
   const localCount = manifest.skills.skills.length
+
+  const toggleCollapse = (key: string) => {
+    setCollapsed((prev) => {
+      const n = new Set(prev)
+      if (n.has(key)) n.delete(key)
+      else n.add(key)
+      return n
+    })
+  }
 
   const handleChipToggle = async (
     sourceUrl: string,
@@ -177,19 +186,55 @@ export default function SkillSourceList({
       {/* Remote sources */}
       {manifest.skills.sources.map((src) => {
         const repoId = deriveRepoId(src.url)
+        const key = src.url + '-' + src.ref
+        const isCollapsed = collapsed.has(key)
         return (
-          <div key={src.url + '-' + src.ref} className="group">
-            <div className="group-head" style={{ position: 'relative' }}>
+          <div key={key} className="group">
+            <div
+              className="group-head"
+              style={{ position: 'relative', cursor: 'pointer' }}
+              onClick={() => toggleCollapse(key)}
+            >
               <span className="gname">
-                <span className="arrow">▼</span>
+                <ChevronDown size={14} style={chevronStyle(isCollapsed)} />
                 {repoId}
               </span>
+              {src.type === 'tag' ? (
+                <span
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 10,
+                    padding: '1px 6px',
+                    borderRadius: 'var(--radius)',
+                    background: 'rgba(139,92,246,0.14)',
+                    color: 'var(--oc)',
+                    border: '1px solid color-mix(in srgb, var(--oc) 30%, transparent)',
+                  }}
+                >
+                  tag
+                </span>
+              ) : (
+                <span
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 10,
+                    padding: '1px 6px',
+                    borderRadius: 'var(--radius)',
+                    background: 'rgba(56,189,248,0.12)',
+                    color: 'var(--info)',
+                    border: '1px solid color-mix(in srgb, var(--info) 30%, transparent)',
+                  }}
+                >
+                  {src.type ?? 'branch'}
+                </span>
+              )}
               <a
                 href={src.url.replace(/\.git$/, '')}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="gurl"
                 style={{ textDecoration: 'none' }}
+                onClick={(e) => e.stopPropagation()}
               >
                 {src.url}
               </a>
@@ -206,83 +251,110 @@ export default function SkillSourceList({
                   {updates[src.url]}
                 </span>
               )}
-              <span className="gacts">
-                <button
-                  className="gbtn"
+              <span className="gacts" onClick={(e) => e.stopPropagation()}>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => handleCheck(src)}
                   disabled={checking === src.url}
                 >
-                  {checking === src.url ? '...' : 'check'}
-                </button>
+                  <RefreshCw className="h-3 w-3" />
+                  {checking === src.url ? '...' : 'Check'}
+                </Button>
                 {updates[src.url] && (
-                  <button
-                    className="gbtn"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => handlePerformUpdate(src)}
                     disabled={updating === src.url}
                     style={{ color: 'var(--warn)' }}
                   >
-                    {updating === src.url ? '...' : 'update'}
-                  </button>
+                    <RefreshCw className="h-3 w-3" />
+                    {updating === src.url ? '...' : 'Update'}
+                  </Button>
                 )}
-                <button
-                  className="gbtn"
+                <Button variant="ghost" size="sm" onClick={() => onOpenEdit(src)}>
+                  <Pencil className="h-3 w-3" />
+                  Edit
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setMenuOpen(menuOpen === src.url ? null : src.url)}
                 >
-                  ⋯
-                </button>
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </Button>
               </span>
               {menuOpen === src.url && (
-                <div style={{ ...menuStyle, right: 14, top: '100%' }}>
-                  <button
-                    style={{ ...menuBtnStyle }}
+                <div
+                  style={{ ...menuStyle, right: 14, top: '100%' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
                     onClick={() => {
                       setMenuOpen(null)
                       onOpenScan(src)
                     }}
                   >
+                    <ScanLine className="h-3 w-3" />
                     scan
-                  </button>
-                  <button
-                    style={{ ...menuBtnStyle, color: 'var(--error)' }}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      justifyContent: 'flex-start',
+                      color: 'var(--error)',
+                    }}
                     onClick={() => handleDeleteSource(src.url)}
                   >
+                    <Trash2 className="h-3 w-3" />
                     删除
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
-            {src.members?.map((m) => {
-              const isEnabled = m.enabled !== false
-              const mTargets = m.targets ?? agents
-              return (
-                <div key={m.name} className="skill">
-                  <span className={'sdot ' + (isEnabled ? 'green' : 'dim')} />
-                  <span
-                    className={'sname clickable' + (isEnabled ? '' : ' dim')}
-                    onClick={() =>
-                      onOpenDetail({
-                        skillId: `${repoId}-${m.name}`,
-                        source: src.url,
-                        targets: mTargets,
-                      })
-                    }
-                  >
-                    {repoId}-{m.name}
-                  </span>
-                  <span className="chips">
-                    {allAgents.map((a) =>
-                      renderChip(a, isEnabled && mTargets.includes(a), () =>
-                        handleChipToggle(src.url, m.name, a, mTargets),
-                      ),
-                    )}
-                  </span>
-                  <span className={'sstate ' + (isEnabled ? 'st-proj' : 'st-off')}>
-                    {isEnabled ? 'projected' : 'disabled'}
-                  </span>
-                </div>
-              )
-            })}
-            {!src.members?.length && (
+            {!isCollapsed &&
+              src.members?.map((m) => {
+                const isEnabled = m.enabled !== false
+                const mTargets = m.targets ?? agents
+                return (
+                  <div key={m.name} className="skill">
+                    <span className={'sdot ' + (isEnabled ? 'green' : 'dim')} />
+                    <span
+                      className={'sname clickable' + (isEnabled ? '' : ' dim')}
+                      onClick={() =>
+                        onOpenDetail({
+                          skillId:
+                            manifest.config?.skill_naming === 'hyphen'
+                              ? `${repoId}-${m.name}`
+                              : `${repoId}/${m.name}`,
+                          source: src.url,
+                          targets: mTargets,
+                        })
+                      }
+                    >
+                      {m.name}
+                    </span>
+                    <span className="chips">
+                      {allAgents.map((a) =>
+                        renderChip(a, isEnabled && mTargets.includes(a), () =>
+                          handleChipToggle(src.url, m.name, a, mTargets),
+                        ),
+                      )}
+                    </span>
+                    <span className={'sstate ' + (isEnabled ? 'st-proj' : 'st-off')}>
+                      {isEnabled ? 'projected' : 'disabled'}
+                    </span>
+                  </div>
+                )
+              })}
+            {!isCollapsed && !src.members?.length && (
               <div className="skill">
                 <span className="sdot green" />
                 <span className="sname" style={{ color: 'var(--muted)' }}>
@@ -303,54 +375,76 @@ export default function SkillSourceList({
       {/* Local skills */}
       {localCount > 0 && (
         <div className="group">
-          <div className="group-head">
+          <div
+            className="group-head"
+            style={{ cursor: 'pointer' }}
+            onClick={() => toggleCollapse('local')}
+          >
             <span className="gname">
-              <span className="arrow">▼</span>local skills <span className="local-tag">local</span>
+              <ChevronDown size={14} style={chevronStyle(collapsed.has('local'))} />
+              local skills <span className="local-tag">local</span>
             </span>
-            <span className="gurl">./assets/skills</span>
           </div>
-          {manifest.skills.skills.map((s) => {
-            const lTargets = s.targets ?? agents
-            return (
-              <div key={s.id} className="skill">
-                <span className="sdot green" />
-                <span
-                  className="sname clickable"
-                  onClick={() => onOpenDetail({ skillId: s.id, path: s.path, targets: lTargets })}
-                >
-                  {s.id}
-                </span>
-                <span className="chips">
-                  {allAgents.map((a) =>
-                    renderChip(a, lTargets.includes(a), () =>
-                      handleLocalChipToggle(s.id, a, lTargets),
-                    ),
-                  )}
-                </span>
-                <span className="sstate st-proj">projected</span>
-                <span style={{ position: 'relative', display: 'flex', justifyContent: 'flex-end' }}>
-                  <button
-                    className="gbtn"
-                    onClick={() =>
-                      setMenuOpen(menuOpen === 'local:' + s.id ? null : 'local:' + s.id)
-                    }
-                  >
-                    ⋯
-                  </button>
-                  {menuOpen === 'local:' + s.id && (
-                    <div style={{ ...menuStyle, right: 0, top: '100%', minWidth: 100 }}>
-                      <button
-                        style={{ ...menuBtnStyle, color: 'var(--error)' }}
-                        onClick={() => handleDeleteLocal(s.id)}
+          {!collapsed.has('local') &&
+            manifest.skills.skills.map((s) => {
+              const lTargets = s.targets ?? agents
+              return (
+                <div key={s.id}>
+                  <div className="skill">
+                    <span className="sdot green" />
+                    <span
+                      className="sname clickable"
+                      onClick={() =>
+                        onOpenDetail({ skillId: s.id, path: s.path, targets: lTargets })
+                      }
+                    >
+                      {s.id}
+                    </span>
+                    {s.path && <span className="ref-badge">ref</span>}
+                    <span className="chips">
+                      {allAgents.map((a) =>
+                        renderChip(a, lTargets.includes(a), () =>
+                          handleLocalChipToggle(s.id, a, lTargets),
+                        ),
+                      )}
+                    </span>
+                    <span className="sstate st-proj">projected</span>
+                    <span
+                      style={{ position: 'relative', display: 'flex', justifyContent: 'flex-end' }}
+                    >
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setMenuOpen(menuOpen === 'local:' + s.id ? null : 'local:' + s.id)
+                        }
                       >
-                        删除
-                      </button>
-                    </div>
-                  )}
-                </span>
-              </div>
-            )
-          })}
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </Button>
+                      {menuOpen === 'local:' + s.id && (
+                        <div style={{ ...menuStyle, right: 0, top: '100%', minWidth: 100 }}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            style={{
+                              width: '100%',
+                              textAlign: 'left',
+                              justifyContent: 'flex-start',
+                              color: 'var(--error)',
+                            }}
+                            onClick={() => handleDeleteLocal(s.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            删除
+                          </Button>
+                        </div>
+                      )}
+                    </span>
+                  </div>
+                  {s.path && <div className="skill-missing-path">→ {s.path}</div>}
+                </div>
+              )
+            })}
         </div>
       )}
 

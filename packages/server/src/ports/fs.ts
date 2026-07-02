@@ -8,4 +8,5 @@ export interface IFileSystem {
   readDir(path: string): Promise<string[]>
   isLink(path: string): Promise<boolean>
   copyDir(src: string, dest: string): Promise<void>
+  move(src: string, dest: string): Promise<void>
 }

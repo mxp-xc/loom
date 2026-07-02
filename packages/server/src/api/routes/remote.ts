@@ -136,5 +136,24 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
     }
   })
 
+  app.post('/sources/refs', async (c) => {
+    try {
+      const { url } = await c.req.json()
+      if (!url || typeof url !== 'string') return c.json({ ok: false, error: 'invalid_url' }, 400)
+      const result = await deps.git.lsRemote(url)
+      return c.json({
+        ok: true,
+        branches: result.branches,
+        tags: Object.keys(result.tags).sort().reverse(),
+      })
+    } catch (e) {
+      return c.json({
+        ok: false,
+        error: 'refs_failed',
+        message: String((e as Error)?.message ?? e),
+      })
+    }
+  })
+
   return app
 }

@@ -1,4 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
+import { Button } from '@/components/ui/button'
+import { X } from 'lucide-react'
 
 interface ModalProps {
   open: boolean
@@ -23,8 +25,26 @@ export default function Modal({
     if (!open) return
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
+      // Focus trap: keep Tab within modal
+      if (e.key === 'Tab' && ref.current) {
+        const focusable = ref.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        )
+        if (focusable.length === 0) return
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
+      }
     }
     window.addEventListener('keydown', handler)
+    // Focus the modal container on open
+    setTimeout(() => ref.current?.focus(), 0)
     return () => window.removeEventListener('keydown', handler)
   }, [open, onClose])
 
@@ -58,6 +78,7 @@ export default function Modal({
     >
       <div
         ref={ref}
+        tabIndex={-1}
         style={{
           width,
           minHeight: minHeight || undefined,
@@ -67,6 +88,7 @@ export default function Modal({
           border: '1px solid var(--border)',
           borderRadius: 'var(--radius-card)',
           boxShadow: 'var(--shadow-popover)',
+          outline: 'none',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -90,20 +112,9 @@ export default function Modal({
           >
             {title}
           </span>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--muted)',
-              cursor: 'pointer',
-              fontSize: 18,
-              lineHeight: 1,
-              padding: 2,
-            }}
-          >
-            &times;
-          </button>
+          <Button variant="ghost" size="xs" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
         </div>
         <div style={{ padding: '18px 20px' }}>{children}</div>
       </div>

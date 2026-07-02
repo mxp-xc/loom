@@ -1,4 +1,4 @@
-import { describe, it, expectTypeOf } from 'vitest'
+import { describe, it, expect, expectTypeOf } from 'vitest'
 import type { AgentId, Manifest, McpServer, Config, SkillSource } from '../src/types'
 
 describe('types', () => {
@@ -28,5 +28,31 @@ describe('types', () => {
       proxy: { http: '', https: '', no_proxy: '' },
     }
     expectTypeOf(c).toMatchTypeOf<Config>()
+  })
+})
+
+describe('SkillSource type field', () => {
+  it('accepts type: "branch"', () => {
+    const src: SkillSource = { url: 'https://github.com/org/repo', ref: 'main', type: 'branch' }
+    expect(src.type).toBe('branch')
+  })
+  it('accepts type: "tag"', () => {
+    const src: SkillSource = { url: 'https://github.com/org/repo', ref: 'v1.0', type: 'tag' }
+    expect(src.type).toBe('tag')
+  })
+  it('type is optional', () => {
+    const src: SkillSource = { url: 'https://github.com/org/repo', ref: 'main' }
+    expect(src.type).toBeUndefined()
+  })
+})
+
+describe('Config skill_naming field', () => {
+  it('accepts skill_naming: "dir"', () => {
+    const cfg: Config = { skill_naming: 'dir' }
+    expect(cfg.skill_naming).toBe('dir')
+  })
+  it('accepts skill_naming: "hyphen"', () => {
+    const cfg: Config = { skill_naming: 'hyphen' }
+    expect(cfg.skill_naming).toBe('hyphen')
   })
 })

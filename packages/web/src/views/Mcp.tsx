@@ -4,6 +4,8 @@ import Modal from '@/components/Modal'
 import Toast from '@/components/Toast'
 import { AGENTS, agentShort, agentColor, type AgentId } from '@/lib/agents'
 import { inputStyle } from '@/lib/styles'
+import { Button } from '@/components/ui/button'
+import { Plus, RefreshCw, Trash2, Copy, Check } from 'lucide-react'
 import { type McpServer, type McpType } from '@loom/core'
 import { useManifest } from '@/hooks/useManifest'
 import { useToast } from '@/hooks/useToast'
@@ -136,37 +138,6 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
       .catch(() => showToast('拷贝失败'))
   }
 
-  // 内联 SVG 剪贴板图标
-  const ClipboardIcon = ({ size = 14 }: { size?: number }) => (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="8" y="2" width="8" height="4" rx="1" />
-      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-    </svg>
-  )
-  const CheckIcon = ({ size = 14 }: { size?: number }) => (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  )
-
   return (
     <div>
       <div className="head">
@@ -175,12 +146,14 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           <div className="page-sub">{manifest?.mcp?.length ?? 0} servers</div>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button className="add-btn" onClick={openAdd}>
-            + Add server
-          </button>
-          <button className="add-btn" onClick={project} disabled={projecting}>
-            {projecting ? '投影中…' : '+ 投影'}
-          </button>
+          <Button variant="primary" size="sm" onClick={openAdd}>
+            <Plus className="h-3.5 w-3.5" />
+            Add server
+          </Button>
+          <Button variant="secondary" size="sm" onClick={project} disabled={projecting}>
+            <RefreshCw className="h-3.5 w-3.5" />
+            {projecting ? '投影中…' : '投影'}
+          </Button>
         </div>
       </div>
 
@@ -282,21 +255,21 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                 <span className={'mtype' + (selectedServer.type !== 'stdio' ? ' remote' : '')}>
                   {selectedServer.type}
                 </span>
-                <button
-                  className="gbtn"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={handleCopy}
                   title="拷贝配置 JSON"
                   style={{
-                    marginLeft: 'auto',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 4,
                     padding: '4px 10px',
                   }}
                 >
-                  {copied ? <CheckIcon /> : <ClipboardIcon />}
+                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   <span style={{ fontSize: 11 }}>{copied ? '已拷贝' : '拷贝'}</span>
-                </button>
+                </Button>
               </div>
               <div style={{ marginTop: 16 }}>
                 <span className="label">targets</span>
@@ -409,8 +382,9 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                   </div>
                 )}
               <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-                <button
-                  className="gbtn"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   style={{ color: 'var(--error)' }}
                   onClick={async () => {
                     if (!selectedServer) return
@@ -423,8 +397,9 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                     }
                   }}
                 >
+                  <Trash2 className="h-3.5 w-3.5" />
                   删除
-                </button>
+                </Button>
               </div>
             </>
           ) : (
@@ -470,24 +445,23 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           <span className="label">type</span>
           <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
             {MCP_TYPES.map((t) => (
-              <button
+              <Button
                 key={t}
+                variant="ghost"
+                size="sm"
                 onClick={() => setSrvType(t)}
                 style={{
                   flex: 1,
-                  padding: '6px 0',
-                  fontSize: 11,
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontWeight: 600,
-                  borderRadius: 'var(--radius)',
                   border: '1px solid var(--border)',
                   background: srvType === t ? 'var(--bg)' : 'transparent',
                   color: srvType === t ? 'var(--bright)' : 'var(--muted)',
-                  cursor: 'pointer',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 11,
+                  fontWeight: 600,
                 }}
               >
                 {t}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -555,14 +529,14 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           </div>
         </div>
 
-        <button
-          className="add-btn"
+        <Button
+          variant="primary"
+          style={{ width: '100%' }}
           onClick={handleAddServer}
           disabled={addBusy}
-          style={{ width: '100%' }}
         >
           {addBusy ? '添加中…' : '添加 MCP Server'}
-        </button>
+        </Button>
       </Modal>
       {toast && <Toast message={toast} onClose={dismiss} />}
     </div>

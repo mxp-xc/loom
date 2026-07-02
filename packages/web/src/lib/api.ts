@@ -73,6 +73,18 @@ export const api = {
 
   addLocalSkill: (body: { repoPath: string; skill: { id: string; path?: string } }) =>
     post('/skills/local', body).then(json),
+  scanLocalSkills: (dir: string) =>
+    post('/skills/local/scan', { dir }).then(json) as Promise<{
+      ok: boolean
+      skills: Array<{ name: string; path: string }>
+      error?: string
+      message?: string
+    }>,
+  importLocalSkills: (body: {
+    repoPath: string
+    skills: Array<{ name: string; path: string }>
+    mode: 'move' | 'ref'
+  }) => post('/skills/local/import', body).then(json) as Promise<{ ok: boolean; count?: number }>,
   addSource: (body: { repoPath: string; url: string; ref: string }) =>
     post('/sources', body).then(json),
   addMcpServer: (body: {
@@ -116,6 +128,14 @@ export const api = {
     post('/sources/scan', { url }).then(json) as Promise<{
       members: Array<{ name: string; description: string; path: string; installed: boolean }>
     }>,
+  getSourceRefs: (url: string) =>
+    post('/sources/refs', { url }).then(json) as Promise<{
+      ok: boolean
+      branches: string[]
+      tags: string[]
+      error?: string
+      message?: string
+    }>,
   refreshSource: (repoPath: string, url: string, ref: string) =>
     post('/sources/refresh', { repoPath, url, ref }).then(json) as Promise<{
       ok: boolean
@@ -125,6 +145,17 @@ export const api = {
     }>,
   setSourceMembers: (body: { repoPath: string; url: string; members: string[] }) =>
     post('/sources/members', body).then(json) as Promise<{
+      ok: boolean
+      error?: string
+      message?: string
+    }>,
+  updateSourceMeta: (body: {
+    repoPath: string
+    url: string
+    ref?: string
+    type?: 'branch' | 'tag'
+  }) =>
+    post('/sources/update', body).then(json) as Promise<{
       ok: boolean
       error?: string
       message?: string

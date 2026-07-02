@@ -44,7 +44,7 @@ describe('Sync view', () => {
         <Sync repoPath="/tmp/r" />
       </MemoryRouter>,
     )
-    expect(screen.getByText('⇅ 拉取', { exact: true })).toBeDefined()
-    expect(screen.getByText('↑ 上传', { exact: true })).toBeDefined()
+    expect(screen.getByText('拉取', { exact: true })).toBeDefined()
+    expect(screen.getByText('上传', { exact: true })).toBeDefined()
   })
 })

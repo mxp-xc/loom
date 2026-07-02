@@ -31,6 +31,7 @@ export function resolveFullLinks(
   installedAgents: Set<AgentId>,
 ): ProjectionPlan {
   const base = planProjection(manifest, effectiveConfig, installedAgents)
+  const naming = effectiveConfig.skill_naming ?? 'dir'
   const globalTargets = effectiveConfig.targets ?? []
   const skipped: AgentId[] = []
   const activeTargets = (ts: AgentId[]): AgentId[] => {
@@ -51,7 +52,7 @@ export function resolveFullLinks(
       const enabled = ov?.enabled ?? true
       const ts = activeTargets(enabled === false ? [] : (ov?.targets ?? globalTargets))
       links.push({
-        skillId: `${repoId}-${m.name}`,
+        skillId: naming === 'hyphen' ? `${repoId}-${m.name}` : `${repoId}/${m.name}`,
         source: { repoId, memberName: m.name },
         targets: ts,
       })

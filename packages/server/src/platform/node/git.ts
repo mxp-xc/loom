@@ -23,19 +23,24 @@ export class NodeGit implements IGit {
     return r.trim()
   }
 
-  async lsRemote(url: string): Promise<{ tags: Record<string, string>; head: string }> {
+  async lsRemote(
+    url: string,
+  ): Promise<{ tags: Record<string, string>; head: string; branches: string[] }> {
     const out = await this.git().listRemote([url])
     const tags: Record<string, string> = {}
+    const branches: string[] = []
     let head = ''
     for (const line of out.split('\n').filter(Boolean)) {
       const [sha, ref] = line.split(/\s+/)
       if (ref === 'HEAD') head = sha
-      else if (ref?.startsWith('refs/tags/')) {
+      else if (ref?.startsWith('refs/heads/')) {
+        branches.push(ref.slice('refs/heads/'.length))
+      } else if (ref?.startsWith('refs/tags/')) {
         const name = ref.slice('refs/tags/'.length).replace(/\^\{\}$/, '')
         tags[name] = sha
       }
     }
-    return { tags, head }
+    return { tags, head, branches }
   }
 
   async clone(url: string, dest: string, shallow = false): Promise<void> {

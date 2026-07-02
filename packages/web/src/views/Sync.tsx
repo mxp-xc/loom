@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { Button } from '@/components/ui/button'
+import { RefreshCw, Upload, Check, X, ArrowDownToLine } from 'lucide-react'
 import Toast from '@/components/Toast'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
@@ -146,9 +148,9 @@ export default function Sync({ repoPath }: { repoPath: string }) {
                 outline: 'none',
               }}
             />
-            <button className="add-btn" onClick={saveRemote} disabled={remoteSaving}>
+            <Button variant="primary" size="sm" onClick={saveRemote} disabled={remoteSaving}>
               {remoteSaving ? '保存中…' : '保存'}
-            </button>
+            </Button>
           </div>
           {remoteErr && (
             <div
@@ -193,20 +195,24 @@ export default function Sync({ repoPath }: { repoPath: string }) {
             : '点击拉取预览远程变更'}
         </span>
         <span className="acts">
-          <button
-            className="sbtn"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => run('pull', () => api.syncPull(repoPath), setPull)}
             disabled={busy !== null || !hasRemote}
           >
-            {busy === 'pull' ? '拉取中…' : '⇅ 拉取'}
-          </button>
-          <button
-            className="sbtn"
+            <ArrowDownToLine className="h-3.5 w-3.5" />
+            {busy === 'pull' ? '拉取中…' : '拉取'}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => run('push', () => api.syncPush(repoPath), setPush)}
             disabled={busy !== null || !hasRemote}
           >
-            {busy === 'push' ? '上传中…' : '↑ 上传'}
-          </button>
+            <Upload className="h-3.5 w-3.5" />
+            {busy === 'push' ? '上传中…' : '上传'}
+          </Button>
         </span>
       </div>
 
@@ -254,8 +260,9 @@ export default function Sync({ repoPath }: { repoPath: string }) {
                 : `已选择 ${resolved}/${totalConflicts} 项`
             })()}
           </span>
-          <button
-            className="sbtn"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => {
               setPull(null)
               setResolutions({})
@@ -264,9 +271,10 @@ export default function Sync({ repoPath }: { repoPath: string }) {
             disabled={busy !== null}
           >
             放弃
-          </button>
-          <button
-            className="add-btn"
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
             style={{ marginLeft: 0 }}
             onClick={async () => {
               setBusy('apply')
@@ -294,7 +302,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
             }
           >
             {busy === 'apply' ? '应用中…' : '应用解决'}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -420,8 +428,9 @@ export default function Sync({ repoPath }: { repoPath: string }) {
                     background: 'var(--bg)',
                   }}
                 >
-                  <button
-                    className="sbtn"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     style={
                       resolutions[`${c.file}:${c.path}:${c.field}`] === 'ours'
                         ? { borderColor: 'var(--primary)', color: 'var(--primary)' }
@@ -435,9 +444,10 @@ export default function Sync({ repoPath }: { repoPath: string }) {
                     }
                   >
                     使用本地
-                  </button>
-                  <button
-                    className="sbtn"
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     style={
                       resolutions[`${c.file}:${c.path}:${c.field}`] === 'theirs'
                         ? { borderColor: 'var(--primary)', color: 'var(--primary)' }
@@ -451,7 +461,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
                     }
                   >
                     使用远程
-                  </button>
+                  </Button>
                 </div>
               </div>
             )),

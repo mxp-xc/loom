@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { api } from '@/lib/api'
+import { Button } from '@/components/ui/button'
+import { Check, X, Pencil } from 'lucide-react'
 
 export type ConfigLevel = 'effective' | 'repo' | 'local'
 
@@ -121,23 +123,25 @@ export function ConfigField({
             }}
             autoFocus
           />
-          <button
-            className="gbtn"
+          <Button
+            variant="ghost"
+            size="xs"
             onClick={handleSave}
             disabled={saving}
             style={{ color: 'var(--signal)' }}
           >
-            {saving ? '...' : '✓'}
-          </button>
-          <button
-            className="gbtn"
+            <Check className="h-3 w-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
             onClick={() => {
               setEditing(false)
               setEditValue(formatValue(value))
             }}
           >
-            x
-          </button>
+            <X className="h-3 w-3" />
+          </Button>
           {err && <span style={{ fontSize: 11, color: 'var(--error)' }}>{err}</span>}
         </>
       ) : (
@@ -153,15 +157,16 @@ export function ConfigField({
             {formatValue(value)}
           </span>
           {canEdit && (
-            <button
-              className="gbtn"
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={() => {
                 setEditing(true)
                 setEditValue(formatValue(value))
               }}
             >
-              编辑
-            </button>
+              <Pencil className="h-3 w-3" />
+            </Button>
           )}
         </>
       )}

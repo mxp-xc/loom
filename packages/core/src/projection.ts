@@ -23,6 +23,7 @@ export function planProjection(
 ): ProjectionPlan {
   const globalTargets = effectiveConfig.targets ?? []
   const skippedAgents: AgentId[] = []
+  const naming = effectiveConfig.skill_naming ?? 'dir'
   const activeTargets = (ts: AgentId[]): AgentId[] => {
     const out: AgentId[] = []
     for (const a of ts) {
@@ -42,7 +43,7 @@ export function planProjection(
     for (const m of members) {
       const ts = activeTargets(m.enabled === false ? [] : (m.targets ?? globalTargets))
       links.push({
-        skillId: `${repoId}-${m.name}`,
+        skillId: naming === 'hyphen' ? `${repoId}-${m.name}` : `${repoId}/${m.name}`,
         source: { repoId, memberName: m.name },
         targets: ts,
       })

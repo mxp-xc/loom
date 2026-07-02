@@ -12,6 +12,7 @@
   --text: #3f3f46;
   --bright: #18181b;
   --muted: #a1a1aa;
+  --m2: #71717a;
   --primary: #059669;
   --primary-fg: #ffffff;
   --accent: rgba(5, 150, 105, 0.06);
@@ -40,6 +41,7 @@
   --text: #e4e4e7;
   --bright: #fafafa;
   --muted: #71717a;
+  --m2: #8b8b94;
   --primary: #10b981;
   --primary-fg: #052e1b;
   --accent: rgba(16, 185, 129, 0.08);
@@ -57,6 +59,35 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+/* Global scrollbar styling — applied to all scrollable elements */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+/* Dark mode overrides */
+html[data-theme='dark'] {
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
 }
 html,
 body,
@@ -184,7 +215,7 @@ body {
   letter-spacing: -0.01em;
 }
 .page-sub {
-  color: var(--muted);
+  color: var(--m2);
   font-size: 12px;
   margin-top: 2px;
 }
@@ -272,12 +303,12 @@ textarea:not(.cfg-textarea):focus {
 }
 .gbtn {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 11px;
   padding: 3px 8px;
   border-radius: var(--radius);
   background: transparent;
   border: 1px solid var(--border);
-  color: var(--muted);
+  color: var(--m2);
   cursor: pointer;
   transition: all var(--dur) var(--ease);
 }
@@ -325,7 +356,7 @@ textarea:not(.cfg-textarea):focus {
 }
 .sname {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
 }
 .sname.clickable {
@@ -374,7 +405,7 @@ textarea:not(.cfg-textarea):focus {
 }
 .sstate {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 11px;
 }
 .st-proj {
   color: var(--signal);
@@ -408,8 +439,8 @@ textarea:not(.cfg-textarea):focus {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--m2);
 }
 .lg .sw {
   width: 12px;
@@ -417,8 +448,8 @@ textarea:not(.cfg-textarea):focus {
   border-radius: var(--radius);
 }
 .hint {
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--m2);
   font-style: italic;
   margin-top: 8px;
 }
@@ -776,6 +807,22 @@ textarea:not(.cfg-textarea):focus {
     opacity: 1;
     transform: translateY(0);
   }
+}
+.ref-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: var(--radius);
+  background: rgba(251, 191, 36, 0.1);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+}
+.skill-missing-path {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--warn);
+  opacity: 0.8;
+  padding: 0 14px 6px 36px;
 }
 @media (prefers-reduced-motion: reduce) {
   .sdot.yellow {

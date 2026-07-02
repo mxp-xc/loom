@@ -33,6 +33,23 @@ export function removeSource(skills: SkillsManifest, url: string): MutationResul
   return { changed: true, data: { ...skills, sources: filtered } }
 }
 
+// Update a source's ref and/or type without touching its members.
+export function updateSourceMeta(
+  skills: SkillsManifest,
+  url: string,
+  updates: { ref?: string; type?: 'branch' | 'tag' },
+): MutationResult<SkillsManifest> {
+  const idx = skills.sources.findIndex((s) => s.url === url)
+  if (idx === -1) return { changed: false, data: skills }
+  const source = skills.sources[idx]
+  const next: typeof source = { ...source }
+  if (updates.ref !== undefined) next.ref = updates.ref
+  if (updates.type !== undefined) next.type = updates.type
+  const sources = skills.sources.slice()
+  sources[idx] = next
+  return { changed: true, data: { ...skills, sources } }
+}
+
 // Keep existing member config (targets/enabled) for names that remain;
 // drop members not in the new selection. New names get { name } only.
 export function setSourceMembers(

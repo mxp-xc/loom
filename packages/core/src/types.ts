@@ -10,6 +10,7 @@ export interface SkillMemberOverride {
 export interface SkillSource {
   url: string
   ref: string
+  type?: 'branch' | 'tag'
   pinned_commit?: string
   scan?: string
   members?: SkillMemberOverride[]
@@ -57,6 +58,7 @@ export interface Config {
   update_check?: UpdateCheckConfig
   active_repo?: string
   proxy?: ProxyConfig
+  skill_naming?: 'dir' | 'hyphen'
 }
 
 export interface VarsFile {

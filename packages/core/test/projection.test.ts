@@ -29,7 +29,11 @@ const manifest: Manifest = {
     { id: 'zhipu', type: 'sse', url: 'https://x' },
   ],
   vars: { default: {}, active: {} },
-  config: { targets: ['claude-code', 'codex', 'opencode'], projection: { strategy: 'link' } },
+  config: {
+    targets: ['claude-code', 'codex', 'opencode'],
+    projection: { strategy: 'link' },
+    skill_naming: 'hyphen',
+  },
   errors: [],
 }
 
@@ -102,5 +106,32 @@ describe('planProjection', () => {
       new Set(['claude-code']),
     )
     expect(pDefault.strategy).toBe('link')
+  })
+})
+describe('planProjection skill_naming', () => {
+  it('dir format produces repoId/memberName skillId', () => {
+    const m = { ...manifest, config: { ...manifest.config, skill_naming: 'dir' as const } }
+    const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
+    const link = p.links.find(
+      (l) => l.source !== 'local' && (l.source as any).memberName === 'brainstorming',
+    )
+    expect(link!.skillId).toBe('superpowers/brainstorming')
+  })
+  it('hyphen format produces repoId-memberName skillId', () => {
+    const m = { ...manifest, config: { ...manifest.config, skill_naming: 'hyphen' as const } }
+    const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
+    const link = p.links.find(
+      (l) => l.source !== 'local' && (l.source as any).memberName === 'brainstorming',
+    )
+    expect(link!.skillId).toBe('superpowers-brainstorming')
+  })
+  it('defaults to dir format when unset', () => {
+    const m = { ...manifest, config: { ...manifest.config } }
+    delete (m.config as any).skill_naming
+    const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
+    const link = p.links.find(
+      (l) => l.source !== 'local' && (l.source as any).memberName === 'brainstorming',
+    )
+    expect(link!.skillId).toBe('superpowers/brainstorming')
   })
 })

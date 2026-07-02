@@ -36,7 +36,7 @@ describe('resolveFullLinks', () => {
     skills: { sources, skills: [{ id: 'frontend-design' }] },
     mcp: [],
     vars: { default: {}, active: {} },
-    config: { targets: ['claude-code', 'codex'] },
+    config: { targets: ['claude-code', 'codex'], skill_naming: 'hyphen' },
     errors: [],
   })
   it('source no members: scanned members all enabled with global targets', () => {
@@ -92,7 +92,7 @@ describe('resolveFullLinks', () => {
     const p = resolveFullLinks(
       manifest,
       scan,
-      { targets: ['claude-code', 'opencode'] } as any,
+      { targets: ['claude-code', 'opencode'], skill_naming: 'hyphen' } as any,
       new Set(['claude-code']),
     )
     expect(p.skippedAgents).toContain('opencode')

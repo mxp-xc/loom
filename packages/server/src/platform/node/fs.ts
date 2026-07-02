@@ -8,8 +8,9 @@ import {
   stat,
   lstat,
   copyFile,
+  rename,
 } from 'node:fs/promises'
-import { join, isAbsolute } from 'node:path'
+import { join, isAbsolute, dirname } from 'node:path'
 import type { IFileSystem } from '../../ports/fs.js'
 
 export interface FsOptions {
@@ -102,6 +103,12 @@ export class NodeFileSystem implements IFileSystem {
         await copyFile(s, d)
       }
     }
+  }
+
+  async move(src: string, dest: string): Promise<void> {
+    // Ensure parent dir exists
+    await fsMkdir(dirname(dest), { recursive: true })
+    await rename(src, dest)
   }
 }
 

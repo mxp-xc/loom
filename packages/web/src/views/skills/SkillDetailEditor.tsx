@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
 import MarkdownPreview from '@/components/MarkdownPreview'
+import { Button } from '@/components/ui/button'
+import { Copy, Check } from 'lucide-react'
 import { AGENTS, agentShort, agentColor, agentSkillPath, type AgentId } from '@/lib/agents'
 import type { SkillDetail } from './types'
 
@@ -10,18 +12,6 @@ interface Props {
   detail: SkillDetail | null
   showToast: (msg: string) => void
   onClose: () => void
-}
-
-const copyBtnStyle: React.CSSProperties = {
-  flexShrink: 0,
-  padding: '3px 8px',
-  fontFamily: "'JetBrains Mono', monospace",
-  fontSize: 10,
-  borderRadius: 'var(--radius)',
-  border: '1px solid var(--border)',
-  background: 'transparent',
-  color: 'var(--muted)',
-  cursor: 'pointer',
 }
 
 const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
@@ -160,9 +150,13 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
                     >
                       {p}
                     </span>
-                    <button onClick={() => copyPath(p)} style={copyBtnStyle} title="复制">
-                      {copiedPath === p ? 'copied' : 'copy'}
-                    </button>
+                    <Button variant="ghost" size="xs" onClick={() => copyPath(p)} title="复制">
+                      {copiedPath === p ? (
+                        <Check className="h-3 w-3" />
+                      ) : (
+                        <Copy className="h-3 w-3" />
+                      )}
+                    </Button>
                   </div>
                 )
               })}

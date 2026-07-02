@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { join, dirname, basename as pathBasename } from 'node:path'
+import { join, dirname, basename as pathBasename, isAbsolute } from 'node:path'
 import { glob } from 'tinyglobby'
 import { executeProjection } from '../../projection/executor.js'
 import { scanSourceMembers } from '../../projection/scan.js'
@@ -16,6 +16,12 @@ import { createDeps } from '../deps.js'
 import { readRepoFiles, readLocalConfig } from '../repo-config.js'
 import { logger } from '../../lib/logger.js'
 import type { RouteDeps } from '../router.js'
+
+// Resolve a local skill path that may be relative (e.g. "./assets/skills/x")
+// against the repo root, so SKILL.md reads/writes land in the right place
+// regardless of the server's current working directory.
+const resolveSkillDir = (localPath: string, repoPath: string) =>
+  isAbsolute(localPath) ? localPath : join(repoPath, localPath)
 
 const apiLogger = logger.child('api')
 
@@ -116,7 +122,9 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
         const repoId = deriveRepoId(sourceUrl)
         const memberName = skillId.startsWith(repoId + '-')
           ? skillId.slice(repoId.length + 1)
-          : skillId
+          : skillId.startsWith(repoId + '/')
+            ? skillId.slice(repoId.length + 1)
+            : skillId
         const cacheDir = join(repoPath, 'remote-cache', repoId)
         if (await deps.fs.exists(cacheDir)) {
           const matches = await glob('**/SKILL.md', {
@@ -128,9 +136,15 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
           if (found) skillDir = join(cacheDir, dirname(found))
         }
       } else if (localPath) {
-        skillDir = localPath
+        skillDir = resolveSkillDir(localPath, repoPath)
       } else {
-        skillDir = join(repoPath, 'assets', 'skills', skillId)
+        // Try ~/.agents/skills/<skillId> first, then fall back to repo assets
+        const agentsDir = join(deps.home, '.agents', 'skills', skillId)
+        if (await deps.fs.exists(agentsDir)) {
+          skillDir = agentsDir
+        } else {
+          skillDir = join(repoPath, 'assets', 'skills', skillId)
+        }
       }
       if (skillDir) {
         const skillFile = join(skillDir, 'SKILL.md')
@@ -159,9 +173,15 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
 
       let skillDir: string | null = null
       if (localPath) {
-        skillDir = localPath
+        skillDir = resolveSkillDir(localPath, repoPath)
       } else {
-        skillDir = join(repoPath, 'assets', 'skills', skillId)
+        // Try ~/.agents/skills/<skillId> first, then fall back to repo assets
+        const agentsDir = join(deps.home, '.agents', 'skills', skillId)
+        if (await deps.fs.exists(agentsDir)) {
+          skillDir = agentsDir
+        } else {
+          skillDir = join(repoPath, 'assets', 'skills', skillId)
+        }
       }
       if (!skillDir) return c.json({ ok: false, error: 'invalid_path' })
 
