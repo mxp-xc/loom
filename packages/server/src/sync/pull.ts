@@ -142,9 +142,20 @@ async function safeShow(
   try {
     return await git.show(repoPath, ref, path)
   } catch (e) {
-    logger?.warn?.({ err: e, ref, path }, 'git show miss (file absent at ref)')
+    // A file absent at a ref is a normal three-way-merge case (e.g. a file
+    // newly added on one side, or removed on another). Return empty without
+    // logging — only surface genuinely unexpected git errors.
+    if (isFileAbsentError(e)) return ''
+    logger?.warn?.({ err: e, ref, path }, 'git show error')
     return ''
   }
+}
+
+// git emits these when `show <ref>:<path>` targets a path not in that ref's
+// tree. They are expected during three-way merge, not real failures.
+function isFileAbsentError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e)
+  return /does not exist in|exists on disk, but not in/i.test(msg)
 }
 
 async function listVarsFilesUnion(

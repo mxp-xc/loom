@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
 import Toast from '@/components/Toast'
@@ -36,6 +36,11 @@ interface SkillDetail {
   source?: string
   path?: string
   targets: string[]
+}
+
+interface RefreshMember {
+  name: string
+  path: string
 }
 
 const AGENTS = ['claude-code', 'codex', 'opencode'] as const
@@ -125,9 +130,19 @@ export default function Skills({ repoPath }: { repoPath: string }) {
   const [localPath, setLocalPath] = useState('')
   const [srcUrl, setSrcUrl] = useState('')
   const [srcRef, setSrcRef] = useState('main')
-  const [checking, setChecking] = useState<string | null>(null)
+ const [checking, setChecking] = useState<string | null>(null)
   const [updates, setUpdates] = useState<Record<string, string>>({})
-  const [menuOpen, setMenuOpen] = useState<string | null>(null)
+  const [updating, setUpdating] = useState<string | null>(null)
+ const [scanningSource, setScanningSource] = useState<string | null>(null)
+ const [scanModal, setScanModal] = useState<{
+   source: SkillSource
+   members: RefreshMember[]
+   existing: Set<string>
+ } | null>(null)
+const [scanModalSelected, setScanModalSelected] = useState<Set<string>>(new Set())
+const [scanModalSaving, setScanModalSaving] = useState(false)
+const scanLock = useRef(false)
+const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const [scanMembers, setScanMembers] = useState<ScanMember[]>([])
   const [scanSelected, setScanSelected] = useState<Set<string>>(new Set())
@@ -221,37 +236,133 @@ export default function Skills({ repoPath }: { repoPath: string }) {
     }
   }
 
-  const handleLocalChipToggle = async (id: string, agent: Agent, currentTargets: string[]) => {
-    const newTargets = currentTargets.includes(agent)
-      ? currentTargets.filter((a) => a !== agent)
-      : [...currentTargets, agent]
+ const handleLocalChipToggle = async (id: string, agent: Agent, currentTargets: string[]) => {
+   const newTargets = currentTargets.includes(agent)
+     ? currentTargets.filter((a) => a !== agent)
+     : [...currentTargets, agent]
+   try {
+     await api.updateLocalSkillTargets({ repoPath, id, targets: newTargets })
+     load()
+   } catch (e) {
+     setError(e instanceof Error ? e.message : String(e))
+   }
+ }
+
+  const handleGlobalTargetToggle = async (agent: Agent) => {
+    const current = manifest?.config?.targets ?? []
+    const newTargets = current.includes(agent)
+      ? current.filter((a) => a !== agent)
+      : [...current, agent]
     try {
-      await api.updateLocalSkillTargets({ repoPath, id, targets: newTargets })
+      await api.putConfig({ repoPath, level: 'repo', field: 'targets', value: newTargets })
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
   }
 
-  const handleCheck = async (src: SkillSource) => {
-    setChecking(src.url)
+const handleCheck = async (src: SkillSource) => {
+  setChecking(src.url)
+  try {
+     const res = (await api.update(repoPath, [src])) as any
+     if (res.updates?.[0]?.hasUpdate) {
+        const u = res.updates[0]
+        if (u.needsRepair) {
+          setUpdates((prev) => ({ ...prev, [src.url]: 'repair' }))
+          showToast(`${deriveRepoId(src.url)} 缓存损坏,请点击 update 修复`)
+          return
+        }
+        // Tag tracking shows the tag name; branch tracking shows a short commit hash.
+        const latest = u.latestTag ?? (u.latestCommit ? u.latestCommit.slice(0, 7) : 'unknown')
+       setUpdates((prev) => ({ ...prev, [src.url]: latest }))
+       showToast(`${deriveRepoId(src.url)} 有更新: ${src.ref} -> ${latest}`)
+     } else {
+       showToast(`${deriveRepoId(src.url)} 已是最新`)
+     }
+   } catch (e) {
+     setError(e instanceof Error ? e.message : String(e))
+   } finally {
+     setChecking(null)
+   }
+ }
+
+  const handlePerformUpdate = async (src: SkillSource) => {
+    setUpdating(src.url)
     try {
-      const res = (await api.update([src])) as any
-      if (res.updates?.[0]?.hasUpdate) {
-        const latest = res.updates[0].latestTag ?? 'unknown'
-        setUpdates((prev) => ({ ...prev, [src.url]: latest }))
-        showToast(`${deriveRepoId(src.url)} 有更新: ${src.ref} -> ${latest}`)
-      } else {
-        showToast(`${deriveRepoId(src.url)} 已是最新`)
-      }
+      const repoId = deriveRepoId(src.url)
+      const res = (await api.performUpdate({
+        source: src,
+        newRef: src.ref,
+        repoPath,
+        sourceId: repoId,
+        oldMembers: src.members ?? [],
+      })) as any
+      showToast(`${repoId} 已更新到 ${res.pinned_commit?.slice(0, 7) ?? src.ref}`)
+      setUpdates((prev) => {
+        const n = { ...prev }
+        delete n[src.url]
+        return n
+      })
+      load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setChecking(null)
+      setUpdating(null)
     }
   }
 
-  const handleDeleteSource = async (url: string) => {
+const handleScanSource = async (src: SkillSource) => {
+  setMenuOpen(null)
+  // Synchronous guard: a second click before the first resolves would open a
+  // second modal that overwrites the first. scan is now near-instant (local
+  // glob), so this mainly protects against the clone-fallback path.
+  if (scanLock.current) return
+  scanLock.current = true
+  setScanningSource(src.url)
+  try {
+    const res = await api.refreshSource(repoPath, src.url, src.ref)
+     if (res.ok) {
+       const members = res.members ?? []
+       const existing = new Set((src.members ?? []).map((m) => m.name))
+       setScanModal({ source: src, members, existing })
+       // Pre-select members already configured; new ones left unchecked so the
+       // user explicitly opts in instead of silently enabling everything.
+       setScanModalSelected(new Set(members.filter((m) => existing.has(m.name)).map((m) => m.name)))
+     } else {
+       setError(res.message ?? res.error ?? '扫描失败')
+     }
+  } catch (e) {
+    setError(e instanceof Error ? e.message : String(e))
+  } finally {
+    setScanningSource(null)
+    scanLock.current = false
+  }
+}
+
+ const handleConfirmScanMembers = async (selected: string[]) => {
+   if (!scanModal) return
+   setScanModalSaving(true)
+   try {
+     const res = await api.setSourceMembers({
+       repoPath,
+       url: scanModal.source.url,
+       members: selected,
+     })
+     if (res.ok) {
+       showToast(`${deriveRepoId(scanModal.source.url)}: ${selected.length} members`)
+       setScanModal(null)
+       load()
+     } else {
+       setError(res.message ?? res.error ?? '保存失败')
+     }
+   } catch (e) {
+     setError(e instanceof Error ? e.message : String(e))
+   } finally {
+     setScanModalSaving(false)
+   }
+ }
+
+ const handleDeleteSource = async (url: string) => {
     setMenuOpen(null)
     try {
       await api.deleteSource({ repoPath, url })
@@ -462,8 +573,43 @@ export default function Skills({ repoPath }: { repoPath: string }) {
         </div>
       )}
 
-      {menuOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 5 }} onClick={() => setMenuOpen(null)} />
+     {menuOpen && (
+       <div style={{ position: 'fixed', inset: 0, zIndex: 5 }} onClick={() => setMenuOpen(null)} />
+     )}
+
+     {manifest && (sourceCount > 0 || localCount > 0) && (
+       <div
+         style={{
+            display: 'grid',
+           gridTemplateColumns: '12px minmax(0, 1fr) auto 90px 28px',
+           alignItems: 'center',
+           gap: 12,
+           marginTop: 14,
+            marginBottom: 6,
+            padding: '8px 14px',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-card)',
+            background: 'var(--card)',
+          }}
+        >
+          <span />
+          <span
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: 11,
+              color: 'var(--muted)',
+            }}
+          >
+            全局 targets
+          </span>
+          <span className="chips" style={{ display: 'flex', gap: 7 }}>
+            {allAgents.map((a) =>
+              renderChip(a, agents.includes(a), () => handleGlobalTargetToggle(a)),
+            )}
+          </span>
+          <span />
+          <span />
+        </div>
       )}
 
       {/* Remote sources */}
@@ -475,8 +621,16 @@ export default function Skills({ repoPath }: { repoPath: string }) {
               <span className="gname">
                 <span className="arrow">▼</span>
                 {repoId}
-              </span>
-              <span className="gurl">{src.url}</span>
+             </span>
+              <a
+                href={src.url.replace(/\.git$/, '')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="gurl"
+                style={{ textDecoration: 'none' }}
+              >
+                {src.url}
+              </a>
               <span className="gref">@ {src.ref}</span>
               {updates[src.url] && (
                 <span
@@ -490,34 +644,41 @@ export default function Skills({ repoPath }: { repoPath: string }) {
                   {updates[src.url]}
                 </span>
               )}
-              <span className="gacts">
-                <button
-                  className="gbtn"
-                  onClick={() => handleCheck(src)}
-                  disabled={checking === src.url}
-                >
-                  {checking === src.url ? '...' : 'check'}
-                </button>
-                <button
-                  className="gbtn"
-                  onClick={() => setMenuOpen(menuOpen === src.url ? null : src.url)}
-                >
+             <span className="gacts">
+               <button
+                 className="gbtn"
+                 onClick={() => handleCheck(src)}
+                 disabled={checking === src.url}
+               >
+                 {checking === src.url ? '...' : 'check'}
+               </button>
+                {updates[src.url] && (
+                  <button
+                    className="gbtn"
+                    onClick={() => handlePerformUpdate(src)}
+                    disabled={updating === src.url}
+                    style={{ color: 'var(--warn)' }}
+                  >
+                    {updating === src.url ? '...' : 'update'}
+                  </button>
+                )}
+               <button
+                 className="gbtn"
+                 onClick={() => setMenuOpen(menuOpen === src.url ? null : src.url)}
+               >
                   ⋯
                 </button>
               </span>
               {menuOpen === src.url && (
-                <div style={{ ...menuStyle, right: 14, top: '100%' }}>
-                  <button
-                    style={menuBtnStyle}
-                    onClick={() => {
-                      setMenuOpen(null)
-                      showToast('Scan: ' + (src.members?.length ?? 0) + ' members')
-                    }}
-                  >
-                    scan
-                  </button>
-                  <button
-                    style={{ ...menuBtnStyle, color: 'var(--error)' }}
+               <div style={{ ...menuStyle, right: 14, top: '100%' }}>
+                 <button
+                    style={{ ...menuBtnStyle, opacity: scanningSource === src.url ? 0.5 : 1 }}
+                    onClick={() => handleScanSource(src)}
+                 >
+                    {scanningSource === src.url ? '...' : 'scan'}
+                 </button>
+                 <button
+                   style={{ ...menuBtnStyle, color: 'var(--error)' }}
                     onClick={() => handleDeleteSource(src.url)}
                   >
                     删除
@@ -586,12 +747,11 @@ export default function Skills({ repoPath }: { repoPath: string }) {
           {manifest.skills.skills.map((s) => {
             const lTargets = s.targets ?? agents
             return (
-              <div
-                key={s.id}
-                className="skill"
-                style={{ gridTemplateColumns: '12px 1fr auto 90px 28px' }}
-              >
-                <span className="sdot green" />
+             <div
+               key={s.id}
+               className="skill"
+             >
+               <span className="sdot green" />
                 <span
                   className="sname clickable"
                   onClick={() => openDetail({ skillId: s.id, path: s.path, targets: lTargets })}
@@ -832,9 +992,133 @@ export default function Skills({ repoPath }: { repoPath: string }) {
         )}
       </Modal>
 
-      {/* Skill Detail Modal */}
-      <Modal
-        open={!!detail}
+     {/* Skill Detail Modal */}
+     {/* Scan Members Modal */}
+     <Modal
+       open={!!scanModal}
+       onClose={() => (scanModalSaving ? undefined : setScanModal(null))}
+       title={`Scan · ${scanModal ? deriveRepoId(scanModal.source.url) : ''}`}
+       width={520}
+       minHeight={300}
+     >
+       {scanModal && (
+         <div>
+           <div
+             style={{
+               marginBottom: 12,
+               fontSize: 12,
+               color: 'var(--muted)',
+               fontFamily: "'JetBrains Mono', monospace",
+             }}
+             >
+               发现 {scanModal.members.length} 个 member,勾选要启用的
+             </div>
+           {scanModal.members.length > 0 && (
+             <div
+               style={{
+                 display: 'flex',
+                 alignItems: 'center',
+                 gap: 12,
+                 marginBottom: 8,
+                 fontFamily: "'JetBrains Mono', monospace",
+                 fontSize: 11,
+               }}
+             >
+               <button
+                 onClick={() => {
+                   const all = scanModalSelected.size === scanModal.members.length
+                   setScanModalSelected(all ? new Set() : new Set(scanModal.members.map((m) => m.name)))
+                 }}
+                 style={{
+                   background: 'none',
+                   border: '1px solid var(--border)',
+                   borderRadius: 'var(--radius)',
+                   padding: '2px 8px',
+                   color: 'var(--muted)',
+                   cursor: 'pointer',
+                 }}
+               >
+                 {scanModalSelected.size === scanModal.members.length ? '全不选' : '全选'}
+               </button>
+               <span style={{ color: 'var(--muted)' }}>
+                 已选 {scanModalSelected.size} / {scanModal.members.length}
+               </span>
+             </div>
+           )}
+             {scanModal.members.length === 0 ? (
+             <div style={{ fontSize: 12, color: 'var(--muted)' }}>未发现任何 SKILL.md</div>
+           ) : (
+             <div
+               style={{
+                 border: '1px solid var(--border)',
+                 borderRadius: 'var(--radius)',
+                 maxHeight: 280,
+                 overflow: 'auto',
+                 marginBottom: 14,
+               }}
+             >
+              {scanModal.members.map((m) => {
+                const checked = scanModalSelected.has(m.name)
+                return (
+                  <label
+                    key={m.name}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '7px 10px',
+                      borderBottom: '1px solid var(--border)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        setScanModalSelected((prev) => {
+                          const n = new Set(prev)
+                          if (e.target.checked) n.add(m.name)
+                          else n.delete(m.name)
+                          return n
+                        })
+                      }}
+                    />
+                    <span
+                      style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
+                    >
+                      {m.name}
+                    </span>
+                  </label>
+                )
+              })}
+             </div>
+           )}
+           <div style={{ display: 'flex', gap: 8 }}>
+             <button
+               className="add-btn"
+               onClick={() =>
+                 handleConfirmScanMembers([...scanModalSelected])
+               }
+               disabled={scanModalSaving}
+               style={{ flex: 1 }}
+             >
+               {scanModalSaving ? '保存中…' : `保存 (${scanModalSelected.size})`}
+             </button>
+             <button
+               className="add-btn"
+               onClick={() => setScanModal(null)}
+               disabled={scanModalSaving}
+               style={{ flex: '0 0 auto' }}
+             >
+               取消
+             </button>
+           </div>
+         </div>
+       )}
+     </Modal>
+
+     <Modal
+       open={!!detail}
         onClose={closeDetail}
         title={detail?.skillId ?? ''}
         width={760}
