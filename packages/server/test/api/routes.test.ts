@@ -10,7 +10,11 @@ vi.mock('../../src/sync/pull.js', () => ({
 }))
 vi.mock('../../src/sync/push.js', () => ({ syncPush: vi.fn(async () => ({ ok: true })) }))
 vi.mock('@loom/core', () => ({
-  loadRepoManifest: vi.fn(() => ({ repoConfig: { targets: ['claude-code'] }, errors: [] })),
+  loadRepoManifest: vi.fn(() => ({
+    repoConfig: { targets: ['claude-code'] },
+    errors: [],
+    varsFiles: { default: {} },
+  })),
   mergeConfig: vi.fn((repo: Record<string, unknown>) => ({ ...repo, active_repo: 'default' })),
   buildManifest: vi.fn(),
   planProjection: vi.fn(),
@@ -73,5 +77,13 @@ describe('API routes', () => {
     expect(body).toHaveProperty('effective')
     expect(body).toHaveProperty('repo')
     expect(body).toHaveProperty('local')
+  })
+  it('GET /api/config returns profiles list from vars files', async () => {
+    const res = await app.request('/api/config?repoPath=/tmp/r')
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.profiles).toBeDefined()
+    expect(Array.isArray(json.profiles)).toBe(true)
+    expect(json.profiles).toContain('default')
   })
 })

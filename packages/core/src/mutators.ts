@@ -156,12 +156,32 @@ export function setConfigField(
   field: string,
   value: unknown,
 ): { changed: boolean; data: Record<string, unknown> } {
-  if (value === null) {
-    if (!(field in config)) return { changed: false, data: config }
-    const rest = { ...config }
-    delete rest[field]
-    return { changed: true, data: rest }
+  const parts = field.split('.')
+  if (parts.length === 1) {
+    // Top-level field — original behavior
+    if (value === null) {
+      if (!(field in config)) return { changed: false, data: config }
+      const rest = { ...config }
+      delete rest[field]
+      return { changed: true, data: rest }
+    }
+    if (Object.is(config[field], value)) return { changed: false, data: config }
+    return { changed: true, data: { ...config, [field]: value } }
   }
-  if (Object.is(config[field], value)) return { changed: false, data: config }
-  return { changed: true, data: { ...config, [field]: value } }
+
+  // Dot-path: traverse into nested objects
+  const [head, ...tail] = parts
+  const child = config[head]
+  if (value === null) {
+    if (child === undefined || typeof child !== 'object' || child === null) {
+      return { changed: false, data: config }
+    }
+    const result = setConfigField(child as Record<string, unknown>, tail.join('.'), null)
+    if (!result.changed) return { changed: false, data: config }
+    return { changed: true, data: { ...config, [head]: result.data } }
+  }
+  const base = typeof child === 'object' && child !== null ? (child as Record<string, unknown>) : {}
+  const result = setConfigField(base, tail.join('.'), value)
+  if (!result.changed && head in config) return { changed: false, data: config }
+  return { changed: true, data: { ...config, [head]: result.data } }
 }

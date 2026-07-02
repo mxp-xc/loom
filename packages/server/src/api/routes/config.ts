@@ -13,7 +13,8 @@ export function createConfigRoutes(deps: RouteDeps): Hono {
     const repoManifest = loadRepoManifest(files)
     const localConfig = await readLocalConfig(deps.fs, deps.home)
     const effective = mergeConfig(repoManifest.repoConfig, localConfig as any)
-    return c.json({ effective, repo: repoManifest.repoConfig, local: localConfig })
+    const profiles = Object.keys(repoManifest.varsFiles)
+    return c.json({ effective, repo: repoManifest.repoConfig, local: localConfig, profiles })
   })
 
   app.put('/config', async (c) => {

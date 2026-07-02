@@ -300,4 +300,44 @@ describe('setConfigField', () => {
     expect(result.data.profile).toBe('default')
     expect(result.data.targets).toEqual(['codex'])
   })
+  it('sets a nested field via dot path', () => {
+    const result = setConfigField(
+      { projection: { strategy: 'link' } },
+      'projection.strategy',
+      'copy',
+    )
+    expect(result.changed).toBe(true)
+    expect(result.data).toEqual({ projection: { strategy: 'copy' } })
+  })
+  it('creates intermediate objects when setting a dot path on missing parent', () => {
+    const result = setConfigField({}, 'proxy.http', 'http://127.0.0.1:7890')
+    expect(result.changed).toBe(true)
+    expect(result.data).toEqual({ proxy: { http: 'http://127.0.0.1:7890' } })
+  })
+  it('preserves sibling keys when setting a nested field', () => {
+    const result = setConfigField({ proxy: { http: 'a', https: 'b' } }, 'proxy.http', 'c')
+    expect(result.data).toEqual({ proxy: { http: 'c', https: 'b' } })
+  })
+  it('deletes a nested field via dot path when value is null', () => {
+    const result = setConfigField({ proxy: { http: 'a', https: 'b' } }, 'proxy.http', null)
+    expect(result.changed).toBe(true)
+    expect(result.data).toEqual({ proxy: { https: 'b' } })
+  })
+  it('returns changed=false when deleting a non-existent nested field', () => {
+    const result = setConfigField({ proxy: { https: 'b' } }, 'proxy.http', null)
+    expect(result.changed).toBe(false)
+  })
+  it('returns changed=false when setting the same nested value', () => {
+    const result = setConfigField(
+      { projection: { strategy: 'link' } },
+      'projection.strategy',
+      'link',
+    )
+    expect(result.changed).toBe(false)
+  })
+  it('still handles top-level fields (no dot)', () => {
+    const result = setConfigField({ profile: 'default' }, 'active_repo', 'myrepo')
+    expect(result.changed).toBe(true)
+    expect(result.data.active_repo).toBe('myrepo')
+  })
 })

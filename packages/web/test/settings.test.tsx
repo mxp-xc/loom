@@ -24,16 +24,15 @@ describe('Settings', () => {
   it('sdot: effective tab active_repo=fixed, targets=repo', async () => {
     render(<Settings repoPath="/tmp/r" />)
     await screen.findByText('最终结果')
-    expect(document.querySelector('.sdot-cfg.fixed')).not.toBeNull()
-    expect(document.querySelector('.sdot-cfg.repo')).not.toBeNull()
+    expect(document.querySelector('.sdot2.dot-fixed')).not.toBeNull()
+    expect(document.querySelector('.sdot2.repo')).not.toBeNull()
   })
 
-  it('switching to repo tab hides fixed active_repo field', async () => {
+  it('switching to repo tab still shows active_repo as fixed', async () => {
     render(<Settings repoPath="/tmp/r" />)
     await screen.findByText('最终结果')
-    // Radix TabsTrigger 在 onMouseDown(button 0) 时触发 onValueChange
-    fireEvent.mouseDown(screen.getByText('仓库级'))
-    // 仓库级 tab 过滤掉固定本地字段 active_repo
-    expect(document.querySelector('.sdot-cfg.fixed')).toBeNull()
+    fireEvent.click(screen.getByText('仓库级'))
+    // active_repo is fixed local — dot stays fixed in all panes
+    expect(document.querySelector('.sdot2.dot-fixed')).not.toBeNull()
   })
 })
