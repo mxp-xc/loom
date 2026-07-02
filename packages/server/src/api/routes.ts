@@ -7,7 +7,7 @@ import { scanSourceMembers } from '../projection/scan.js'
 import { syncPull } from '../sync/pull.js'
 import { applyResolutions } from '../sync/pull.js'
 import { syncPush } from '../sync/push.js'
-import { installSkill } from '../remote/install.js'
+import { installSkill, isValidGitRepo } from '../remote/install.js'
 import { checkUpdates, performUpdate } from '../remote/update.js'
 import {
   loadRepoManifest,
@@ -274,10 +274,22 @@ export function registerRoutes(): Hono {
   })
 
   app.post('/update', async (c) => {
-    const { sources } = await c.req.json()
+    const { sources, repoPath } = await c.req.json()
     remoteLogger.info('check updates', { count: sources?.length ?? 0 })
-    const { git } = createNodePlatform()
+    const { git, fs } = createNodePlatform()
     const updates = await checkUpdates(sources, git)
+    // Detect corrupt/missing local caches so the UI can surface an update
+    // button to repair them (scan only globs files, it won't fix a broken .git).
+    if (repoPath) {
+      for (const u of updates) {
+        const sourceId = deriveRepoId(u.source.url)
+        const cacheDir = join(repoPath, 'remote-cache', sourceId)
+        if (!(await isValidGitRepo(fs, cacheDir))) {
+          ;(u as any).hasUpdate = true
+          ;(u as any).needsRepair = true
+        }
+      }
+    }
     return c.json({ updates })
   })
 
@@ -295,6 +307,19 @@ export function registerRoutes(): Hono {
         body.sourceId,
         body.oldMembers,
       )
+      // Persist the new pinned_commit (and ref if it changed) back to skills.yaml
+      try {
+        const filePath = join(body.repoPath, 'skills.yaml')
+        const data = (await readYaml(fs, filePath)) ?? { sources: [], skills: [] }
+        const source = (data.sources ?? []).find((s: any) => s.url === body.source?.url)
+        if (source) {
+          if (body.newRef) source.ref = body.newRef
+          source.pinned_commit = res.pinned_commit
+          await writeYaml(fs, filePath, data)
+        }
+      } catch {
+        /* best-effort: cache is updated even if yaml write fails */
+      }
       remoteLogger.info('update completed', { source: body.source?.url, commit: res.pinned_commit })
       return c.json(res)
     } catch (e) {
@@ -315,8 +340,8 @@ export function registerRoutes(): Hono {
   })
 
   app.get('/manifest', async (c) => {
-    const repoPath = c.req.query('repoPath')!
-    const { fs } = createNodePlatform()
+   const repoPath = c.req.query('repoPath')!
+    const { fs, git } = createNodePlatform()
     const files = await readRepoFiles(fs, repoPath)
     const repoManifest = loadRepoManifest(files)
     const home = process.env.HOME || process.env.USERPROFILE || ''
@@ -326,8 +351,18 @@ export function registerRoutes(): Hono {
       if (src.members && src.members.length > 0) continue
       const repoId = deriveRepoId(src.url)
       const cacheDir = join(repoPath, 'remote-cache', repoId)
-      if (!(await fs.exists(cacheDir))) continue
-      try {
+      // A source may arrive via sync/pull without a local cache clone.
+      // Auto-install so member discovery works on every machine.
+      if (!(await fs.exists(cacheDir))) {
+        try {
+          await installSkill(git, fs, src.url, src.ref, repoPath, repoId)
+        } catch (e) {
+          console.error('auto-install failed for source', src.url, e)
+          continue
+        }
+      }
+     if (!(await fs.exists(cacheDir))) continue
+     try {
         const scanned = await scanSourceMembers(fs, cacheDir, { url: src.url, ref: src.ref })
         if (scanned.length > 0) {
           src.members = scanned.map((m) => ({ name: m.name, targets: src.targets ?? [] }))
@@ -486,6 +521,57 @@ export function registerRoutes(): Hono {
       return c.json({ members })
     } catch (e) {
       return c.json({ ok: false, error: 'scan_failed', message: String(e?.message ?? e) })
+    }
+  })
+
+  // Force re-install a source's remote-cache and re-discover its members.
+  // Used by the source row "scan" menu to refresh members after a pull or
+  // when the cache is missing/stale.
+ app.post('/sources/refresh', async (c) => {
+   try {
+     const { repoPath, url, ref } = await c.req.json()
+     const { git, fs } = createNodePlatform()
+     const sourceId = deriveRepoId(url)
+      // Pure-local scan: glob the existing cache for SKILL.md without hitting
+      // the network. Only clones as a fallback when the cache directory doesn't
+      // exist yet (e.g. user deleted it). Corrupt caches (.git missing) are
+      // left as-is and repaired via the "update" button instead.
+      const cacheDir = join(repoPath, 'remote-cache', sourceId)
+      if (!(await fs.exists(cacheDir))) {
+        await installSkill(git, fs, url, ref ?? 'main', repoPath, sourceId)
+      }
+     const scanned = await scanSourceMembers(fs, cacheDir, { url, ref: ref ?? 'main' })
+     return c.json({
+       ok: true,
+       members: scanned.map((m) => ({ name: m.name, path: m.path })),
+     })
+   } catch (e) {
+     return c.json({ ok: false, error: 'refresh_failed', message: String(e?.message ?? e) })
+   }
+ })
+
+  // Write the selected member list for a source into skills.yaml, replacing
+  // whatever was there before. Called after the user picks members in the
+  // scan popup. Preserves existing per-member targets/enabled where possible.
+  app.post('/sources/members', async (c) => {
+    try {
+      const { repoPath, url, members } = await c.req.json()
+      if (!url || typeof url !== 'string') return c.json({ ok: false, error: 'invalid_url' }, 400)
+      const memberNames: string[] = Array.isArray(members) ? members : []
+      const { fs } = createNodePlatform()
+      const filePath = join(repoPath, 'skills.yaml')
+      const data = (await readYaml(fs, filePath)) ?? { sources: [], skills: [] }
+      const source = (data.sources ?? []).find((s: any) => s.url === url)
+      if (!source)
+        return c.json({ ok: false, error: 'not_found', message: `Source ${url} not found` })
+      // Keep existing member config (targets/enabled) for names that remain;
+      // drop members not in the new selection.
+      const prev = new Map<string, any>((source.members ?? []).map((m: any) => [m.name, m]))
+      source.members = memberNames.map((name) => prev.get(name) ?? { name })
+      await writeYaml(fs, filePath, data)
+      return c.json({ ok: true })
+    } catch (e) {
+      return c.json({ ok: false, error: 'write_failed', message: String(e?.message ?? e) })
     }
   })
 

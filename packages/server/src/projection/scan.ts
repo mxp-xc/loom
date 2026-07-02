@@ -19,7 +19,9 @@ export async function scanSourceMembers(
   const pattern = src.scan ?? '**/SKILL.md'
   void fs
   const matches = await glob(pattern, { cwd: repoPath, ignore: DEFAULT_IGNORE, onlyFiles: true })
-  return matches.map((m) => ({ name: basename(dirname(m)), path: join(repoPath, dirname(m)) }))
+  return matches
+    .map((m) => ({ name: basename(dirname(m)), path: join(repoPath, dirname(m)) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export function resolveFullLinks(

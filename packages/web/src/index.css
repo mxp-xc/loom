@@ -294,7 +294,7 @@ textarea:not(.cfg-textarea):focus {
 /* skill row */
 .skill {
   display: grid;
-  grid-template-columns: 12px 1fr auto 90px;
+  grid-template-columns: 12px minmax(0, 1fr) auto 90px 28px;
   align-items: center;
   gap: 12px;
   padding: 8px 14px;

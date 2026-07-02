@@ -33,7 +33,8 @@ export const api = {
     post('/sync/apply', { repoPath, resolutions }).then(json),
   syncPush: (repoPath: string) => post('/sync/push', { repoPath }).then(json),
   install: (body: unknown) => post('/install', body).then(json),
-  update: (sources: unknown[]) => post('/update', { sources }).then(json),
+  update: (repoPath: string, sources: unknown[]) =>
+    post('/update', { repoPath, sources }).then(json),
   performUpdate: (body: unknown) => post('/update/perform', body).then(json),
   getConfig: (repoPath: string) =>
     fetch(`${base}/config?repoPath=${encodeURIComponent(repoPath)}`).then(json),
@@ -111,11 +112,24 @@ export const api = {
     }>,
   setSyncRemote: (body: { repoPath: string; remoteUrl: string }) =>
     post('/sync/remote', body).then(json),
-  scanSource: (url: string) =>
-    post('/sources/scan', { url }).then(json) as Promise<{
-      members: Array<{ name: string; description: string; path: string; installed: boolean }>
-    }>,
-  updateMcpTargets: (body: { repoPath: string; id: string; targets: string[] }) =>
+ scanSource: (url: string) =>
+   post('/sources/scan', { url }).then(json) as Promise<{
+     members: Array<{ name: string; description: string; path: string; installed: boolean }>
+   }>,
+refreshSource: (repoPath: string, url: string, ref: string) =>
+   post('/sources/refresh', { repoPath, url, ref }).then(json) as Promise<{
+     ok: boolean
+     members?: Array<{ name: string; path: string }>
+     error?: string
+     message?: string
+   }>,
+ setSourceMembers: (body: { repoPath: string; url: string; members: string[] }) =>
+   post('/sources/members', body).then(json) as Promise<{
+     ok: boolean
+     error?: string
+     message?: string
+   }>,
+ updateMcpTargets: (body: { repoPath: string; id: string; targets: string[] }) =>
     post('/mcp/targets', body).then(json),
   updateSkillTargets: (body: {
     repoPath: string
