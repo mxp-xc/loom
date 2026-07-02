@@ -189,7 +189,11 @@ export function registerRoutes(): Hono {
     if (res.ok) {
       apiLogger.info('projection completed', { repoPath })
     } else {
-      apiLogger.error('projection failed', { repoPath, step: res.failure.failedStep, err: res.failure.originalError })
+      apiLogger.error('projection failed', {
+        repoPath,
+        step: res.failure.failedStep,
+        err: res.failure.originalError,
+      })
     }
     return c.json(res)
   })
@@ -219,7 +223,10 @@ export function registerRoutes(): Hono {
   app.post('/sync/apply', async (c) => {
     try {
       const { repoPath, resolutions } = await c.req.json()
-      syncLogger.info('apply resolutions', { repoPath, count: Object.keys(resolutions ?? {}).length })
+      syncLogger.info('apply resolutions', {
+        repoPath,
+        count: Object.keys(resolutions ?? {}).length,
+      })
       const { git, fs } = createNodePlatform()
       await applyResolutions(repoPath, git, fs, resolutions, {
         error: (o, m) => syncLogger.error(m, o),
@@ -295,7 +302,11 @@ export function registerRoutes(): Hono {
 
   app.post('/update/perform', async (c) => {
     const body = await c.req.json()
-    remoteLogger.info('perform update', { source: body.source?.url, newRef: body.newRef, repoPath: body.repoPath })
+    remoteLogger.info('perform update', {
+      source: body.source?.url,
+      newRef: body.newRef,
+      repoPath: body.repoPath,
+    })
     const { git, fs } = createNodePlatform()
     try {
       const res = await performUpdate(
@@ -340,7 +351,7 @@ export function registerRoutes(): Hono {
   })
 
   app.get('/manifest', async (c) => {
-   const repoPath = c.req.query('repoPath')!
+    const repoPath = c.req.query('repoPath')!
     const { fs, git } = createNodePlatform()
     const files = await readRepoFiles(fs, repoPath)
     const repoManifest = loadRepoManifest(files)
@@ -361,8 +372,8 @@ export function registerRoutes(): Hono {
           continue
         }
       }
-     if (!(await fs.exists(cacheDir))) continue
-     try {
+      if (!(await fs.exists(cacheDir))) continue
+      try {
         const scanned = await scanSourceMembers(fs, cacheDir, { url: src.url, ref: src.ref })
         if (scanned.length > 0) {
           src.members = scanned.map((m) => ({ name: m.name, targets: src.targets ?? [] }))
@@ -527,11 +538,11 @@ export function registerRoutes(): Hono {
   // Force re-install a source's remote-cache and re-discover its members.
   // Used by the source row "scan" menu to refresh members after a pull or
   // when the cache is missing/stale.
- app.post('/sources/refresh', async (c) => {
-   try {
-     const { repoPath, url, ref } = await c.req.json()
-     const { git, fs } = createNodePlatform()
-     const sourceId = deriveRepoId(url)
+  app.post('/sources/refresh', async (c) => {
+    try {
+      const { repoPath, url, ref } = await c.req.json()
+      const { git, fs } = createNodePlatform()
+      const sourceId = deriveRepoId(url)
       // Pure-local scan: glob the existing cache for SKILL.md without hitting
       // the network. Only clones as a fallback when the cache directory doesn't
       // exist yet (e.g. user deleted it). Corrupt caches (.git missing) are
@@ -540,15 +551,15 @@ export function registerRoutes(): Hono {
       if (!(await fs.exists(cacheDir))) {
         await installSkill(git, fs, url, ref ?? 'main', repoPath, sourceId)
       }
-     const scanned = await scanSourceMembers(fs, cacheDir, { url, ref: ref ?? 'main' })
-     return c.json({
-       ok: true,
-       members: scanned.map((m) => ({ name: m.name, path: m.path })),
-     })
-   } catch (e) {
-     return c.json({ ok: false, error: 'refresh_failed', message: String(e?.message ?? e) })
-   }
- })
+      const scanned = await scanSourceMembers(fs, cacheDir, { url, ref: ref ?? 'main' })
+      return c.json({
+        ok: true,
+        members: scanned.map((m) => ({ name: m.name, path: m.path })),
+      })
+    } catch (e) {
+      return c.json({ ok: false, error: 'refresh_failed', message: String(e?.message ?? e) })
+    }
+  })
 
   // Write the selected member list for a source into skills.yaml, replacing
   // whatever was there before. Called after the user picks members in the

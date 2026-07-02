@@ -13,10 +13,16 @@
     "build": "pnpm -r run build",
     "build:web": "pnpm --filter @loom/web build",
     "format": "prettier --write 'packages/**/*.{ts,tsx,css,json}' '*.{json,md}' --ignore-path .gitignore",
-    "format:check": "prettier --check 'packages/**/*.{ts,tsx,css,json}' '*.{json,md}' --ignore-path .gitignore"
+    "format:check": "prettier --check 'packages/**/*.{ts,tsx,css,json}' '*.{json,md}' --ignore-path .gitignore",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,css,json,md}": "prettier --check --ignore-path .gitignore"
   },
   "devDependencies": {
     "concurrently": "^10.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
     "prettier": "^3.9.4",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "typescript": "^5.9.0",

@@ -99,7 +99,6 @@ function createLoggerInternal(opts: LoggerOptions, core?: LoggerCore): Logger {
   // Note: cleanup is NOT auto-run on createLogger to avoid filesystem side
   // effects on module import. Call cleanupOldLogs() explicitly on startup.
 
-
   function shouldLog(lvl: LogLevel): boolean {
     return LEVEL_ORDER[lvl] >= minLevel
   }
