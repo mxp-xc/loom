@@ -3,6 +3,7 @@ import { join, dirname, basename as pathBasename, isAbsolute } from 'node:path'
 import { glob } from 'tinyglobby'
 import { executeProjection } from '../../projection/executor.js'
 import { scanSourceMembers } from '../../projection/scan.js'
+import { mergeLocalSkills } from '../../projection/scan.js'
 import {
   loadRepoManifest,
   mergeConfig,
@@ -48,6 +49,11 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
     if (!mf) {
       const files = await readRepoFiles(deps.fs, repoPath)
       const repoManifest = loadRepoManifest(files)
+      repoManifest.skills.skills = await mergeLocalSkills(
+        deps.fs,
+        repoPath,
+        repoManifest.skills.skills,
+      )
       const localConfig = await readLocalConfig(deps.fs, deps.home)
       mf = buildManifest(repoManifest, localConfig as any)
     }
@@ -106,6 +112,13 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
         /* scan failure: leave members unset */
       }
     }
+    // Auto-discover repo-local skills under assets/skills so they show up
+    // even when not explicitly listed in skills.yaml.
+    repoManifest.skills.skills = await mergeLocalSkills(
+      deps.fs,
+      repoPath,
+      repoManifest.skills.skills,
+    )
     const manifest = buildManifest(repoManifest, localConfig as any)
     return c.json(manifest)
   })
@@ -139,11 +152,14 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
         skillDir = resolveSkillDir(localPath, repoPath)
       } else {
         // Try ~/.agents/skills/<skillId> first, then fall back to repo assets
-        const agentsDir = join(deps.home, '.agents', 'skills', skillId)
-        if (await deps.fs.exists(agentsDir)) {
-          skillDir = agentsDir
+        // Repo assets/skills is the canonical home for local skills;
+        // ~/.agents/skills is a legacy fallback.
+        const assetsDir = join(repoPath, 'assets', 'skills', skillId)
+        if (await deps.fs.exists(assetsDir)) {
+          skillDir = assetsDir
         } else {
-          skillDir = join(repoPath, 'assets', 'skills', skillId)
+          const agentsDir = join(deps.home, '.agents', 'skills', skillId)
+          if (await deps.fs.exists(agentsDir)) skillDir = agentsDir
         }
       }
       if (skillDir) {
@@ -176,11 +192,14 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
         skillDir = resolveSkillDir(localPath, repoPath)
       } else {
         // Try ~/.agents/skills/<skillId> first, then fall back to repo assets
-        const agentsDir = join(deps.home, '.agents', 'skills', skillId)
-        if (await deps.fs.exists(agentsDir)) {
-          skillDir = agentsDir
+        // Repo assets/skills is the canonical home for local skills;
+        // ~/.agents/skills is a legacy fallback.
+        const assetsDir = join(repoPath, 'assets', 'skills', skillId)
+        if (await deps.fs.exists(assetsDir)) {
+          skillDir = assetsDir
         } else {
-          skillDir = join(repoPath, 'assets', 'skills', skillId)
+          const agentsDir = join(deps.home, '.agents', 'skills', skillId)
+          if (await deps.fs.exists(agentsDir)) skillDir = agentsDir
         }
       }
       if (!skillDir) return c.json({ ok: false, error: 'invalid_path' })

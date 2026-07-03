@@ -73,8 +73,8 @@ export const api = {
 
   addLocalSkill: (body: { repoPath: string; skill: { id: string; path?: string } }) =>
     post('/skills/local', body).then(json),
-  scanLocalSkills: (dir: string) =>
-    post('/skills/local/scan', { dir }).then(json) as Promise<{
+  scanLocalSkills: (dir: string, repoPath: string) =>
+    post('/skills/local/scan', { dir, repoPath }).then(json) as Promise<{
       ok: boolean
       skills: Array<{ name: string; path: string }>
       error?: string
@@ -85,6 +85,10 @@ export const api = {
     skills: Array<{ name: string; path: string }>
     mode: 'move' | 'ref'
   }) => post('/skills/local/import', body).then(json) as Promise<{ ok: boolean; count?: number }>,
+  writeLocalSkills: (body: {
+    repoPath: string
+    skills: Array<{ name: string; files: Array<{ path: string; content: string }> }>
+  }) => post('/skills/local/write', body).then(json) as Promise<{ ok: boolean; count?: number }>,
   addSource: (body: { repoPath: string; url: string; ref: string }) =>
     post('/sources', body).then(json),
   addMcpServer: (body: {

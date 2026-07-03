@@ -1,7 +1,7 @@
 import { glob } from 'tinyglobby'
 import { join, dirname, basename } from 'node:path'
 import type { IFileSystem } from '../ports/fs.js'
-import type { SkillSource, AgentId, Manifest } from '@loom/core'
+import type { SkillSource, AgentId, Manifest, LocalSkill } from '@loom/core'
 import { planProjection, deriveRepoId, type ProjectionPlan, type LinkPlan } from '@loom/core'
 
 const DEFAULT_IGNORE = ['**/.git/**', '**/node_modules/**', '**/.cache/**']
@@ -22,6 +22,32 @@ export async function scanSourceMembers(
   return matches
     .map((m) => ({ name: basename(dirname(m)), path: join(repoPath, dirname(m)) }))
     .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+// Auto-discover repo-local skills under <repo>/assets/skills and merge them
+// into the manifest's local skill list. Skills already registered in
+// skills.yaml (with custom targets/enabled) are preserved as-is; newly
+// discovered ones are appended as pathless entries that projection resolves
+// to assets/skills/<id>.
+export async function mergeLocalSkills(
+  fs: IFileSystem,
+  repoPath: string,
+  existing: LocalSkill[],
+): Promise<LocalSkill[]> {
+  const dir = join(repoPath, 'assets', 'skills')
+  if (!(await fs.exists(dir))) return existing
+  let matches: string[] = []
+  try {
+    matches = await glob('**/SKILL.md', { cwd: dir, ignore: DEFAULT_IGNORE, onlyFiles: true })
+  } catch {
+    return existing
+  }
+  const have = new Set(existing.map((s) => s.id))
+  const out = [...existing]
+  for (const name of [...new Set(matches.map((m) => basename(dirname(m))))].sort()) {
+    if (!have.has(name)) out.push({ id: name })
+  }
+  return out
 }
 
 export function resolveFullLinks(

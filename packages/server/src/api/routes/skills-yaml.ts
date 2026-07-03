@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { join } from 'node:path'
+import { join, isAbsolute, dirname } from 'node:path'
 import {
   deriveRepoId,
   addLocalSkill,
@@ -40,11 +40,14 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/skills/local/scan', async (c) => {
     try {
-      const { dir } = await c.req.json()
+      const { dir, repoPath } = await c.req.json()
       if (!dir || typeof dir !== 'string') return c.json({ ok: false, error: 'invalid_dir' }, 400)
       const { glob } = await import('tinyglobby')
       const { basename, dirname } = await import('node:path')
-      const resolvedDir = dir.replace(/^~/, deps.home)
+      let resolvedDir = dir.replace(/^~/, deps.home)
+      // Relative paths (e.g. "assets/skills") resolve against the repo root,
+      // so the default scan target lands inside the managed repo.
+      if (!isAbsolute(resolvedDir) && repoPath) resolvedDir = join(repoPath, resolvedDir)
       if (!(await deps.fs.exists(resolvedDir))) {
         return c.json({ ok: true, skills: [] })
       }
@@ -70,28 +73,74 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     try {
       const { repoPath, skills, mode } = await c.req.json()
       if (!Array.isArray(skills)) return c.json({ ok: false, error: 'invalid_skills' }, 400)
-      const agentsSkillsDir = join(deps.home, '.agents', 'skills')
+      // Local skills canonical home is <repo>/assets/skills — this is where
+      // projection (resolveSkillSrc) looks for them, and it git-syncs.
+      const assetsSkillsDir = join(repoPath, 'assets', 'skills')
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
 
       for (const skill of skills) {
         if (mode === 'move') {
-          const dest = join(agentsSkillsDir, skill.name)
+          const dest = join(assetsSkillsDir, skill.name)
           if (await deps.fs.exists(dest)) {
             return c.json({
               ok: false,
               error: 'already_exists',
-              message: `Skill \`${skill.name}\` already exists in ~/.agents/skills`,
+              message: `Skill \`${skill.name}\` already exists in assets/skills`,
             })
           }
+          await deps.fs.mkdir(assetsSkillsDir, true)
           await deps.fs.move(skill.path, dest)
           const result = addLocalSkill(data, { id: skill.name })
           if (result.changed) Object.assign(data, result.data)
         } else {
-          // ref mode: register with path as-is
+          // ref mode: register with external path as-is
           const result = addLocalSkill(data, { id: skill.name, path: skill.path })
           if (result.changed) Object.assign(data, result.data)
         }
+      }
+      await writeYaml(deps.fs, filePath, data)
+      return c.json({ ok: true, count: skills.length })
+    } catch (e) {
+      return c.json({
+        ok: false,
+        error: 'import_failed',
+        message: String((e as Error)?.message ?? e),
+      })
+    }
+  })
+
+  // Import local skills by writing their file contents directly into
+  // <repo>/assets/skills/<name>/. Used by the folder picker flow, which
+  // reads files client-side (the web File API hides absolute paths) and
+  // ships the content here so it lands in the git-synced repo.
+  app.post('/skills/local/write', async (c) => {
+    try {
+      const { repoPath, skills } = await c.req.json()
+      if (!Array.isArray(skills)) return c.json({ ok: false, error: 'invalid_skills' }, 400)
+      const assetsSkillsDir = join(repoPath, 'assets', 'skills')
+      const filePath = join(repoPath, 'skills.yaml')
+      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
+
+      for (const skill of skills) {
+        const dest = join(assetsSkillsDir, skill.name)
+        if (await deps.fs.exists(dest)) {
+          return c.json({
+            ok: false,
+            error: 'already_exists',
+            message: `Skill \`${skill.name}\` already exists in assets/skills`,
+          })
+        }
+        await deps.fs.mkdir(dest, true)
+        for (const f of Array.isArray(skill.files) ? skill.files : []) {
+          const rel = String(f.path).replace(/^[/\\]+/, '')
+          if (!rel || rel.includes('..')) continue
+          const target = join(dest, rel)
+          await deps.fs.mkdir(dirname(target), true)
+          await deps.fs.writeFile(target, String(f.content ?? ''))
+        }
+        const result = addLocalSkill(data, { id: skill.name })
+        if (result.changed) Object.assign(data, result.data)
       }
       await writeYaml(deps.fs, filePath, data)
       return c.json({ ok: true, count: skills.length })
@@ -204,8 +253,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       if (!id || typeof id !== 'string') return c.json({ ok: false, error: 'invalid_id' }, 400)
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
+      // Pathless skills live in <repo>/assets/skills/<id>; removing the yaml
+      // entry should also delete that directory. ref skills keep an external
+      // path and their files are left untouched.
+      const existing = data.skills.find((s: { id: string; path?: string }) => s.id === id)
       const result = removeLocalSkill(data, id)
       if (result.changed) await writeYaml(deps.fs, filePath, result.data)
+      if (!existing?.path) {
+        const dir = join(repoPath, 'assets', 'skills', id)
+        if (await deps.fs.exists(dir)) await deps.fs.removeDir(dir)
+      }
       return c.json({ ok: true })
     } catch (e) {
       return c.json({

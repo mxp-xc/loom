@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { inputStyle } from '@/lib/styles'
-import { Search, FolderOpen, RefreshCw } from 'lucide-react'
+import { Search, FolderInput, RefreshCw } from 'lucide-react'
 import { Segmented } from './Segmented'
 import type { ScanMember, LocalScanResult } from './types'
 
@@ -14,11 +14,10 @@ interface Props {
   onClose: () => void
 }
 
-const DEFAULT_LOCAL_DIR = '~/.agents/skills/'
+// Repo-relative: the server resolves this against repoPath. assets/skills is
+// the canonical home for local skills (git-synced, projection reads it).
+const DEFAULT_LOCAL_DIR = 'assets/skills'
 const mono = "'JetBrains Mono', monospace"
-
-// Strip trailing slashes so '~/.agents/skills/' and '~/.agents/skills' match.
-const norm = (p: string) => p.trim().replace(/[\\/]+$/, '')
 
 const errBox: React.CSSProperties = {
   marginBottom: 12,
@@ -97,7 +96,17 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
   const [localSkills, setLocalSkills] = useState<LocalScanResult[]>([])
   const [localSelected, setLocalSelected] = useState<Set<string>>(new Set())
   const [localSearch, setLocalSearch] = useState('')
-  const [importMode, setImportMode] = useState<'move' | 'ref'>('move')
+  // When true, the listed skills came from an external folder picked via the
+  // directory chooser (webkitdirectory). These have no server-side path, so
+  // import ships their file contents to /skills/local/write. When false, the
+  // listed skills already live under <repo>/assets/skills and just need a ref
+  // entry in skills.yaml.
+  const [pickedExternal, setPickedExternal] = useState(false)
+  // Picked skill files keyed by skill name, retained until import completes.
+  const [pickedFiles, setPickedFiles] = useState<
+    Map<string, Array<{ path: string; content: string }>>
+  >(new Map())
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Source tab
   const [srcUrl, setSrcUrl] = useState('')
@@ -112,33 +121,88 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
   const [srcSelected, setSrcSelected] = useState<Set<string>>(new Set())
   const [srcSearch, setSrcSearch] = useState('')
 
-  const isDefaultDir = norm(localPath) === norm(DEFAULT_LOCAL_DIR)
-
-  const scanLocal = useCallback(async (dir: string) => {
-    const d = dir.trim()
-    if (!d) return
-    setLocalScanning(true)
-    setAddErr(null)
-    try {
-      const res = await api.scanLocalSkills(d)
-      if (res.ok) {
-        const skills = res.skills ?? []
-        setLocalSkills(skills)
-        // Pre-select everything discovered so the bulk-import button is
-        // immediately useful; the user can untick what they don't want.
-        setLocalSelected(new Set(skills.map((s) => s.name)))
-      } else {
+  const scanLocal = useCallback(
+    async (dir: string) => {
+      const d = dir.trim()
+      if (!d) return
+      setLocalScanning(true)
+      setAddErr(null)
+      try {
+        const res = await api.scanLocalSkills(d, repoPath)
+        if (res.ok) {
+          const skills = res.skills ?? []
+          setLocalSkills(skills)
+          // Pre-select everything discovered so the bulk-import button is
+          // immediately useful; the user can untick what they don't want.
+          setLocalSelected(new Set(skills.map((s) => s.name)))
+        } else {
+          setLocalSkills([])
+          setLocalSelected(new Set())
+          setAddErr(res.message || res.error || '扫描失败')
+        }
+      } catch (e) {
         setLocalSkills([])
         setLocalSelected(new Set())
-        setAddErr(res.message || res.error || '扫描失败')
+        setAddErr(e instanceof Error ? e.message : String(e))
+      } finally {
+        setLocalScanning(false)
       }
-    } catch (e) {
-      setLocalSkills([])
-      setLocalSelected(new Set())
-      setAddErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLocalScanning(false)
+    },
+    [repoPath],
+  )
+
+  // Browse via the native directory picker (webkitdirectory). The browser
+  // only exposes file contents + relative paths, so we scan client-side for
+  // SKILL.md and remember each skill's files. Import then writes them into
+  // <repo>/assets/skills through /skills/local/write.
+  const handleBrowsePick = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    // Group files by the SKILL.md's parent directory name — same shape the
+    // server-side scan produces (name = basename(dirname(SKILL.md))).
+    const bySkill = new Map<string, Array<{ path: string; content: string }>>()
+    const readText = async (f: File) => {
+      try {
+        return await f.text()
+      } catch {
+        return null
+      }
     }
+    for (const f of Array.from(files)) {
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? f.name
+      const parts = rel.split('/')
+      // parts[0] is the chosen root dir name; drop it so the stored path is
+      // relative to the skill folder itself.
+      const inSkill = parts.slice(1).join('/')
+      if (!inSkill || !inSkill.endsWith('SKILL.md')) continue
+      const skillName = parts.length > 2 ? parts[parts.length - 2] : parts[0]
+      const content = await readText(f)
+      if (content === null) continue
+      bySkill.set(skillName, [{ path: 'SKILL.md', content }])
+    }
+    // Also collect sibling files next to each discovered SKILL.md so a
+    // multi-file skill (references, assets) survives the import.
+    for (const f of Array.from(files)) {
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? f.name
+      const parts = rel.split('/')
+      const inSkill = parts.slice(1).join('/')
+      if (!inSkill || inSkill.endsWith('SKILL.md')) continue
+      const skillName = parts.length > 2 ? parts[1] : parts[0]
+      if (!bySkill.has(skillName)) continue
+      const content = await readText(f)
+      if (content === null) continue
+      const arr = bySkill.get(skillName)!
+      const skillRel = parts.slice(2).join('/')
+      arr.push({ path: skillRel || inSkill, content })
+    }
+    const skills: LocalScanResult[] = Array.from(bySkill.keys())
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ name, path: name }))
+    setLocalSkills(skills)
+    setLocalSelected(new Set(skills.map((s) => s.name)))
+    setPickedFiles(bySkill)
+    setPickedExternal(true)
+    setLocalPath('(外部目录)')
+    setAddErr(null)
   }, [])
 
   // Reset every field and kick off the initial local scan each time the
@@ -152,7 +216,8 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
     setLocalSearch('')
     setLocalSkills([])
     setLocalSelected(new Set())
-    setImportMode('move')
+    setPickedExternal(false)
+    setPickedFiles(new Map())
     setSrcUrl('')
     setSrcType('branch')
     setSrcRef('')
@@ -225,21 +290,30 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
       setAddErr('未选择 skill')
       return
     }
-    // Skills already living in the default dir only need to be registered.
-    const mode = isDefaultDir ? 'ref' : importMode
     setAddBusy(true)
     setAddErr(null)
     try {
-      const res = await api.importLocalSkills({
-        repoPath,
-        skills: selected.map((s) => ({ name: s.name, path: s.path })),
-        mode,
-      })
+      let res: { ok: boolean; count?: number; message?: string; error?: string }
+      if (pickedExternal) {
+        // External folder: write file contents into <repo>/assets/skills.
+        const skillsWithFiles = selected.map((s) => ({
+          name: s.name,
+          files: pickedFiles.get(s.name) ?? [],
+        }))
+        res = await api.writeLocalSkills({ repoPath, skills: skillsWithFiles })
+      } else {
+        // Already under <repo>/assets/skills — just register a ref entry.
+        res = await api.importLocalSkills({
+          repoPath,
+          skills: selected.map((s) => ({ name: s.name, path: s.path })),
+          mode: 'ref',
+        })
+      }
       if (res.ok) {
         onClose()
         reload()
       } else {
-        setAddErr('导入失败')
+        setAddErr(res.message || res.error || '导入失败')
       }
     } catch (e) {
       setAddErr(e instanceof Error ? e.message : String(e))
@@ -306,25 +380,56 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
 
       {addTab === 'local' ? (
         <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            // @ts-expect-error webkitdirectory is a non-standard DOM attribute
+            webkitdirectory=""
+            directory=""
+            multiple
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              void handleBrowsePick(e.target.files)
+              e.target.value = ''
+            }}
+          />
           <div style={{ marginBottom: 14 }}>
             <span className="label">path</span>
-            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'stretch' }}>
               <input
                 value={localPath}
-                onChange={(e) => setLocalPath(e.target.value)}
+                onChange={(e) => {
+                  setLocalPath(e.target.value)
+                  setPickedExternal(false)
+                }}
                 placeholder={DEFAULT_LOCAL_DIR}
                 style={{ ...inputStyle, marginTop: 0, flex: 1 }}
               />
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => scanLocal(localPath)}
-                disabled={localScanning}
-                title="浏览 / 重新扫描"
+                onClick={() => fileInputRef.current?.click()}
+                title="选择外部目录导入"
               >
-                <FolderOpen className="h-3.5 w-3.5" />
+                <FolderInput className="h-3.5 w-3.5" />
                 Browse
               </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setPickedExternal(false)
+                  void scanLocal(localPath)
+                }}
+                disabled={localScanning || pickedExternal}
+                title="重新扫描当前路径"
+              >
+                <RefreshCw className={localScanning ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
+              </Button>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+              默认扫描 <code style={{ fontFamily: mono }}>assets/skills</code>(仓库内);点 Browse
+              从外部目录导入并写入仓库。
             </div>
           </div>
 
@@ -365,58 +470,6 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
               })
             )}
           </div>
-
-          {!isDefaultDir && localSkills.length > 0 && (
-            <div style={{ marginBottom: 14 }}>
-              <div className="label" style={{ marginBottom: 6 }}>
-                import mode
-              </div>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  cursor: 'pointer',
-                  fontFamily: mono,
-                  fontSize: 12,
-                }}
-              >
-                <input
-                  type="radio"
-                  name="importMode"
-                  checked={importMode === 'move'}
-                  onChange={() => setImportMode('move')}
-                />
-                <span>移动到 ~/.agents/skills (推荐)</span>
-              </label>
-              <div
-                style={{ fontSize: 11, color: 'var(--muted)', paddingLeft: 24, marginBottom: 6 }}
-              >
-                移动目录,git 同步,跨机器可用
-              </div>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  cursor: 'pointer',
-                  fontFamily: mono,
-                  fontSize: 12,
-                }}
-              >
-                <input
-                  type="radio"
-                  name="importMode"
-                  checked={importMode === 'ref'}
-                  onChange={() => setImportMode('ref')}
-                />
-                <span>仅引用登记</span>
-              </label>
-              <div style={{ fontSize: 11, color: 'var(--muted)', paddingLeft: 24 }}>
-                不移动,在 yaml 登记路径,其他机器可能没有
-              </div>
-            </div>
-          )}
 
           <Button
             variant="primary"

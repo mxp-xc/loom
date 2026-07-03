@@ -110,6 +110,10 @@ export class NodeFileSystem implements IFileSystem {
     await fsMkdir(dirname(dest), { recursive: true })
     await rename(src, dest)
   }
+
+  async removeDir(path: string): Promise<void> {
+    await rm(path, { recursive: true, force: true })
+  }
 }
 
 function resolveAbs(p: string): string {

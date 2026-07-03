@@ -253,27 +253,37 @@ export default function SkillSourceList({
               )}
               <span className="gacts" onClick={(e) => e.stopPropagation()}>
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   onClick={() => handleCheck(src)}
                   disabled={checking === src.url}
+                  title="检查更新"
                 >
                   <RefreshCw className="h-3 w-3" />
                   {checking === src.url ? '...' : 'Check'}
                 </Button>
                 {updates[src.url] && (
                   <Button
-                    variant="ghost"
+                    variant="secondary"
                     size="sm"
                     onClick={() => handlePerformUpdate(src)}
                     disabled={updating === src.url}
-                    style={{ color: 'var(--warn)' }}
+                    style={{
+                      color: 'var(--warn)',
+                      borderColor: 'color-mix(in srgb, var(--warn) 40%, transparent)',
+                    }}
+                    title="更新到最新版本"
                   >
                     <RefreshCw className="h-3 w-3" />
                     {updating === src.url ? '...' : 'Update'}
                   </Button>
                 )}
-                <Button variant="ghost" size="sm" onClick={() => onOpenEdit(src)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onOpenEdit(src)}
+                  title="编辑 source"
+                >
                   <Pencil className="h-3 w-3" />
                   Edit
                 </Button>
@@ -281,6 +291,7 @@ export default function SkillSourceList({
                   variant="ghost"
                   size="sm"
                   onClick={() => setMenuOpen(menuOpen === src.url ? null : src.url)}
+                  title="更多操作"
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" />
                 </Button>
