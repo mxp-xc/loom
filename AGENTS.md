@@ -8,20 +8,20 @@ Loom 是一个 code agent 周边设施管理工具。配置一份 Skills/MCP/Con
 
 - 前端: React 18 + Vite + Tailwind CSS v4 + Radix UI,默认端口 5173
 - 后端: Hono,默认端口 3000(可通过 `LOOM_PORT` 环境变量配置)
-- Monorepo: pnpm workspaces,`packages/web` + `packages/server` + `packages/core`(共享库)
+- Monorepo: bun workspaces,`packages/web` + `packages/server` + `packages/core`(共享库)
 - 全局配置: `~/.loom/`
 
 ## 开发命令
 
 ```bash
-pnpm dev          # 启动前后端(热加载)
-pnpm dev:api      # 仅后端
-pnpm dev:web      # 启动前后端(web 优先,与 dev 相同)
-pnpm build        # 构建
-pnpm test         # 运行测试
+bun dev           # 启动前后端(热加载)
+bun dev:api       # 仅后端
+bun dev:web       # 启动前后端(web 优先,与 dev 相同)
+bun build         # 构建
+bun test          # 运行测试
 ```
 
-仅前端: `pnpm --filter @loom/web dev`
+仅前端: `bun --filter @loom/web dev`
 
 ## 文档
 
@@ -32,4 +32,4 @@ pnpm test         # 运行测试
 - 用户可见内容用中文;代码标识符用英文
 - 前端改动参考 [docs/ui/](docs/ui/index.md) 中的设计系统,不要自行发明样式
 - 临时文件放 `temp/`
-- JS/TS 用 `pnpm`
+- JS/TS 用 `bun`
