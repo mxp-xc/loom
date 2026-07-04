@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { AGENTS, agentShort } from '@/lib/agents'
 
@@ -164,6 +164,11 @@ export function ConfigField({
 }: ConfigFieldProps) {
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [pendingValue, setPendingValue] = useState<{ value: unknown } | null>(null)
+
+  useEffect(() => {
+    setPendingValue(null)
+  }, [value])
 
   const isFixed = field.fixed === true
   const isReadonly = level === 'effective'
@@ -176,11 +181,13 @@ export function ConfigField({
   const canEdit = !isDisabled
   const editing = draft !== undefined
   const editValue = draft ?? ''
+  const displayValue = pendingValue ? pendingValue.value : value
   const ctrlDisabledCls = isDisabled ? ' cfg-ctrl-disabled' : ''
   const inheritedCls = isInherited ? ' cfg-ctrl-inherited' : ''
 
   const save = async (v: unknown) => {
     if (level === 'effective') return
+    setPendingValue({ value: v })
     setSaving(true)
     setErr(null)
     try {
@@ -193,6 +200,7 @@ export function ConfigField({
       onDraftChange(field.key, undefined)
       onSaved()
     } catch (e) {
+      setPendingValue(null)
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)
@@ -235,7 +243,7 @@ export function ConfigField({
     if (canEdit) save(newValue)
   }
   const toggleChip = (agent: string) => {
-    const cur = Array.isArray(value) ? (value as string[]) : []
+    const cur = Array.isArray(displayValue) ? (displayValue as string[]) : []
     const set = new Set(cur)
     if (set.has(agent)) set.delete(agent)
     else set.add(agent)
@@ -267,7 +275,7 @@ export function ConfigField({
               {(field.options ?? []).map((opt) => (
                 <div
                   key={opt}
-                  className={'cfg-seg-opt' + (value === opt ? ' on' : '')}
+                  className={'cfg-seg-opt' + (displayValue === opt ? ' on' : '')}
                   onClick={() => onControlClick(opt)}
                 >
                   {opt}
@@ -277,14 +285,14 @@ export function ConfigField({
           )}
           {field.control === 'toggle' && (
             <div
-              className={'cfg-toggle' + (value === true ? ' on' : '') + ctrlDisabledCls}
-              onClick={() => onControlClick(!value)}
+              className={'cfg-toggle' + (displayValue === true ? ' on' : '') + ctrlDisabledCls}
+              onClick={() => onControlClick(!displayValue)}
             />
           )}
           {field.control === 'chips' && (
             <div className={'cfg-chips' + ctrlDisabledCls}>
               {AGENTS.map((agent) => {
-                const on = Array.isArray(value) && (value as string[]).includes(agent)
+                const on = Array.isArray(displayValue) && (displayValue as string[]).includes(agent)
                 const da = agent === 'claude-code' ? 'cc' : agent === 'codex' ? 'cx' : 'oc'
                 return (
                   <span
