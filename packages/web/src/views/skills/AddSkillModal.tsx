@@ -14,9 +14,9 @@ interface Props {
   onClose: () => void
 }
 
-// Repo-relative: the server resolves this against repoPath. assets/skills is
-// the canonical home for local skills (git-synced, projection reads it).
-const DEFAULT_LOCAL_DIR = 'assets/skills'
+// Repository assets are auto-discovered separately; adding starts from the
+// user's shared cross-agent skill directory.
+const DEFAULT_LOCAL_DIR = '~/.agents/skills'
 const mono = "'JetBrains Mono', monospace"
 
 const errBox: React.CSSProperties = {
@@ -361,8 +361,8 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
   )
 
   return (
-    <Modal open={open} onClose={onClose} title="Add Skill" width={560}>
-      <div style={{ marginBottom: 16 }}>
+    <Modal open={open} onClose={onClose} title="Add Skill" width={600}>
+      <div className="add-skill-tabs">
         <Segmented
           value={addTab}
           onChange={(t) => {
@@ -393,9 +393,9 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
               e.target.value = ''
             }}
           />
-          <div style={{ marginBottom: 14 }}>
+          <div className="add-skill-section">
             <span className="label">path</span>
-            <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'stretch' }}>
+            <div className="add-skill-path-row">
               <input
                 value={localPath}
                 onChange={(e) => {
@@ -427,9 +427,10 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
                 <RefreshCw className={localScanning ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
               </Button>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-              默认扫描 <code style={{ fontFamily: mono }}>assets/skills</code>(仓库内);点 Browse
-              从外部目录导入并写入仓库。
+            <div className="add-skill-helper">
+              默认扫描 <code style={{ fontFamily: mono }}>~/.agents/skills</code> 并以 ref
+              方式添加；仓库内 <code style={{ fontFamily: mono }}>assets/skills</code>{' '}
+              会自动加载。Browse 可将其他目录导入仓库。
             </div>
           </div>
 
@@ -437,7 +438,7 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
             <SearchInput value={localSearch} onChange={setLocalSearch} placeholder="搜索 skill…" />
           )}
 
-          <div style={listBox}>
+          <div className="add-skill-results" style={listBox}>
             {localScanning ? (
               <div style={placeholderStyle}>扫描中…</div>
             ) : localSkills.length === 0 ? (
@@ -471,14 +472,16 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
             )}
           </div>
 
-          <Button
-            variant="primary"
-            onClick={handleAddLocal}
-            disabled={addBusy || localSelected.size === 0}
-            style={{ width: '100%' }}
-          >
-            {addBusy ? '添加中…' : `添加 ${localSelected.size} 个 Local Skill`}
-          </Button>
+          <div className="add-skill-footer">
+            <span className="add-skill-selection">已选择 {localSelected.size} 项</span>
+            <Button
+              variant="primary"
+              onClick={handleAddLocal}
+              disabled={addBusy || localSelected.size === 0}
+            >
+              {addBusy ? '添加中…' : '添加 Local Skill'}
+            </Button>
+          </div>
         </>
       ) : (
         <>

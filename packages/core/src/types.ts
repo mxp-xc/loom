@@ -20,6 +20,8 @@ export interface LocalSkill {
   id: string
   path?: string
   targets?: AgentId[]
+  /** Runtime-only status added to manifest responses for referenced skills. */
+  available?: boolean
 }
 
 export interface SkillsManifest {

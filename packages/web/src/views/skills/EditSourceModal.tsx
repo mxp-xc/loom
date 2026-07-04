@@ -6,7 +6,7 @@ import { inputStyle } from '@/lib/styles'
 import { Search } from 'lucide-react'
 import { Segmented } from './Segmented'
 import { deriveRepoId, type SkillSource } from '@loom/core'
-import type { ScanMember } from './types'
+import { sortSkillMembers, type ScanMember } from './types'
 
 interface Props {
   repoPath: string
@@ -119,7 +119,7 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
         const res = await api.scanSource(url)
         if (!active) return
         if (Array.isArray(res.members)) {
-          setMembers(res.members)
+          setMembers(sortSkillMembers(res.members))
           // Pre-select scanned members that are already configured on the source.
           setSelected(new Set(res.members.filter((m) => existing.has(m.name)).map((m) => m.name)))
         }

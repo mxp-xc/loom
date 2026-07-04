@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { api } from '../src/lib/api'
 import Skills from '../src/views/skills/Skills'
 import SkillSourceList from '../src/views/skills/SkillSourceList'
+import AddSkillModal from '../src/views/skills/AddSkillModal'
 import Sync from '../src/views/Sync'
 
 vi.mock('../src/lib/api', () => ({
@@ -20,6 +21,7 @@ vi.mock('../src/lib/api', () => ({
     getSyncRemote: vi.fn(async () => ({ remoteUrl: null })),
     setSyncRemote: vi.fn(async () => ({ ok: true })),
     getConfig: vi.fn(async () => ({ effective: {}, repo: {}, local: {} })),
+    scanLocalSkills: vi.fn(async () => ({ ok: true, skills: [] })),
     getManifest: vi.fn(async (repoPath: string) =>
       repoPath === '/tmp/skills-layout'
         ? {
@@ -41,13 +43,14 @@ vi.mock('../src/lib/api', () => ({
                 {
                   id: 'test-qa-skill',
                   path: './assets/skills/test-qa-skill',
+                  available: false,
                   targets: ['claude-code', 'codex', 'opencode'],
                 },
               ],
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: ['claude-code', 'codex', 'opencode'] },
+            config: { targets: ['claude-code', 'codex'] },
             errors: [],
           }
         : {
@@ -92,7 +95,13 @@ describe('Skills view', () => {
     expect(within(localRow as HTMLElement).getByText('ref')).toBeDefined()
     expect(within(localRow as HTMLElement).getByText('本地路径')).toBeDefined()
     expect(within(localRow as HTMLElement).getByText('./assets/skills/test-qa-skill')).toBeDefined()
-    expect(within(localRow as HTMLElement).getByText('projected')).toBeDefined()
+    expect(within(localRow as HTMLElement).queryByText('projected')).toBeNull()
+
+    expect(within(localRow as HTMLElement).queryByText('OC')).toBeNull()
+    expect(within(localRow as HTMLElement).getByText('路径不存在')).toBeDefined()
+    expect(
+      within(localRow as HTMLElement).queryByRole('button', { name: 'test-qa-skill' }),
+    ).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '折叠 superpowers' }))
     expect(screen.queryByText('systematic-debugging')).toBeNull()
@@ -104,7 +113,65 @@ describe('Skills view', () => {
   })
 })
 
+describe('Add Skill modal', () => {
+  it('scans ~/.agents/skills when opened', async () => {
+    render(<AddSkillModal open repoPath="/tmp/r" reload={vi.fn()} onClose={vi.fn()} />)
+    await waitFor(() =>
+      expect(api.scanLocalSkills).toHaveBeenCalledWith('~/.agents/skills', '/tmp/r'),
+    )
+  })
+})
+
 describe('Skill source updates', () => {
+  it('toggles from the group header but not from links or actions', () => {
+    const onToggleGroup = vi.fn()
+    const onOpenEdit = vi.fn()
+    render(
+      <SkillSourceList
+        repoPath="/tmp/header-click"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  url: 'https://github.com/obra/superpowers.git',
+                  ref: 'main',
+                  members: [],
+                },
+              ],
+              skills: [{ id: 'local-skill' }],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: ['claude-code'] },
+            errors: [],
+          } as never
+        }
+        reload={vi.fn()}
+        showToast={vi.fn()}
+        setError={vi.fn()}
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={onOpenEdit}
+        expandedGroups={new Set()}
+        onToggleGroup={onToggleGroup}
+      />,
+    )
+
+    const expandLocal = screen.getByRole('button', { name: '展开 local skills' })
+    fireEvent.click(expandLocal.closest('.group-head') as HTMLElement)
+    expect(onToggleGroup).toHaveBeenLastCalledWith('local')
+
+    const expand = screen.getByRole('button', { name: '展开 superpowers' })
+    fireEvent.click(expand.closest('.group-head') as HTMLElement)
+    expect(onToggleGroup).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(screen.getByRole('link'))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    expect(onToggleGroup).toHaveBeenCalledTimes(2)
+    expect(onOpenEdit).toHaveBeenCalledTimes(1)
+  })
+
   it('updates a tag source to the latest tag returned by Check', async () => {
     vi.mocked(api.update).mockResolvedValueOnce({
       updates: [

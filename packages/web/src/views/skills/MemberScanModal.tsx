@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
 import { deriveRepoId, type SkillSource } from '@loom/core'
-import type { RefreshMember } from './types'
+import { sortSkillMembers, type RefreshMember } from './types'
 
 interface Props {
   repoPath: string
@@ -44,7 +44,7 @@ export default function MemberScanModal({
         const res = await api.refreshSource(repoPath, source.url, source.ref)
         if (!active) return
         if (res.ok) {
-          const mems = res.members ?? []
+          const mems = sortSkillMembers(res.members ?? [])
           const existing = new Set((source.members ?? []).map((m) => m.name))
           setMembers(mems)
           // Pre-select members already configured; new ones left unchecked so

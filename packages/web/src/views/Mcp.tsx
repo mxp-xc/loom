@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
 import Toast from '@/components/Toast'
-import { AGENTS, agentShort, agentColor, type AgentId } from '@/lib/agents'
+import { agentShort, agentColor, type AgentId } from '@/lib/agents'
 import { inputStyle } from '@/lib/styles'
 import { Button } from '@/components/ui/button'
 import { Plus, RefreshCw, Trash2, Copy, Check } from 'lucide-react'
@@ -104,7 +104,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   }
 
   const agents = manifest?.config?.targets ?? []
-  const allAgents: AgentId[] = [...AGENTS]
+  const visibleAgents: AgentId[] = agents
 
   const selectedServer = manifest?.mcp?.find((s) => s.id === selected)
 
@@ -113,7 +113,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     server: McpServer | undefined = selectedServer,
   ) => {
     if (!server) return
-    const currentTargets = server.targets ?? agents
+    const currentTargets = server.targets ?? []
     const newTargets = currentTargets.includes(agent)
       ? currentTargets.filter((a) => a !== agent)
       : [...currentTargets, agent]
@@ -208,7 +208,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         {/* List */}
         <div className="mlist" style={{ borderRight: '1px solid var(--border)' }}>
           {manifest?.mcp?.map((srv) => {
-            const srvAgents = srv.targets ?? agents
+            const srvAgents = srv.targets ?? []
             const isRemote = srv.type === 'sse' || srv.type === 'http'
             return (
               <div
@@ -219,13 +219,16 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                 <div className="mcp-top">
                   <span className="mid">{srv.id}</span>
                   <span className={'mtype' + (isRemote ? ' remote' : '')}>{srv.type}</span>
-                  <span className="mcnt">{srvAgents.length}/3</span>
+                  <span className="mcnt">
+                    {srvAgents.filter((agent) => visibleAgents.includes(agent)).length}/
+                    {visibleAgents.length}
+                  </span>
                 </div>
                 <div className="mcp-bottom">
                   <span className="mcmd">
                     {srv.type === 'stdio' ? `${srv.command} ${srv.args?.join(' ') ?? ''}` : srv.url}
                   </span>
-                  {allAgents.map((a) => (
+                  {visibleAgents.map((a) => (
                     <span
                       key={a}
                       className={'tg ' + (srvAgents.includes(a) ? 'on' : 'off')}
@@ -274,8 +277,8 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
               <div style={{ marginTop: 16 }}>
                 <span className="label">targets</span>
                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  {allAgents.map((a) => {
-                    const srvAgents = selectedServer.targets ?? agents
+                  {visibleAgents.map((a) => {
+                    const srvAgents = selectedServer.targets ?? []
                     return (
                       <span
                         key={a}
@@ -510,7 +513,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
             targets <span style={{ color: 'var(--muted)' }}>(可选)</span>
           </span>
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-            {AGENTS.map((a) => (
+            {visibleAgents.map((a) => (
               <span
                 key={a}
                 className={'tg ' + (srvTargets.includes(a) ? 'on' : 'off')}

@@ -17,12 +17,27 @@ import { createDeps } from '../deps.js'
 import { readRepoFiles, readLocalConfig } from '../repo-config.js'
 import { logger } from '../../lib/logger.js'
 import type { RouteDeps } from '../router.js'
+import type { IFileSystem } from '../../ports/fs.js'
+import type { LocalSkill } from '@loom/core'
 
 // Resolve a local skill path that may be relative (e.g. "./assets/skills/x")
 // against the repo root, so SKILL.md reads/writes land in the right place
 // regardless of the server's current working directory.
 const resolveSkillDir = (localPath: string, repoPath: string) =>
   isAbsolute(localPath) ? localPath : join(repoPath, localPath)
+
+export async function annotateLocalSkillAvailability(
+  fs: Pick<IFileSystem, 'exists'>,
+  repoPath: string,
+  skills: LocalSkill[],
+): Promise<void> {
+  await Promise.all(
+    skills.map(async (skill) => {
+      if (!skill.path) return
+      skill.available = await fs.exists(join(resolveSkillDir(skill.path, repoPath), 'SKILL.md'))
+    }),
+  )
+}
 
 const apiLogger = logger.child('api')
 
@@ -119,6 +134,7 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
       repoPath,
       repoManifest.skills.skills,
     )
+    await annotateLocalSkillAvailability(deps.fs, repoPath, repoManifest.skills.skills)
     const manifest = buildManifest(repoManifest, localConfig as any)
     return c.json(manifest)
   })

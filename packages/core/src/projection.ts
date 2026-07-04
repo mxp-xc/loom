@@ -22,11 +22,13 @@ export function planProjection(
   installedAgents: Set<AgentId>,
 ): ProjectionPlan {
   const globalTargets = effectiveConfig.targets ?? []
+  const globalTargetSet = new Set(globalTargets)
   const skippedAgents: AgentId[] = []
   const naming = effectiveConfig.skill_naming ?? 'dir'
   const activeTargets = (ts: AgentId[]): AgentId[] => {
     const out: AgentId[] = []
     for (const a of ts) {
+      if (!globalTargetSet.has(a)) continue
       if (installedAgents.has(a)) out.push(a)
       else skippedAgents.push(a)
     }
@@ -35,13 +37,13 @@ export function planProjection(
 
   const links: LinkPlan[] = []
   for (const s of manifest.skills.skills) {
-    links.push({ skillId: s.id, source: 'local', targets: activeTargets(globalTargets) })
+    links.push({ skillId: s.id, source: 'local', targets: activeTargets(s.targets ?? []) })
   }
   for (const src of manifest.skills.sources) {
     const repoId = deriveRepoId(src.url)
     const members = src.members?.length ? src.members : []
     for (const m of members) {
-      const ts = activeTargets(m.enabled === false ? [] : (m.targets ?? globalTargets))
+      const ts = activeTargets(m.enabled === false ? [] : (m.targets ?? []))
       links.push({
         skillId: naming === 'hyphen' ? `${repoId}-${m.name}` : `${repoId}/${m.name}`,
         source: { repoId, memberName: m.name },
@@ -52,7 +54,7 @@ export function planProjection(
 
   const mcpEntries: McpPlanEntry[] = manifest.mcp.map((m) => ({
     id: m.id,
-    targets: activeTargets(m.targets ?? globalTargets),
+    targets: activeTargets(m.targets ?? []),
   }))
 
   return {

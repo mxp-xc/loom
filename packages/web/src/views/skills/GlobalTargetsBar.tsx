@@ -1,6 +1,8 @@
-import { api } from '@/lib/api'
-import { AGENTS, agentShort, agentColor, type AgentId } from '@/lib/agents'
+import { agentShort, agentColor, type AgentId } from '@/lib/agents'
 import type { Manifest } from '@loom/core'
+import { Link } from 'react-router-dom'
+import { Settings2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 interface Props {
   repoPath: string
@@ -9,35 +11,16 @@ interface Props {
   setError: (e: unknown) => void
 }
 
-const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
-  <span
-    key={agent}
-    className={'chip ' + (active ? 'active' : 'inactive')}
-    style={{ ['--c' as string]: agentColor[agent] }}
-    onClick={onClick}
-  >
+const renderChip = (agent: AgentId) => (
+  <span key={agent} className="chip active" style={{ ['--c' as string]: agentColor[agent] }}>
     {agentShort[agent]}
   </span>
 )
 
-export default function GlobalTargetsBar({ repoPath, manifest, reload, setError }: Props) {
+export default function GlobalTargetsBar({ manifest }: Props) {
   const agents = manifest.config?.targets ?? []
-  const allAgents: AgentId[] = [...AGENTS]
   const sourceCount = manifest.skills?.sources?.length ?? 0
   const localCount = manifest.skills?.skills?.length ?? 0
-
-  const handleGlobalTargetToggle = async (agent: AgentId) => {
-    const current = manifest.config?.targets ?? []
-    const newTargets = current.includes(agent)
-      ? current.filter((a) => a !== agent)
-      : [...current, agent]
-    try {
-      await api.putConfig({ repoPath, level: 'repo', field: 'targets', value: newTargets })
-      reload()
-    } catch (e) {
-      setError(e)
-    }
-  }
 
   if (sourceCount === 0 && localCount === 0) return null
 
@@ -46,7 +29,7 @@ export default function GlobalTargetsBar({ repoPath, manifest, reload, setError 
       className="global-targets-bar"
       style={{
         display: 'grid',
-        gridTemplateColumns: '12px minmax(0, 1fr) auto 90px 28px',
+        gridTemplateColumns: 'minmax(0, 1fr) auto auto',
         alignItems: 'center',
         gap: 12,
         marginTop: 14,
@@ -57,7 +40,6 @@ export default function GlobalTargetsBar({ repoPath, manifest, reload, setError 
         background: 'var(--card)',
       }}
     >
-      <span />
       <span
         style={{
           fontFamily: "'JetBrains Mono', monospace",
@@ -65,13 +47,16 @@ export default function GlobalTargetsBar({ repoPath, manifest, reload, setError 
           color: 'var(--muted)',
         }}
       >
-        全局 targets
+        当前 targets
       </span>
       <span className="chips" style={{ display: 'flex', gap: 7 }}>
-        {allAgents.map((a) => renderChip(a, agents.includes(a), () => handleGlobalTargetToggle(a)))}
+        {agents.map(renderChip)}
       </span>
-      <span />
-      <span />
+      <Button asChild variant="ghost" size="xs">
+        <Link to="/settings" title="在 Settings 中修改 targets">
+          <Settings2 className="h-3.5 w-3.5" /> 设置
+        </Link>
+      </Button>
     </div>
   )
 }

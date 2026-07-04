@@ -18,7 +18,7 @@ bun dev           # 启动前后端(热加载)
 bun dev:api       # 仅后端
 bun dev:web       # 启动前后端(web 优先,与 dev 相同)
 bun build         # 构建
-bun test          # 运行测试
+bun run test      # 运行测试
 ```
 
 仅前端: `bun --filter @loom/web dev`

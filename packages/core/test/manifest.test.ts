@@ -50,7 +50,7 @@ describe('validateManifest (zod discriminatedUnion)', () => {
     })
     expect(validateManifest(m).some((e) => e.includes('url'))).toBe(true)
   })
-  it('accepts mcp without targets (fallback to global)', () => {
+  it('accepts mcp without targets', () => {
     const m = loadRepoManifest({
       'mcp.yaml': '- id: x\n  type: stdio\n  command: c\n',
       'skills.yaml': 'sources: []\nskills: []\n',

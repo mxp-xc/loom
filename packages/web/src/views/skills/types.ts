@@ -26,3 +26,7 @@ export interface SourceRef {
   type: 'branch' | 'tag'
   ref: string
 }
+
+export function sortSkillMembers<T extends { name: string }>(members: readonly T[]): T[] {
+  return [...members].sort((a, b) => a.name.localeCompare(b.name, 'en'))
+}

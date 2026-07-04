@@ -80,7 +80,7 @@ export default function Modal({
         ref={ref}
         tabIndex={-1}
         style={{
-          width,
+          width: `min(${width}px, calc(100vw - 32px))`,
           minHeight: minHeight || undefined,
           maxHeight: '92vh',
           overflow: 'auto',
@@ -112,7 +112,7 @@ export default function Modal({
           >
             {title}
           </span>
-          <Button variant="ghost" size="xs" onClick={onClose}>
+          <Button variant="ghost" size="xs" onClick={onClose} aria-label="关闭弹窗">
             <X className="h-4 w-4" />
           </Button>
         </div>

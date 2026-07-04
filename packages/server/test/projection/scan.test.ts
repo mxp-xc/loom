@@ -39,7 +39,7 @@ describe('resolveFullLinks', () => {
     config: { targets: ['claude-code', 'codex'], skill_naming: 'hyphen' },
     errors: [],
   })
-  it('source no members: scanned members all enabled with global targets', () => {
+  it('source no members: scanned members default to no targets', () => {
     const manifest = mk([{ url: 'github:obra/superpowers', ref: 'v1' }])
     const scan = new Map([
       [
@@ -51,16 +51,10 @@ describe('resolveFullLinks', () => {
       ],
     ])
     const p = resolveFullLinks(manifest, scan, manifest.config, new Set(['claude-code', 'codex']))
-    expect(p.links.find((l) => l.skillId === 'superpowers-brainstorming')!.targets).toEqual([
-      'claude-code',
-      'codex',
-    ])
-    expect(p.links.find((l) => l.skillId === 'superpowers-tdd')!.targets).toEqual([
-      'claude-code',
-      'codex',
-    ])
+    expect(p.links.find((l) => l.skillId === 'superpowers-brainstorming')!.targets).toEqual([])
+    expect(p.links.find((l) => l.skillId === 'superpowers-tdd')!.targets).toEqual([])
   })
-  it('source with members override: override applies, unlisted member still enabled', () => {
+  it('source with members override: disabled and unlisted members both have no targets', () => {
     const manifest = mk([
       { url: 'github:obra/superpowers', ref: 'v1', members: [{ name: 'tdd', enabled: false }] },
     ])
@@ -75,10 +69,7 @@ describe('resolveFullLinks', () => {
     ])
     const p = resolveFullLinks(manifest, scan, manifest.config, new Set(['claude-code', 'codex']))
     expect(p.links.find((l) => l.skillId === 'superpowers-tdd')!.targets).toEqual([])
-    expect(p.links.find((l) => l.skillId === 'superpowers-brainstorming')!.targets).toEqual([
-      'claude-code',
-      'codex',
-    ])
+    expect(p.links.find((l) => l.skillId === 'superpowers-brainstorming')!.targets).toEqual([])
   })
   it('local skill still projected', () => {
     const manifest = mk([{ url: 'github:obra/superpowers', ref: 'v1' }])
@@ -87,7 +78,13 @@ describe('resolveFullLinks', () => {
     expect(p.links.some((l) => l.skillId === 'frontend-design')).toBe(true)
   })
   it('uninstalled agent goes to skippedAgents and filtered from link targets', () => {
-    const manifest = mk([{ url: 'github:obra/superpowers', ref: 'v1' }])
+    const manifest = mk([
+      {
+        url: 'github:obra/superpowers',
+        ref: 'v1',
+        members: [{ name: 'brainstorming', targets: ['claude-code', 'opencode'] }],
+      },
+    ])
     const scan = new Map([['github:obra/superpowers', [{ name: 'brainstorming', path: '/p' }]]])
     const p = resolveFullLinks(
       manifest,

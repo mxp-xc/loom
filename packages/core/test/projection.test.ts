@@ -38,14 +38,14 @@ const manifest: Manifest = {
 }
 
 describe('planProjection', () => {
-  it('local skill projected to all global targets', () => {
+  it('local skill without targets is not projected', () => {
     const p = planProjection(
       manifest,
       manifest.config,
       new Set(['claude-code', 'codex', 'opencode']),
     )
     const fd = p.links.find((l) => l.skillId === 'frontend-design')!
-    expect(fd.targets).toEqual(['claude-code', 'codex', 'opencode'])
+    expect(fd.targets).toEqual([])
   })
   it('source member (explicit members override) gets namespace prefix', () => {
     const p = planProjection(
@@ -78,20 +78,55 @@ describe('planProjection', () => {
     const m = p.mcpEntries.find((m) => m.id === 'playwright')!
     expect(m.targets).toEqual(['claude-code', 'codex'])
   })
-  it('mcp server without targets falls back to global', () => {
+  it('mcp server without targets is not projected', () => {
     const p = planProjection(
       manifest,
       manifest.config,
       new Set(['claude-code', 'codex', 'opencode']),
     )
     const z = p.mcpEntries.find((m) => m.id === 'zhipu')!
-    expect(z.targets).toEqual(['claude-code', 'codex', 'opencode'])
+    expect(z.targets).toEqual([])
   })
   it('uninstalled agent skipped, marked in skipped', () => {
     const p = planProjection(manifest, manifest.config, new Set(['claude-code']))
     expect(p.skippedAgents).toContain('codex')
     const fd = p.links.find((l) => l.skillId === 'frontend-design')!
-    expect(fd.targets).toEqual(['claude-code'])
+    expect(fd.targets).toEqual([])
+  })
+
+  it('intersects explicit targets with configured and installed targets', () => {
+    const m: Manifest = {
+      ...manifest,
+      skills: {
+        ...manifest.skills,
+        skills: [{ id: 'frontend-design', targets: ['claude-code', 'opencode'] }],
+      },
+      config: { ...manifest.config, targets: ['claude-code', 'codex'] },
+    }
+    const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
+    expect(p.links.find((l) => l.skillId === 'frontend-design')?.targets).toEqual(['claude-code'])
+  })
+  it('filters hidden targets for remote skills and MCP without mutating the manifest', () => {
+    const m: Manifest = {
+      ...manifest,
+      skills: {
+        sources: [
+          {
+            ...manifest.skills.sources[0],
+            members: [{ name: 'writing', targets: ['claude-code', 'opencode'] }],
+          },
+        ],
+        skills: [],
+      },
+      mcp: [{ id: 'playwright', type: 'stdio', command: 'npx', targets: ['codex', 'opencode'] }],
+      config: { ...manifest.config, targets: ['claude-code', 'codex'] },
+    }
+    const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
+
+    expect(p.links[0].targets).toEqual(['claude-code'])
+    expect(p.mcpEntries[0].targets).toEqual(['codex'])
+    expect(m.skills.sources[0].members?.[0].targets).toEqual(['claude-code', 'opencode'])
+    expect(m.mcp[0].targets).toEqual(['codex', 'opencode'])
   })
   it('strategy: copy透传;无 projection 默认 link', () => {
     const pCopy = planProjection(

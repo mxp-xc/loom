@@ -59,10 +59,12 @@ export function resolveFullLinks(
   const base = planProjection(manifest, effectiveConfig, installedAgents)
   const naming = effectiveConfig.skill_naming ?? 'dir'
   const globalTargets = effectiveConfig.targets ?? []
+  const globalTargetSet = new Set(globalTargets)
   const skipped: AgentId[] = []
   const activeTargets = (ts: AgentId[]): AgentId[] => {
     const out: AgentId[] = []
     for (const a of ts) {
+      if (!globalTargetSet.has(a)) continue
       if (installedAgents.has(a)) out.push(a)
       else skipped.push(a)
     }
@@ -76,7 +78,7 @@ export function resolveFullLinks(
     for (const m of scanned) {
       const ov = overrideByName.get(m.name)
       const enabled = ov?.enabled ?? true
-      const ts = activeTargets(enabled === false ? [] : (ov?.targets ?? globalTargets))
+      const ts = activeTargets(enabled === false ? [] : (ov?.targets ?? []))
       links.push({
         skillId: naming === 'hyphen' ? `${repoId}-${m.name}` : `${repoId}/${m.name}`,
         source: { repoId, memberName: m.name },
