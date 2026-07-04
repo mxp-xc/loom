@@ -20,6 +20,15 @@ describe('compareVersion', () => {
     expect(r.latestTag).toBe('v5.1.4')
     expect(r.latestCommit).toBe('aaa')
   })
+  it('hasUpdate when latest tag name changed even if it points to the pinned commit', () => {
+    const r = compareVersion(
+      { ref: 'v6.0.3', pinned_commit: 'bbb' },
+      { tags: { 'v6.0.3': 'aaa', 'v6.1.1': 'bbb' }, head: 'bbb' },
+    )
+    expect(r.hasUpdate).toBe(true)
+    expect(r.latestTag).toBe('v6.1.1')
+    expect(r.latestCommit).toBe('bbb')
+  })
   it('tag moved to new commit (mutable tag) => hasUpdate', () => {
     const r = compareVersion(
       { ref: 'v5.1.4', pinned_commit: 'aaa' },

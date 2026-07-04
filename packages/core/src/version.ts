@@ -25,7 +25,7 @@ export function compareVersion(
   const pinnedCommit = local.pinned_commit
   const latestTag = tagKeys.sort(semverCompare).at(-1)!
   const latestCommit = remote.tags[latestTag]
-  const hasUpdate = latestCommit !== pinnedCommit
+  const hasUpdate = latestTag !== local.ref || latestCommit !== pinnedCommit
   return { hasUpdate, latestTag, latestCommit }
 }
 

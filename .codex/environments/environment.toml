@@ -5,6 +5,6 @@ name = "loom"
 [setup]
 script = '''
 cd "$CODEX_WORKTREE_PATH"
-pnpm install
+bun install
 codegraph init -i
 '''

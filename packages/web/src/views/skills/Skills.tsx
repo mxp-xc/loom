@@ -2,7 +2,7 @@ import { useState } from 'react'
 import Toast from '@/components/Toast'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Plus, RefreshCw } from 'lucide-react'
+import { ChevronsDownUp, ChevronsUpDown, Plus, RefreshCw } from 'lucide-react'
 import { useManifest } from '@/hooks/useManifest'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
@@ -27,6 +27,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
   const [scanSource, setScanSource] = useState<SkillSource | null>(null)
   const [detail, setDetail] = useState<SkillDetail | null>(null)
   const [editSource, setEditSource] = useState<SkillSource | null>(null)
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
 
   const project = async () => {
     setProjecting(true)
@@ -51,6 +52,24 @@ export default function Skills({ repoPath }: { repoPath: string }) {
   const totalSkills =
     (manifest?.skills?.sources?.reduce((acc, s) => acc + (s.members?.length ?? 0), 0) ?? 0) +
     localCount
+  const groupKeys = [
+    ...(manifest?.skills?.sources.map((source) => `${source.url}-${source.ref}`) ?? []),
+    ...(localCount > 0 ? ['local'] : []),
+  ]
+  const allCollapsed = groupKeys.every((key) => !expandedGroups.has(key))
+
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const toggleAllGroups = () => {
+    setExpandedGroups(allCollapsed ? new Set(groupKeys) : new Set())
+  }
 
   return (
     <div>
@@ -61,12 +80,28 @@ export default function Skills({ repoPath }: { repoPath: string }) {
             {totalSkills} skills · {sourceCount} sources · {localCount} local
           </div>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+        <div className="skills-head-actions">
+          {groupKeys.length > 0 && (
+            <Button variant="secondary" size="sm" onClick={toggleAllGroups}>
+              {allCollapsed ? (
+                <ChevronsUpDown className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronsDownUp className="h-3.5 w-3.5" />
+              )}
+              {allCollapsed ? '全部展开' : '全部收起'}
+            </Button>
+          )}
           <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
             <Plus className="h-3.5 w-3.5" />
             Add skill
           </Button>
-          <Button variant="secondary" size="sm" onClick={project} disabled={projecting}>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="project-button"
+            onClick={project}
+            disabled={projecting}
+          >
             <RefreshCw className="h-3.5 w-3.5" />
             {projecting ? '投影中…' : '投影'}
           </Button>
@@ -142,6 +177,8 @@ export default function Skills({ repoPath }: { repoPath: string }) {
             onOpenDetail={setDetail}
             onOpenScan={setScanSource}
             onOpenEdit={setEditSource}
+            expandedGroups={expandedGroups}
+            onToggleGroup={toggleGroup}
           />
         </>
       )}

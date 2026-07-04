@@ -15,7 +15,11 @@ interface Props {
   onOpenDetail: (d: SkillDetail) => void
   onOpenScan: (src: SkillSource) => void
   onOpenEdit: (src: SkillSource) => void
+  expandedGroups: Set<string>
+  onToggleGroup: (key: string) => void
 }
+
+type SourceUpdate = 'repair' | { label: string; newRef?: string }
 
 const menuStyle: React.CSSProperties = {
   position: 'absolute',
@@ -53,26 +57,18 @@ export default function SkillSourceList({
   onOpenDetail,
   onOpenScan,
   onOpenEdit,
+  expandedGroups,
+  onToggleGroup,
 }: Props) {
   const [checking, setChecking] = useState<string | null>(null)
-  const [updates, setUpdates] = useState<Record<string, string>>({})
+  const [updates, setUpdates] = useState<Record<string, SourceUpdate>>({})
   const [updating, setUpdating] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   const agents = manifest.config?.targets ?? []
   const allAgents: AgentId[] = [...AGENTS]
   const sourceCount = manifest.skills.sources.length
   const localCount = manifest.skills.skills.length
-
-  const toggleCollapse = (key: string) => {
-    setCollapsed((prev) => {
-      const n = new Set(prev)
-      if (n.has(key)) n.delete(key)
-      else n.add(key)
-      return n
-    })
-  }
 
   const handleChipToggle = async (
     sourceUrl: string,
@@ -116,7 +112,10 @@ export default function SkillSourceList({
         }
         // Tag tracking shows the tag name; branch tracking shows a short commit hash.
         const latest = u.latestTag ?? (u.latestCommit ? u.latestCommit.slice(0, 7) : 'unknown')
-        setUpdates((prev) => ({ ...prev, [src.url]: latest }))
+        setUpdates((prev) => ({
+          ...prev,
+          [src.url]: { label: latest, newRef: u.latestTag },
+        }))
         showToast(`${deriveRepoId(src.url)} 有更新: ${src.ref} -> ${latest}`)
       } else {
         showToast(`${deriveRepoId(src.url)} 已是最新`)
@@ -132,9 +131,10 @@ export default function SkillSourceList({
     setUpdating(src.url)
     try {
       const repoId = deriveRepoId(src.url)
+      const update = updates[src.url]
       const res = (await api.performUpdate({
         source: src,
-        newRef: src.ref,
+        newRef: update && update !== 'repair' ? (update.newRef ?? src.ref) : src.ref,
         repoPath,
         sourceId: repoId,
         oldMembers: src.members ?? [],
@@ -187,18 +187,20 @@ export default function SkillSourceList({
       {manifest.skills.sources.map((src) => {
         const repoId = deriveRepoId(src.url)
         const key = src.url + '-' + src.ref
-        const isCollapsed = collapsed.has(key)
+        const isExpanded = expandedGroups.has(key)
         return (
           <div key={key} className="group">
-            <div
-              className="group-head"
-              style={{ position: 'relative', cursor: 'pointer' }}
-              onClick={() => toggleCollapse(key)}
-            >
-              <span className="gname">
-                <ChevronDown size={14} style={chevronStyle(isCollapsed)} />
+            <div className="group-head" style={{ position: 'relative' }} data-expanded={isExpanded}>
+              <button
+                type="button"
+                className="gname"
+                aria-expanded={isExpanded}
+                aria-label={`${isExpanded ? '折叠' : '展开'} ${repoId}`}
+                onClick={() => onToggleGroup(key)}
+              >
+                <ChevronDown size={14} style={chevronStyle(!isExpanded)} />
                 {repoId}
-              </span>
+              </button>
               {src.type === 'tag' ? (
                 <span
                   style={{
@@ -233,7 +235,7 @@ export default function SkillSourceList({
                 target="_blank"
                 rel="noopener noreferrer"
                 className="gurl"
-                style={{ textDecoration: 'none' }}
+                title={src.url}
                 onClick={(e) => e.stopPropagation()}
               >
                 {src.url}
@@ -248,7 +250,7 @@ export default function SkillSourceList({
                   }}
                 >
                   {'-> '}
-                  {updates[src.url]}
+                  {updates[src.url] === 'repair' ? 'repair' : updates[src.url].label}
                 </span>
               )}
               <span className="gacts" onClick={(e) => e.stopPropagation()}>
@@ -259,7 +261,7 @@ export default function SkillSourceList({
                   disabled={checking === src.url}
                   title="检查更新"
                 >
-                  <RefreshCw className="h-3 w-3" />
+                  <RefreshCw className="h-3.5 w-3.5" />
                   {checking === src.url ? '...' : 'Check'}
                 </Button>
                 {updates[src.url] && (
@@ -274,7 +276,7 @@ export default function SkillSourceList({
                     }}
                     title="更新到最新版本"
                   >
-                    <RefreshCw className="h-3 w-3" />
+                    <RefreshCw className="h-3.5 w-3.5" />
                     {updating === src.url ? '...' : 'Update'}
                   </Button>
                 )}
@@ -284,7 +286,7 @@ export default function SkillSourceList({
                   onClick={() => onOpenEdit(src)}
                   title="编辑 source"
                 >
-                  <Pencil className="h-3 w-3" />
+                  <Pencil className="h-3.5 w-3.5" />
                   Edit
                 </Button>
                 <Button
@@ -293,7 +295,7 @@ export default function SkillSourceList({
                   onClick={() => setMenuOpen(menuOpen === src.url ? null : src.url)}
                   title="更多操作"
                 >
-                  <MoreHorizontal className="h-3.5 w-3.5" />
+                  <MoreHorizontal className="h-4 w-4" />
                 </Button>
               </span>
               {menuOpen === src.url && (
@@ -330,7 +332,7 @@ export default function SkillSourceList({
                 </div>
               )}
             </div>
-            {!isCollapsed &&
+            {isExpanded &&
               src.members?.map((m) => {
                 const isEnabled = m.enabled !== false
                 const mTargets = m.targets ?? agents
@@ -365,7 +367,7 @@ export default function SkillSourceList({
                   </div>
                 )
               })}
-            {!isCollapsed && !src.members?.length && (
+            {isExpanded && !src.members?.length && (
               <div className="skill">
                 <span className="sdot green" />
                 <span className="sname" style={{ color: 'var(--muted)' }}>
@@ -386,73 +388,80 @@ export default function SkillSourceList({
       {/* Local skills */}
       {localCount > 0 && (
         <div className="group">
-          <div
-            className="group-head"
-            style={{ cursor: 'pointer' }}
-            onClick={() => toggleCollapse('local')}
-          >
-            <span className="gname">
-              <ChevronDown size={14} style={chevronStyle(collapsed.has('local'))} />
+          <div className="group-head" data-expanded={expandedGroups.has('local')}>
+            <button
+              type="button"
+              className="gname"
+              aria-expanded={expandedGroups.has('local')}
+              aria-label={`${expandedGroups.has('local') ? '折叠' : '展开'} local skills`}
+              onClick={() => onToggleGroup('local')}
+            >
+              <ChevronDown size={14} style={chevronStyle(!expandedGroups.has('local'))} />
               local skills <span className="local-tag">local</span>
-            </span>
+            </button>
           </div>
-          {!collapsed.has('local') &&
+          {expandedGroups.has('local') &&
             manifest.skills.skills.map((s) => {
               const lTargets = s.targets ?? agents
               return (
-                <div key={s.id}>
-                  <div className="skill">
-                    <span className="sdot green" />
-                    <span
-                      className="sname clickable"
-                      onClick={() =>
-                        onOpenDetail({ skillId: s.id, path: s.path, targets: lTargets })
-                      }
-                    >
-                      {s.id}
-                    </span>
-                    {s.path && <span className="ref-badge">ref</span>}
-                    <span className="chips">
-                      {allAgents.map((a) =>
-                        renderChip(a, lTargets.includes(a), () =>
-                          handleLocalChipToggle(s.id, a, lTargets),
-                        ),
-                      )}
-                    </span>
-                    <span className="sstate st-proj">projected</span>
-                    <span
-                      style={{ position: 'relative', display: 'flex', justifyContent: 'flex-end' }}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="sm"
+                <div key={s.id} className="skill">
+                  <span className="sdot green" />
+                  <span className="skill-main">
+                    <span className="skill-name-line">
+                      <span
+                        className="sname clickable"
                         onClick={() =>
-                          setMenuOpen(menuOpen === 'local:' + s.id ? null : 'local:' + s.id)
+                          onOpenDetail({ skillId: s.id, path: s.path, targets: lTargets })
                         }
                       >
-                        <MoreHorizontal className="h-3.5 w-3.5" />
-                      </Button>
-                      {menuOpen === 'local:' + s.id && (
-                        <div style={{ ...menuStyle, right: 0, top: '100%', minWidth: 100 }}>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              justifyContent: 'flex-start',
-                              color: 'var(--error)',
-                            }}
-                            onClick={() => handleDeleteLocal(s.id)}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            删除
-                          </Button>
-                        </div>
-                      )}
+                        {s.id}
+                      </span>
+                      {s.path && <span className="ref-badge">ref</span>}
                     </span>
-                  </div>
-                  {s.path && <div className="skill-missing-path">→ {s.path}</div>}
+                    {s.path && (
+                      <span className="skill-local-path">
+                        <span className="skill-local-path-label">本地路径</span>
+                        <span>{s.path}</span>
+                      </span>
+                    )}
+                  </span>
+                  <span className="chips">
+                    {allAgents.map((a) =>
+                      renderChip(a, lTargets.includes(a), () =>
+                        handleLocalChipToggle(s.id, a, lTargets),
+                      ),
+                    )}
+                  </span>
+                  <span className="sstate st-proj">projected</span>
+                  <span className="skill-actions">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setMenuOpen(menuOpen === 'local:' + s.id ? null : 'local:' + s.id)
+                      }
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                    {menuOpen === 'local:' + s.id && (
+                      <div style={{ ...menuStyle, right: 0, top: '100%', minWidth: 100 }}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          style={{
+                            width: '100%',
+                            textAlign: 'left',
+                            justifyContent: 'flex-start',
+                            color: 'var(--error)',
+                          }}
+                          onClick={() => handleDeleteLocal(s.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          删除
+                        </Button>
+                      </div>
+                    )}
+                  </span>
                 </div>
               )
             })}

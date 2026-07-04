@@ -43,6 +43,7 @@ export default function GlobalTargetsBar({ repoPath, manifest, reload, setError 
 
   return (
     <div
+      className="global-targets-bar"
       style={{
         display: 'grid',
         gridTemplateColumns: '12px minmax(0, 1fr) auto 90px 28px',
