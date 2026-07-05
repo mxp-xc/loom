@@ -5,16 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "bun scripts/dev.mjs",
-    "dev:web": "bun scripts/dev.mjs",
     "dev:api": "bun --cwd packages/server dev",
     "start": "bun --cwd packages/server start",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "build": "bun run --workspaces build",
-    "build:web": "bun --filter @loom/web build",
-    "format": "prettier --write 'packages/**/*.{ts,tsx,css,json,html}' 'docs/index.md' 'docs/ui/{index,vars}.md' 'docs/superpowers/plans/2026-07-05-vars-management.md' 'docs/superpowers/specs/2026-07-05-vars-management-design.md' '*.{json,md}' --ignore-path .gitignore",
-    "format:check": "prettier --check 'packages/**/*.{ts,tsx,css,json,html}' 'docs/index.md' 'docs/ui/{index,vars}.md' 'docs/superpowers/plans/2026-07-05-vars-management.md' 'docs/superpowers/specs/2026-07-05-vars-management-design.md' '*.{json,md}' --ignore-path .gitignore",
-    "prepare": "husky"
+    "test": "bun vitest run",
+    "test:watch": "bun vitest",
+    "format": "bun --bun prettier --write 'packages/**/*.{ts,tsx,css,json,html}' 'docs/index.md' 'docs/ui/{index,vars}.md' 'docs/superpowers/plans/2026-07-05-vars-management.md' 'docs/superpowers/specs/2026-07-05-vars-management-design.md' '*.{json,md}' --ignore-path .gitignore",
+    "format:check": "bun --bun prettier --check 'packages/**/*.{ts,tsx,css,json,html}' 'docs/index.md' 'docs/ui/{index,vars}.md' 'docs/superpowers/plans/2026-07-05-vars-management.md' 'docs/superpowers/specs/2026-07-05-vars-management-design.md' '*.{json,md}' --ignore-path .gitignore",
+    "prepare": "bun --bun husky"
   },
   "workspaces": [
     "packages/*"
@@ -23,7 +20,7 @@
     "esbuild"
   ],
   "lint-staged": {
-    "*.{ts,tsx,css,json,md}": "prettier --check --ignore-path .gitignore"
+    "*.{ts,tsx,css,json,md}": "bun --bun prettier --check --ignore-path .gitignore"
   },
   "devDependencies": {
     "husky": "^9.1.7",

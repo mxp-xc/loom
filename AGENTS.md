@@ -1,86 +1,31 @@
-# AGENTS.md
+# 仓库指南
 
-## 项目概要
+## 项目结构与模块组织
 
-Loom 是 code agent 周边设施管理工具:维护一份 Skills / MCP / Memory / Config 配置,投影到 Claude Code、Codex、OpenCode 三个 agent;以 Git 仓库为载体实现多端增量同步。
+Loom 是 Bun workspace monorepo。共享且无 IO 的领域逻辑在 `packages/core/src`；Hono API、Node 平台适配器和投影/同步编排在 `packages/server/src`；React/Vite 前端在 `packages/web/src`。测试按 package 放在 `packages/*/test`。设计与贡献文档在 `docs/`，UI 规范从 `docs/ui/index.md` 开始。临时调试文件放 `temp/`，不要散落到源码目录。
 
-## 技术栈
+## 构建、测试与本地开发
 
-- Monorepo(bun workspaces):`packages/core`(共享纯逻辑,无 IO)+ `packages/server`(Hono 后端)+ `packages/web`(React SPA)
-- 前端 React 18 + Vite + Tailwind v4 + Radix UI(固定 `127.0.0.1`,默认 5173,被占则随机,`LOOM_WEB_PORT` 覆盖);后端 Hono on `@hono/node-server`(默认 3000,被占则随机,`LOOM_PORT` 覆盖)
-- 测试 vitest(workspace projects,web 用 jsdom);格式化 prettier(无分号、单引号、trailingComma all、tailwind 插件),pre-commit 跑 `lint-staged`。无 eslint。
+- `bun dev`：同时启动 API 与 Web，并自动选择可用端口。
+- `bun dev:api`：只启动 server package。
+- `bun --cwd packages/web dev`：只启动 Vite 前端。
+- `bun run test`：运行全部 Vitest 项目。
+- `bun run test <path>` 或 `bun run test -t "name"`：按文件或用例名过滤测试。
+- `bun run format:check`：检查 Prettier 格式。
+- `bun run format`：自动格式化。
 
-## 命令
+## 代码风格与命名约定
 
-```bash
-bun dev                       # 前后端(scripts/dev.mjs 自动选空闲端口或用 LOOM_PORT)
-bun dev:api                   # 仅后端
-bun --cwd packages/web dev    # 仅前端
-bun build                     # 全 workspace 构建
-bun run test                  # vitest run(全 package)
-bun run test:watch            # 监听
-bun run format / format:check
-```
+使用 ESM TypeScript。源码导入本地文件时写 `.js` 后缀，即使源文件是 `.ts`。格式化由 Prettier 负责：无分号、单引号、trailing comma，并启用 Tailwind 插件。保持 `packages/core` 不依赖文件系统、进程或网络 IO；新增 IO 能力优先通过 server 的 ports/adapters 接入。文件与测试名应直观描述行为，例如 `projection.test.ts`、`executor-memory.test.ts`。
 
-单测过滤:`bun run test <文件路径>`、`bun run test -t "<测试名>"`、`bun --cwd packages/server test -- <pattern>`(仅该 package)。
+## 测试规范
 
-## 架构
+测试框架是 Vitest；Web 测试使用 jsdom 与 Testing Library。优先覆盖业务行为、关键分支、边界条件、错误路径和对外契约，不为实现细节堆覆盖率。Server 测试常用临时目录，并通过 `vi.stubEnv('HOME', ...)` 隔离用户配置。前端交互改动应尽量用自动化浏览器验证；涉及视觉变化的 PR 请附截图。
 
-### 全局目录 `~/.loom/`
+## Commit 与 Pull Request
 
-- `config.yaml` — 本机级配置(`active_repo`、`proxy`),不进 git
-- `repos/<name>/` — 被同步的 git 仓库:`config.yaml`(repo 级)、`skills.yaml`、`mcp.yaml`、`vars/<profile>.yaml`、`memories/<name>.md`、`assets/skills/<id>/`(本地 skill,canonical)、`remote-cache/<repoId>/`(源仓库克隆,gitignored)
-- `state/<repo>/projected-mcp.json` — 记录 loom 上次投影的 mcp id,区分"loom 管理可删"与"用户手写保留";丢失则降级为保留全部
+近期提交采用 Conventional Commit 风格，例如 `feat(vars): add vars management`、`fix: unify target controls and editors`、`chore: simplify bun package scripts`。每个 commit 聚焦一个逻辑变更。PR 应包含简短摘要、已运行的测试、相关 issue；涉及 UI 时附截图，涉及配置、同步或迁移风险时说明影响与回滚方式。
 
-`initLoom`(`platform/node/init.ts`)首次运行建骨架并 `git init`。
+## 安全与配置提示
 
-### Agent 适配
-
-配置位置由 `adapters/paths.ts` 集中解析(支持 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `OPENCODE_CONFIG_DIR` 覆盖):
-
-| agent       | MCP 文件                                   | skills 目录              | memory 文件                |
-| ----------- | ------------------------------------------ | ------------------------ | -------------------------- |
-| claude-code | `~/.claude.json`(JSON `mcpServers`)        | `~/.claude/skills/`      | `~/.claude/CLAUDE.md`      |
-| codex       | `~/.codex/config.toml`(TOML `mcp_servers`) | `~/.codex/skills/`       | `~/.codex/AGENTS.md`       |
-| opencode    | `<xdg>/opencode/opencode.json`(JSON `mcp`) | `<xdg>/opencode/skills/` | `<xdg>/opencode/AGENTS.md` |
-
-各 agent 一个 adapter 类(实现 `IAgentAdapter` 的 `readMcp`/`writeMcp`),只管格式读写。新增 agent:扩 paths + 加 adapter,不在路由层散落格式判断。
-
-### Manifest 与投影
-
-`packages/core` 纯逻辑(便于单测),`packages/server` 做 IO 与编排。manifest 由 repo 文件 + `~/.loom/config.yaml` 深合并(local 优先)后 zod 校验;`assets/skills/` 下未登记的本地 skill(含 `SKILL.md`)自动并入。
-
-`planProjection`(纯函数)算每个条目的目标 agent:**目标 = 条目自身 targets ∩ 全局 config.targets ∩ 已安装 agent**。`executeProjection` 落地为 skill 符号链接(或 `strategy: copy`)、MCP 合并写入、memory 渲染写入,全程记 journal、失败回滚。
-
-约束/陷阱:
-
-- projection 清理**只删符号链接**,真实文件/目录一律保留(保护用户数据)
-- MCP 合并依 state 文件区分 loom 管理 vs 用户手写条目
-- memory 投影时每 agent 注入 `LOOM_AGENT`/`LOOM_CONFIG_DIR`/`LOOM_SKILLS_DIR`/`LOOM_AGENT_FILE` 环境变量
-
-### Vars 与模板变量
-
-Typed vars 存在 `vars/<profile>.yaml`，`resolveVarsChain` 按调用方给定的环境链解析，后面的环境覆盖前面同名 key，只读取 vars，不读取 `process.env`。旧 `resolveVars` 仅服务投影兼容层，读取 active/default profile。Memory 的 `renderText` 额外支持调用方显式注入的 `LOOM_AGENT` / `LOOM_CONFIG_DIR` / `LOOM_SKILLS_DIR` / `LOOM_AGENT_FILE` runtime tokens；`\${` 转义字面量。
-
-### Git 同步
-
-每个 loom repo 是 git 仓库。`sync/pull` 对 `skills.yaml`/`mcp.yaml`/`config.yaml` 及 `vars/*.yaml` 做 YAML 感知的三方合并(`core/merge.ts`,按 kind 区分语义),对 `assets/` 文本冲突单独检测,产出可 fast-forward push 的合并提交。`sync/push` 先 auto-commit 脏 yaml。源 skill 仓库克隆到 `remote-cache/<repoId>/` 按 commit pin。
-
-### 端口与依赖注入
-
-`ports/` 定义 `IFileSystem`/`IGit`/`IProcess`/`IAgentAdapter`,真实实现在 `platform/node/`。路由收 `RouteDeps { fs, git, proc, home }`。新增 IO 能力优先扩接口,不在路由层直接调 node API。测试用 `mkdtemp` + `vi.stubEnv('HOME')` 起真实文件系统。
-
-### API 与前端
-
-Hono app 路由全挂 `/api`;server 同时托管 `packages/web/dist` 静态资源 + SPA fallback(`LOOM_WEB_DIST` 覆盖)。前端 SPA(react-router),views:Skills / Mcp / Memory / Sync / Settings,`lib/api.ts` 类型化客户端,`useManifest` 缓存。**字段级即时保存**(乐观更新),无全局 save bar。主题用 CSS 变量(`var(--primary)`),非 tailwind color token。
-
-### 日志
-
-`lib/logger.ts` 写 `logs/loom-YYYY-MM-DD.log` 并镜像 console(`LOOM_LOG_DIR` / `LOOM_LOG_LEVEL` 可调),`logger.child('component')` 派生。约定:catch / 错误分支必须记日志,带完整 `err` 对象(`logger.error('msg', { err })`),不静默吞错。server 入口注册 uncaughtException/unhandledRejection → flush 后退出。
-
-## 约定
-
-- 用户可见内容用中文;代码标识符用英文
-- ESM TypeScript,import 路径写 `.js` 后缀(源码是 `.ts`,moduleResolution: Bundler);bun 直接跑 TS,无编译步骤
-- 前端改动参考 [`docs/ui/`](docs/ui/index.md) 设计系统,不自创样式
-- 临时文件放 `temp/`;设计文档索引见 [docs/index.md](docs/index.md)
+不要提交本机 `~/.loom/config.yaml`、agent 配置目录、密钥、生成日志，或 `temp/` 之外的临时文件。配置路径可通过 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`OPENCODE_CONFIG_DIR`、`LOOM_PORT`、`LOOM_WEB_PORT` 覆盖。
