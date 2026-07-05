@@ -21,6 +21,28 @@ function pickFreePort() {
   })
 }
 
+/** Probe one stack: EADDRINUSE → occupied; other errors → stack unavailable (treat as free). */
+function probeBind(host, port) {
+  return new Promise((resolve) => {
+    const srv = createServer()
+    srv.unref()
+    srv.on('error', (err) => resolve(err.code === 'EADDRINUSE' ? false : true))
+    srv.listen(port, host, () => srv.close(() => resolve(true)))
+  })
+}
+
+/** True if the port is free on the same host the server binds (127.0.0.1). */
+function isPortFree(port) {
+  return probeBind('127.0.0.1', port)
+}
+
+/** Prefer an explicit env override, then the default port if free, else a random one. */
+async function resolvePort(envVar, defaultPort) {
+  if (process.env[envVar]) return process.env[envVar]
+  if (await isPortFree(defaultPort)) return String(defaultPort)
+  return String(await pickFreePort())
+}
+
 // Tag each child's output with a colored prefix, like concurrently does.
 function tagged(name, color, cmd, cwd) {
   const prefix = `\x1b[${color}m[${name}]\x1b[0m`
@@ -51,9 +73,12 @@ function tagged(name, color, cmd, cwd) {
 }
 
 async function main() {
-  const port = process.env.LOOM_PORT ?? String(await pickFreePort())
+  const port = await resolvePort('LOOM_PORT', 3000)
   process.env.LOOM_PORT = port
+  const webPort = await resolvePort('LOOM_WEB_PORT', 5173)
+  process.env.LOOM_WEB_PORT = webPort
   console.log(`\x1b[35m[dev]\x1b[0m API server port: ${port}`)
+  console.log(`\x1b[35m[dev]\x1b[0m Web server port: ${webPort}  →  http://127.0.0.1:${webPort}`)
 
   // Bun runs TypeScript natively — no tsx, no node, no pnpm in the chain.
   const children = [

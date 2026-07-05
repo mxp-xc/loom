@@ -7,7 +7,7 @@ Loom 是 code agent 周边设施管理工具:维护一份 Skills / MCP / Memory 
 ## 技术栈
 
 - Monorepo(bun workspaces):`packages/core`(共享纯逻辑,无 IO)+ `packages/server`(Hono 后端)+ `packages/web`(React SPA)
-- 前端 React 18 + Vite + Tailwind v4 + Radix UI(端口 5173);后端 Hono on `@hono/node-server`(端口 3000,`LOOM_PORT` 覆盖)
+- 前端 React 18 + Vite + Tailwind v4 + Radix UI(固定 `127.0.0.1`,默认 5173,被占则随机,`LOOM_WEB_PORT` 覆盖);后端 Hono on `@hono/node-server`(默认 3000,被占则随机,`LOOM_PORT` 覆盖)
 - 测试 vitest(workspace projects,web 用 jsdom);格式化 prettier(无分号、单引号、trailingComma all、tailwind 插件),pre-commit 跑 `lint-staged`。无 eslint。
 
 ## 命令

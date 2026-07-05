@@ -37,7 +37,7 @@ export function createApp(): Hono {
 
 export function startApiServer(port = Number(process.env.LOOM_PORT ?? 3000)) {
   return import('@hono/node-server').then(({ serve }) =>
-    serve({ fetch: createApp().fetch, port }, (info) =>
+    serve({ fetch: createApp().fetch, port, hostname: '127.0.0.1' }, (info) =>
       logger.info('server started', { port: info.port }),
     ),
   )
