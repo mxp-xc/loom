@@ -9,6 +9,7 @@ import {
   applyBlockSide,
   buildMergeModel,
   ignoreBlockSide,
+  resetBlockSide,
   type BlockSide,
   type BlockDecision,
   type MergeChange,
@@ -54,6 +55,7 @@ class BlockActionsMarker extends GutterMarker {
     private number: number,
     private apply: (id: string, side: BlockSide) => void,
     private ignore: (id: string, side: BlockSide) => void,
+    private reset: (id: string, side: BlockSide) => void,
   ) {
     super()
   }
@@ -76,28 +78,48 @@ class BlockActionsMarker extends GutterMarker {
     const applyButton = document.createElement('button')
     applyButton.type = 'button'
     applyButton.className = 'merge-block-action'
-    applyButton.ariaLabel = `${label}变更 ${this.number}：应用到结果`
-    applyButton.textContent = this.side === 'local' ? '→' : '←'
-    applyButton.disabled = state !== 'pending'
+    applyButton.ariaLabel =
+      state === 'applied'
+        ? `${label}变更 ${this.number}：撤回应用`
+        : `${label}变更 ${this.number}：应用到结果`
+    applyButton.title = applyButton.ariaLabel
+    applyButton.textContent = state === 'applied' ? '↶' : this.side === 'local' ? '→' : '←'
+    applyButton.disabled = state === 'ignored'
     applyButton.addEventListener('click', (event) => {
       event.preventDefault()
       event.stopPropagation()
-      this.apply(this.block.id, this.side)
+      if (state === 'applied') {
+        this.reset(this.block.id, this.side)
+      } else {
+        this.apply(this.block.id, this.side)
+      }
     })
 
     const ignoreButton = document.createElement('button')
     ignoreButton.type = 'button'
     ignoreButton.className = 'merge-block-action'
-    ignoreButton.ariaLabel = `${label}变更 ${this.number}：忽略变更`
-    ignoreButton.textContent = '×'
-    ignoreButton.disabled = state !== 'pending'
+    ignoreButton.ariaLabel =
+      state === 'ignored'
+        ? `${label}变更 ${this.number}：撤回忽略`
+        : `${label}变更 ${this.number}：忽略变更`
+    ignoreButton.title = ignoreButton.ariaLabel
+    ignoreButton.textContent = state === 'ignored' ? '↶' : '×'
+    ignoreButton.disabled = state === 'applied'
     ignoreButton.addEventListener('click', (event) => {
       event.preventDefault()
       event.stopPropagation()
-      this.ignore(this.block.id, this.side)
+      if (state === 'ignored') {
+        this.reset(this.block.id, this.side)
+      } else {
+        this.ignore(this.block.id, this.side)
+      }
     })
 
-    actions.append(applyButton, ignoreButton)
+    if (this.side === 'local') {
+      actions.append(ignoreButton, applyButton)
+    } else {
+      actions.append(applyButton, ignoreButton)
+    }
     host.append(actions)
     return host
   }
@@ -161,6 +183,7 @@ function actionGutter(
   side: BlockSide,
   apply: (id: string, side: BlockSide) => void,
   ignore: (id: string, side: BlockSide) => void,
+  reset: (id: string, side: BlockSide) => void,
 ) {
   return gutter({
     class: 'merge-action-gutter',
@@ -176,7 +199,7 @@ function actionGutter(
         builder.add(
           line.from,
           line.from,
-          new BlockActionsMarker(block, side, index + 1, apply, ignore),
+          new BlockActionsMarker(block, side, index + 1, apply, ignore, reset),
         )
       })
       return builder.finish()
@@ -208,6 +231,10 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
     setModel((current) => ignoreBlockSide(current, id, side))
   }
 
+  const resetSide = (id: string, side: BlockSide) => {
+    setModel((current) => resetBlockSide(current, id, side))
+  }
+
   const keepAutomaticMerge = () =>
     setModel(buildMergeModel(conflict.base ?? '', conflict.ours ?? '', conflict.theirs ?? ''))
 
@@ -237,7 +264,7 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
       extensions: [
         ...extensions(true),
         sideDecorations(model.changes.local, model.blocks, 'local', applySide, ignoreSide),
-        actionGutter(model.blocks, 'local', applySide, ignoreSide),
+        actionGutter(model.blocks, 'local', applySide, ignoreSide, resetSide),
       ],
     })
     const remote = new EditorView({
@@ -246,7 +273,7 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
       extensions: [
         ...extensions(true),
         sideDecorations(model.changes.remote, model.blocks, 'remote', applySide, ignoreSide),
-        actionGutter(model.blocks, 'remote', applySide, ignoreSide),
+        actionGutter(model.blocks, 'remote', applySide, ignoreSide, resetSide),
       ],
     })
     return () => {
@@ -410,6 +437,8 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
         .merge-block-actions { display:inline-flex; gap:1px; padding:1px; border:1px solid color-mix(in srgb, var(--danger, #dc2626) 55%, var(--border)); border-radius:5px; background:var(--card); vertical-align:middle; }
         .merge-block-action { width:18px; height:18px; border:0; border-radius:3px; background:transparent; color:var(--text); font:600 11px 'JetBrains Mono',monospace; cursor:pointer; }
         .merge-block-action:hover { background:var(--accent); }
+        .merge-block-action:disabled { cursor:default; opacity:.35; }
+        .merge-block-action:disabled:hover { background:transparent; }
         .merge-block-action:focus-visible { outline:2px solid var(--primary); outline-offset:1px; }
         .merge-block-actions.is-applied { border-color:var(--primary); opacity:.72; }
         .merge-block-actions.is-ignored { opacity:.38; }

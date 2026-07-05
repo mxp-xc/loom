@@ -157,6 +157,31 @@ function withCount(model: Omit<MergeModel, 'unresolvedCount'>): MergeModel {
   }
 }
 
+function withBlockResult(model: MergeModel, target: MergeBlock, nextTarget: MergeBlock) {
+  const replacement = renderAppliedBlock(nextTarget)
+  const delta = replacement.length - (target.resultTo - target.resultFrom)
+  const result =
+    model.result.slice(0, target.resultFrom) + replacement + model.result.slice(target.resultTo)
+  const blocks = model.blocks.map((block) => {
+    if (block.id === target.id) {
+      return {
+        ...nextTarget,
+        resultTo: target.resultFrom + replacement.length,
+      }
+    }
+    if (block.resultFrom >= target.resultTo) {
+      return {
+        ...block,
+        resultFrom: block.resultFrom + delta,
+        resultTo: block.resultTo + delta,
+      }
+    }
+    return block
+  })
+
+  return withCount({ result, blocks, changes: model.changes })
+}
+
 export function buildMergeModel(base: string, local: string, remote: string): MergeModel {
   const localLines = splitLines(local)
   const remoteLines = splitLines(remote)
@@ -228,35 +253,27 @@ export function applyBlockSide(model: MergeModel, id: string, side: BlockSide): 
       ? target.appliedOrder
       : [...target.appliedOrder, side],
   } as MergeBlock
-  const replacement = renderAppliedBlock(nextTarget)
-  const delta = replacement.length - (target.resultTo - target.resultFrom)
-  const result =
-    model.result.slice(0, target.resultFrom) + replacement + model.result.slice(target.resultTo)
-  const blocks = model.blocks.map((block) => {
-    if (block.id === id) {
-      return {
-        ...nextTarget,
-        resultTo: block.resultFrom + replacement.length,
-      } as MergeBlock
-    }
-    if (block.resultFrom >= target.resultTo) {
-      return {
-        ...block,
-        resultFrom: block.resultFrom + delta,
-        resultTo: block.resultTo + delta,
-      }
-    }
-    return block
-  })
-
-  return withCount({ result, blocks, changes: model.changes })
+  return withBlockResult(model, target, nextTarget)
 }
 
 export function ignoreBlockSide(model: MergeModel, id: string, side: BlockSide): MergeModel {
-  if (!model.blocks.some((block) => block.id === id)) return model
+  const target = model.blocks.find((block) => block.id === id)
+  if (!target) return model
 
-  const blocks = model.blocks.map((block) =>
-    block.id === id ? ({ ...block, [`${side}State`]: 'ignored' } as MergeBlock) : block,
-  )
-  return withCount({ result: model.result, blocks, changes: model.changes })
+  return withBlockResult(model, target, {
+    ...target,
+    [`${side}State`]: 'ignored',
+    appliedOrder: target.appliedOrder.filter((appliedSide) => appliedSide !== side),
+  } as MergeBlock)
+}
+
+export function resetBlockSide(model: MergeModel, id: string, side: BlockSide): MergeModel {
+  const target = model.blocks.find((block) => block.id === id)
+  if (!target) return model
+
+  return withBlockResult(model, target, {
+    ...target,
+    [`${side}State`]: 'pending',
+    appliedOrder: target.appliedOrder.filter((appliedSide) => appliedSide !== side),
+  } as MergeBlock)
 }

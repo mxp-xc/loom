@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { applyBlockSide, buildMergeModel, ignoreBlockSide } from '../src/views/sync/merge-model'
+import {
+  applyBlockSide,
+  buildMergeModel,
+  ignoreBlockSide,
+  resetBlockSide,
+} from '../src/views/sync/merge-model'
 
 const base = `profile: local
 targets:
@@ -139,6 +144,34 @@ describe('three-way merge model', () => {
     expect(model.unresolvedCount).toBe(0)
   })
 
+  it('resets an applied side and recomputes the result from the remaining decisions', () => {
+    let model = buildMergeModel('value: base\n', 'value: local\n', 'value: remote\n')
+    const id = model.blocks[0].id
+
+    model = applyBlockSide(model, id, 'local')
+    model = applyBlockSide(model, id, 'remote')
+    model = resetBlockSide(model, id, 'local')
+
+    expect(model.result).toBe('value: remote\n')
+    expect(model.blocks[0].localState).toBe('pending')
+    expect(model.blocks[0].remoteState).toBe('applied')
+    expect(model.unresolvedCount).toBe(1)
+  })
+
+  it('resets an ignored side to pending without changing applied text', () => {
+    let model = buildMergeModel(base, local, remote)
+    const id = model.blocks[0].id
+
+    model = applyBlockSide(model, id, 'local')
+    model = ignoreBlockSide(model, id, 'remote')
+    model = resetBlockSide(model, id, 'remote')
+
+    expect(model.result).toContain('  - opencode')
+    expect(model.blocks[0].localState).toBe('applied')
+    expect(model.blocks[0].remoteState).toBe('pending')
+    expect(model.unresolvedCount).toBe(1)
+  })
+
   it('treats identical edits as stable', () => {
     const model = buildMergeModel('value: base\n', 'value: same\n', 'value: same\n')
 
@@ -167,5 +200,6 @@ describe('three-way merge model', () => {
 
     expect(applyBlockSide(model, 'missing', 'local')).toBe(model)
     expect(ignoreBlockSide(model, 'missing', 'remote')).toBe(model)
+    expect(resetBlockSide(model, 'missing', 'remote')).toBe(model)
   })
 })

@@ -377,6 +377,7 @@ describe('Sync view', () => {
     const localActionCellText = localApply.closest('.cm-gutterElement')?.textContent ?? ''
     expect(localActionCellText).toContain('→')
     expect(localActionCellText).toContain('×')
+    expect(localActionCellText.indexOf('×')).toBeLessThan(localActionCellText.indexOf('→'))
     expect(localActionCellText).not.toMatch(/\d/)
 
     const remoteApply = document.querySelector(
@@ -396,6 +397,19 @@ describe('Sync view', () => {
     fireEvent.click(localApply)
     expect(
       Array.from(document.querySelectorAll('.merge-change-applied')).some((line) =>
+        line.textContent?.includes('opencode'),
+      ),
+    ).toBe(true)
+    expect(screen.getByText('1 个待处理冲突')).toBeDefined()
+
+    const undoLocalApply = document.querySelector(
+      '.merge-block-action[aria-label="本地变更 1：撤回应用"]',
+    ) as HTMLButtonElement
+    expect(undoLocalApply).not.toBeNull()
+    expect(undoLocalApply.disabled).toBe(false)
+    fireEvent.click(undoLocalApply)
+    expect(
+      Array.from(document.querySelectorAll('.merge-change-conflict')).some((line) =>
         line.textContent?.includes('opencode'),
       ),
     ).toBe(true)
@@ -427,5 +441,48 @@ describe('Sync view', () => {
         }),
       ),
     )
+  })
+
+  it('explains that multiple conflict files are resolved one at a time', async () => {
+    vi.mocked(api.getSyncRemote).mockResolvedValueOnce({
+      remoteUrl: 'https://example.test/repo.git',
+    })
+    vi.mocked(api.syncPull).mockResolvedValueOnce({
+      ok: true,
+      clean: false,
+      sessionId: 'session-3',
+      conflicts: [
+        {
+          path: 'config.yaml',
+          base: 'value: base\n',
+          ours: 'value: local\n',
+          theirs: 'value: remote\n',
+          result: null,
+          binary: false,
+        },
+        {
+          path: 'agents.yaml',
+          base: 'enabled: false\n',
+          ours: 'enabled: local\n',
+          theirs: 'enabled: remote\n',
+          result: null,
+          binary: false,
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <Sync repoPath="/tmp/r" />
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
+
+    expect(
+      await screen.findByText('Git 检测到 2 个冲突文件，当前显示第 1/2 个，保存后继续下一个'),
+    ).toBeDefined()
+    expect(screen.getByText('文件 1/2')).toBeDefined()
+    expect(screen.getByText('config.yaml')).toBeDefined()
+    expect(screen.queryByText('agents.yaml')).toBeNull()
   })
 })

@@ -24,6 +24,11 @@ export default function Sync({ repoPath }: { repoPath: string }) {
   )
   const { error, setError } = useViewError()
   const { toast, showToast, dismiss } = useToast()
+  const totalConflictCount = conflicts.length ? (pull?.conflicts.length ?? conflicts.length) : 0
+  const currentConflictNumber =
+    conflicts.length && totalConflictCount
+      ? Math.max(1, totalConflictCount - conflicts.length + 1)
+      : 0
 
   useEffect(() => {
     api.getSyncRemote(repoPath).then(
@@ -188,7 +193,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
       <div className="syncbar" style={{ marginTop: 12 }}>
         <span className="msg">
           {conflicts.length
-            ? `Git 检测到 ${conflicts.length} 个冲突文件`
+            ? `Git 检测到 ${totalConflictCount} 个冲突文件，当前显示第 ${currentConflictNumber}/${totalConflictCount} 个，保存后继续下一个`
             : pull?.clean
               ? '合并成功，无冲突'
               : '点击拉取并按 Git 规则合并远程变更'}
