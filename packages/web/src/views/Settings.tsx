@@ -52,7 +52,6 @@ export default function Settings({ repoPath }: { repoPath: string }) {
     return (typeof localStorage !== 'undefined' ? localStorage.getItem(LS_CAT) : null) || 'general'
   })
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [savingAll, setSavingAll] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -103,39 +102,6 @@ export default function Settings({ repoPath }: { repoPath: string }) {
     setDrafts({})
   }
 
-  const discardAll = () => {
-    setDrafts({})
-  }
-
-  const saveAll = async () => {
-    const entries = Object.entries(drafts)
-    if (!entries.length || level === 'effective') return
-    setSavingAll(true)
-    const savedKeys: string[] = []
-    try {
-      for (const [key, val] of entries) {
-        await api.putConfig({
-          repo: repoPath,
-          level: level as 'repo' | 'local',
-          field: key,
-          value: val || null,
-        })
-        savedKeys.push(key)
-      }
-      setDrafts({})
-      reloadAll()
-    } catch (e) {
-      setDrafts((prev) => {
-        const next = { ...prev }
-        for (const k of savedKeys) delete next[k]
-        return next
-      })
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSavingAll(false)
-    }
-  }
-
   if (error) {
     return (
       <div className="p-4" style={{ color: 'var(--error)' }}>
@@ -175,8 +141,6 @@ export default function Settings({ repoPath }: { repoPath: string }) {
       : level === 'repo'
         ? '仓库级 · 随 git 同步'
         : '本地级 · 优先级最高 · 编辑或点左圆点覆盖'
-  const dirtyCount = Object.keys(drafts).length
-
   return (
     <div className="space-y-5 p-6">
       <div>
@@ -249,51 +213,6 @@ export default function Settings({ repoPath }: { repoPath: string }) {
             </div>
           )
         })}
-      </div>
-
-      {/* Save bar */}
-      <div className="cfg-save-bar">
-        <span className="cfg-dirty" style={{ visibility: dirtyCount > 0 ? 'visible' : 'hidden' }}>
-          <span className="d" />
-          {dirtyCount > 0 ? `${dirtyCount} 项未保存改动` : '仓库级改动会随下次上传同步'}
-        </span>
-        <button
-          className="btn btn-ghost"
-          onClick={discardAll}
-          disabled={dirtyCount === 0}
-          style={{
-            fontSize: 13,
-            fontWeight: 500,
-            padding: '7px 16px',
-            borderRadius: 'var(--radius)',
-            border: '1px solid var(--border)',
-            background: 'transparent',
-            color: 'var(--muted)',
-            cursor: dirtyCount === 0 ? 'default' : 'pointer',
-            opacity: dirtyCount === 0 ? 0.4 : 1,
-          }}
-        >
-          放弃
-        </button>
-        <button
-          className="btn btn-primary"
-          onClick={saveAll}
-          disabled={dirtyCount === 0 || savingAll || level === 'effective'}
-          style={{
-            fontSize: 13,
-            fontWeight: 500,
-            padding: '7px 16px',
-            borderRadius: 'var(--radius)',
-            border: 'none',
-            background: 'var(--primary)',
-            color: 'var(--primary-fg)',
-            cursor: dirtyCount === 0 || savingAll ? 'default' : 'pointer',
-            marginLeft: 'auto',
-            opacity: dirtyCount === 0 || savingAll ? 0.4 : 1,
-          }}
-        >
-          {savingAll ? '保存中…' : '保存'}
-        </button>
       </div>
     </div>
   )

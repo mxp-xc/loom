@@ -25,6 +25,9 @@ vi.mock('../src/lib/api', () => ({
       setVariable: vi.fn(),
       revealVariable: vi.fn(),
       validateDraft: vi.fn(),
+      renameVariable: vi.fn(),
+      inspectVariableDelete: vi.fn(),
+      deleteVariable: vi.fn(),
     },
   },
 }))
@@ -34,6 +37,11 @@ const environment = (entries: Record<string, unknown>) => ({
   name: 'base',
   environment: { format: 'typed' as const, entries },
 })
+
+const previewChainNames = () =>
+  Array.from(screen.getByLabelText('预览环境链').querySelectorAll('.vars-chain-name')).map(
+    (node) => node.textContent,
+  )
 
 describe('Vars view', () => {
   beforeEach(() => {
@@ -61,6 +69,12 @@ describe('Vars view', () => {
       diagnostics: [],
     })
     vi.mocked(api.vars.setVariable).mockResolvedValue({ ok: true, changed: [], diagnostics: [] })
+    vi.mocked(api.vars.renameVariable).mockResolvedValue({ ok: true, changed: [], diagnostics: [] })
+    vi.mocked(api.vars.inspectVariableDelete).mockResolvedValue({
+      ok: true,
+      impact: { direct: [], transitive: [], impactToken: 'delete-token' },
+    })
+    vi.mocked(api.vars.deleteVariable).mockResolvedValue({ ok: true, changed: [], diagnostics: [] })
     vi.mocked(api.vars.validateDraft).mockResolvedValue({
       ok: true,
       resolution: { ok: true, values: {}, sources: {}, dependencies: {}, diagnostics: [] },
@@ -81,6 +95,16 @@ describe('Vars view', () => {
     expect(screen.queryByText('••••••••')).toBeNull()
   })
 
+  it('shows variable types as badges without redundant preview copy', async () => {
+    render(<Vars repoPath="/repo" />)
+
+    await screen.findByText('API_URL')
+    const row = screen.getByText('API_URL').closest('.vars-variable') as HTMLElement
+    expect(within(row).queryByText('可预览')).toBeNull()
+    expect(row.querySelector('.vars-variable-type')?.textContent).toBe('string')
+    expect(row.querySelector('.vars-variable-title')?.textContent).toContain('API_URL')
+  })
+
   it('selects environments and builds an ordered preview chain', async () => {
     render(<Vars repoPath="/repo" />)
     await screen.findByText('API_URL')
@@ -88,12 +112,7 @@ describe('Vars view', () => {
     fireEvent.click(screen.getByRole('button', { name: /local/ }))
 
     expect(await screen.findByText('DEBUG')).toBeDefined()
-    const chain = screen.getByLabelText('预览环境链')
-    expect(
-      within(chain)
-        .getAllByRole('button')
-        .map((button) => button.textContent),
-    ).toEqual(['base', 'local'])
+    expect(previewChainNames()).toEqual(['base', 'local'])
     await waitFor(() =>
       expect(api.vars.resolve).toHaveBeenLastCalledWith('/repo', ['base', 'local']),
     )
@@ -170,11 +189,7 @@ describe('Vars view', () => {
       .getAllByRole('button')
       .find((button) => button.getAttribute('aria-current'))
     expect(current?.textContent).toContain('base')
-    expect(
-      within(screen.getByLabelText('预览环境链'))
-        .getAllByRole('button')
-        .map((button) => button.textContent),
-    ).toEqual(['base'])
+    expect(screen.queryByLabelText('预览环境链')).toBeNull()
     errorSpy.mockRestore()
   })
 
@@ -210,32 +225,43 @@ describe('Vars view', () => {
       .mockReturnValueOnce(prod.promise)
     fireEvent.click(screen.getByRole('button', { name: /^local$/ }))
     fireEvent.click(screen.getByRole('button', { name: /^prod$/ }))
-    const chain = screen.getByLabelText('预览环境链')
-    expect(
-      within(chain)
-        .getAllByRole('button')
-        .map((button) => button.textContent),
-    ).toEqual(['base', 'local', 'prod'])
+    expect(previewChainNames()).toEqual(['base', 'local', 'prod'])
     prod.resolve({ ...environment({ PROD: { type: 'string', value: 'yes' } }), name: 'prod' })
     local.resolve({ ...environment({ LOCAL: { type: 'string', value: 'yes' } }), name: 'local' })
     expect(await screen.findByText('PROD')).toBeDefined()
     expect(screen.queryByText('LOCAL')).toBeNull()
   })
 
-  it('does not apply a stale resolution after the chain becomes empty', async () => {
-    const pending = deferred<Awaited<ReturnType<typeof api.vars.resolve>>>()
-    vi.mocked(api.vars.resolve).mockReturnValueOnce(pending.promise)
+  it('keeps the preview chain anchored to the last selected environment', async () => {
     render(<Vars repoPath="/repo" />)
     await screen.findByText('API_URL')
-    fireEvent.click(screen.getByRole('button', { name: '从预览链移除 base' }))
-    pending.resolve({
+
+    expect(screen.queryByLabelText('预览环境链')).toBeNull()
+    expect(screen.queryByRole('button', { name: '从预览链移除 base' })).toBeNull()
+  })
+
+  it('does not apply a stale resolution after removing a preview layer', async () => {
+    const initial = deferred<Awaited<ReturnType<typeof api.vars.resolve>>>()
+    const withLocal = deferred<Awaited<ReturnType<typeof api.vars.resolve>>>()
+    vi.mocked(api.vars.resolve)
+      .mockReturnValueOnce(initial.promise)
+      .mockReturnValueOnce(withLocal.promise)
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('API_URL')
+
+    fireEvent.click(screen.getByRole('button', { name: /^local$/ }))
+    await screen.findByText('DEBUG')
+    expect(previewChainNames()).toEqual(['base', 'local'])
+
+    fireEvent.click(screen.getByRole('button', { name: '从预览链移除 local' }))
+    withLocal.resolve({
       ok: true,
       values: { OLD: { type: 'string', value: 'old' } },
       sources: {},
       dependencies: {},
       diagnostics: [],
     })
-    await waitFor(() => expect(screen.getByText('0 层')).toBeDefined())
+    await waitFor(() => expect(screen.queryByLabelText('预览环境链')).toBeNull())
     expect(screen.queryByText('OLD')).toBeNull()
   })
 
@@ -313,19 +339,73 @@ describe('Vars view', () => {
     errorSpy.mockRestore()
   })
 
-  it('shows selected variable details and clears them on environment change', async () => {
+  it('opens variable details from an explicit edit action and clears them on environment change', async () => {
     render(<Vars repoPath="/repo" />)
-    fireEvent.click(await screen.findByRole('button', { name: /API_URL/ }))
-    expect(screen.getByRole('region', { name: '变量配置' }).textContent).toContain('API_URL')
-    expect(screen.getByRole('region', { name: '变量配置' }).textContent).toContain('string')
+    const variables = await screen.findByRole('region', { name: '当前环境' })
+    expect(within(variables).getByRole('button', { name: '新建变量' })).toBeDefined()
+    expect(screen.queryByRole('region', { name: '变量配置' })).toBeNull()
+
+    fireEvent.click(await screen.findByText('API_URL'))
+    expect(screen.queryByRole('dialog', { name: '编辑变量 API_URL' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '编辑变量 API_URL' }))
+    expect(screen.getByRole('dialog', { name: '编辑变量 API_URL' }).textContent).toContain(
+      'API_URL',
+    )
+    expect(screen.getByRole('dialog', { name: '编辑变量 API_URL' }).textContent).toContain('string')
     fireEvent.click(screen.getByRole('button', { name: /^local$/ }))
     expect(await screen.findByText('DEBUG')).toBeDefined()
-    expect(screen.getByRole('region', { name: '变量配置' }).textContent).toContain('选择一个变量')
+    expect(screen.queryByRole('dialog', { name: '编辑变量 API_URL' })).toBeNull()
+  })
+
+  it('renames variables through the variable name field', async () => {
+    render(<Vars repoPath="/repo" />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑变量 API_URL' }))
+    const dialog = screen.getByRole('dialog', { name: '编辑变量 API_URL' })
+
+    expect(within(dialog).queryByRole('button', { name: '重命名' })).toBeNull()
+    expect(within(dialog).queryByRole('button', { name: '删除变量' })).toBeNull()
+    fireEvent.change(within(dialog).getByLabelText('变量名'), { target: { value: 'API_BASE_URL' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存变量' }))
+
+    await waitFor(() =>
+      expect(api.vars.renameVariable).toHaveBeenCalledWith(
+        '/repo',
+        'base',
+        'API_URL',
+        'API_BASE_URL',
+      ),
+    )
+    expect(api.vars.setVariable).toHaveBeenCalledWith('/repo', 'base', 'API_BASE_URL', {
+      type: 'string',
+      value: 'https://example.test',
+    })
+  })
+
+  it('deletes variables from the variable list', async () => {
+    render(<Vars repoPath="/repo" />)
+    fireEvent.click(await screen.findByRole('button', { name: '删除变量 API_URL' }))
+
+    expect(api.vars.inspectVariableDelete).toHaveBeenCalledWith('/repo', 'base', 'API_URL')
+    const dialog = screen.getByRole('dialog', { name: '删除变量 API_URL' })
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole('button', { name: '确认删除' }).hasAttribute('disabled'),
+      ).toBe(false),
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认删除' }))
+
+    await waitFor(() =>
+      expect(api.vars.deleteVariable).toHaveBeenCalledWith('/repo', 'base', 'API_URL', {
+        confirmed: true,
+        impactToken: 'delete-token',
+      }),
+    )
   })
 
   it('saves a typed variable, reloads detail and resolution, then shows a toast', async () => {
     render(<Vars repoPath="/repo" />)
     fireEvent.click(await screen.findByRole('button', { name: '新建变量' }))
+    expect(screen.getByRole('dialog', { name: '新建变量' })).toBeDefined()
     fireEvent.change(screen.getByLabelText('变量名'), { target: { value: 'PORT' } })
     fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'number' } })
     fireEvent.change(screen.getByLabelText('值'), { target: { value: '8080' } })

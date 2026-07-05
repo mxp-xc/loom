@@ -73,6 +73,11 @@ describe('Vars diagnostics actions', () => {
       ok: true,
       resolution: { ok: true, values: {}, sources: {}, dependencies: {}, diagnostics: [] },
     })
+    vi.mocked(api.vars.setVariable).mockResolvedValue({
+      ok: true,
+      changed: ['base'],
+      diagnostics: [],
+    })
   })
 
   it('shows impact and only deletes with the confirmed token', async () => {
@@ -89,14 +94,8 @@ describe('Vars diagnostics actions', () => {
       changed: ['base'],
       diagnostics: [],
     })
-    vi.mocked(api.vars.setVariable).mockResolvedValue({
-      ok: true,
-      changed: ['base'],
-      diagnostics: [],
-    })
     render(<Vars repoPath="/repo" />)
-    fireEvent.click(await screen.findByRole('button', { name: /^API_URL string/ }))
-    fireEvent.click(screen.getByRole('button', { name: '删除变量' }))
+    fireEvent.click(await screen.findByRole('button', { name: '删除变量 API_URL' }))
     const dialog = await screen.findByRole('dialog', { name: '删除变量 API_URL' })
     expect(within(dialog).getByText('直接依赖')).toBeDefined()
     expect(within(dialog).getByText('base / CLIENT')).toBeDefined()
@@ -131,8 +130,7 @@ describe('Vars diagnostics actions', () => {
       )
       .mockResolvedValueOnce({ ok: true, changed: ['base'], diagnostics: [] })
     render(<Vars repoPath="/repo" />)
-    fireEvent.click(await screen.findByRole('button', { name: /^API_URL string/ }))
-    fireEvent.click(screen.getByRole('button', { name: '删除变量' }))
+    fireEvent.click(await screen.findByRole('button', { name: '删除变量 API_URL' }))
     fireEvent.click(await screen.findByRole('button', { name: '确认删除' }))
     expect(await screen.findByText('依赖已变化，请重新确认')).toBeDefined()
     expect(screen.getByText('base / NEW')).toBeDefined()
@@ -145,7 +143,7 @@ describe('Vars diagnostics actions', () => {
     )
   })
 
-  it('renames with a dedicated action and reloads the selected key', async () => {
+  it('renames through the variable name field and reloads the selected key', async () => {
     vi.mocked(api.vars.renameVariable).mockResolvedValue({
       ok: true,
       changed: ['base'],
@@ -155,13 +153,12 @@ describe('Vars diagnostics actions', () => {
       .mockResolvedValueOnce(detail({ API_URL: { type: 'string', value: 'x' } }))
       .mockResolvedValue(detail({ SERVICE_URL: { type: 'string', value: 'x' } }))
     render(<Vars repoPath="/repo" />)
-    fireEvent.click(await screen.findByRole('button', { name: /^API_URL string/ }))
-    fireEvent.click(screen.getByRole('button', { name: '重命名' }))
-    const dialog = screen.getByRole('dialog', { name: '重命名变量' })
-    fireEvent.change(within(dialog).getByLabelText('新变量名'), {
+    fireEvent.click(await screen.findByRole('button', { name: '编辑变量 API_URL' }))
+    const dialog = screen.getByRole('dialog', { name: '编辑变量 API_URL' })
+    fireEvent.change(within(dialog).getByLabelText('变量名'), {
       target: { value: 'SERVICE_URL' },
     })
-    fireEvent.click(within(dialog).getByRole('button', { name: '确认重命名' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存变量' }))
     await waitFor(() =>
       expect(api.vars.renameVariable).toHaveBeenCalledWith(
         '/repo',
@@ -170,14 +167,18 @@ describe('Vars diagnostics actions', () => {
         'SERVICE_URL',
       ),
     )
-    expect(await screen.findByRole('heading', { name: /SERVICE_URL/ })).toBeDefined()
+    expect(api.vars.setVariable).toHaveBeenCalledWith('/repo', 'base', 'SERVICE_URL', {
+      type: 'string',
+      value: 'x',
+    })
+    expect(await screen.findByRole('button', { name: '编辑变量 SERVICE_URL' })).toBeDefined()
   })
 
   it('marks warning rows with icon and text and shows diagnostic detail', async () => {
     render(<Vars repoPath="/repo" />)
     const warning = await screen.findByText('引用缺失：API_URL')
-    expect(warning.closest('button')?.querySelector('svg')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /CLIENT/ }))
+    expect(warning.closest('.vars-variable')?.querySelector('svg')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '编辑变量 CLIENT' }))
     expect(screen.getByText('缺失变量：API_URL')).toBeDefined()
     expect(screen.getByText('来源环境：base')).toBeDefined()
     expect(screen.getByText('引用路径：CLIENT → API_URL')).toBeDefined()
@@ -190,10 +191,9 @@ describe('Vars diagnostics actions', () => {
       ]),
     )
     render(<Vars repoPath="/repo" />)
-    fireEvent.click(await screen.findByRole('button', { name: /^API_URL string/ }))
-    fireEvent.click(screen.getByRole('button', { name: '重命名' }))
-    fireEvent.change(screen.getByLabelText('新变量名'), { target: { value: 'CLIENT' } })
-    fireEvent.click(screen.getByRole('button', { name: '确认重命名' }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑变量 API_URL' }))
+    fireEvent.change(screen.getByLabelText('变量名'), { target: { value: 'CLIENT' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存变量' }))
     expect(await screen.findByText('重命名失败：冲突')).toBeDefined()
     expect(screen.getByText('变量已存在')).toBeDefined()
   })
@@ -241,11 +241,10 @@ describe('Vars diagnostics actions', () => {
         }),
       )
     render(<Vars repoPath="/repo" />)
-    fireEvent.click(await screen.findByRole('button', { name: /^API_URL string/ }))
-    fireEvent.click(screen.getByRole('button', { name: '删除变量' }))
+    fireEvent.click(await screen.findByRole('button', { name: '删除变量 API_URL' }))
     fireEvent.click(await screen.findByRole('button', { name: '确认删除' }))
     expect(await screen.findByText('引用缺失：API_URL')).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: /CLIENT string/ }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑变量 CLIENT' }))
     fireEvent.change(screen.getByRole('combobox', { name: '值' }), { target: { value: 'fixed' } })
     fireEvent.click(screen.getByRole('button', { name: '保存变量' }))
     await waitFor(() => expect(screen.queryByText('引用缺失：API_URL')).toBeNull())
@@ -259,9 +258,9 @@ describe('Vars diagnostics actions', () => {
     })
     vi.mocked(api.vars.deleteVariable).mockReturnValue(deletion.promise)
     render(<Vars repoPath="/repo" />)
-    fireEvent.click(await screen.findByRole('button', { name: /^API_URL string/ }))
-    fireEvent.click(screen.getByRole('button', { name: '删除变量' }))
+    fireEvent.click(await screen.findByRole('button', { name: '删除变量 API_URL' }))
     const confirm = await screen.findByRole('button', { name: '确认删除' })
+    await waitFor(() => expect(confirm.hasAttribute('disabled')).toBe(false))
     fireEvent.click(confirm)
     expect(await screen.findByRole('button', { name: '正在删除…' })).toHaveProperty(
       'disabled',
@@ -328,15 +327,14 @@ describe('Vars diagnostics actions', () => {
       .mockRejectedValueOnce(new ApiError('存在缺失引用', 422, 'resolution_failed'))
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     render(<Vars repoPath="/repo" />)
-    fireEvent.click(await screen.findByRole('button', { name: /^API_URL string/ }))
-    fireEvent.click(screen.getByRole('button', { name: '删除变量' }))
+    fireEvent.click(await screen.findByRole('button', { name: '删除变量 API_URL' }))
     fireEvent.click(await screen.findByRole('button', { name: '确认删除' }))
 
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: '删除变量 API_URL' })).toBeNull(),
     )
     expect(await screen.findByText('变量 API_URL 已删除')).toBeDefined()
-    expect(screen.queryByRole('button', { name: /^API_URL string/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: '编辑变量 API_URL' })).toBeNull()
     expect(screen.getByText('引用缺失：API_URL')).toBeDefined()
     expect(api.vars.deleteVariable).toHaveBeenCalledTimes(1)
     expect(errorSpy).toHaveBeenCalledWith(
@@ -366,15 +364,16 @@ describe('Vars diagnostics actions', () => {
       .mockRejectedValueOnce(new ApiError('存在缺失引用', 422, 'resolution_failed'))
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     render(<Vars repoPath="/repo" />)
-    fireEvent.click(await screen.findByRole('button', { name: /^API_URL string/ }))
-    fireEvent.click(screen.getByRole('button', { name: '重命名' }))
-    fireEvent.change(screen.getByLabelText('新变量名'), { target: { value: 'SERVICE_URL' } })
-    fireEvent.click(screen.getByRole('button', { name: '确认重命名' }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑变量 API_URL' }))
+    fireEvent.change(screen.getByLabelText('变量名'), { target: { value: 'SERVICE_URL' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存变量' }))
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '重命名变量' })).toBeNull())
-    expect(await screen.findByText('变量 API_URL 已重命名为 SERVICE_URL')).toBeDefined()
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '编辑变量 API_URL' })).toBeNull(),
+    )
+    expect(await screen.findByText('变量 API_URL 已重命名为 SERVICE_URL 并保存')).toBeDefined()
     expect(screen.queryByText(/重命名失败/)).toBeNull()
-    expect(await screen.findByRole('heading', { name: /SERVICE_URL/ })).toBeDefined()
+    expect(await screen.findByRole('button', { name: '编辑变量 SERVICE_URL' })).toBeDefined()
     expect(errorSpy).toHaveBeenCalledWith(
       'Failed to resolve vars preview after refresh',
       expect.any(ApiError),

@@ -1,4 +1,4 @@
-import { Check, Layers3, Plus, X } from 'lucide-react'
+import { Check, Layers3, Plus } from 'lucide-react'
 
 interface Props {
   environments: string[]
@@ -46,28 +46,30 @@ export default function EnvironmentSidebar(props: Props) {
           </button>
         ))}
       </div>
-      <section className="vars-chain" aria-labelledby="vars-chain-title">
-        <div className="vars-chain-label">
-          <span id="vars-chain-title">预览链</span>
-          <span>{props.previewChain.length} 层</span>
-        </div>
-        <div className="vars-chain-rail" aria-label="预览环境链">
-          {props.previewChain.map((name, index) => (
-            <div className="vars-chain-step" key={name}>
-              <span className="vars-chain-index">{index + 1}</span>
-              <button
-                type="button"
-                onClick={() => props.onRemoveFromChain(name)}
-                aria-label={`从预览链移除 ${name}`}
-              >
-                <span>{name}</span>
-                <X size={14} />
-              </button>
-            </div>
-          ))}
-          {props.previewChain.length === 0 && <p>点击环境以建立预览链</p>}
-        </div>
-      </section>
+      {props.previewChain.length > 1 && (
+        <section className="vars-chain" aria-labelledby="vars-chain-title">
+          <div className="vars-chain-label">
+            <span id="vars-chain-title">覆盖预览</span>
+            <span>{props.previewChain.length} 层</span>
+          </div>
+          <p className="vars-chain-help">后面的环境会覆盖前面的同名变量。</p>
+          <div className="vars-chain-rail" aria-label="预览环境链">
+            {props.previewChain.map((name, index) => (
+              <div className="vars-chain-step" key={name}>
+                <span className="vars-chain-index">{index + 1}</span>
+                <button
+                  type="button"
+                  onClick={() => props.onRemoveFromChain(name)}
+                  aria-label={`从预览链移除 ${name}`}
+                >
+                  <span className="vars-chain-name">{name}</span>
+                  <span className="vars-chain-action">移除</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </aside>
   )
 }

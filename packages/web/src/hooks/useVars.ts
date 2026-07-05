@@ -197,6 +197,7 @@ export function useVars(repoPath: string) {
   }, [previewChain, repoPath])
 
   const removeFromChain = useCallback((name: string) => {
+    if (previewChainRef.current.length <= 1) return
     resolutionSequence.current += 1
     previewChainRef.current = previewChainRef.current.filter((item) => item !== name)
     setPreviewChain(previewChainRef.current)

@@ -1,15 +1,25 @@
-import { AlertTriangle, KeyRound, Search } from 'lucide-react'
+import { AlertTriangle, KeyRound, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { Button } from '../../components/ui/button'
 import type { VarEntry, VarsDiagnostic } from '../../lib/vars'
 
 interface Props {
   entries: Record<string, VarEntry>
   selectedKey: string | null
-  onSelect: (key: string) => void
+  onEdit: (key: string) => void
+  onDelete: (key: string) => void
+  onCreate: () => void
   diagnostics?: VarsDiagnostic[]
 }
 
-export default function VariableList({ entries, selectedKey, onSelect, diagnostics = [] }: Props) {
+export default function VariableList({
+  entries,
+  selectedKey,
+  onEdit,
+  onDelete,
+  onCreate,
+  diagnostics = [],
+}: Props) {
   const [query, setQuery] = useState('')
   const filtered = useMemo(
     () =>
@@ -25,7 +35,12 @@ export default function VariableList({ entries, selectedKey, onSelect, diagnosti
           <span className="vars-eyebrow">变量</span>
           <h2 id="vars-list-title">当前环境</h2>
         </div>
-        <span className="vars-count">{Object.keys(entries).length}</span>
+        <div className="vars-list-actions">
+          <span className="vars-count">{Object.keys(entries).length}</span>
+          <Button type="button" size="sm" variant="secondary" onClick={onCreate}>
+            <Plus size={15} /> 新建变量
+          </Button>
+        </div>
       </div>
       <label className="vars-search">
         <span className="sr-only">搜索变量</span>
@@ -38,32 +53,55 @@ export default function VariableList({ entries, selectedKey, onSelect, diagnosti
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>
-      <div className="vars-variable-list">
+      <div className="vars-variable-list" role="list">
         {filtered.map(([key, entry]) => {
           const warning = diagnostics.find(
             (item) => item.severity === 'warning' && item.key === key,
           )
+          const warningText = warning
+            ? `引用缺失：${warning.referencedKey ?? warning.path?.at(-1) ?? '未知变量'}`
+            : null
           return (
-            <button
+            <div
               key={key}
-              type="button"
               className={`vars-variable${warning ? 'vars-variable-warning' : ''}`}
-              aria-pressed={selectedKey === key}
-              onClick={() => onSelect(key)}
+              data-selected={selectedKey === key ? 'true' : undefined}
+              role="listitem"
             >
               {warning ? <AlertTriangle size={16} aria-label="引用警告" /> : <KeyRound size={16} />}
-              <span className="vars-variable-name">{key}</span>
-              <span className="vars-variable-meta">
-                <span>{entry.type}</span>
-                <span>
-                  {warning
-                    ? `引用缺失：${warning.referencedKey ?? warning.path?.at(-1) ?? '未知变量'}`
-                    : entry.type === 'secret'
-                      ? '已隐藏'
-                      : '可预览'}
+              <span className="vars-variable-main">
+                <span className="vars-variable-title">
+                  <span className="vars-variable-name">{key}</span>
+                  <span className={`vars-variable-type vars-variable-type-${entry.type}`}>
+                    {entry.type}
+                  </span>
                 </span>
+                {warningText && <span className="vars-variable-note">{warningText}</span>}
               </span>
-            </button>
+              <span className="vars-variable-row-actions">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="secondary"
+                  aria-label={`编辑变量 ${key}`}
+                  onClick={() => onEdit(key)}
+                >
+                  <Pencil size={13} />
+                  编辑
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  className="vars-variable-delete"
+                  aria-label={`删除变量 ${key}`}
+                  onClick={() => onDelete(key)}
+                >
+                  <Trash2 size={13} />
+                  删除
+                </Button>
+              </span>
+            </div>
           )
         })}
         {filtered.length === 0 && (

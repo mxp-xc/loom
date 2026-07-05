@@ -49,4 +49,12 @@ describe('Settings', () => {
 
     await waitFor(() => expect(refreshManifest).toHaveBeenCalledWith('/tmp/r'))
   })
+
+  it('does not render the old global save bar actions', async () => {
+    render(<Settings repoPath="/tmp/r" />)
+    await screen.findByText('最终结果')
+
+    expect(screen.queryByRole('button', { name: '放弃' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '保存' })).toBeNull()
+  })
 })

@@ -28,8 +28,6 @@ interface Props {
     entry: VarEntryInput,
   ) => Promise<{ ok: true; resolution: VarsResolution }>
   warnings?: VarsDiagnostic[]
-  onRename?: () => void
-  onDelete?: () => void
 }
 
 const serialize = (entry?: VarEntry) => {
@@ -48,8 +46,6 @@ export default function VariableEditor({
   onReveal,
   validateDraft,
   warnings = [],
-  onRename,
-  onDelete,
 }: Props) {
   const [key, setKey] = useState(initialKey)
   const [type, setType] = useState<VarType>(entry?.type ?? 'string')
@@ -249,33 +245,6 @@ export default function VariableEditor({
 
   return (
     <form className="vars-editor" onSubmit={(event) => void submit(event)}>
-      {initialKey && (
-        <div className="vars-editor-heading">
-          <h3 className="vars-editor-title">
-            {initialKey} <span>{type}</span>
-          </h3>
-          <div>
-            <Button
-              type="button"
-              size="xs"
-              variant="secondary"
-              onClick={onRename}
-              disabled={formBusy}
-            >
-              重命名
-            </Button>
-            <Button
-              type="button"
-              size="xs"
-              variant="destructive"
-              onClick={onDelete}
-              disabled={formBusy}
-            >
-              删除变量
-            </Button>
-          </div>
-        </div>
-      )}
       <div className="vars-editor-row">
         <label htmlFor="vars-key">变量名</label>
         <input
@@ -288,7 +257,6 @@ export default function VariableEditor({
             currentKey.current = event.target.value
             setKey(event.target.value)
           }}
-          readOnly={Boolean(initialKey)}
         />
       </div>
       <div className="vars-editor-row">
