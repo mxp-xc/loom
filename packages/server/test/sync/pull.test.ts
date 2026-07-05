@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path'
 import { simpleGit } from 'simple-git'
 import { NodeGit } from '../../src/platform/node/git'
 import { NodeFileSystem } from '../../src/platform/node/fs'
-import { syncPull } from '../../src/sync/pull'
+import { abortConflictMerge, saveConflict, syncPull } from '../../src/sync/pull'
 
 const created: string[] = []
 afterAll(async () => {
@@ -85,15 +85,37 @@ const C =
   'sources:\n  - url: github:x/a\n    ref: v1\n  - url: github:x/c\n    ref: v1\nskills: []\n'
 
 describe('syncPull', () => {
-  it('no conflict: auto-merges both sides (B + C)', async () => {
-    const repo = await setupRepo(A, B, C)
+  it('keeps native Git conflict state for competing line edits', async () => {
+    const repo = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
+    const result = await syncPull(repo, new NodeGit(), new NodeFileSystem())
+
+    expect(result.clean).toBe(false)
+    expect(result.conflicts).toHaveLength(1)
+    expect(result.conflicts[0]).toMatchObject({
+      path: 'skills.yaml',
+      base: 'value: base',
+      ours: 'value: local',
+      theirs: 'value: remote',
+    })
+    expect(result.conflicts[0].result).toContain('<<<<<<< HEAD')
+
+    const resumed = await syncPull(repo, new NodeGit(), new NodeFileSystem())
+    expect(resumed.clean).toBe(false)
+    expect(resumed.conflicts.map((conflict) => conflict.path)).toEqual(['skills.yaml'])
+  })
+
+  it('no conflict: Git auto-merges changes on separate lines', async () => {
+    const repo = await setupRepo(
+      'first: base\ncontext: unchanged\nsecond: base\n',
+      'first: local\ncontext: unchanged\nsecond: base\n',
+      'first: base\ncontext: unchanged\nsecond: remote\n',
+    )
     const res = await syncPull(repo, new NodeGit(), new NodeFileSystem())
     expect(res.clean).toBe(true)
     const merged = await readFile(join(repo, 'skills.yaml'), 'utf8')
-    expect(merged).toContain('github:x/b')
-    expect(merged).toContain('github:x/c')
+    expect(merged).toBe('first: local\ncontext: unchanged\nsecond: remote\n')
   })
-  it('conflict: both change same ref -> conflicts, no <<<<<<< in working tree', async () => {
+  it('conflict: both change same ref -> Git conflict with worktree markers', async () => {
     const repo = await setupRepo(
       A,
       'sources:\n  - url: github:x/a\n    ref: v2\nskills: []\n',
@@ -101,12 +123,8 @@ describe('syncPull', () => {
     )
     const res = await syncPull(repo, new NodeGit(), new NodeFileSystem())
     expect(res.clean).toBe(false)
-    expect(
-      res.files.some((f) =>
-        f.result.conflicts.some((c) => c.path.includes('github:x/a') && c.field === 'ref'),
-      ),
-    ).toBe(true)
-    expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).not.toContain('<<<<<<<')
+    expect(res.conflicts.map((conflict) => conflict.path)).toContain('skills.yaml')
+    expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toContain('<<<<<<< HEAD')
   })
   it('vars union: HEAD has no vars, theirs adds vars/local.yaml -> clean', async () => {
     const repo = await setupRepoMulti([
@@ -117,13 +135,44 @@ describe('syncPull', () => {
     expect(res.clean).toBe(true)
     expect(await readFile(join(repo, 'vars', 'local.yaml'), 'utf8')).toContain('k: v')
   })
-  it('assets both sides change -> textConflicts non-empty, no <<<<<<<', async () => {
+  it('assets both sides change -> native Git conflict', async () => {
     const repo = await setupRepoMulti([
       { path: 'skills.yaml', base: A, ours: A, theirs: A },
       { path: 'assets/skills/foo/SKILL.md', base: 'v1\n', ours: 'v2\n', theirs: 'v3\n' },
     ])
     const res = await syncPull(repo, new NodeGit(), new NodeFileSystem())
     expect(res.clean).toBe(false)
-    expect(res.textConflicts.some((t) => t.file.includes('SKILL.md'))).toBe(true)
+    expect(res.conflicts.some((conflict) => conflict.path.includes('SKILL.md'))).toBe(true)
+  })
+
+  it('saves a resolved file and creates a two-parent merge commit', async () => {
+    const repo = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
+    const git = new NodeGit()
+    const fs = new NodeFileSystem()
+    await syncPull(repo, git, fs)
+
+    await expect(saveConflict(repo, git, fs, 'skills.yaml', '<<<<<<< HEAD\n')).rejects.toThrow(
+      '仍包含未解决的冲突标记',
+    )
+
+    const saved = await saveConflict(repo, git, fs, 'skills.yaml', 'value: chosen\n')
+    expect(saved).toEqual({ clean: true, remaining: [] })
+    expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: chosen\n')
+
+    const parents = (await simpleGit(repo).raw(['rev-list', '--parents', '-n', '1', 'HEAD']))
+      .trim()
+      .split(' ')
+    expect(parents).toHaveLength(3)
+  })
+
+  it('aborts an in-progress conflict merge', async () => {
+    const repo = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
+    const git = new NodeGit()
+    await syncPull(repo, git, new NodeFileSystem())
+
+    await abortConflictMerge(repo, git)
+
+    expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: local\n')
+    expect(await git.unmergedPaths(repo)).toEqual([])
   })
 })

@@ -29,9 +29,14 @@ export const api = {
     fetch(`${base}/status`).then(json) as Promise<{ active_repo: string; repoPath: string }>,
   project: (body: { repo: string; scope?: 'skills' | 'mcp' | 'memory' | 'all' }) =>
     post('/project', body).then(json),
-  syncPull: (repo: string) => post('/sync/pull', { repo }).then(json),
-  syncApply: (repo: string, resolutions: Record<string, 'ours' | 'theirs'>) =>
-    post('/sync/apply', { repo, resolutions }).then(json),
+  syncPull: (repo: string) => post('/sync/pull', { repo }).then(json) as Promise<SyncPullResponse>,
+  getSyncSession: (repo: string) =>
+    fetch(`${base}/sync/session?repo=${encodeURIComponent(repo)}`).then(json) as Promise<
+      SyncPullResponse & { active: boolean }
+    >,
+  saveSyncConflict: (body: { sessionId: string; path: string; result: string }) =>
+    post('/sync/conflicts/save', body).then(json) as Promise<SyncConflictSaveResponse>,
+  abortSyncMerge: (sessionId: string) => post('/sync/conflicts/abort', { sessionId }).then(json),
   syncPush: (repo: string) => post('/sync/push', { repo }).then(json),
   install: (body: unknown) => post('/install', body).then(json),
   update: (repo: string, sources: unknown[]) => post('/update', { repo, sources }).then(json),
@@ -202,4 +207,31 @@ export const api = {
       error?: string
       message?: string
     }>,
+}
+
+export interface GitConflictFile {
+  path: string
+  base: string | null
+  ours: string | null
+  theirs: string | null
+  result: string | null
+  binary: boolean
+}
+
+export interface SyncPullResponse {
+  ok: boolean
+  clean: boolean
+  sessionId?: string
+  conflicts: GitConflictFile[]
+  error?: string
+  message?: string
+}
+
+export interface SyncConflictSaveResponse {
+  ok: boolean
+  clean: boolean
+  remaining: GitConflictFile[]
+  sessionId?: string
+  error?: string
+  message?: string
 }

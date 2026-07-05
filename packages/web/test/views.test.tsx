@@ -8,6 +8,10 @@ import SkillSourceList from '../src/views/skills/SkillSourceList'
 import AddSkillModal from '../src/views/skills/AddSkillModal'
 import Sync from '../src/views/Sync'
 
+if (!Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList
+}
+
 vi.mock('../src/lib/api', () => ({
   api: {
     init: vi.fn(async () => ({ ok: true, active_repo: 'default', repoPath: '/tmp/r' })),
@@ -16,8 +20,10 @@ vi.mock('../src/lib/api', () => ({
     update: vi.fn(async () => ({ updates: [] })),
     performUpdate: vi.fn(async () => ({ pinned_commit: 'bbb' })),
     syncPull: vi.fn(async () => ({ clean: true, files: [], textConflicts: [] })),
+    getSyncSession: vi.fn(async () => ({ ok: true, active: false })),
     syncPush: vi.fn(async () => ({ ok: true })),
-    syncApply: vi.fn(async () => ({ ok: true })),
+    saveSyncConflict: vi.fn(async () => ({ ok: true, clean: true, remaining: [] })),
+    abortSyncMerge: vi.fn(async () => ({ ok: true })),
     getSyncRemote: vi.fn(async () => ({ remoteUrl: null })),
     setSyncRemote: vi.fn(async () => ({ ok: true })),
     getConfig: vi.fn(async () => ({ effective: {}, repo: {}, local: {} })),
@@ -243,7 +249,7 @@ describe('Skill source updates', () => {
 })
 
 describe('Sync view', () => {
-  it('renders pull and push buttons', () => {
+  it('renders pull and push buttons', async () => {
     render(
       <MemoryRouter>
         <Sync repoPath="/tmp/r" />
@@ -251,5 +257,175 @@ describe('Sync view', () => {
     )
     expect(screen.getByText('拉取', { exact: true })).toBeDefined()
     expect(screen.getByText('上传', { exact: true })).toBeDefined()
+    await waitFor(() => expect(api.getSyncRemote).toHaveBeenCalledWith('/tmp/r'))
+  })
+
+  it('restores an isolated conflict session after page reload', async () => {
+    vi.mocked(api.getSyncSession).mockResolvedValueOnce({
+      ok: true,
+      active: true,
+      clean: false,
+      sessionId: 'restored-session',
+      conflicts: [
+        {
+          path: 'skills.yaml',
+          base: 'value: base\n',
+          ours: 'value: local\n',
+          theirs: 'value: remote\n',
+          result: '<<<<<<< HEAD\nvalue: local\n=======\nvalue: remote\n>>>>>>> remote\n',
+          binary: false,
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <Sync repoPath="/tmp/restored" />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('skills.yaml')).toBeDefined()
+    expect(api.getSyncSession).toHaveBeenCalledWith('/tmp/restored')
+  })
+
+  it('renders native Git conflicts and aborts the merge', async () => {
+    vi.mocked(api.getSyncRemote).mockResolvedValueOnce({
+      remoteUrl: 'https://example.test/repo.git',
+    })
+    vi.mocked(api.syncPull).mockResolvedValueOnce({
+      ok: true,
+      clean: false,
+      sessionId: 'session-1',
+      conflicts: [
+        {
+          path: 'skills.yaml',
+          base: 'value: base\n',
+          ours: 'value: local\n',
+          theirs: 'value: remote\n',
+          result: '<<<<<<< HEAD\nvalue: local\n=======\nvalue: remote\n>>>>>>> FETCH_HEAD\n',
+          binary: false,
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <Sync repoPath="/tmp/r" />
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
+
+    expect(await screen.findByText('skills.yaml')).toBeDefined()
+    expect(screen.getAllByText('LOCAL').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('REMOTE').length).toBeGreaterThan(0)
+    expect(screen.queryByText('[object Object]')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '放弃合并' }))
+    await waitFor(() => expect(api.abortSyncMerge).toHaveBeenCalledWith('session-1'))
+  })
+
+  it('refines conflicts and applies or ignores each side change', async () => {
+    vi.mocked(api.getSyncRemote).mockResolvedValueOnce({
+      remoteUrl: 'https://example.test/repo.git',
+    })
+    vi.mocked(api.syncPull).mockResolvedValueOnce({
+      ok: true,
+      clean: false,
+      sessionId: 'session-2',
+      conflicts: [
+        {
+          path: 'config.yaml',
+          base: 'profile: local\ntargets:\n  - claude-code\nprojection:\n  strategy: link\n',
+          ours: 'profile: local\ntargets:\n  - claude-code\n  - codex\n  - opencode\nprojection:\n  strategy: link\n',
+          theirs:
+            'profile: local\ntargets: []\nprojection:\n  strategy: link\nproxy:\n  http: http://127.0.0.1:7890\n  https: http://127.0.0.1:7890\n',
+          result: 'unused Git marker result',
+          binary: false,
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <Sync repoPath="/tmp/r" />
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
+
+    expect(await screen.findByText('config.yaml')).toBeDefined()
+    expect(screen.getAllByText('RESULT').length).toBeGreaterThan(0)
+    expect(screen.getByText('1 个待处理冲突')).toBeDefined()
+    expect(document.querySelectorAll('.merge-block-action[aria-label$="应用到结果"]')).toHaveLength(
+      2,
+    )
+    expect(document.querySelectorAll('.merge-block-action[aria-label$="忽略变更"]')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: '保留两者' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '保留本地' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '保留远程' })).toBeDefined()
+    expect(document.querySelectorAll('.merge-change-conflict').length).toBeGreaterThan(0)
+    expect(document.querySelectorAll('.merge-change-stable').length).toBeGreaterThan(0)
+
+    const localApply = document.querySelector(
+      '.merge-block-action[aria-label="本地变更 1：应用到结果"]',
+    ) as HTMLButtonElement
+    expect(localApply).not.toBeNull()
+    expect(localApply.closest('.cm-line')).toBeNull()
+    expect(localApply.closest('.cm-gutters-after')).not.toBeNull()
+    expect(localApply.closest('.merge-action-gutter')).not.toBeNull()
+    expect(localApply.closest('.cm-lineNumbers')).toBeNull()
+    expect(localApply.closest('.cm-gutterElement')).not.toBeNull()
+    const localActionCellText = localApply.closest('.cm-gutterElement')?.textContent ?? ''
+    expect(localActionCellText).toContain('→')
+    expect(localActionCellText).toContain('×')
+    expect(localActionCellText).not.toMatch(/\d/)
+
+    const remoteApply = document.querySelector(
+      '.merge-block-action[aria-label="远程变更 1：应用到结果"]',
+    ) as HTMLButtonElement
+    expect(remoteApply).not.toBeNull()
+    expect(remoteApply.closest('.cm-line')).toBeNull()
+    expect(remoteApply.closest('.cm-gutters-before')).not.toBeNull()
+    expect(remoteApply.closest('.merge-action-gutter')).not.toBeNull()
+    expect(remoteApply.closest('.cm-lineNumbers')).toBeNull()
+    const remoteActionCellText = remoteApply.closest('.cm-gutterElement')?.textContent ?? ''
+    expect(remoteActionCellText).toContain('←')
+    expect(remoteActionCellText).toContain('×')
+    expect(remoteActionCellText).not.toMatch(/\d/)
+    expect(document.querySelectorAll('.cm-line .merge-block-action')).toHaveLength(0)
+
+    fireEvent.click(localApply)
+    expect(
+      Array.from(document.querySelectorAll('.merge-change-applied')).some((line) =>
+        line.textContent?.includes('opencode'),
+      ),
+    ).toBe(true)
+    expect(screen.getByText('1 个待处理冲突')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: '保留远程' }))
+    expect(screen.queryByText('0 个待处理冲突')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '保留两者' }))
+    expect(screen.getByText('1 个待处理冲突')).toBeDefined()
+
+    fireEvent.click(
+      document.querySelector(
+        '.merge-block-action[aria-label="本地变更 1：应用到结果"]',
+      ) as HTMLButtonElement,
+    )
+    fireEvent.click(
+      document.querySelector(
+        '.merge-block-action[aria-label="远程变更 1：忽略变更"]',
+      ) as HTMLButtonElement,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '保存并完成合并' }))
+
+    await waitFor(() =>
+      expect(api.saveSyncConflict).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-2',
+          path: 'config.yaml',
+          result: expect.stringMatching(/targets:[\s\S]*opencode[\s\S]*proxy:/),
+        }),
+      ),
+    )
   })
 })

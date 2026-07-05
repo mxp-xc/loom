@@ -5,8 +5,16 @@ import { registerRoutes } from '../../src/api/router'
 vi.mock('../../src/projection/executor.js', () => ({
   executeProjection: vi.fn(async () => ({ ok: true })),
 }))
-vi.mock('../../src/sync/pull.js', () => ({
-  syncPull: vi.fn(async () => ({ files: [], varsFiles: [], textConflicts: [], clean: true })),
+vi.mock('../../src/sync/session-manager.js', () => ({
+  SyncSessionError: class SyncSessionError extends Error {},
+  SyncSessionManager: class SyncSessionManager {
+    pull = vi.fn(async () => ({ conflicts: [], clean: true }))
+    getSession = vi.fn(async () => null)
+    saveConflict = vi.fn(async () => ({ clean: true, remaining: [] }))
+    abort = vi.fn(async () => undefined)
+    recover = vi.fn(async () => undefined)
+    startMaintenance = vi.fn(() => () => undefined)
+  },
 }))
 vi.mock('../../src/sync/push.js', () => ({ syncPush: vi.fn(async () => ({ ok: true })) }))
 vi.mock('@loom/core', () => ({
@@ -73,6 +81,24 @@ describe('API routes', () => {
     })
     expect(res.status).toBe(200)
     expect((await res.json()).ok).toBe(true)
+  })
+  it('POST /api/sync/conflicts/save returns remaining conflicts', async () => {
+    const res = await app.request('/api/sync/conflicts/save', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'session-1', path: 'skills.yaml', result: 'resolved\n' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, clean: true, remaining: [] })
+  })
+  it('POST /api/sync/conflicts/abort returns ok', async () => {
+    const res = await app.request('/api/sync/conflicts/abort', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'session-1' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
   })
   it('GET /api/config returns effective + repo + local config', async () => {
     const res = await app.request('/api/config?repo=/tmp/r')

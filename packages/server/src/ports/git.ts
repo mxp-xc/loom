@@ -1,6 +1,10 @@
 export interface IGit {
   init(repoPath: string): Promise<void>
   fetch(repoPath: string): Promise<void>
+  merge(repoPath: string, ref: string): Promise<{ clean: boolean }>
+  unmergedPaths(repoPath: string): Promise<string[]>
+  showIndexStage(repoPath: string, stage: 1 | 2 | 3, path: string): Promise<string | null>
+  abortMerge(repoPath: string): Promise<void>
   mergeBase(repoPath: string, a: string, b: string): Promise<string>
   lsRemote(url: string): Promise<{ tags: Record<string, string>; head: string; branches: string[] }>
   clone(url: string, dest: string, shallow?: boolean): Promise<void>

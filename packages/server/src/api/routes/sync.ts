@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
-import { syncPull, applyResolutions } from '../../sync/pull.js'
 import { syncPush } from '../../sync/push.js'
+import { SyncSessionError } from '../../sync/session-manager.js'
 import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
 import type { RouteDeps } from '../router.js'
@@ -11,134 +11,116 @@ export function createSyncRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
 
   app.post('/sync/pull', async (c) => {
+    let repoPath: string | undefined
     try {
       const { repo } = await c.req.json()
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      syncLogger.info('pull started', { repoPath })
-      const res = await syncPull(repoPath, deps.git, deps.fs, {
-        error: (o, m) => syncLogger.error(m, o as Record<string, unknown>),
-        warn: (o, m) => syncLogger.warn(m, o as Record<string, unknown>),
-      })
-      syncLogger.info('pull completed', { repoPath, clean: res.clean })
-      return c.json({ ok: true, ...res })
-    } catch (e) {
-      const msg = String((e as Error)?.message ?? e)
-      syncLogger.error('pull failed', { err: e, repoPath: c.req.path })
-      const noRemote =
-        /no remote|could not find remote|not a git repository|does not appear to be a git/i.test(
-          msg,
-        )
-      return c.json({ ok: false, error: noRemote ? 'no_remote' : 'other', message: msg })
+      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      syncLogger.info('isolated pull started', { repoPath })
+      const result = await deps.sync.pull(repoPath)
+      syncLogger.info('isolated pull completed', { repoPath, clean: result.clean })
+      return c.json({ ok: true, ...result })
+    } catch (err) {
+      return syncError(c, err, { repoPath, operation: 'pull' })
     }
   })
 
-  app.post('/sync/apply', async (c) => {
+  app.get('/sync/session', async (c) => {
+    let repoPath: string | undefined
     try {
-      const { repo, resolutions } = await c.req.json()
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      syncLogger.info('apply resolutions', {
-        repoPath,
-        count: Object.keys(resolutions ?? {}).length,
-      })
-      await applyResolutions(repoPath, deps.git, deps.fs, resolutions, {
-        error: (o, m) => syncLogger.error(m, o as Record<string, unknown>),
-        warn: (o, m) => syncLogger.warn(m, o as Record<string, unknown>),
-      })
-      syncLogger.info('apply completed', { repoPath })
+      repoPath = await resolveRepoPath(deps.fs, c.req.query('repo')!, deps.home)
+      const result = await deps.sync.getSession(repoPath)
+      return c.json(result ? { ok: true, active: true, ...result } : { ok: true, active: false })
+    } catch (err) {
+      return syncError(c, err, { repoPath, operation: 'session restore' })
+    }
+  })
+
+  app.post('/sync/conflicts/save', async (c) => {
+    let context: Record<string, unknown> = {}
+    try {
+      const { sessionId, path, result } = await c.req.json()
+      context = { sessionId, path }
+      const saved = await deps.sync.saveConflict(sessionId, path, result)
+      return c.json({ ok: true, ...saved })
+    } catch (err) {
+      return syncError(c, err, { ...context, operation: 'conflict save' })
+    }
+  })
+
+  app.post('/sync/conflicts/abort', async (c) => {
+    let sessionId: string | undefined
+    try {
+      ;({ sessionId } = await c.req.json())
+      await deps.sync.abort(sessionId!)
       return c.json({ ok: true })
-    } catch (e) {
-      syncLogger.error('apply failed', { err: e })
-      const msg = String((e as Error)?.message ?? e)
-      return c.json({ ok: false, error: 'apply_failed', message: msg })
+    } catch (err) {
+      return syncError(c, err, { sessionId, operation: 'conflict abort' })
     }
   })
 
   app.post('/sync/push', async (c) => {
+    let repoPath: string | undefined
     try {
       const { repo } = await c.req.json()
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      syncLogger.info('push started', { repoPath })
-      // Auto-commit uncommitted yaml changes before pushing
+      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
       const status = await deps.git.status(repoPath)
       if (status.dirty) {
         await deps.git.add(repoPath, ['.'])
         await deps.git.commit(repoPath, 'loom: sync changes')
       }
-      const res = await syncPush(repoPath, deps.git)
-      syncLogger.info('push completed', { repoPath, ok: res.ok })
-      return c.json(res)
-    } catch (e) {
-      syncLogger.error('push failed', { err: e })
-      const msg = String((e as Error)?.message ?? e)
-      const noRemote =
-        /no remote|could not find remote|not a git repository|does not appear to be a git/i.test(
-          msg,
-        )
-      return c.json({ ok: false, error: noRemote ? 'no_remote' : 'other', message: msg })
+      return c.json(await syncPush(repoPath, deps.git))
+    } catch (err) {
+      syncLogger.error('push failed', { err, repoPath })
+      const message = String((err as Error)?.message ?? err)
+      const noRemote = /no remote|could not find remote|not a git repository/i.test(message)
+      return c.json({ ok: false, error: noRemote ? 'no_remote' : 'other', message })
     }
   })
 
   app.post('/sync/remote', async (c) => {
     try {
       const { repo, remoteUrl } = await c.req.json()
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
+      const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
       await deps.git.addOrUpdateRemote(repoPath, remoteUrl)
       return c.json({ ok: true, remoteUrl })
-    } catch (e) {
+    } catch (err) {
+      syncLogger.error('remote update failed', { err })
       return c.json({
         ok: false,
         error: 'remote_failed',
-        message: String((e as Error)?.message ?? e),
+        message: String((err as Error)?.message ?? err),
       })
     }
   })
 
   app.get('/sync/remote', async (c) => {
-    const repo = c.req.query('repo')!
-    let repoPath: string
     try {
-      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-    } catch (e) {
+      const repoPath = await resolveRepoPath(deps.fs, c.req.query('repo')!, deps.home)
+      return c.json({ remoteUrl: await deps.git.getRemoteUrl(repoPath) })
+    } catch (err) {
+      syncLogger.error('remote lookup failed', { err })
       return c.json(
-        { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+        { ok: false, error: 'invalid_repo', message: String((err as Error).message) },
         400,
       )
     }
-    const remoteUrl = await deps.git.getRemoteUrl(repoPath)
-    return c.json({ remoteUrl })
   })
 
   return app
+}
+
+function syncError(c: any, err: unknown, context: Record<string, unknown>) {
+  syncLogger.error(`${String(context.operation)} failed`, { err, ...context })
+  const message = String((err as Error)?.message ?? err)
+  const error =
+    err instanceof SyncSessionError
+      ? err.code
+      : message.includes('未解决的冲突标记')
+        ? 'unresolved_markers'
+        : /invalid repo/i.test(message)
+          ? 'invalid_repo'
+          : /no remote|could not find remote|does not appear to be a git/i.test(message)
+            ? 'no_remote'
+            : 'other'
+  return c.json({ ok: false, error, message }, error === 'invalid_repo' ? 400 : 200)
 }

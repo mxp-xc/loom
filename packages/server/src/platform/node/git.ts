@@ -18,6 +18,33 @@ export class NodeGit implements IGit {
     await this.git(repoPath).raw(['fetch', 'origin', '--tags'])
   }
 
+  async merge(repoPath: string, ref: string): Promise<{ clean: boolean }> {
+    try {
+      await this.git(repoPath).merge([ref, '--no-edit'])
+      return { clean: true }
+    } catch (err) {
+      if ((await this.unmergedPaths(repoPath)).length > 0) return { clean: false }
+      throw err
+    }
+  }
+
+  async unmergedPaths(repoPath: string): Promise<string[]> {
+    const out = await this.git(repoPath).raw(['diff', '--name-only', '--diff-filter=U', '-z'])
+    return out.split('\0').filter(Boolean)
+  }
+
+  async showIndexStage(repoPath: string, stage: 1 | 2 | 3, path: string): Promise<string | null> {
+    try {
+      return (await this.git(repoPath).raw(['show', `:${stage}:${path}`])).replace(/\n$/, '')
+    } catch {
+      return null
+    }
+  }
+
+  async abortMerge(repoPath: string): Promise<void> {
+    await this.git(repoPath).raw(['merge', '--abort'])
+  }
+
   async mergeBase(repoPath: string, a: string, b: string): Promise<string> {
     const r = await this.git(repoPath).raw(['merge-base', a, b])
     return r.trim()
