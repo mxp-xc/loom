@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "bun scripts/dev.mjs",
     "dev:web": "bun scripts/dev.mjs",
-    "dev:api": "bun --filter @loom/server dev",
-    "start": "bun --filter @loom/server start",
+    "dev:api": "bun --cwd packages/server dev",
+    "start": "bun --cwd packages/server start",
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "bun run --workspaces build",

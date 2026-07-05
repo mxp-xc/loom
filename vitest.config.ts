@@ -12,5 +12,6 @@ export default defineConfig({
     coverage: { include: ['packages/*/src/**'] },
     testTimeout: 30000,
     globals: true,
+    exclude: ['**/node_modules/**', '**/.claude/worktrees/**', '**/.worktrees/**'],
   },
 })
