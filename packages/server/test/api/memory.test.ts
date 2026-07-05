@@ -86,6 +86,14 @@ describe('memory routes', () => {
     expect(cfg).toContain('active_memory: v1')
   })
 
+  it('POST /memory/active clears active_memory when name is null', async () => {
+    writeFileSync(join(home, '.loom', 'repos', 'default', 'config.yaml'), 'active_memory: v1\n')
+    const res = await req('POST', '/api/memory/active', { repo: 'default', name: null })
+    expect(res.status).toBe(200)
+    const cfg = readFileSync(join(home, '.loom', 'repos', 'default', 'config.yaml'), 'utf8')
+    expect(cfg).not.toContain('active_memory')
+  })
+
   it('DELETE /memory removes file + clears active if active', async () => {
     writeFileSync(join(home, '.loom', 'repos', 'default', 'memories', 'v1.md'), 'x')
     writeFileSync(join(home, '.loom', 'repos', 'default', 'config.yaml'), 'active_memory: v1\n')

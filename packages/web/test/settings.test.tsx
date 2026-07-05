@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import Settings from '../src/views/Settings'
+
+const { refreshManifest } = vi.hoisted(() => ({ refreshManifest: vi.fn(async () => {}) }))
 
 vi.mock('../src/lib/api', () => ({
   api: {
@@ -10,8 +12,11 @@ vi.mock('../src/lib/api', () => ({
       repo: { targets: ['claude-code'] },
       local: { active_repo: 'default' },
     })),
+    putConfig: vi.fn(async () => ({ ok: true })),
   },
 }))
+
+vi.mock('../src/hooks/useManifest', () => ({ refreshManifest }))
 
 describe('Settings', () => {
   it('renders three state tabs (最终结果/仓库级/本地级)', async () => {
@@ -34,5 +39,14 @@ describe('Settings', () => {
     fireEvent.click(screen.getByText('仓库级'))
     // active_repo is fixed local — dot stays fixed in all panes
     expect(document.querySelector('.sdot2.dot-fixed')).not.toBeNull()
+  })
+
+  it('refreshes shared manifest after saving targets', async () => {
+    render(<Settings repoPath="/tmp/r" />)
+    await screen.findByText('最终结果')
+    fireEvent.click(screen.getByText('仓库级'))
+    fireEvent.click(screen.getByText('CC'))
+
+    await waitFor(() => expect(refreshManifest).toHaveBeenCalledWith('/tmp/r'))
   })
 })

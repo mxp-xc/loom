@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { ConfigField, FIELD_SCHEMA, type ConfigLevel } from '@/components/ConfigField'
 import { useViewError } from '@/hooks/useViewError'
+import { refreshManifest } from '@/hooks/useManifest'
 
 type Config = Record<string, unknown>
 
@@ -76,6 +77,11 @@ export default function Settings({ repoPath }: { repoPath: string }) {
       .catch((e) => setError(e))
   }
 
+  const reloadAll = () => {
+    reload()
+    refreshManifest(repoPath).catch((e) => setError(e))
+  }
+
   const handleDraftChange = (key: string, value: string | undefined) => {
     setDrafts((prev) => {
       const next = { ...prev }
@@ -117,7 +123,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
         savedKeys.push(key)
       }
       setDrafts({})
-      reload()
+      reloadAll()
     } catch (e) {
       setDrafts((prev) => {
         const next = { ...prev }
@@ -234,7 +240,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
                     inRepo={hasPath(cfg.repo, field.key)}
                     inLocal={hasPath(cfg.local, field.key)}
                     repoPath={repoPath}
-                    onSaved={reload}
+                    onSaved={reloadAll}
                     draft={drafts[field.key]}
                     onDraftChange={handleDraftChange}
                   />

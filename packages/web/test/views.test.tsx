@@ -22,6 +22,7 @@ vi.mock('../src/lib/api', () => ({
     setSyncRemote: vi.fn(async () => ({ ok: true })),
     getConfig: vi.fn(async () => ({ effective: {}, repo: {}, local: {} })),
     scanLocalSkills: vi.fn(async () => ({ ok: true, skills: [] })),
+    updateLocalSkillTargets: vi.fn(async () => ({ ok: true })),
     getManifest: vi.fn(async (repoPath: string) =>
       repoPath === '/tmp/skills-layout'
         ? {
@@ -45,6 +46,10 @@ vi.mock('../src/lib/api', () => ({
                   path: './assets/skills/test-qa-skill',
                   available: false,
                   targets: ['claude-code', 'codex', 'opencode'],
+                },
+                {
+                  id: 'frontend-design',
+                  targets: [],
                 },
               ],
             },
@@ -102,6 +107,17 @@ describe('Skills view', () => {
     expect(
       within(localRow as HTMLElement).queryByRole('button', { name: 'test-qa-skill' }),
     ).toBeNull()
+
+    const frontendRow = screen.getByText('frontend-design').closest('.skill')
+    expect(frontendRow).not.toBeNull()
+    fireEvent.click(within(frontendRow as HTMLElement).getByRole('button', { name: 'CX' }))
+    await waitFor(() =>
+      expect(api.updateLocalSkillTargets).toHaveBeenCalledWith({
+        repo: '/tmp/skills-layout',
+        id: 'frontend-design',
+        targets: ['codex'],
+      }),
+    )
 
     fireEvent.click(screen.getByRole('button', { name: '折叠 superpowers' }))
     expect(screen.queryByText('systematic-debugging')).toBeNull()

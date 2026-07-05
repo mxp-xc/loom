@@ -1,8 +1,9 @@
-import { agentShort, agentColor, type AgentId } from '@/lib/agents'
+import { AGENTS, agentShort, agentColor, type AgentId } from '@/lib/agents'
 import type { Manifest } from '@loom/core'
 import { Link } from 'react-router-dom'
 import { Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { api } from '@/lib/api'
 
 interface Props {
   repoPath: string
@@ -11,16 +12,47 @@ interface Props {
   setError: (e: unknown) => void
 }
 
-const renderChip = (agent: AgentId) => (
-  <span key={agent} className="chip active" style={{ ['--c' as string]: agentColor[agent] }}>
-    {agentShort[agent]}
-  </span>
-)
-
-export default function GlobalTargetsBar({ manifest }: Props) {
-  const agents = manifest.config?.targets ?? []
+export default function GlobalTargetsBar({ repoPath, manifest, reload, setError }: Props) {
+  const agents = (manifest.config?.targets ?? []) as AgentId[]
   const sourceCount = manifest.skills?.sources?.length ?? 0
   const localCount = manifest.skills?.skills?.length ?? 0
+  const skills = [
+    ...(manifest.skills?.sources.flatMap((source) =>
+      (source.members ?? []).map((member) => ({ kind: 'source' as const, source, member })),
+    ) ?? []),
+    ...(manifest.skills?.skills.map((skill) => ({ kind: 'local' as const, skill })) ?? []),
+  ]
+
+  const setAll = async (agent: AgentId) => {
+    const allOn =
+      skills.length > 0 &&
+      skills.every((item) => {
+        const targets = item.kind === 'source' ? item.member.targets : item.skill.targets
+        return (targets ?? []).includes(agent)
+      })
+    try {
+      await Promise.all(
+        skills.map((item) => {
+          const targets =
+            item.kind === 'source' ? (item.member.targets ?? []) : (item.skill.targets ?? [])
+          const next = allOn
+            ? targets.filter((a) => a !== agent)
+            : AGENTS.filter((a) => a === agent || targets.includes(a))
+          return item.kind === 'source'
+            ? api.updateSkillTargets({
+                repo: repoPath,
+                sourceUrl: item.source.url,
+                memberName: item.member.name,
+                targets: next,
+              })
+            : api.updateLocalSkillTargets({ repo: repoPath, id: item.skill.id, targets: next })
+        }),
+      )
+      reload()
+    } catch (e) {
+      setError(e)
+    }
+  }
 
   if (sourceCount === 0 && localCount === 0) return null
 
@@ -47,10 +79,33 @@ export default function GlobalTargetsBar({ manifest }: Props) {
           color: 'var(--muted)',
         }}
       >
-        当前 targets
+        批量设置 · 应用于全部 skills
       </span>
-      <span className="chips" style={{ display: 'flex', gap: 7 }}>
-        {agents.map(renderChip)}
+      <span className="cfg-chips" style={{ display: 'flex', gap: 7 }}>
+        {agents.map((agent) => {
+          const count = skills.filter((item) =>
+            (item.kind === 'source' ? item.member.targets : item.skill.targets)?.includes(agent),
+          ).length
+          const state = count === 0 ? 'off' : count === skills.length ? 'on' : 'mixed'
+          return (
+            <button
+              key={agent}
+              type="button"
+              className={`achip ${state}`}
+              style={{ ['--c' as string]: agentColor[agent] }}
+              aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
+              aria-label={`${agentShort[agent]}：${state === 'on' ? '全部已选择' : state === 'mixed' ? '部分已选择' : '全部未选择'}`}
+              onClick={() => setAll(agent)}
+            >
+              {agentShort[agent]}
+              {state === 'mixed' && (
+                <span className="achip-count">
+                  {count}/{skills.length}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </span>
       <Button asChild variant="ghost" size="xs">
         <Link to="/settings" title="在 Settings 中修改 targets">

@@ -102,19 +102,22 @@ export default function MemoryEditor({ repo, name, content, onSave, targets }: P
           {tab('resolved', '解析预览')}
         </div>
         {view === 'resolved' && (
-          <div className="cfg-chips">
-            {targets.map((a) => (
-              <button
-                key={a}
-                type="button"
-                className={'achip' + (agent === a ? ' on' : ' off')}
-                data-a={agentKey(a)}
-                style={{ ['--c' as string]: agentColor[a] }}
-                onClick={() => setAgent(a)}
-              >
-                {agentShort[a]}
-              </button>
-            ))}
+          <div className="mem-preview-targets">
+            <span className="label">预览为</span>
+            <div className="cfg-chips">
+              {targets.map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  className={'achip' + (agent === a ? ' on' : ' off')}
+                  data-a={agentKey(a)}
+                  style={{ ['--c' as string]: agentColor[a] }}
+                  onClick={() => setAgent(a)}
+                >
+                  {agentShort[a]}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {view === 'edit' && dirty && (

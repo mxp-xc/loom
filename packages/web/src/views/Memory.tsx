@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
-import { AGENTS, agentShort, agentColor, type AgentId } from '@/lib/agents'
+import { agentShort, agentColor, type AgentId } from '@/lib/agents'
 import MemoryEditor from '@/components/MemoryEditor'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,7 @@ export default function Memory({ repoPath }: Props) {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
   const [projecting, setProjecting] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const { showToast } = useToast()
   const { manifest, reload } = useManifest(repoPath)
   const targets = manifest?.config?.targets ?? []
@@ -118,7 +119,6 @@ export default function Memory({ repoPath }: Props) {
   }
 
   const del = async (name: string) => {
-    if (!confirm(`删除 ${name}?此操作不可撤销。`)) return
     try {
       await api.deleteMemory(repoPath, name)
       if (selected === name) {
@@ -126,17 +126,18 @@ export default function Memory({ repoPath }: Props) {
         setSelectedContent('')
       }
       await load()
+      setDeleting(null)
       showToast('已删除')
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e))
     }
   }
 
-  const activate = async (name: string) => {
+  const activate = async (name: string | null) => {
     try {
       await api.setMemoryActive({ repo: repoPath, name })
       await load()
-      showToast(`已激活 ${name}`)
+      showToast(name ? `已激活 ${name}` : '已取消激活')
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e))
     }
@@ -167,6 +168,24 @@ export default function Memory({ repoPath }: Props) {
             + 新建
           </Button>
         </div>
+        <div className="mem-global-targets">
+          <span className="label">投影目标</span>
+          <div className="cfg-chips">
+            {targets.map((a) => (
+              <button
+                key={a}
+                type="button"
+                className={'achip ' + (targets.includes(a) ? 'on' : 'off')}
+                data-a={agentKey(a)}
+                style={{ ['--c' as string]: agentColor[a] }}
+                aria-pressed={targets.includes(a)}
+                onClick={() => toggleTarget(a)}
+              >
+                {agentShort[a]}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="mem-list-scroll">
           {loading && <div className="mem-empty">加载中…</div>}
           {!loading && memories.length === 0 && (
@@ -190,11 +209,12 @@ export default function Memory({ repoPath }: Props) {
               />
               <span className="mem-name">{m.name}</span>
               <span className="mem-actions" onClick={(e) => e.stopPropagation()}>
-                {active !== m.name && (
-                  <button className="mem-act activate" onClick={() => activate(m.name)}>
-                    activate
-                  </button>
-                )}
+                <button
+                  className="mem-act activate"
+                  onClick={() => activate(active === m.name ? null : m.name)}
+                >
+                  {active === m.name ? '取消激活' : '激活'}
+                </button>
                 <button
                   className="mem-act"
                   onClick={() => {
@@ -202,10 +222,10 @@ export default function Memory({ repoPath }: Props) {
                     setDraftName(m.name)
                   }}
                 >
-                  rename
+                  重命名
                 </button>
-                <button className="mem-act danger" onClick={() => del(m.name)}>
-                  delete
+                <button className="mem-act danger" onClick={() => setDeleting(m.name)}>
+                  删除
                 </button>
               </span>
             </div>
@@ -218,21 +238,6 @@ export default function Memory({ repoPath }: Props) {
           <>
             <div className="mem-detail-head">
               <span className="mem-detail-name">{selected}</span>
-              <div className="cfg-chips">
-                {targets.map((a) => (
-                  <button
-                    key={a}
-                    type="button"
-                    className="achip on"
-                    data-a={agentKey(a)}
-                    style={{ ['--c' as string]: agentColor[a] }}
-                    onClick={() => toggleTarget(a)}
-                    title={`${a} — 点击取消投影目标`}
-                  >
-                    {agentShort[a]}
-                  </button>
-                ))}
-              </div>
               <Button
                 variant="secondary"
                 size="sm"
@@ -300,6 +305,25 @@ export default function Memory({ repoPath }: Props) {
           </Button>
           <Button variant="primary" size="sm" onClick={doRename} disabled={!draftName.trim()}>
             重命名
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal open={!!deleting} onClose={() => setDeleting(null)} title="删除 memory" width={360}>
+        <p style={{ color: 'var(--text)', fontSize: 13 }}>
+          确认删除 <strong>{deleting}</strong>？此操作不可撤销。
+        </p>
+        <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+          <Button variant="ghost" size="sm" onClick={() => setDeleting(null)}>
+            取消
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            style={{ color: 'var(--error)' }}
+            onClick={() => deleting && del(deleting)}
+          >
+            删除
           </Button>
         </div>
       </Modal>

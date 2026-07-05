@@ -171,6 +171,35 @@ describe('targets update', () => {
     const parsed = yaml.load(memFiles['/tmp/r5/mcp.yaml']) as any
     expect(parsed[0].targets).toEqual(['claude-code', 'codex'])
   })
+
+  it('PUT /api/mcp updates an existing server without changing its id', async () => {
+    memFiles['/tmp/r5/mcp.yaml'] = '- id: srv1\n  type: stdio\n  command: echo\n'
+    const res = await app.request('/api/mcp', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/r5',
+        id: 'srv1',
+        server: { id: 'srv1', type: 'http', url: 'https://example.test/mcp' },
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    const parsed = yaml.load(memFiles['/tmp/r5/mcp.yaml']) as any
+    expect(parsed).toEqual([{ id: 'srv1', type: 'http', url: 'https://example.test/mcp' }])
+  })
+
+  it('PUT /api/mcp rejects stdio servers without a command', async () => {
+    memFiles['/tmp/r5/mcp.yaml'] = '- id: srv1\n  type: stdio\n  command: echo\n'
+    const res = await app.request('/api/mcp', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/tmp/r5', id: 'srv1', server: { type: 'stdio' } }),
+    })
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('invalid_server')
+  })
 })
 
 describe('PUT /config', () => {

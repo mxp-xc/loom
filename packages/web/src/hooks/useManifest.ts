@@ -7,6 +7,15 @@ import type { Manifest } from '@loom/core'
 // cache and notifies all listeners.
 const cache = new Map<string, { data: Manifest | null; listeners: Set<() => void> }>()
 
+export async function refreshManifest(repoPath: string): Promise<Manifest> {
+  const data = (await api.getManifest(repoPath)) as Manifest
+  const entry = cache.get(repoPath) ?? { data: null, listeners: new Set<() => void>() }
+  entry.data = data
+  cache.set(repoPath, entry)
+  entry.listeners.forEach((listener) => listener())
+  return data
+}
+
 export function useManifest(
   repoPath: string,
   opts?: { onError?: (e: unknown) => void; onSuccess?: () => void },
@@ -54,13 +63,8 @@ export function useManifest(
 
   const reload = useCallback(() => {
     setLoading(true)
-    api
-      .getManifest(repoPath)
-      .then((m) => {
-        const data = m as Manifest
-        const entry = cache.get(repoPath)!
-        entry.data = data
-        entry.listeners.forEach((l) => l())
+    refreshManifest(repoPath)
+      .then(() => {
         setLoading(false)
         onSuccessRef.current?.()
       })

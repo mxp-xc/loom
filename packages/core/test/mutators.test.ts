@@ -10,6 +10,7 @@ import {
   pinSourceCommit,
   addMcpServer,
   removeMcpServer,
+  updateMcpServer,
   setMcpTargets,
   setConfigField,
 } from '../src/mutators.js'
@@ -184,10 +185,10 @@ describe('setLocalSkillTargets', () => {
     expect(result.changed).toBe(true)
     expect(result.data.skills[0].targets).toEqual(['codex'])
   })
-  it('returns changed=false when skill not found', () => {
-    const result = setLocalSkillTargets(emptySkills, 'missing', ['codex' as AgentId])
-    expect(result.changed).toBe(false)
-    expect(result.data).toBe(emptySkills)
+  it('registers an auto-discovered local skill when first assigning targets', () => {
+    const result = setLocalSkillTargets(emptySkills, 'frontend-design', ['codex' as AgentId])
+    expect(result.changed).toBe(true)
+    expect(result.data.skills).toEqual([{ id: 'frontend-design', targets: ['codex'] }])
   })
   it('preserves other fields on the skill via spread', () => {
     const skills: SkillsManifest = {
@@ -250,6 +251,35 @@ describe('removeMcpServer', () => {
   it('returns changed=false when id not found', () => {
     const mcp: McpServer[] = [{ id: 'a', type: 'stdio', command: 'c' }]
     const result = removeMcpServer(mcp, 'missing')
+    expect(result.changed).toBe(false)
+    expect(result.data).toBe(mcp)
+  })
+})
+
+describe('updateMcpServer', () => {
+  it('replaces an existing server while keeping its id stable', () => {
+    const mcp: McpServer[] = [{ id: 'a', type: 'stdio', command: 'old' }]
+    const replacement: McpServer = {
+      id: 'a',
+      type: 'http',
+      url: 'https://example.test/mcp',
+      targets: ['codex'],
+    }
+
+    const result = updateMcpServer(mcp, 'a', replacement)
+
+    expect(result.changed).toBe(true)
+    expect(result.data).toEqual([replacement])
+  })
+
+  it('returns changed=false when the server does not exist', () => {
+    const mcp: McpServer[] = [{ id: 'a', type: 'stdio', command: 'old' }]
+    const result = updateMcpServer(mcp, 'missing', {
+      id: 'missing',
+      type: 'stdio',
+      command: 'new',
+    })
+
     expect(result.changed).toBe(false)
     expect(result.data).toBe(mcp)
   })

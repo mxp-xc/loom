@@ -287,14 +287,17 @@ export function ConfigField({
                 const on = Array.isArray(value) && (value as string[]).includes(agent)
                 const da = agent === 'claude-code' ? 'cc' : agent === 'codex' ? 'cx' : 'oc'
                 return (
-                  <span
+                  <button
+                    type="button"
                     key={agent}
                     className={'achip ' + (on ? 'on' : 'off')}
                     data-a={da}
+                    aria-pressed={on}
+                    disabled={isDisabled || saving}
                     onClick={() => toggleChip(agent)}
                   >
                     {agentShort[agent]}
-                  </span>
+                  </button>
                 )
               })}
             </div>

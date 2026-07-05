@@ -628,6 +628,30 @@ textarea:focus {
   color: var(--muted);
   margin-right: auto;
 }
+.mcp-editor {
+  display: grid;
+  gap: 14px;
+  max-width: 680px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.mcp-field {
+  display: grid;
+  gap: 6px;
+}
+.mcp-json {
+  min-height: 96px;
+  padding: 10px 12px;
+  resize: vertical;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font:
+    12px/1.6 'JetBrains Mono',
+    monospace;
+}
 
 /* big toggle */
 .tg {
@@ -1053,11 +1077,24 @@ textarea:focus {
 }
 .cfg-chips .achip.on {
   color: #fff;
+  background: var(--c);
   border-color: transparent;
 }
 .cfg-chips .achip.off {
   opacity: 0.45;
   background: transparent;
+  color: var(--c);
+  border-color: color-mix(in srgb, var(--c) 45%, transparent);
+}
+.cfg-chips .achip.mixed {
+  color: var(--c);
+  border-color: var(--c);
+  background: color-mix(in srgb, var(--c) 10%, transparent);
+}
+.cfg-chips .achip-count {
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
 }
 .cfg-chips .achip.off:hover {
   opacity: 0.8;
@@ -1513,6 +1550,20 @@ textarea:focus {
 }
 .mem-list-head .label {
   flex: 1;
+}
+.mem-global-targets {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 12px 8px;
+  padding: 10px 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.mem-preview-targets {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .mem-list-scroll {
   flex: 1;

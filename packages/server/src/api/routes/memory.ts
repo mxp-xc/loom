@@ -146,8 +146,14 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
   app.post('/memory/active', async (c) => {
     try {
       const { repo, name } = await c.req.json()
-      if (!validName(name)) return c.json({ ok: false, error: 'invalid_name' }, 400)
       const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      if (name === null) {
+        const cfg = await readConfig(deps.fs, repoPath)
+        delete cfg.active_memory
+        await writeYaml(deps.fs, join(repoPath, 'config.yaml'), cfg)
+        return c.json({ ok: true })
+      }
+      if (!validName(name)) return c.json({ ok: false, error: 'invalid_name' }, 400)
       const file = join(memoriesDir(repoPath), `${name}.md`)
       if (!(await deps.fs.exists(file))) return c.json({ ok: false, error: 'not_found' }, 404)
       const cfg = await readConfig(deps.fs, repoPath)

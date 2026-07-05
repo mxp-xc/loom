@@ -5,7 +5,7 @@ import Toast from '@/components/Toast'
 import { agentShort, agentColor, type AgentId } from '@/lib/agents'
 import { inputStyle } from '@/lib/styles'
 import { Button } from '@/components/ui/button'
-import { Plus, RefreshCw, Trash2, Copy, Check } from 'lucide-react'
+import { Plus, RefreshCw, Trash2, Copy, Check, Pencil } from 'lucide-react'
 import { type McpServer, type McpType } from '@loom/core'
 import { useManifest } from '@/hooks/useManifest'
 import { useToast } from '@/hooks/useToast'
@@ -32,6 +32,16 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   const [srvUrl, setSrvUrl] = useState('')
   const [srvTargets, setSrvTargets] = useState<string[]>([])
   const [copied, setCopied] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editType, setEditType] = useState<McpType>('stdio')
+  const [editCommand, setEditCommand] = useState('')
+  const [editArgs, setEditArgs] = useState('')
+  const [editUrl, setEditUrl] = useState('')
+  const [editEnv, setEditEnv] = useState('{}')
+  const [editHeaders, setEditHeaders] = useState('{}')
+  const [editBusy, setEditBusy] = useState(false)
+  const [editErr, setEditErr] = useState<string | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   useEffect(() => {
     if (!selected && manifest?.mcp?.length) setSelected(manifest.mcp[0].id)
   }, [manifest, selected])
@@ -107,6 +117,56 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   const visibleAgents: AgentId[] = agents
 
   const selectedServer = manifest?.mcp?.find((s) => s.id === selected)
+
+  useEffect(() => {
+    if (!selectedServer) return
+    setEditing(false)
+    setEditType(selectedServer.type)
+    setEditCommand(selectedServer.command ?? '')
+    setEditArgs(selectedServer.args?.join(' ') ?? '')
+    setEditUrl(selectedServer.url ?? '')
+    setEditEnv(JSON.stringify(selectedServer.env ?? {}, null, 2))
+    setEditHeaders(JSON.stringify(selectedServer.headers ?? {}, null, 2))
+    setEditErr(null)
+  }, [selectedServer?.id])
+
+  const handleSaveEdit = async () => {
+    if (!selectedServer) return
+    if (editType === 'stdio' && !editCommand.trim()) return setEditErr('command 不能为空')
+    if (editType !== 'stdio' && !editUrl.trim()) return setEditErr('url 不能为空')
+    setEditBusy(true)
+    setEditErr(null)
+    try {
+      const env = JSON.parse(editEnv || '{}')
+      const headers = JSON.parse(editHeaders || '{}')
+      const server: McpServer =
+        editType === 'stdio'
+          ? {
+              id: selectedServer.id,
+              type: editType,
+              command: editCommand.trim(),
+              args: editArgs.trim() ? editArgs.trim().split(/\s+/) : undefined,
+              env,
+              targets: selectedServer.targets,
+            }
+          : {
+              id: selectedServer.id,
+              type: editType,
+              url: editUrl.trim(),
+              headers,
+              env,
+              targets: selectedServer.targets,
+            }
+      await api.updateMcpServer({ repo: repoPath, id: selectedServer.id, server })
+      setEditing(false)
+      showToast('MCP Server 已保存')
+      reload()
+    } catch (e) {
+      setEditErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setEditBusy(false)
+    }
+  }
 
   const handleToggleTarget = async (
     agent: AgentId,
@@ -196,7 +256,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         style={{
           marginTop: 18,
           display: 'grid',
-          gridTemplateColumns: '360px 1fr',
+          gridTemplateColumns: '280px 1fr',
           gap: 0,
           minHeight: 400,
           border: '1px solid var(--border)',
@@ -229,17 +289,20 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                     {srv.type === 'stdio' ? `${srv.command} ${srv.args?.join(' ') ?? ''}` : srv.url}
                   </span>
                   {visibleAgents.map((a) => (
-                    <span
+                    <button
+                      type="button"
                       key={a}
                       className={'tg ' + (srvAgents.includes(a) ? 'on' : 'off')}
                       style={{ ['--c' as string]: agentColor[a], cursor: 'pointer' }}
+                      aria-pressed={srvAgents.includes(a)}
+                      aria-label={`${srv.id}：${agentShort[a]}`}
                       onClick={(e) => {
                         e.stopPropagation()
                         handleToggleTarget(a, srv)
                       }}
                     >
                       {agentShort[a]}
-                    </span>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -273,49 +336,121 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   <span style={{ fontSize: 11 }}>{copied ? '已拷贝' : '拷贝'}</span>
                 </Button>
+                <Button variant="secondary" size="sm" onClick={() => setEditing((value) => !value)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                  {editing ? '取消编辑' : '编辑'}
+                </Button>
               </div>
-              <div style={{ marginTop: 16 }}>
-                <span className="label">targets</span>
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  {visibleAgents.map((a) => {
-                    const srvAgents = selectedServer.targets ?? []
-                    return (
-                      <span
-                        key={a}
-                        className={'tg ' + (srvAgents.includes(a) ? 'on' : 'off')}
-                        style={{
-                          ['--c' as string]: agentColor[a],
-                          width: 40,
-                          height: 40,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                        }}
-                        onClick={() => handleToggleTarget(a)}
-                      >
-                        {agentShort[a]}
-                      </span>
-                    )
-                  })}
-                </div>
-              </div>
-              {selectedServer.type === 'stdio' ? (
-                <>
-                  <div style={{ marginTop: 16 }}>
-                    <span className="label">command</span>
-                    <div
-                      style={{
-                        marginTop: 4,
-                        fontFamily: "'JetBrains Mono', monospace",
-                        fontSize: 13,
-                        color: 'var(--text)',
-                      }}
-                    >
-                      {selectedServer.command}
+              {editing && (
+                <div className="mcp-editor">
+                  {editErr && <div className="mem-err">{editErr}</div>}
+                  <label className="mcp-field">
+                    <span className="label">id（不可修改）</span>
+                    <input style={inputStyle} value={selectedServer.id} disabled />
+                  </label>
+                  <div className="mcp-field">
+                    <span className="label">type</span>
+                    <div className="cfg-seg">
+                      {MCP_TYPES.map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          className={'cfg-seg-opt' + (editType === type ? ' on' : '')}
+                          onClick={() => setEditType(type)}
+                        >
+                          {type}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                  {selectedServer.args && (
-                    <div style={{ marginTop: 12 }}>
-                      <span className="label">args</span>
+                  {editType === 'stdio' ? (
+                    <>
+                      <label className="mcp-field">
+                        <span className="label">command</span>
+                        <input
+                          style={inputStyle}
+                          value={editCommand}
+                          onChange={(e) => setEditCommand(e.target.value)}
+                        />
+                      </label>
+                      <label className="mcp-field">
+                        <span className="label">args（空格分隔）</span>
+                        <input
+                          style={inputStyle}
+                          value={editArgs}
+                          onChange={(e) => setEditArgs(e.target.value)}
+                        />
+                      </label>
+                    </>
+                  ) : (
+                    <label className="mcp-field">
+                      <span className="label">url</span>
+                      <input
+                        style={inputStyle}
+                        value={editUrl}
+                        onChange={(e) => setEditUrl(e.target.value)}
+                      />
+                    </label>
+                  )}
+                  <label className="mcp-field">
+                    <span className="label">env（JSON）</span>
+                    <textarea
+                      className="mcp-json"
+                      value={editEnv}
+                      onChange={(e) => setEditEnv(e.target.value)}
+                    />
+                  </label>
+                  {editType !== 'stdio' && (
+                    <label className="mcp-field">
+                      <span className="label">headers（JSON）</span>
+                      <textarea
+                        className="mcp-json"
+                        value={editHeaders}
+                        onChange={(e) => setEditHeaders(e.target.value)}
+                      />
+                    </label>
+                  )}
+                  <Button variant="primary" size="sm" onClick={handleSaveEdit} disabled={editBusy}>
+                    {editBusy ? '保存中…' : '保存修改'}
+                  </Button>
+                </div>
+              )}
+              {!editing && (
+                <>
+                  {selectedServer.type === 'stdio' ? (
+                    <>
+                      <div style={{ marginTop: 16 }}>
+                        <span className="label">command</span>
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontSize: 13,
+                            color: 'var(--text)',
+                          }}
+                        >
+                          {selectedServer.command}
+                        </div>
+                      </div>
+                      {selectedServer.args && (
+                        <div style={{ marginTop: 12 }}>
+                          <span className="label">args</span>
+                          <div
+                            style={{
+                              marginTop: 4,
+                              fontFamily: "'JetBrains Mono', monospace",
+                              fontSize: 13,
+                              color: 'var(--text)',
+                            }}
+                          >
+                            {selectedServer.args.join(' ')}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ marginTop: 16 }}>
+                      <span className="label">url</span>
                       <div
                         style={{
                           marginTop: 4,
@@ -324,81 +459,58 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                           color: 'var(--text)',
                         }}
                       >
-                        {selectedServer.args.join(' ')}
+                        {selectedServer.url}
                       </div>
                     </div>
                   )}
-                </>
-              ) : (
-                <div style={{ marginTop: 16 }}>
-                  <span className="label">url</span>
-                  <div
-                    style={{
-                      marginTop: 4,
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: 13,
-                      color: 'var(--text)',
-                    }}
-                  >
-                    {selectedServer.url}
-                  </div>
-                </div>
-              )}
-              {selectedServer.env && Object.keys(selectedServer.env).length > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <span className="label">env</span>
-                  <div
-                    style={{
-                      marginTop: 4,
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: 12,
-                      color: 'var(--muted)',
-                    }}
-                  >
-                    {Object.entries(selectedServer.env).map(([k, v]) => (
-                      <div key={k}>
-                        {k}: {v}
+                  {selectedServer.env && Object.keys(selectedServer.env).length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <span className="label">env</span>
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: 12,
+                          color: 'var(--muted)',
+                        }}
+                      >
+                        {Object.entries(selectedServer.env).map(([k, v]) => (
+                          <div key={k}>
+                            {k}: {v}
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {selectedServer.type !== 'stdio' &&
-                selectedServer.headers &&
-                Object.keys(selectedServer.headers).length > 0 && (
-                  <div style={{ marginTop: 12 }}>
-                    <span className="label">headers</span>
-                    <div
-                      style={{
-                        marginTop: 4,
-                        fontFamily: "'JetBrains Mono', monospace",
-                        fontSize: 12,
-                        color: 'var(--muted)',
-                      }}
-                    >
-                      {Object.entries(selectedServer.headers).map(([k, v]) => (
-                        <div key={k}>
-                          {k}: {v}
-                        </div>
-                      ))}
                     </div>
-                  </div>
-                )}
+                  )}
+                  {selectedServer.type !== 'stdio' &&
+                    selectedServer.headers &&
+                    Object.keys(selectedServer.headers).length > 0 && (
+                      <div style={{ marginTop: 12 }}>
+                        <span className="label">headers</span>
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontSize: 12,
+                            color: 'var(--muted)',
+                          }}
+                        >
+                          {Object.entries(selectedServer.headers).map(([k, v]) => (
+                            <div key={k}>
+                              {k}: {v}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                </>
+              )}
               <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
                 <Button
                   variant="ghost"
                   size="sm"
                   style={{ color: 'var(--error)' }}
-                  onClick={async () => {
-                    if (!selectedServer) return
-                    try {
-                      await api.deleteMcpServer({ repo: repoPath, id: selectedServer.id })
-                      setSelected(null)
-                      reload()
-                    } catch (e) {
-                      setError(e)
-                    }
-                  }}
+                  onClick={() => setDeleteOpen(true)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   删除
@@ -540,6 +652,39 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         >
           {addBusy ? '添加中…' : '添加 MCP Server'}
         </Button>
+      </Modal>
+      <Modal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title="删除 MCP Server"
+        width={380}
+      >
+        <p style={{ color: 'var(--text)', fontSize: 13 }}>
+          确认删除 <strong>{selectedServer?.id}</strong>？此操作不可撤销。
+        </p>
+        <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+          <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(false)}>
+            取消
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            style={{ color: 'var(--error)' }}
+            onClick={async () => {
+              if (!selectedServer) return
+              try {
+                await api.deleteMcpServer({ repo: repoPath, id: selectedServer.id })
+                setDeleteOpen(false)
+                setSelected(null)
+                reload()
+              } catch (e) {
+                setError(e)
+              }
+            }}
+          >
+            删除
+          </Button>
+        </div>
       </Modal>
       {toast && <Toast message={toast} onClose={dismiss} />}
     </div>

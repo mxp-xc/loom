@@ -101,7 +101,9 @@ export function setLocalSkillTargets(
   targets: AgentId[],
 ): MutationResult<SkillsManifest> {
   const idx = skills.skills.findIndex((s) => s.id === id)
-  if (idx === -1) return { changed: false, data: skills }
+  if (idx === -1) {
+    return { changed: true, data: { ...skills, skills: [...skills.skills, { id, targets }] } }
+  }
   const list = skills.skills.slice()
   list[idx] = { ...skills.skills[idx], targets }
   return { changed: true, data: { ...skills, skills: list } }
@@ -135,6 +137,18 @@ export function removeMcpServer(mcp: McpServer[], id: string): MutationResult<Mc
   const filtered = mcp.filter((s) => s.id !== id)
   if (filtered.length === mcp.length) return { changed: false, data: mcp }
   return { changed: true, data: filtered }
+}
+
+export function updateMcpServer(
+  mcp: McpServer[],
+  id: string,
+  server: McpServer,
+): MutationResult<McpServer[]> {
+  const idx = mcp.findIndex((item) => item.id === id)
+  if (idx === -1) return { changed: false, data: mcp }
+  const list = mcp.slice()
+  list[idx] = { ...server, id }
+  return { changed: true, data: list }
 }
 
 export function setMcpTargets(

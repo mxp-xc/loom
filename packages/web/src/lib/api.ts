@@ -103,6 +103,12 @@ export const api = {
       targets?: string[]
     }
   }) => post('/mcp', body).then(json),
+  updateMcpServer: (body: { repo: string; id: string; server: unknown }) =>
+    fetch(`${base}/mcp`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(json),
   deleteSource: (body: { repo: string; url: string }) =>
     fetch(`${base}/sources`, {
       method: 'DELETE',
@@ -188,7 +194,7 @@ export const api = {
     }).then(json),
   renameMemory: (body: { repo: string; name: string; newName: string }) =>
     post('/memory/rename', body).then(json),
-  setMemoryActive: (body: { repo: string; name: string }) =>
+  setMemoryActive: (body: { repo: string; name: string | null }) =>
     post('/memory/active', body).then(json),
   previewMemory: (body: { repo: string; content: string; agent: string }) =>
     post('/memory/preview', body).then(json) as Promise<{
