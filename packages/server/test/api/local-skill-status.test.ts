@@ -37,7 +37,7 @@ describe('local skill scan path', () => {
     const response = await app.request('/api/skills/local/scan', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dir: '~/.agents/skills', repoPath: '/repo' }),
+      body: JSON.stringify({ dir: '~/.agents/skills' }),
     })
 
     expect(response.status).toBe(200)

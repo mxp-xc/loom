@@ -26,6 +26,10 @@ vi.mock('../../src/platform/node/index.js', () => ({
     proc: {},
   })),
 }))
+vi.mock('../../src/api/repo.js', () => ({
+  resolveRepoPath: vi.fn(async (_fs: unknown, repo: string) => repo),
+  listRepos: vi.fn(async () => []),
+}))
 
 describe('API routes', () => {
   const app = new Hono().route('/api', registerRoutes())
@@ -35,7 +39,7 @@ describe('API routes', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        repoPath: '/tmp/r',
+        repo: '/tmp/r',
         manifest: {
           skills: { sources: [], skills: [] },
           mcp: [],
@@ -55,7 +59,7 @@ describe('API routes', () => {
     const res = await app.request('/api/sync/pull', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repoPath: '/tmp/r' }),
+      body: JSON.stringify({ repo: '/tmp/r' }),
     })
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -65,13 +69,13 @@ describe('API routes', () => {
     const res = await app.request('/api/sync/push', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repoPath: '/tmp/r' }),
+      body: JSON.stringify({ repo: '/tmp/r' }),
     })
     expect(res.status).toBe(200)
     expect((await res.json()).ok).toBe(true)
   })
   it('GET /api/config returns effective + repo + local config', async () => {
-    const res = await app.request('/api/config?repoPath=/tmp/r')
+    const res = await app.request('/api/config?repo=/tmp/r')
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body).toHaveProperty('effective')
@@ -79,7 +83,7 @@ describe('API routes', () => {
     expect(body).toHaveProperty('local')
   })
   it('GET /api/config returns profiles list from vars files', async () => {
-    const res = await app.request('/api/config?repoPath=/tmp/r')
+    const res = await app.request('/api/config?repo=/tmp/r')
     expect(res.status).toBe(200)
     const json = await res.json()
     expect(json.profiles).toBeDefined()

@@ -40,6 +40,10 @@ vi.mock('../../src/platform/node/index.js', () => ({
   createNodePlatform: vi.fn(() => ({ fs: memFs, git: {}, proc: {} })),
 }))
 vi.mock('../../src/platform/node/init.js', () => ({ initLoom: vi.fn() }))
+vi.mock('../../src/api/repo.js', () => ({
+  resolveRepoPath: vi.fn(async (_fs: unknown, repo: string) => repo),
+  listRepos: vi.fn(async () => []),
+}))
 vi.mock('../../src/remote/discover.js', () => ({
   discoverSkills: vi.fn(async () => [
     {
@@ -64,7 +68,7 @@ describe('routes file-init safety', () => {
     const res = await app.request('/api/skills/local', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repoPath: '/tmp/r1', skill: { id: 'test-skill' } }),
+      body: JSON.stringify({ repo: '/tmp/r1', skill: { id: 'test-skill' } }),
     })
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -77,7 +81,7 @@ describe('routes file-init safety', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        repoPath: '/tmp/r1',
+        repo: '/tmp/r1',
         server: { id: 'test', type: 'stdio', command: 'echo' },
       }),
     })
@@ -96,7 +100,7 @@ describe('DELETE endpoints', () => {
     const res = await app.request('/api/sources', {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repoPath: '/tmp/r2', url: 'https://github.com/test/repo' }),
+      body: JSON.stringify({ repo: '/tmp/r2', url: 'https://github.com/test/repo' }),
     })
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -110,7 +114,7 @@ describe('DELETE endpoints', () => {
     const res = await app.request('/api/skills/local', {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repoPath: '/tmp/r3', id: 'test-skill' }),
+      body: JSON.stringify({ repo: '/tmp/r3', id: 'test-skill' }),
     })
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -124,7 +128,7 @@ describe('DELETE endpoints', () => {
     const res = await app.request('/api/mcp', {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repoPath: '/tmp/r4', id: 'test' }),
+      body: JSON.stringify({ repo: '/tmp/r4', id: 'test' }),
     })
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -159,7 +163,7 @@ describe('targets update', () => {
     const res = await app.request('/api/mcp/targets', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repoPath: '/tmp/r5', id: 'srv1', targets: ['claude-code', 'codex'] }),
+      body: JSON.stringify({ repo: '/tmp/r5', id: 'srv1', targets: ['claude-code', 'codex'] }),
     })
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -178,7 +182,7 @@ describe('PUT /config', () => {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        repoPath: '/tmp/r6',
+        repo: '/tmp/r6',
         level: 'repo',
         field: 'profile',
         value: 'default',

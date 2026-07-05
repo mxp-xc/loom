@@ -109,7 +109,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
     try {
       for (const [key, val] of entries) {
         await api.putConfig({
-          repoPath,
+          repo: repoPath,
           level: level as 'repo' | 'local',
           field: key,
           value: val || null,

@@ -33,7 +33,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
     setProjecting(true)
     setError(null)
     try {
-      const res = (await api.project({ repoPath })) as any
+      const res = (await api.project({ repo: repoPath, scope: 'skills' })) as any
       if (res.ok) {
         showToast('投影完成')
         reload()

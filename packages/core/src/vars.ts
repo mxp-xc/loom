@@ -21,3 +21,12 @@ export function resolveVars(value: string, ctx: VarsContext): string {
     throw new ResolveError(`undefined variable: ${name}`)
   })
 }
+
+// NUL 字节 (\0) 在正常 markdown 文本与变量值中不会出现,确保 round-trip 不冲突。
+const ESC = '\0DOLLAR_BRACE\0'
+
+export function renderText(text: string, ctx: VarsContext): string {
+  let s = text.replaceAll('\\${', ESC) // 1. 保护转义 \${ → 占位符
+  s = resolveVars(s, ctx) // 2. 复用现有 ${VAR} 解析
+  return s.replaceAll(ESC, '${') // 3. 还原占位符为字面 ${
+}

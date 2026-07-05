@@ -35,6 +35,7 @@ describe('resolveFullLinks', () => {
   const mk = (sources: any[]): Manifest => ({
     skills: { sources, skills: [{ id: 'frontend-design' }] },
     mcp: [],
+    memory: { memories: [], active: null, activeContent: '' },
     vars: { default: {}, active: {} },
     config: { targets: ['claude-code', 'codex'], skill_naming: 'hyphen' },
     errors: [],

@@ -39,7 +39,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   const project = async () => {
     setProjecting(true)
     try {
-      await api.project({ repoPath })
+      await api.project({ repo: repoPath, scope: 'mcp' })
       showToast('投影完成')
       reload()
     } catch (e) {
@@ -89,7 +89,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         server.url = srvUrl.trim()
       }
       if (srvTargets.length > 0) server.targets = srvTargets
-      await api.addMcpServer({ repoPath, server })
+      await api.addMcpServer({ repo: repoPath, server })
       closeAdd()
       reload()
     } catch (e) {
@@ -118,7 +118,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
       ? currentTargets.filter((a) => a !== agent)
       : [...currentTargets, agent]
     try {
-      await api.updateMcpTargets({ repoPath, id: server.id, targets: newTargets })
+      await api.updateMcpTargets({ repo: repoPath, id: server.id, targets: newTargets })
       reload()
     } catch (e) {
       setError(e)
@@ -392,7 +392,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                   onClick={async () => {
                     if (!selectedServer) return
                     try {
-                      await api.deleteMcpServer({ repoPath, id: selectedServer.id })
+                      await api.deleteMcpServer({ repo: repoPath, id: selectedServer.id })
                       setSelected(null)
                       reload()
                     } catch (e) {

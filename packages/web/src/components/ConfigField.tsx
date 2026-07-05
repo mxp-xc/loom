@@ -185,7 +185,7 @@ export function ConfigField({
     setErr(null)
     try {
       await api.putConfig({
-        repoPath,
+        repo: repoPath,
         level: level as 'repo' | 'local',
         field: field.key,
         value: v,
@@ -205,7 +205,7 @@ export function ConfigField({
     setErr(null)
     try {
       await api.putConfig({
-        repoPath,
+        repo: repoPath,
         level: level as 'repo' | 'local',
         field: field.key,
         value: null,

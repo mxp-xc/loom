@@ -5,6 +5,7 @@ import { checkUpdates, performUpdate } from '../../remote/update.js'
 import { scanSourceMembers } from '../../projection/scan.js'
 import { deriveRepoId, pinSourceCommit } from '@loom/core'
 import { readYaml, writeYaml } from '../repo-config.js'
+import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
 import type { RouteDeps } from '../router.js'
 
@@ -14,7 +15,16 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
 
   app.post('/install', async (c) => {
-    const { url, ref, repoPath, sourceId } = await c.req.json()
+    const { url, ref, repo, sourceId } = await c.req.json()
+    let repoPath: string
+    try {
+      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+    } catch (e) {
+      return c.json(
+        { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+        400,
+      )
+    }
     remoteLogger.info('install skill', { url, ref, repoPath, sourceId })
     try {
       const res = await installSkill(deps.git, deps.fs, url, ref, repoPath, sourceId)
@@ -31,8 +41,17 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
   })
 
   app.post('/update', async (c) => {
-    const { sources, repoPath } = await c.req.json()
+    const { sources, repo } = await c.req.json()
     remoteLogger.info('check updates', { count: sources?.length ?? 0 })
+    let repoPath: string | undefined
+    try {
+      if (repo) repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+    } catch (e) {
+      return c.json(
+        { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+        400,
+      )
+    }
     const updates = await checkUpdates(sources, deps.git)
     // Detect corrupt/missing local caches so the UI can surface an update
     // button to repair them (scan only globs files, it won't fix a broken .git).
@@ -51,10 +70,19 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
 
   app.post('/update/perform', async (c) => {
     const body = await c.req.json()
+    let repoPath: string
+    try {
+      repoPath = await resolveRepoPath(deps.fs, body.repo, deps.home)
+    } catch (e) {
+      return c.json(
+        { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+        400,
+      )
+    }
     remoteLogger.info('perform update', {
       source: body.source?.url,
       newRef: body.newRef,
-      repoPath: body.repoPath,
+      repoPath,
     })
     try {
       const res = await performUpdate(
@@ -62,13 +90,13 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
         deps.fs,
         body.source,
         body.newRef,
-        body.repoPath,
+        repoPath,
         body.sourceId,
         body.oldMembers,
       )
       // Persist the new pinned_commit (and ref if it changed) back to skills.yaml
       try {
-        const filePath = join(body.repoPath, 'skills.yaml')
+        const filePath = join(repoPath, 'skills.yaml')
         const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
         const result = pinSourceCommit(
           data,
@@ -112,7 +140,16 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
   // when the cache is missing/stale.
   app.post('/sources/refresh', async (c) => {
     try {
-      const { repoPath, url, ref } = await c.req.json()
+      const { repo, url, ref } = await c.req.json()
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const sourceId = deriveRepoId(url)
       // Pure-local scan: glob the existing cache for SKILL.md without hitting
       // the network. Only clones as a fallback when the cache directory doesn't

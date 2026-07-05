@@ -91,7 +91,7 @@ export default function SkillSourceList({
       ? currentTargets.filter((a) => a !== agent)
       : [...currentTargets, agent]
     try {
-      await api.updateSkillTargets({ repoPath, sourceUrl, memberName, targets: newTargets })
+      await api.updateSkillTargets({ repo: repoPath, sourceUrl, memberName, targets: newTargets })
       reload()
     } catch (e) {
       setError(e)
@@ -103,7 +103,7 @@ export default function SkillSourceList({
       ? currentTargets.filter((a) => a !== agent)
       : [...currentTargets, agent]
     try {
-      await api.updateLocalSkillTargets({ repoPath, id, targets: newTargets })
+      await api.updateLocalSkillTargets({ repo: repoPath, id, targets: newTargets })
       reload()
     } catch (e) {
       setError(e)
@@ -146,7 +146,7 @@ export default function SkillSourceList({
       const res = (await api.performUpdate({
         source: src,
         newRef: update && update !== 'repair' ? (update.newRef ?? src.ref) : src.ref,
-        repoPath,
+        repo: repoPath,
         sourceId: repoId,
         oldMembers: src.members ?? [],
       })) as any
@@ -167,7 +167,7 @@ export default function SkillSourceList({
   const handleDeleteSource = async (url: string) => {
     setMenuOpen(null)
     try {
-      await api.deleteSource({ repoPath, url })
+      await api.deleteSource({ repo: repoPath, url })
       showToast('已删除 source')
       reload()
     } catch (e) {
@@ -178,7 +178,7 @@ export default function SkillSourceList({
   const handleDeleteLocal = async (id: string) => {
     setMenuOpen(null)
     try {
-      await api.deleteLocalSkill({ repoPath, id })
+      await api.deleteLocalSkill({ repo: repoPath, id })
       showToast('已删除 local skill')
       reload()
     } catch (e) {

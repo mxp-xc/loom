@@ -15,6 +15,7 @@ import {
 import { installSkill } from '../../remote/install.js'
 import { createDeps } from '../deps.js'
 import { readRepoFiles, readLocalConfig } from '../repo-config.js'
+import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
 import type { RouteDeps } from '../router.js'
 import type { IFileSystem } from '../../ports/fs.js'
@@ -46,7 +47,16 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
 
   app.post('/project', async (c) => {
     const body = await c.req.json()
-    const repoPath = body.repoPath
+    const repo = body.repo
+    let repoPath: string
+    try {
+      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+    } catch (e) {
+      return c.json(
+        { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+        400,
+      )
+    }
     apiLogger.info('projection started', { repoPath })
     // Detect installed agents
     const allAgents: AgentId[] =
@@ -84,7 +94,8 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
       activeProfile: mf.vars.active,
       defaultProfile: mf.vars.default,
     }
-    const res = await executeProjection(plan, mf, varsCtx, projDeps)
+    const scope = (body.scope ?? 'all') as 'skills' | 'mcp' | 'memory' | 'all'
+    const res = await executeProjection(plan, mf, varsCtx, projDeps, scope)
     if (res.ok) {
       apiLogger.info('projection completed', { repoPath })
     } else {
@@ -98,7 +109,16 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
   })
 
   app.get('/manifest', async (c) => {
-    const repoPath = c.req.query('repoPath')!
+    const repo = c.req.query('repo')!
+    let repoPath: string
+    try {
+      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+    } catch (e) {
+      return c.json(
+        { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+        400,
+      )
+    }
     const files = await readRepoFiles(deps.fs, repoPath)
     const repoManifest = loadRepoManifest(files)
     const localConfig = await readLocalConfig(deps.fs, deps.home)
@@ -141,7 +161,16 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
 
   app.get('/skill/content', async (c) => {
     try {
-      const repoPath = c.req.query('repoPath')!
+      const repo = c.req.query('repo')!
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const skillId = c.req.query('skillId')!
       const sourceUrl = c.req.query('sourceUrl') ?? ''
       const localPath = c.req.query('localPath') ?? ''
@@ -199,7 +228,16 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
 
   app.put('/skill/content', async (c) => {
     try {
-      const { repoPath, skillId, sourceUrl, localPath, content } = await c.req.json()
+      const { repo, skillId, sourceUrl, localPath, content } = await c.req.json()
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       if (sourceUrl)
         return c.json({ ok: false, error: 'read_only', message: 'source skills are read-only' })
 

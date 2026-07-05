@@ -1384,3 +1384,293 @@ textarea:focus {
 [data-theme='light'] .hljs-attribute {
   color: #7c3aed;
 }
+
+/* ===== memory editor ===== */
+.mem-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.mem-toolbar .cfg-chips {
+  margin-left: auto;
+}
+.mem-save {
+  margin-left: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--primary-fg);
+  border: none;
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.mem-save:hover:not(:disabled) {
+  box-shadow: 0 0 12px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+.mem-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mem-edit-wrap {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  overflow: hidden;
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.mem-edit-wrap:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.mem-overlay,
+.mem-textarea {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 2;
+  border: 0;
+}
+.mem-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: var(--text);
+  overflow: auto;
+  background: var(--card);
+}
+.mem-textarea {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 440px;
+  background: transparent;
+  color: transparent;
+  resize: vertical;
+  outline: none;
+  caret-color: var(--primary);
+}
+.ph-var {
+  background: var(--accent);
+  color: var(--primary);
+  border-radius: 2px;
+  padding: 1px 3px;
+  font-weight: 500;
+}
+.ph-esc {
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  color: var(--muted);
+  border-radius: 2px;
+  padding: 1px 3px;
+  opacity: 0.75;
+}
+.mem-pane {
+  min-height: 440px;
+  padding: 16px 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: auto;
+}
+.mem-err {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
+  border-radius: var(--radius);
+}
+
+/* ===== memory page ===== */
+.mem-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 0;
+  height: 100%;
+}
+.mem-list {
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mem-list-head {
+  display: flex;
+  align-items: center;
+  padding: 16px 16px 10px;
+}
+.mem-list-head .label {
+  flex: 1;
+}
+.mem-list-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0 16px;
+}
+.mem-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background var(--dur) var(--ease);
+}
+.mem-item:hover {
+  background: var(--accent);
+}
+.mem-item.sel {
+  background: linear-gradient(90deg, var(--accent), transparent);
+  border-left-color: var(--signal);
+}
+.mem-active-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--signal);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--signal) 60%, transparent);
+  flex-shrink: 0;
+}
+.mem-active-dot.dim {
+  background: var(--muted);
+  box-shadow: none;
+  opacity: 0.3;
+}
+.mem-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mem-item.sel .mem-name {
+  color: var(--bright);
+  font-weight: 600;
+}
+.mem-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+.mem-item:hover .mem-actions,
+.mem-item.sel .mem-actions {
+  opacity: 1;
+}
+.mem-act {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--m2);
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.mem-act:hover {
+  color: var(--text);
+  background: var(--card);
+  border-color: var(--border);
+}
+.mem-act.danger:hover {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 35%, transparent);
+}
+.mem-act.activate:hover {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+}
+.mem-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.mem-empty .add-link {
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.mem-main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+.mem-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border);
+}
+.mem-detail-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--bright);
+}
+.mem-detail-targets {
+  display: flex;
+  gap: 5px;
+}
+.mem-detail-body {
+  flex: 1;
+  overflow: auto;
+  padding: 18px 22px;
+}
+.mem-placeholder {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+.mem-new-input {
+  width: 100%;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  padding: 9px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  outline: none;
+}
+@media (max-width: 760px) {
+  .mem-layout {
+    grid-template-columns: 1fr;
+  }
+  .mem-list {
+    max-height: 240px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mem-item,
+  .mem-actions,
+  .mem-act,
+  .mem-edit-wrap {
+    transition-duration: 0.01ms;
+  }
+}

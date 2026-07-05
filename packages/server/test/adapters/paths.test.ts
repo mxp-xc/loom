@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { agentConfigDir, agentSkillsDir, agentMcpFile } from '../../src/adapters/paths'
+import {
+  agentConfigDir,
+  agentSkillsDir,
+  agentMcpFile,
+  agentMemoryFile,
+} from '../../src/adapters/paths'
 
 let home: string
 beforeEach(async () => {
@@ -39,5 +44,23 @@ describe('agent paths', () => {
     expect(agentMcpFile('codex')).toBe(join(home, '.codex', 'config.toml'))
     vi.stubEnv('OPENCODE_CONFIG_DIR', join(home, 'opencode'))
     expect(agentMcpFile('opencode')).toBe(join(home, 'opencode', 'opencode.json'))
+  })
+  it('opencode config dir is ~/.config/opencode on darwin (not Library/Application Support)', () => {
+    delete process.env.OPENCODE_CONFIG_DIR
+    const dir = agentConfigDir('opencode')
+    expect(dir.endsWith('.config/opencode')).toBe(true)
+    expect(dir).not.toContain('Application Support')
+  })
+  it('agentMemoryFile: claude-code -> CLAUDE.md, others -> AGENTS.md', () => {
+    expect(agentMemoryFile('claude-code').endsWith('CLAUDE.md')).toBe(true)
+    expect(agentMemoryFile('codex').endsWith('AGENTS.md')).toBe(true)
+    expect(agentMemoryFile('opencode').endsWith('AGENTS.md')).toBe(true)
+  })
+  it('agentMemoryFile lives under agentConfigDir', () => {
+    for (const a of ['claude-code', 'codex', 'opencode'] as const) {
+      const f = agentMemoryFile(a)
+      const d = agentConfigDir(a)
+      expect(f.startsWith(d)).toBe(true)
+    }
   })
 })

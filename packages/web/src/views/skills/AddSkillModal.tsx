@@ -300,11 +300,11 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
           name: s.name,
           files: pickedFiles.get(s.name) ?? [],
         }))
-        res = await api.writeLocalSkills({ repoPath, skills: skillsWithFiles })
+        res = await api.writeLocalSkills({ repo: repoPath, skills: skillsWithFiles })
       } else {
         // Already under <repo>/assets/skills — just register a ref entry.
         res = await api.importLocalSkills({
-          repoPath,
+          repo: repoPath,
           skills: selected.map((s) => ({ name: s.name, path: s.path })),
           mode: 'ref',
         })
@@ -330,12 +330,12 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
     setAddBusy(true)
     setAddErr(null)
     try {
-      await api.addSource({ repoPath, url: srcUrl.trim(), ref: srcRef.trim() || 'main' })
+      await api.addSource({ repo: repoPath, url: srcUrl.trim(), ref: srcRef.trim() || 'main' })
       // Persist selected members from Scan so they aren't lost.
       if (srcSelected.size > 0) {
         try {
           await api.setSourceMembers({
-            repoPath,
+            repo: repoPath,
             url: srcUrl.trim(),
             members: [...srcSelected],
           })

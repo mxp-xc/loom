@@ -1,4 +1,4 @@
-import type { Manifest, AgentId, Config } from './types.js'
+import type { Manifest, AgentId, Config, Memory } from './types.js'
 
 export interface LinkPlan {
   skillId: string
@@ -9,9 +9,15 @@ export interface McpPlanEntry {
   id: string
   targets: AgentId[]
 }
+export interface MemoryPlan {
+  active: Memory | null
+  content: string | null
+  targets: AgentId[]
+}
 export interface ProjectionPlan {
   links: LinkPlan[]
   mcpEntries: McpPlanEntry[]
+  memoryPlan: MemoryPlan
   skippedAgents: AgentId[]
   strategy: 'link' | 'copy'
 }
@@ -57,9 +63,18 @@ export function planProjection(
     targets: activeTargets(m.targets ?? []),
   }))
 
+  const memActive = manifest.memory.active
+  const memoryTargets = activeTargets(globalTargets)
+  const memoryPlan: MemoryPlan = {
+    active: memActive,
+    content: memActive ? manifest.memory.activeContent : null,
+    targets: memoryTargets,
+  }
+
   return {
     links,
     mcpEntries,
+    memoryPlan,
     skippedAgents: [...new Set(skippedAgents)],
     strategy: effectiveConfig.projection?.strategy ?? 'link',
   }

@@ -10,6 +10,7 @@ import { createRemoteRoutes } from './routes/remote.js'
 import { createConfigRoutes } from './routes/config.js'
 import { createSkillsYamlRoutes } from './routes/skills-yaml.js'
 import { createMcpYamlRoutes } from './routes/mcp-yaml.js'
+import { createMemoryRoutes } from './routes/memory.js'
 
 export interface RouteDeps {
   fs: IFileSystem
@@ -31,5 +32,6 @@ export function registerRoutes(): Hono {
   app.route('/', createConfigRoutes(deps))
   app.route('/', createSkillsYamlRoutes(deps))
   app.route('/', createMcpYamlRoutes(deps))
+  app.route('/', createMemoryRoutes(deps))
   return app
 }

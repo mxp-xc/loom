@@ -3,6 +3,7 @@ import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { api } from './lib/api'
 import Skills from './views/skills/Skills'
 import Mcp from './views/Mcp'
+import Memory from './views/Memory'
 import Sync from './views/Sync'
 import Settings from './views/Settings'
 import { useManifest } from './hooks/useManifest'
@@ -88,6 +89,12 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
             <span className="ic">⌘</span>MCP servers
           </NavLink>
           <NavLink
+            to="/memory"
+            className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
+          >
+            <span className="ic">✎</span>Memory
+          </NavLink>
+          <NavLink
             to="/sync"
             className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
           >
@@ -109,6 +116,7 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
             <Route index element={<Navigate to="/skills" replace />} />
             <Route path="skills" element={<Skills repoPath={repoPath} />} />
             <Route path="mcp" element={<Mcp repoPath={repoPath} />} />
+            <Route path="memory" element={<Memory repoPath={repoPath} />} />
             <Route path="sync" element={<Sync repoPath={repoPath} />} />
             <Route path="settings" element={<Settings repoPath={repoPath} />} />
           </Routes>
@@ -128,7 +136,7 @@ export default function App() {
     api
       .init()
       .then((res) => {
-        setRepoPath(res.repoPath)
+        setRepoPath(res.active_repo)
         setActiveRepo(res.active_repo)
         setLoading(false)
       })

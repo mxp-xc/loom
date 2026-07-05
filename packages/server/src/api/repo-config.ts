@@ -50,6 +50,22 @@ export async function readRepoFiles(
   } catch {
     /* no vars dir */
   }
+  try {
+    const memDir = join(repoPath, 'memories')
+    if (await fs.exists(memDir)) {
+      for (const f of await fs.readDir(memDir)) {
+        if (f.endsWith('.md')) {
+          try {
+            files[`memories/${f}`] = await fs.readFile(join(memDir, f))
+          } catch {
+            /* skip */
+          }
+        }
+      }
+    }
+  } catch {
+    /* no memories dir */
+  }
   return files
 }
 

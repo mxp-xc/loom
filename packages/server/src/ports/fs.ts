@@ -10,4 +10,5 @@ export interface IFileSystem {
   copyDir(src: string, dest: string): Promise<void>
   move(src: string, dest: string): Promise<void>
   removeDir(path: string): Promise<void>
+  removeFile(path: string): Promise<void>
 }

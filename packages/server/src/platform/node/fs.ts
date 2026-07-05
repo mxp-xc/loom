@@ -1,6 +1,7 @@
 import {
   symlink,
   rm,
+  unlink,
   readFile,
   writeFile as fsWriteFile,
   mkdir as fsMkdir,
@@ -113,6 +114,10 @@ export class NodeFileSystem implements IFileSystem {
 
   async removeDir(path: string): Promise<void> {
     await rm(path, { recursive: true, force: true })
+  }
+
+  async removeFile(path: string): Promise<void> {
+    await unlink(path).catch(() => {})
   }
 }
 

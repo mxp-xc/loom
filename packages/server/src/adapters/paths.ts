@@ -10,12 +10,7 @@ export function agentConfigDir(agent: AgentId): string {
       return process.env.CODEX_HOME ?? join(homedir(), '.codex')
     case 'opencode': {
       if (process.env.OPENCODE_CONFIG_DIR) return process.env.OPENCODE_CONFIG_DIR
-      const base =
-        process.platform === 'win32'
-          ? (process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'))
-          : process.platform === 'darwin'
-            ? join(homedir(), 'Library', 'Application Support')
-            : (process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'))
+      const base = process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config')
       return join(base, 'opencode')
     }
   }
@@ -34,4 +29,9 @@ export function agentMcpFile(agent: AgentId): string {
     case 'opencode':
       return join(agentConfigDir('opencode'), 'opencode.json')
   }
+}
+
+export function agentMemoryFile(agent: AgentId): string {
+  const name = agent === 'claude-code' ? 'CLAUDE.md' : 'AGENTS.md'
+  return join(agentConfigDir(agent), name)
 }

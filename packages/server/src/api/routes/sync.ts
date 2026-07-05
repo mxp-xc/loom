@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { syncPull, applyResolutions } from '../../sync/pull.js'
 import { syncPush } from '../../sync/push.js'
+import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
 import type { RouteDeps } from '../router.js'
 
@@ -11,7 +12,16 @@ export function createSyncRoutes(deps: RouteDeps): Hono {
 
   app.post('/sync/pull', async (c) => {
     try {
-      const { repoPath } = await c.req.json()
+      const { repo } = await c.req.json()
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       syncLogger.info('pull started', { repoPath })
       const res = await syncPull(repoPath, deps.git, deps.fs, {
         error: (o, m) => syncLogger.error(m, o as Record<string, unknown>),
@@ -32,7 +42,16 @@ export function createSyncRoutes(deps: RouteDeps): Hono {
 
   app.post('/sync/apply', async (c) => {
     try {
-      const { repoPath, resolutions } = await c.req.json()
+      const { repo, resolutions } = await c.req.json()
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       syncLogger.info('apply resolutions', {
         repoPath,
         count: Object.keys(resolutions ?? {}).length,
@@ -52,7 +71,16 @@ export function createSyncRoutes(deps: RouteDeps): Hono {
 
   app.post('/sync/push', async (c) => {
     try {
-      const { repoPath } = await c.req.json()
+      const { repo } = await c.req.json()
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       syncLogger.info('push started', { repoPath })
       // Auto-commit uncommitted yaml changes before pushing
       const status = await deps.git.status(repoPath)
@@ -76,7 +104,16 @@ export function createSyncRoutes(deps: RouteDeps): Hono {
 
   app.post('/sync/remote', async (c) => {
     try {
-      const { repoPath, remoteUrl } = await c.req.json()
+      const { repo, remoteUrl } = await c.req.json()
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       await deps.git.addOrUpdateRemote(repoPath, remoteUrl)
       return c.json({ ok: true, remoteUrl })
     } catch (e) {
@@ -89,7 +126,16 @@ export function createSyncRoutes(deps: RouteDeps): Hono {
   })
 
   app.get('/sync/remote', async (c) => {
-    const repoPath = c.req.query('repoPath')!
+    const repo = c.req.query('repo')!
+    let repoPath: string
+    try {
+      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+    } catch (e) {
+      return c.json(
+        { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+        400,
+      )
+    }
     const remoteUrl = await deps.git.getRemoteUrl(repoPath)
     return c.json({ remoteUrl })
   })

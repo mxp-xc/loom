@@ -151,7 +151,7 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
       const typeChanged = type !== (source.type ?? 'branch')
       if (refChanged || typeChanged) {
         const metaRes = await api.updateSourceMeta({
-          repoPath,
+          repo: repoPath,
           url: source.url,
           ref: refChanged ? ref : undefined,
           type: typeChanged ? type : undefined,
@@ -163,7 +163,7 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
         }
       }
       const res = await api.setSourceMembers({
-        repoPath,
+        repo: repoPath,
         url: source.url,
         members: [...selected],
       })

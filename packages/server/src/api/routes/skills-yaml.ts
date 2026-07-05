@@ -13,6 +13,7 @@ import {
 } from '@loom/core'
 import { installSkill } from '../../remote/install.js'
 import { readYaml, writeYaml } from '../repo-config.js'
+import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
 import type { RouteDeps } from '../router.js'
 
@@ -23,7 +24,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/skills/local', async (c) => {
     try {
-      const { repoPath, skill } = await c.req.json()
+      const { repo, skill } = await c.req.json()
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
       const result = addLocalSkill(data, skill)
@@ -40,8 +50,17 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/skills/local/scan', async (c) => {
     try {
-      const { dir, repoPath } = await c.req.json()
+      const { dir, repo } = await c.req.json()
       if (!dir || typeof dir !== 'string') return c.json({ ok: false, error: 'invalid_dir' }, 400)
+      let repoPath: string | undefined
+      try {
+        if (repo) repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const { glob } = await import('tinyglobby')
       const { basename, dirname } = await import('node:path')
       let resolvedDir = dir.replace(/^~/, deps.home)
@@ -71,8 +90,17 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/skills/local/import', async (c) => {
     try {
-      const { repoPath, skills, mode } = await c.req.json()
+      const { repo, skills, mode } = await c.req.json()
       if (!Array.isArray(skills)) return c.json({ ok: false, error: 'invalid_skills' }, 400)
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       // Local skills canonical home is <repo>/assets/skills — this is where
       // projection (resolveSkillSrc) looks for them, and it git-syncs.
       const assetsSkillsDir = join(repoPath, 'assets', 'skills')
@@ -116,8 +144,17 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   // ships the content here so it lands in the git-synced repo.
   app.post('/skills/local/write', async (c) => {
     try {
-      const { repoPath, skills } = await c.req.json()
+      const { repo, skills } = await c.req.json()
       if (!Array.isArray(skills)) return c.json({ ok: false, error: 'invalid_skills' }, 400)
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const assetsSkillsDir = join(repoPath, 'assets', 'skills')
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
@@ -155,7 +192,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/sources', async (c) => {
     try {
-      const { repoPath, url, ref } = await c.req.json()
+      const { repo, url, ref } = await c.req.json()
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
       const result = addSource(data, { url, ref })
@@ -183,8 +229,17 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   // scan popup. Preserves existing per-member targets/enabled where possible.
   app.post('/sources/members', async (c) => {
     try {
-      const { repoPath, url, members } = await c.req.json()
+      const { repo, url, members } = await c.req.json()
       if (!url || typeof url !== 'string') return c.json({ ok: false, error: 'invalid_url' }, 400)
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const memberNames: string[] = Array.isArray(members) ? members : []
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
@@ -206,8 +261,17 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.delete('/sources', async (c) => {
     try {
-      const { repoPath, url } = await c.req.json()
+      const { repo, url } = await c.req.json()
       if (!url || typeof url !== 'string') return c.json({ ok: false, error: 'invalid_url' }, 400)
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
       const result = removeSource(data, url)
@@ -224,8 +288,17 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/sources/update', async (c) => {
     try {
-      const { repoPath, url, ref, type } = await c.req.json()
+      const { repo, url, ref, type } = await c.req.json()
       if (!url || typeof url !== 'string') return c.json({ ok: false, error: 'invalid_url' }, 400)
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
       const updates: { ref?: string; type?: 'branch' | 'tag' } = {}
@@ -249,8 +322,17 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.delete('/skills/local', async (c) => {
     try {
-      const { repoPath, id } = await c.req.json()
+      const { repo, id } = await c.req.json()
       if (!id || typeof id !== 'string') return c.json({ ok: false, error: 'invalid_id' }, 400)
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
       // Pathless skills live in <repo>/assets/skills/<id>; removing the yaml
@@ -275,7 +357,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/skills/targets', async (c) => {
     try {
-      const { repoPath, sourceUrl, memberName, targets } = await c.req.json()
+      const { repo, sourceUrl, memberName, targets } = await c.req.json()
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
       const result = setSkillTargets(data, sourceUrl, memberName, targets)
@@ -296,8 +387,17 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/skills/local/targets', async (c) => {
     try {
-      const { repoPath, id, targets } = await c.req.json()
+      const { repo, id, targets } = await c.req.json()
       if (!id || typeof id !== 'string') return c.json({ ok: false, error: 'invalid_id' }, 400)
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
       const result = setLocalSkillTargets(data, id, targets)

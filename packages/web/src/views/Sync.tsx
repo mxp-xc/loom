@@ -87,7 +87,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
     setRemoteSaving(true)
     setRemoteErr(null)
     try {
-      await api.setSyncRemote({ repoPath, remoteUrl: remoteInput.trim() })
+      await api.setSyncRemote({ repo: repoPath, remoteUrl: remoteInput.trim() })
       setSavedRemote(remoteInput.trim())
       setRemoteLoaded(true)
     } catch (e) {

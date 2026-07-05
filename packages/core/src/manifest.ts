@@ -17,8 +17,15 @@ export function loadRepoManifest(files: Record<string, string>): RepoManifest {
       varsFiles[profile] = parse(path, {})
     }
   }
+  const memoriesFiles: Record<string, string> = {}
+  for (const path of Object.keys(files)) {
+    if (path.startsWith('memories/') && path.endsWith('.md')) {
+      const name = path.slice('memories/'.length, -'.md'.length)
+      memoriesFiles[name] = files[path]
+    }
+  }
   const repoConfig = parse('config.yaml', {})
-  return { skills, mcp, varsFiles, repoConfig } as RepoManifest
+  return { skills, mcp, varsFiles, repoConfig, memoriesFiles } as RepoManifest
 }
 
 export const AgentIdSchema = z.enum(['claude-code', 'codex', 'opencode'])
@@ -99,11 +106,23 @@ export function buildManifest(repo: RepoManifest, localConfig: Config): Manifest
   const effective = mergeConfig(repo.repoConfig, localConfig)
   const profileName = effective.profile ?? 'default'
   const defaultVars = repo.varsFiles['default'] ?? {}
+  const memories = Object.entries(repo.memoriesFiles).map(([name, content]) => ({
+    name,
+    content,
+  }))
+  const activeName = effective.active_memory ?? null
+  const active = activeName ? (memories.find((m) => m.name === activeName) ?? null) : null
+  const activeContent = active?.content ?? ''
+  const errors = validateManifest(repo)
+  if (activeName && !active) {
+    errors.push(`active_memory references unknown memory: ${activeName}`)
+  }
   return {
     skills: repo.skills,
     mcp: repo.mcp,
+    memory: { memories, active, activeContent },
     vars: { default: defaultVars, active: repo.varsFiles[profileName] ?? defaultVars },
     config: effective,
-    errors: validateManifest(repo),
+    errors,
   }
 }

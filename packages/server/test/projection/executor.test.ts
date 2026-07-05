@@ -28,12 +28,14 @@ afterEach(async () => {
 const plan: ProjectionPlan = {
   links: [{ skillId: 'frontend-design', source: 'local', targets: ['claude-code'] }],
   mcpEntries: [{ id: 'playwright', targets: ['claude-code'] }],
+  memoryPlan: { active: null, content: null, targets: [] },
   skippedAgents: [],
   strategy: 'link',
 }
 const manifest: Manifest = {
   skills: { sources: [], skills: [{ id: 'frontend-design' }] },
   mcp: [{ id: 'playwright', type: 'stdio', command: 'npx', args: ['p'], targets: ['claude-code'] }],
+  memory: { memories: [], active: null, activeContent: '' },
   vars: { default: {}, active: {} },
   config: { targets: ['claude-code'] },
   errors: [],
@@ -89,6 +91,7 @@ describe('executeProjection', () => {
     const disabledPlan: ProjectionPlan = {
       links: [{ skillId: 'frontend-design', source: 'local', targets: [] }],
       mcpEntries: [],
+      memoryPlan: { active: null, content: null, targets: [] },
       skippedAgents: [],
       strategy: 'link',
     }
@@ -116,6 +119,7 @@ describe('executeProjection', () => {
         { id: 'broken', targets: ['claude-code'] },
         { id: 'ok', targets: ['claude-code'] },
       ],
+      memoryPlan: { active: null, content: null, targets: [] },
       skippedAgents: [],
       strategy: 'link',
     }

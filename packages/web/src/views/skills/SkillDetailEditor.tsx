@@ -186,7 +186,7 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
                 onSave={async (newContent) => {
                   try {
                     await api.saveSkillContent({
-                      repoPath,
+                      repo: repoPath,
                       skillId: detail.skillId,
                       localPath: detail.path,
                       content: newContent,

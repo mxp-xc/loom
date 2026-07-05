@@ -29,6 +29,17 @@ export interface SkillsManifest {
   skills: LocalSkill[]
 }
 
+export interface Memory {
+  name: string
+  content?: string
+}
+
+export interface MemoryManifest {
+  memories: Memory[]
+  active: Memory | null
+  activeContent: string
+}
+
 export interface McpServer {
   id: string
   type: McpType
@@ -61,6 +72,7 @@ export interface Config {
   active_repo?: string
   proxy?: ProxyConfig
   skill_naming?: 'dir' | 'hyphen'
+  active_memory?: string
 }
 
 export interface VarsFile {
@@ -70,6 +82,7 @@ export interface VarsFile {
 export interface Manifest {
   skills: SkillsManifest
   mcp: McpServer[]
+  memory: MemoryManifest
   vars: { default: VarsFile; active: VarsFile }
   config: Config
   errors: string[]
@@ -80,4 +93,5 @@ export interface RepoManifest {
   mcp: McpServer[]
   varsFiles: Record<string, VarsFile>
   repoConfig: Config
+  memoriesFiles: Record<string, string>
 }

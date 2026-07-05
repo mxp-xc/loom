@@ -29,6 +29,7 @@ const manifest: Manifest = {
     { id: 'zhipu', type: 'sse', url: 'https://x' },
   ],
   vars: { default: {}, active: {} },
+  memory: { memories: [], active: null, activeContent: '' },
   config: {
     targets: ['claude-code', 'codex', 'opencode'],
     projection: { strategy: 'link' },

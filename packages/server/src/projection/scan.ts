@@ -88,5 +88,11 @@ export function resolveFullLinks(
   }
 
   const allSkipped = [...new Set([...base.skippedAgents, ...skipped])]
-  return { links, mcpEntries: base.mcpEntries, skippedAgents: allSkipped, strategy: base.strategy }
+  return {
+    links,
+    mcpEntries: base.mcpEntries,
+    memoryPlan: base.memoryPlan,
+    skippedAgents: allSkipped,
+    strategy: base.strategy,
+  }
 }

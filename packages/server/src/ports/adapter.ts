@@ -12,7 +12,9 @@ export interface McpFragment {
   targets?: AgentId[]
 }
 export type UndoAction =
-  { kind: 'unlink'; path: string } | { kind: 'restoreMcp'; path: string; backup: string | null }
+  | { kind: 'unlink'; path: string }
+  | { kind: 'restoreMcp'; path: string; backup: string | null }
+  | { kind: 'restoreMemory'; path: string; backup: string | null }
 export interface ProjectionJournal {
   undos: UndoAction[]
 }

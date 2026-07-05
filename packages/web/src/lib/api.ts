@@ -27,21 +27,20 @@ export const api = {
     post('/init', {}).then(json) as Promise<{ ok: boolean; active_repo: string; repoPath: string }>,
   status: () =>
     fetch(`${base}/status`).then(json) as Promise<{ active_repo: string; repoPath: string }>,
-  project: (body: unknown) => post('/project', body).then(json),
-  syncPull: (repoPath: string) => post('/sync/pull', { repoPath }).then(json),
-  syncApply: (repoPath: string, resolutions: Record<string, 'ours' | 'theirs'>) =>
-    post('/sync/apply', { repoPath, resolutions }).then(json),
-  syncPush: (repoPath: string) => post('/sync/push', { repoPath }).then(json),
+  project: (body: { repo: string; scope?: 'skills' | 'mcp' | 'memory' | 'all' }) =>
+    post('/project', body).then(json),
+  syncPull: (repo: string) => post('/sync/pull', { repo }).then(json),
+  syncApply: (repo: string, resolutions: Record<string, 'ours' | 'theirs'>) =>
+    post('/sync/apply', { repo, resolutions }).then(json),
+  syncPush: (repo: string) => post('/sync/push', { repo }).then(json),
   install: (body: unknown) => post('/install', body).then(json),
-  update: (repoPath: string, sources: unknown[]) =>
-    post('/update', { repoPath, sources }).then(json),
+  update: (repo: string, sources: unknown[]) => post('/update', { repo, sources }).then(json),
   performUpdate: (body: unknown) => post('/update/perform', body).then(json),
-  getConfig: (repoPath: string) =>
-    fetch(`${base}/config?repoPath=${encodeURIComponent(repoPath)}`).then(json),
-  getManifest: (repoPath: string) =>
-    fetch(`${base}/manifest?repoPath=${encodeURIComponent(repoPath)}`).then(json),
-  getSkillContent: (repoPath: string, skillId: string, sourceUrl?: string, localPath?: string) => {
-    const params = new URLSearchParams({ repoPath, skillId })
+  getConfig: (repo: string) => fetch(`${base}/config?repo=${encodeURIComponent(repo)}`).then(json),
+  getManifest: (repo: string) =>
+    fetch(`${base}/manifest?repo=${encodeURIComponent(repo)}`).then(json),
+  getSkillContent: (repo: string, skillId: string, sourceUrl?: string, localPath?: string) => {
+    const params = new URLSearchParams({ repo, skillId })
     if (sourceUrl) params.set('sourceUrl', sourceUrl)
     if (localPath) params.set('localPath', localPath)
     return fetch(`${base}/skill/content?${params}`).then(json) as Promise<{
@@ -53,7 +52,7 @@ export const api = {
     }>
   },
   saveSkillContent: (body: {
-    repoPath: string
+    repo: string
     skillId: string
     sourceUrl?: string
     localPath?: string
@@ -64,35 +63,35 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }).then(json) as Promise<{ ok: boolean; path?: string; error?: string; message?: string }>,
-  putConfig: (body: { repoPath: string; level: 'repo' | 'local'; field: string; value: unknown }) =>
+  putConfig: (body: { repo: string; level: 'repo' | 'local'; field: string; value: unknown }) =>
     fetch(`${base}/config`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }).then(json),
 
-  addLocalSkill: (body: { repoPath: string; skill: { id: string; path?: string } }) =>
+  addLocalSkill: (body: { repo: string; skill: { id: string; path?: string } }) =>
     post('/skills/local', body).then(json),
-  scanLocalSkills: (dir: string, repoPath: string) =>
-    post('/skills/local/scan', { dir, repoPath }).then(json) as Promise<{
+  scanLocalSkills: (dir: string, repo: string) =>
+    post('/skills/local/scan', { dir, repo }).then(json) as Promise<{
       ok: boolean
       skills: Array<{ name: string; path: string }>
       error?: string
       message?: string
     }>,
   importLocalSkills: (body: {
-    repoPath: string
+    repo: string
     skills: Array<{ name: string; path: string }>
     mode: 'move' | 'ref'
   }) => post('/skills/local/import', body).then(json) as Promise<{ ok: boolean; count?: number }>,
   writeLocalSkills: (body: {
-    repoPath: string
+    repo: string
     skills: Array<{ name: string; files: Array<{ path: string; content: string }> }>
   }) => post('/skills/local/write', body).then(json) as Promise<{ ok: boolean; count?: number }>,
-  addSource: (body: { repoPath: string; url: string; ref: string }) =>
+  addSource: (body: { repo: string; url: string; ref: string }) =>
     post('/sources', body).then(json),
   addMcpServer: (body: {
-    repoPath: string
+    repo: string
     server: {
       id: string
       type: string
@@ -104,29 +103,29 @@ export const api = {
       targets?: string[]
     }
   }) => post('/mcp', body).then(json),
-  deleteSource: (body: { repoPath: string; url: string }) =>
+  deleteSource: (body: { repo: string; url: string }) =>
     fetch(`${base}/sources`, {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }).then(json),
-  deleteLocalSkill: (body: { repoPath: string; id: string }) =>
+  deleteLocalSkill: (body: { repo: string; id: string }) =>
     fetch(`${base}/skills/local`, {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }).then(json),
-  deleteMcpServer: (body: { repoPath: string; id: string }) =>
+  deleteMcpServer: (body: { repo: string; id: string }) =>
     fetch(`${base}/mcp`, {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }).then(json),
-  getSyncRemote: (repoPath: string) =>
-    fetch(`${base}/sync/remote?repoPath=${encodeURIComponent(repoPath)}`).then(json) as Promise<{
+  getSyncRemote: (repo: string) =>
+    fetch(`${base}/sync/remote?repo=${encodeURIComponent(repo)}`).then(json) as Promise<{
       remoteUrl: string | null
     }>,
-  setSyncRemote: (body: { repoPath: string; remoteUrl: string }) =>
+  setSyncRemote: (body: { repo: string; remoteUrl: string }) =>
     post('/sync/remote', body).then(json),
   scanSource: (url: string) =>
     post('/sources/scan', { url }).then(json) as Promise<{
@@ -140,38 +139,61 @@ export const api = {
       error?: string
       message?: string
     }>,
-  refreshSource: (repoPath: string, url: string, ref: string) =>
-    post('/sources/refresh', { repoPath, url, ref }).then(json) as Promise<{
+  refreshSource: (repo: string, url: string, ref: string) =>
+    post('/sources/refresh', { repo, url, ref }).then(json) as Promise<{
       ok: boolean
       members?: Array<{ name: string; path: string }>
       error?: string
       message?: string
     }>,
-  setSourceMembers: (body: { repoPath: string; url: string; members: string[] }) =>
+  setSourceMembers: (body: { repo: string; url: string; members: string[] }) =>
     post('/sources/members', body).then(json) as Promise<{
       ok: boolean
       error?: string
       message?: string
     }>,
-  updateSourceMeta: (body: {
-    repoPath: string
-    url: string
-    ref?: string
-    type?: 'branch' | 'tag'
-  }) =>
+  updateSourceMeta: (body: { repo: string; url: string; ref?: string; type?: 'branch' | 'tag' }) =>
     post('/sources/update', body).then(json) as Promise<{
       ok: boolean
       error?: string
       message?: string
     }>,
-  updateMcpTargets: (body: { repoPath: string; id: string; targets: string[] }) =>
+  updateMcpTargets: (body: { repo: string; id: string; targets: string[] }) =>
     post('/mcp/targets', body).then(json),
   updateSkillTargets: (body: {
-    repoPath: string
+    repo: string
     sourceUrl: string
     memberName: string
     targets: string[]
   }) => post('/skills/targets', body).then(json),
-  updateLocalSkillTargets: (body: { repoPath: string; id: string; targets: string[] }) =>
+  updateLocalSkillTargets: (body: { repo: string; id: string; targets: string[] }) =>
     post('/skills/local/targets', body).then(json),
+
+  getMemory: (repo: string) =>
+    fetch(`${base}/memory?repo=${encodeURIComponent(repo)}`).then(json) as Promise<{
+      memories: Array<{ name: string }>
+      active: string | null
+      activeContent: string
+    }>,
+  createMemory: (body: { repo: string; name: string }) => post('/memory', body).then(json),
+  deleteMemory: (repo: string, name: string) =>
+    fetch(`${base}/memory?repo=${encodeURIComponent(repo)}&name=${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }).then(json),
+  saveMemoryContent: (body: { repo: string; name: string; content: string }) =>
+    fetch(`${base}/memory/content`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(json),
+  renameMemory: (body: { repo: string; name: string; newName: string }) =>
+    post('/memory/rename', body).then(json),
+  setMemoryActive: (body: { repo: string; name: string }) =>
+    post('/memory/active', body).then(json),
+  previewMemory: (body: { repo: string; content: string; agent: string }) =>
+    post('/memory/preview', body).then(json) as Promise<{
+      rendered?: string
+      error?: string
+      message?: string
+    }>,
 }

@@ -108,6 +108,7 @@ describe('buildManifest (RepoManifest -> Manifest)', () => {
       mcp: [],
       varsFiles: { default: { a: 'd' }, local: { a: 'l', b: 'x' } },
       repoConfig: { profile: 'local', targets: ['claude-code'] },
+      memoriesFiles: {},
     }
     const m = buildManifest(repo, { targets: ['codex'] })
     expect(m.config.targets).toEqual(['codex'])
@@ -121,6 +122,7 @@ describe('buildManifest (RepoManifest -> Manifest)', () => {
       mcp: [],
       varsFiles: { default: { a: 'd' } },
       repoConfig: {},
+      memoriesFiles: {},
     }
     const m = buildManifest(repo, {})
     expect(m.vars.active).toEqual({ a: 'd' })

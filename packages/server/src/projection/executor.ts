@@ -8,8 +8,8 @@ import type {
   ProjectionFailure,
 } from '../ports/adapter.js'
 import type { ProjectionPlan, McpPlanEntry, Manifest, AgentId, McpServer } from '@loom/core'
-import { resolveVars, type VarsContext } from '@loom/core'
-import { agentMcpFile, agentSkillsDir } from '../adapters/paths.js'
+import { resolveVars, renderText, type VarsContext } from '@loom/core'
+import { agentMcpFile, agentSkillsDir, agentMemoryFile, agentConfigDir } from '../adapters/paths.js'
 import { mergeMcp } from './mcp-merge.js'
 
 export interface ProjectionDeps {
@@ -30,11 +30,14 @@ export interface ProjectionDeps {
 
 export type ProjectionResult = { ok: true } | { ok: false; failure: ProjectionFailure }
 
+export type ProjectionScope = 'skills' | 'mcp' | 'memory' | 'all'
+
 export async function executeProjection(
   plan: ProjectionPlan,
   manifest: Manifest,
   varsCtx: VarsContext,
   deps: ProjectionDeps,
+  scope: ProjectionScope = 'all',
 ): Promise<ProjectionResult> {
   if (manifest.errors.length > 0) {
     return {
@@ -50,76 +53,113 @@ export async function executeProjection(
   const { fs, adapters, installedAgents } = deps
   try {
     // Phase A: build enabled links
-    const builtDests = new Set<string>()
-    for (const link of plan.links) {
-      const src = deps.resolveSkillSrc(link)
-      if (!src || link.targets.length === 0) continue
-      for (const agent of link.targets) {
-        const skillsDir = agentSkillsDir(agent)
-        await fs.mkdir(skillsDir, true)
-        const dest = join(skillsDir, link.skillId)
-        if (await fs.isLink(dest)) {
-          await fs.removeLink(dest)
-        } else if (await fs.exists(dest)) {
-          deps.logger?.warn?.(
-            { dest, skillId: link.skillId },
-            'skip cleanup: target is real file/dir',
-          )
-          continue
-        }
-        if (plan.strategy === 'copy') {
-          await fs.copyDir(src, dest)
-        } else {
-          await fs.createLink(src, dest)
-        }
-        journal.undos.push({ kind: 'unlink', path: dest })
-        builtDests.add(dest)
-      }
-    }
-    // Phase B: clean stale links for skills still in manifest but no longer projected
-    // (enabled:false etc). Orphaned links from deleted skills are cleaned in Phase C.
-    for (const link of plan.links) {
-      for (const agent of installedAgents) {
-        const dest = join(agentSkillsDir(agent), link.skillId)
-        if (builtDests.has(dest)) continue
-        if (await fs.isLink(dest)) {
-          await fs.removeLink(dest)
-        } else if (await fs.exists(dest)) {
-          deps.logger?.warn?.(
-            { dest, skillId: link.skillId },
-            'skip cleanup: target is real file/dir',
-          )
+    if (scope === 'skills' || scope === 'all') {
+      const builtDests = new Set<string>()
+      for (const link of plan.links) {
+        const src = deps.resolveSkillSrc(link)
+        if (!src || link.targets.length === 0) continue
+        for (const agent of link.targets) {
+          const skillsDir = agentSkillsDir(agent)
+          await fs.mkdir(skillsDir, true)
+          const dest = join(skillsDir, link.skillId)
+          if (await fs.isLink(dest)) {
+            await fs.removeLink(dest)
+          } else if (await fs.exists(dest)) {
+            deps.logger?.warn?.(
+              { dest, skillId: link.skillId },
+              'skip cleanup: target is real file/dir',
+            )
+            continue
+          }
+          if (plan.strategy === 'copy') {
+            await fs.copyDir(src, dest)
+          } else {
+            await fs.createLink(src, dest)
+          }
+          journal.undos.push({ kind: 'unlink', path: dest })
+          builtDests.add(dest)
         }
       }
+      // Phase B: clean stale links for skills still in manifest but no longer projected
+      // (enabled:false etc). Orphaned links from deleted skills are cleaned in Phase C.
+      for (const link of plan.links) {
+        for (const agent of installedAgents) {
+          const dest = join(agentSkillsDir(agent), link.skillId)
+          if (builtDests.has(dest)) continue
+          if (await fs.isLink(dest)) {
+            await fs.removeLink(dest)
+          } else if (await fs.exists(dest)) {
+            deps.logger?.warn?.(
+              { dest, skillId: link.skillId },
+              'skip cleanup: target is real file/dir',
+            )
+          }
+        }
+      }
+      // Phase C: clean orphaned links — skills deleted from manifest entirely.
+      // Scan each installed agent's skills dir; any loom-projected link whose id is
+      // not in the current plan's link set is removed. Non-link real dirs are skipped.
+      await cleanOrphanedLinks(plan, installedAgents, fs, deps.logger)
     }
-    // Phase C: clean orphaned links — skills deleted from manifest entirely.
-    // Scan each installed agent's skills dir; any loom-projected link whose id is
-    // not in the current plan's link set is removed. Non-link real dirs are skipped.
-    await cleanOrphanedLinks(plan, installedAgents, fs, deps.logger)
     // MCP config
-    for (const agent of Object.keys(adapters) as AgentId[]) {
-      const adapter = adapters[agent]
-      if (!adapter) continue
-      const file = agentMcpFile(agent)
-      const fragments = resolveMcpFragments(
-        plan.mcpEntries,
-        manifest.mcp,
-        agent,
-        varsCtx,
-        deps.logger,
-      )
-      // Even with no fragments we must still remove managed entries the manifest deleted.
-      const managedIds = (await deps.getManagedMcpIds?.(agent)) ?? new Set<string>()
-      if (fragments.length === 0 && managedIds.size === 0) continue
-      const backup = (await fs.exists(file)) ? await fs.readFile(file) : null
-      journal.undos.push({ kind: 'restoreMcp', path: file, backup })
-      const existing = await adapter.readMcp(fs)
-      const merged = mergeMcp(existing, fragments, managedIds)
-      await adapter.writeMcp(fs, merged)
-      await deps.setManagedMcpIds?.(
-        agent,
-        fragments.map((f) => f.id),
-      )
+    if (scope === 'mcp' || scope === 'all') {
+      for (const agent of Object.keys(adapters) as AgentId[]) {
+        const adapter = adapters[agent]
+        if (!adapter) continue
+        const file = agentMcpFile(agent)
+        const fragments = resolveMcpFragments(
+          plan.mcpEntries,
+          manifest.mcp,
+          agent,
+          varsCtx,
+          deps.logger,
+        )
+        // Even with no fragments we must still remove managed entries the manifest deleted.
+        const managedIds = (await deps.getManagedMcpIds?.(agent)) ?? new Set<string>()
+        if (fragments.length === 0 && managedIds.size === 0) continue
+        const backup = (await fs.exists(file)) ? await fs.readFile(file) : null
+        journal.undos.push({ kind: 'restoreMcp', path: file, backup })
+        const existing = await adapter.readMcp(fs)
+        const merged = mergeMcp(existing, fragments, managedIds)
+        await adapter.writeMcp(fs, merged)
+        await deps.setManagedMcpIds?.(
+          agent,
+          fragments.map((f) => f.id),
+        )
+      }
+    }
+    // Phase D: memory projection
+    if (scope === 'memory' || scope === 'all') {
+      const mp = plan.memoryPlan
+      if (mp.active && mp.content !== null) {
+        for (const agent of mp.targets) {
+          const ctx: VarsContext = {
+            env: {
+              ...varsCtx.env,
+              LOOM_AGENT: agent,
+              LOOM_CONFIG_DIR: agentConfigDir(agent),
+              LOOM_SKILLS_DIR: agentSkillsDir(agent),
+              LOOM_AGENT_FILE: agent === 'claude-code' ? 'CLAUDE.md' : 'AGENTS.md',
+            },
+            activeProfile: varsCtx.activeProfile,
+            defaultProfile: varsCtx.defaultProfile,
+          }
+          let rendered: string
+          try {
+            rendered = renderText(mp.content, ctx)
+          } catch (e) {
+            deps.logger?.error({ err: e, agent }, 'memory var resolve failed')
+            throw e
+          }
+          const path = agentMemoryFile(agent)
+          await fs.mkdir(join(path, '..'), true).catch(() => {})
+          const backup = (await fs.exists(path)) ? await fs.readFile(path) : null
+          journal.undos.push({ kind: 'restoreMemory', path, backup })
+          await fs.writeFile(path, rendered)
+        }
+      } else {
+        deps.logger?.warn?.({}, 'no active memory, skip memory phase')
+      }
     }
     return { ok: true }
   } catch (originalError) {
@@ -214,12 +254,18 @@ function resolveMcpFragments(
   return out
 }
 
-async function applyUndo(u: UndoAction, fs: IFileSystem): Promise<void> {
+export async function applyUndo(u: UndoAction, fs: IFileSystem): Promise<void> {
   if (u.kind === 'unlink') {
     if (await fs.isLink(u.path)) {
       await fs.removeLink(u.path)
     } else {
       throw new Error(`cannot rollback copy artifact (not a link): ${u.path}`)
+    }
+  } else if (u.kind === 'restoreMemory') {
+    if (u.backup === null) {
+      await fs.removeFile(u.path)
+    } else {
+      await fs.writeFile(u.path, u.backup)
     }
   } else {
     if (u.backup === null) {

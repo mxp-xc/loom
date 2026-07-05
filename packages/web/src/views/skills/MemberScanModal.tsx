@@ -73,7 +73,7 @@ export default function MemberScanModal({
     setSaving(true)
     try {
       const res = await api.setSourceMembers({
-        repoPath,
+        repo: repoPath,
         url: source.url,
         members: selectedNames,
       })
