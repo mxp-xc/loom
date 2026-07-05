@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { X } from 'lucide-react'
 
@@ -8,6 +8,7 @@ interface ModalProps {
   title: string
   width?: number
   minHeight?: number
+  busy?: boolean
   children: ReactNode
 }
 
@@ -17,36 +18,77 @@ export default function Modal({
   title,
   width = 480,
   minHeight = 0,
+  busy = false,
   children,
 }: ModalProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+  const busyRef = useRef(busy)
+  const openerRef = useRef<HTMLElement | null>(null)
+  const titleId = useId()
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  useEffect(() => {
+    busyRef.current = busy
+  }, [busy])
 
   useEffect(() => {
     if (!open) return
+    openerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-      // Focus trap: keep Tab within modal
+      if (e.key === 'Escape' && !busyRef.current) onCloseRef.current()
       if (e.key === 'Tab' && ref.current) {
         const focusable = ref.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
         )
-        if (focusable.length === 0) return
+        if (focusable.length === 0) {
+          e.preventDefault()
+          ref.current.focus()
+          return
+        }
         const first = focusable[0]
         const last = focusable[focusable.length - 1]
-        if (e.shiftKey && document.activeElement === first) {
+        const active = document.activeElement
+        if (
+          e.shiftKey &&
+          (active === first || active === ref.current || !ref.current.contains(active))
+        ) {
           e.preventDefault()
           last.focus()
-        } else if (!e.shiftKey && document.activeElement === last) {
+        } else if (
+          !e.shiftKey &&
+          (active === last || active === ref.current || !ref.current.contains(active))
+        ) {
           e.preventDefault()
           first.focus()
         }
       }
     }
     window.addEventListener('keydown', handler)
-    // Focus the modal container on open
-    setTimeout(() => ref.current?.focus(), 0)
-    return () => window.removeEventListener('keydown', handler)
-  }, [open, onClose])
+    const focusTimer = window.setTimeout(() => {
+      const modal = ref.current
+      if (!modal) return
+      const preferred =
+        modal.querySelector<HTMLElement>(
+          '[data-autofocus]:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)',
+        ) ??
+        modal.querySelector<HTMLElement>(
+          'button:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+        )
+      ;(preferred ?? modal).focus()
+    }, 0)
+    return () => {
+      window.removeEventListener('keydown', handler)
+      window.clearTimeout(focusTimer)
+      const opener = openerRef.current
+      if (opener?.isConnected) opener.focus()
+      openerRef.current = null
+    }
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -73,11 +115,15 @@ export default function Modal({
         WebkitBackdropFilter: 'blur(4px)',
       }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
+        if (e.target === e.currentTarget && !busyRef.current) onCloseRef.current()
       }}
     >
       <div
         ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-busy={busy}
         tabIndex={-1}
         style={{
           width: `min(${width}px, calc(100vw - 32px))`,
@@ -103,6 +149,7 @@ export default function Modal({
           }}
         >
           <span
+            id={titleId}
             style={{
               fontFamily: "'JetBrains Mono', monospace",
               fontSize: 14,
@@ -112,7 +159,13 @@ export default function Modal({
           >
             {title}
           </span>
-          <Button variant="ghost" size="xs" onClick={onClose} aria-label="关闭弹窗">
+          <Button
+            variant="ghost"
+            size="xs"
+            disabled={busy}
+            onClick={() => onCloseRef.current()}
+            aria-label="关闭"
+          >
             <X className="h-4 w-4" />
           </Button>
         </div>

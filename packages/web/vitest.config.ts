@@ -11,6 +11,7 @@ export default defineProject({
   test: {
     globals: true,
     environment: 'jsdom',
+    setupFiles: ['./test/setup.ts'],
     include: ['test/**/*.test.{ts,tsx}'],
   },
 })

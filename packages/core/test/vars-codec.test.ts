@@ -1,0 +1,149 @@
+import { describe, expect, it } from 'vitest'
+import { VarsCodecError, parseVarsEnvironment, serializeVarsEnvironment } from '../src/vars-codec'
+import type { VarsEnvironment } from '../src/vars-types'
+
+function expectCode(run: () => unknown, code: string): void {
+  expect(run).toThrowError(expect.objectContaining({ code }))
+}
+
+describe('parseVarsEnvironment', () => {
+  it('parses all five explicit typed entries', () => {
+    expect(
+      parseVarsEnvironment(`
+TEXT: { type: string, value: hello }
+TOKEN: { type: secret, value: hidden }
+COUNT: { type: number, value: 3.5 }
+ENABLED: { type: boolean, value: true }
+CONFIG:
+  type: json
+  value: { nested: [null, false, 2, ok] }
+`),
+    ).toEqual({
+      format: 'typed',
+      entries: {
+        TEXT: { type: 'string', value: 'hello' },
+        TOKEN: { type: 'secret', value: 'hidden' },
+        COUNT: { type: 'number', value: 3.5 },
+        ENABLED: { type: 'boolean', value: true },
+        CONFIG: { type: 'json', value: { nested: [null, false, 2, 'ok'] } },
+      },
+    })
+  })
+
+  it('rejects an invalid variable key', () => {
+    expect(() => parseVarsEnvironment('bad key: value\n')).toThrowError(
+      expect.objectContaining({ code: 'var_key_invalid' }),
+    )
+  })
+
+  it.each(['.nan', '.inf', '-.inf'])('rejects non-finite number %s', (value) => {
+    expect(() => parseVarsEnvironment(`NUMBER:\n  type: number\n  value: ${value}\n`)).toThrowError(
+      expect.objectContaining({ code: 'typed_value_invalid' }),
+    )
+  })
+
+  it('converts every legacy scalar to a string', () => {
+    expect(parseVarsEnvironment('TEXT: hello\nCOUNT: 12\nENABLED: false\n')).toEqual({
+      format: 'legacy',
+      entries: {
+        TEXT: { type: 'string', value: 'hello' },
+        COUNT: { type: 'string', value: '12' },
+        ENABLED: { type: 'string', value: 'false' },
+      },
+    })
+  })
+
+  it.each(['VALUE: null\n', 'VALUE: [one, two]\n', 'VALUE: { nested: true }\n'])(
+    'rejects a non-scalar legacy value',
+    (source) => {
+      expect(() => parseVarsEnvironment(source)).toThrowError(
+        expect.objectContaining({ code: 'legacy_value_invalid' }),
+      )
+    },
+  )
+
+  it('preserves own __proto__ keys at the root and inside JSON without pollution', () => {
+    const environment = parseVarsEnvironment(`
+"__proto__": { type: string, value: root }
+CONFIG:
+  type: json
+  value:
+    "__proto__": { polluted: true }
+`)
+
+    expect(Object.hasOwn(environment.entries, '__proto__')).toBe(true)
+    expect(environment.entries['__proto__']).toEqual({ type: 'string', value: 'root' })
+    const config = environment.entries.CONFIG
+    expect(config.type).toBe('json')
+    if (config.type === 'json' && typeof config.value === 'object' && config.value !== null) {
+      expect(Object.hasOwn(config.value, '__proto__')).toBe(true)
+      expect(config.value['__proto__']).toEqual({ polluted: true })
+    }
+    expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined()
+
+    const roundTripped = parseVarsEnvironment(serializeVarsEnvironment(environment))
+    expect(Object.hasOwn(roundTripped.entries, '__proto__')).toBe(true)
+    expect(roundTripped.entries['__proto__']).toEqual({ type: 'string', value: 'root' })
+    const roundTrippedConfig = roundTripped.entries.CONFIG
+    if (
+      roundTrippedConfig.type === 'json' &&
+      typeof roundTrippedConfig.value === 'object' &&
+      roundTrippedConfig.value !== null
+    ) {
+      expect(Object.hasOwn(roundTrippedConfig.value, '__proto__')).toBe(true)
+      expect(roundTrippedConfig.value['__proto__']).toEqual({ polluted: true })
+    }
+    expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  it('uses stable error codes for parser failures', () => {
+    expectCode(() => parseVarsEnvironment('VALUE: ['), 'yaml_invalid')
+    expectCode(() => parseVarsEnvironment('[one, two]'), 'vars_document_invalid')
+    expectCode(
+      () => parseVarsEnvironment('VALUE: { type: boolean, value: nope }'),
+      'typed_value_invalid',
+    )
+    expectCode(() => parseVarsEnvironment('VALUE: { nested: true }'), 'legacy_value_invalid')
+  })
+
+  it('keeps parser causes without exposing YAML source in the wrapper message or stack', () => {
+    const secret = 'top-secret-parser-payload'
+    let captured: unknown
+    try {
+      parseVarsEnvironment(`API_KEY: [${secret}`)
+    } catch (error) {
+      captured = error
+    }
+    expect(captured).toBeInstanceOf(VarsCodecError)
+    expect(captured).toMatchObject({ code: 'yaml_invalid', cause: expect.any(Error) })
+    expect(String(captured)).not.toContain(secret)
+    expect((captured as Error).stack).not.toContain(secret)
+  })
+})
+
+describe('serializeVarsEnvironment', () => {
+  it('round-trips a typed environment', () => {
+    const environment = parseVarsEnvironment(`
+TEXT: { type: string, value: hello }
+TOKEN: { type: secret, value: hidden }
+COUNT: { type: number, value: 3.5 }
+ENABLED: { type: boolean, value: true }
+CONFIG: { type: json, value: { nested: [null, false, 2, ok] } }
+`)
+
+    expect(parseVarsEnvironment(serializeVarsEnvironment(environment))).toEqual(environment)
+  })
+
+  it('round-trips an empty typed environment', () => {
+    const environment: VarsEnvironment = { format: 'typed', entries: {} }
+    expect(parseVarsEnvironment(serializeVarsEnvironment(environment))).toEqual(environment)
+  })
+
+  it('rejects non-string entries in a legacy environment', () => {
+    const invalid = {
+      format: 'legacy',
+      entries: { COUNT: { type: 'number', value: 2 } },
+    } as VarsEnvironment
+    expectCode(() => serializeVarsEnvironment(invalid), 'vars_environment_invalid')
+  })
+})

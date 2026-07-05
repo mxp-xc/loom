@@ -58,9 +58,9 @@ bun run format / format:check
 - MCP 合并依 state 文件区分 loom 管理 vs 用户手写条目
 - memory 投影时每 agent 注入 `LOOM_AGENT`/`LOOM_CONFIG_DIR`/`LOOM_SKILLS_DIR`/`LOOM_AGENT_FILE` 环境变量
 
-### 变量替换
+### Vars 与模板变量
 
-`${VAR}` 解析顺序:env → active profile vars → default profile vars → 字面默认值;未定义抛 `ResolveError`。`\${` 转义字面量。用于 MCP 字段与 memory 内容。见 `core/vars.ts`。
+Typed vars 存在 `vars/<profile>.yaml`，`resolveVarsChain` 按调用方给定的环境链解析，后面的环境覆盖前面同名 key，只读取 vars，不读取 `process.env`。旧 `resolveVars` 仅服务投影兼容层，读取 active/default profile。Memory 的 `renderText` 额外支持调用方显式注入的 `LOOM_AGENT` / `LOOM_CONFIG_DIR` / `LOOM_SKILLS_DIR` / `LOOM_AGENT_FILE` runtime tokens；`\${` 转义字面量。
 
 ### Git 同步
 

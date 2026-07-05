@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, mkdir, readFile, symlink } from 'node:fs/promises'
 import { tmpdir, platform } from 'node:os'
 import { join } from 'node:path'
 import { NodeFileSystem } from '../../../src/platform/node/fs'
@@ -13,6 +13,108 @@ afterEach(async () => {
 })
 
 describe('NodeFileSystem', () => {
+  it('replaceFile replaces a target and consumes the temporary file', async () => {
+    const fs = new NodeFileSystem()
+    const target = join(root, 'target')
+    const temporary = join(root, 'temporary')
+    await writeFile(target, 'old')
+    await writeFile(temporary, 'new')
+    await fs.replaceFile(temporary, target)
+    expect(await readFile(target, 'utf8')).toBe('new')
+    expect(await fs.exists(temporary)).toBe(false)
+  })
+
+  it('replaceFile succeeds when the target is absent', async () => {
+    const target = join(root, 'absent')
+    const temporary = join(root, 'temporary')
+    await writeFile(temporary, 'new')
+    await new NodeFileSystem().replaceFile(temporary, target)
+    expect(await readFile(target, 'utf8')).toBe('new')
+  })
+
+  it('restores an existing target when installing the temp fails', async () => {
+    let calls = 0
+    const fs = new NodeFileSystem({
+      platform: 'win32',
+      rename: async (from, to) => {
+        calls++
+        if (calls === 2) throw new Error('install')
+        await import('node:fs/promises').then((m) => m.rename(from, to))
+      },
+    })
+    const target = join(root, 'target')
+    const temporary = join(root, 'temporary')
+    await writeFile(target, 'old')
+    await writeFile(temporary, 'new')
+    await expect(fs.replaceFile(temporary, target)).rejects.toThrow('install')
+    expect(await readFile(target, 'utf8')).toBe('old')
+    expect(
+      (await import('node:fs/promises').then((m) => m.readdir(root))).some((x) =>
+        x.includes('replace-backup'),
+      ),
+    ).toBe(false)
+  })
+
+  it('preserves the backup and original cause when restoring fails', async () => {
+    let calls = 0
+    const install = new Error('install')
+    const restore = new Error('restore')
+    const fs = new NodeFileSystem({
+      platform: 'win32',
+      rename: async (from, to) => {
+        calls++
+        if (calls === 2) throw install
+        if (calls === 3) throw restore
+        await import('node:fs/promises').then((m) => m.rename(from, to))
+      },
+    })
+    const target = join(root, 'target')
+    const temporary = join(root, 'temporary')
+    await writeFile(target, 'old')
+    await writeFile(temporary, 'new')
+    const failure = await fs.replaceFile(temporary, target).catch((error) => error)
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect(failure.cause).toBe(install)
+    expect(failure.errors).toEqual([install, restore])
+    expect(
+      (await import('node:fs/promises').then((m) => m.readdir(root))).some((x) =>
+        x.includes('replace-backup'),
+      ),
+    ).toBe(true)
+  })
+
+  it('uses one direct rename on POSIX and leaves target untouched on failure', async () => {
+    const calls: Array<[string, string]> = []
+    const failure = new Error('rename')
+    const fs = new NodeFileSystem({
+      platform: 'linux',
+      rename: async (from, to) => {
+        calls.push([from, to])
+        throw failure
+      },
+    })
+    const target = join(root, 'target')
+    const temporary = join(root, 'temporary')
+    await writeFile(target, 'old')
+    await writeFile(temporary, 'new')
+    await expect(fs.replaceFile(temporary, target)).rejects.toBe(failure)
+    expect(calls).toEqual([[temporary, target]])
+    expect(await readFile(target, 'utf8')).toBe('old')
+  })
+
+  it('removeFile removes files and links but refuses directories', async () => {
+    const fs = new NodeFileSystem()
+    const file = join(root, 'file')
+    await writeFile(file, 'x')
+    await fs.removeFile(file)
+    expect(await fs.exists(file)).toBe(false)
+    const directory = join(root, 'directory')
+    await mkdir(directory)
+    const link = join(root, 'file-link')
+    await symlink(file, link)
+    await fs.removeFile(link)
+    await expect(fs.removeFile(directory)).rejects.toThrow()
+  })
   it('createLink makes a link to a dir target, returns fallback null', async () => {
     const target = join(root, 'target')
     await mkdir(target)

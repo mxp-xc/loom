@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
-import { createApp } from '../../src/api/server'
+import { createApp, startApiServer } from '../../src/api/server'
 
 vi.mock('../../src/api/router.js', () => ({
   registerRoutes: () => new Hono().get('/health', (c) => c.json({ ok: true })),
@@ -23,6 +23,14 @@ afterEach(async () => {
 })
 
 describe('createApp', () => {
+  it('binds the API server to loopback explicitly', async () => {
+    const serve = vi.fn(() => ({ close: vi.fn() }))
+    await startApiServer(4321, serve as never)
+    expect(serve).toHaveBeenCalledWith(
+      expect.objectContaining({ port: 4321, hostname: '127.0.0.1' }),
+      expect.any(Function),
+    )
+  })
   it('GET /api/health returns ok', async () => {
     const res = await createApp().request('/api/health')
     expect(res.status).toBe(200)

@@ -6,11 +6,12 @@ import Mcp from './views/Mcp'
 import Memory from './views/Memory'
 import Sync from './views/Sync'
 import Settings from './views/Settings'
+import Vars from './views/vars/Vars'
 import { useManifest } from './hooks/useManifest'
 import { useViewError } from './hooks/useViewError'
 import { useTheme } from './theme'
 import { Button } from '@/components/ui/button'
-import { Sun, Moon, Monitor } from 'lucide-react'
+import { Sun, Moon, Monitor, Braces } from 'lucide-react'
 
 function ThemeSwitcher() {
   const { theme, setTheme } = useTheme()
@@ -95,6 +96,13 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
             <span className="ic">✎</span>Memory
           </NavLink>
           <NavLink
+            to="/vars"
+            className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
+          >
+            <Braces className="ic" size={14} />
+            Variables
+          </NavLink>
+          <NavLink
             to="/sync"
             className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
           >
@@ -117,6 +125,7 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
             <Route path="skills" element={<Skills repoPath={repoPath} />} />
             <Route path="mcp" element={<Mcp repoPath={repoPath} />} />
             <Route path="memory" element={<Memory repoPath={repoPath} />} />
+            <Route path="vars" element={<Vars repoPath={repoPath} />} />
             <Route path="sync" element={<Sync repoPath={repoPath} />} />
             <Route path="settings" element={<Settings repoPath={repoPath} />} />
           </Routes>
@@ -141,6 +150,7 @@ export default function App() {
         setLoading(false)
       })
       .catch((e) => {
+        console.error('Failed to initialize Loom', e)
         setError(e)
         setLoading(false)
       })

@@ -1,6 +1,8 @@
 import yaml from 'js-yaml'
 import { z } from 'zod'
 import type { Config, RepoManifest, Manifest } from './types.js'
+import { parseVarsEnvironment } from './vars-codec.js'
+import type { VarsEnvironment, VarEntry } from './vars-types.js'
 
 export function loadRepoManifest(files: Record<string, string>): RepoManifest {
   const parse = (p: string, fallback: unknown): unknown => {
@@ -10,11 +12,11 @@ export function loadRepoManifest(files: Record<string, string>): RepoManifest {
   }
   const skills = parse('skills.yaml', { sources: [], skills: [] })
   const mcp = parse('mcp.yaml', [])
-  const varsFiles: Record<string, unknown> = {}
+  const varsFiles: Record<string, VarsEnvironment> = {}
   for (const path of Object.keys(files)) {
     if (path.startsWith('vars/') && path.endsWith('.yaml')) {
       const profile = path.slice('vars/'.length, -'.yaml'.length)
-      varsFiles[profile] = parse(path, {})
+      varsFiles[profile] = parseVarsEnvironment(files[path])
     }
   }
   const memoriesFiles: Record<string, string> = {}
@@ -105,7 +107,8 @@ export function mergeConfig(repo: Config, local: Config): Config {
 export function buildManifest(repo: RepoManifest, localConfig: Config): Manifest {
   const effective = mergeConfig(repo.repoConfig, localConfig)
   const profileName = effective.profile ?? 'default'
-  const defaultVars = repo.varsFiles['default'] ?? {}
+  const defaultVars = toVarsFile(repo.varsFiles['default'])
+  const activeEnvironment = repo.varsFiles[profileName]
   const memories = Object.entries(repo.memoriesFiles).map(([name, content]) => ({
     name,
     content,
@@ -121,8 +124,22 @@ export function buildManifest(repo: RepoManifest, localConfig: Config): Manifest
     skills: repo.skills,
     mcp: repo.mcp,
     memory: { memories, active, activeContent },
-    vars: { default: defaultVars, active: repo.varsFiles[profileName] ?? defaultVars },
+    vars: {
+      default: defaultVars,
+      active: activeEnvironment ? toVarsFile(activeEnvironment) : defaultVars,
+    },
     config: effective,
     errors,
   }
+}
+
+function stringifyEntry(entry: VarEntry): string {
+  return entry.type === 'json' ? JSON.stringify(entry.value) : String(entry.value)
+}
+
+function toVarsFile(environment: VarsEnvironment | undefined): Record<string, string> {
+  if (!environment) return {}
+  return Object.fromEntries(
+    Object.entries(environment.entries).map(([key, entry]) => [key, stringifyEntry(entry)]),
+  )
 }

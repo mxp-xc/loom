@@ -13,30 +13,45 @@ import { createMcpYamlRoutes } from './routes/mcp-yaml.js'
 import { createMemoryRoutes } from './routes/memory.js'
 import { SyncSessionManager } from '../sync/session-manager.js'
 import { logger } from '../lib/logger.js'
+import { createVarsRoutes } from './routes/vars.js'
 
 export interface RouteDeps {
   fs: IFileSystem
   git: IGit
   proc: IProcess
   home: string
+}
+
+export interface SyncRouteDeps extends RouteDeps {
   sync: SyncSessionManager
 }
 
-export function registerRoutes(): Hono {
-  const { fs, git, proc } = createNodePlatform()
-  const home = process.env.HOME || process.env.USERPROFILE || ''
+type RegisterRouteDeps = RouteDeps & { sync?: SyncSessionManager }
+
+export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
   const syncLogger = logger.child('sync-session')
-  const sync = new SyncSessionManager({
-    home,
-    logger: {
-      error: (message, context) => syncLogger.error(message, context),
-      warn: (message, context) => syncLogger.warn(message, context),
-      info: (message, context) => syncLogger.info(message, context),
-    },
-  })
-  const recovery = sync.recover().catch((err) => syncLogger.error('sync recovery failed', { err }))
+  const baseDeps: RegisterRouteDeps =
+    routeDeps ??
+    (() => {
+      const { fs, git, proc } = createNodePlatform()
+      const home = process.env.HOME || process.env.USERPROFILE || ''
+      return { fs, git, proc, home }
+    })()
+  const sync =
+    baseDeps.sync ??
+    new SyncSessionManager({
+      home: baseDeps.home,
+      logger: {
+        error: (message, context) => syncLogger.error(message, context),
+        warn: (message, context) => syncLogger.warn(message, context),
+        info: (message, context) => syncLogger.info(message, context),
+      },
+    })
+  const recovery = sync
+    .recover()
+    .catch((err: unknown) => syncLogger.error('sync recovery failed', { err }))
   sync.startMaintenance()
-  const deps: RouteDeps = { fs, git, proc, home, sync }
+  const deps: SyncRouteDeps = { ...baseDeps, sync }
 
   const app = new Hono()
   app.use('*', async (_c, next) => {
@@ -51,5 +66,6 @@ export function registerRoutes(): Hono {
   app.route('/', createSkillsYamlRoutes(deps))
   app.route('/', createMcpYamlRoutes(deps))
   app.route('/', createMemoryRoutes(deps))
+  app.route('/', createVarsRoutes(deps))
   return app
 }

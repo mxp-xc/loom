@@ -15,5 +15,6 @@ export default defineConfig({
     setupFiles: ['./packages/web/test/setup.ts'],
     environmentOptions: { jsdom: { url: 'http://localhost/' } },
     exclude: ['**/node_modules/**', '**/.claude/worktrees/**', '**/.worktrees/**'],
+    setupFiles: ['./packages/web/test/setup.ts'],
   },
 })

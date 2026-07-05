@@ -16,7 +16,10 @@ describe('loadRepoManifest', () => {
     const m = loadRepoManifest(files)
     expect(m.skills.sources[0].url).toBe('github:obra/superpowers')
     expect(m.mcp[0].id).toBe('playwright')
-    expect(m.varsFiles.default.browsers_path).toBe('~/.cache/ms-playwright')
+    expect(m.varsFiles.default).toEqual({
+      format: 'legacy',
+      entries: { browsers_path: { type: 'string', value: '~/.cache/ms-playwright' } },
+    })
     expect(m.repoConfig.targets).toEqual(['claude-code', 'codex'])
   })
 })
@@ -106,7 +109,17 @@ describe('buildManifest (RepoManifest -> Manifest)', () => {
     const repo: RepoManifest = {
       skills: { sources: [], skills: [] },
       mcp: [],
-      varsFiles: { default: { a: 'd' }, local: { a: 'l', b: 'x' } },
+      varsFiles: {
+        default: { format: 'legacy', entries: { a: { type: 'string', value: 'd' } } },
+        local: {
+          format: 'typed',
+          entries: {
+            a: { type: 'number', value: 2 },
+            b: { type: 'boolean', value: true },
+            c: { type: 'json', value: { nested: 'x' } },
+          },
+        },
+      },
       repoConfig: { profile: 'local', targets: ['claude-code'] },
       memoriesFiles: {},
     }
@@ -114,13 +127,15 @@ describe('buildManifest (RepoManifest -> Manifest)', () => {
     expect(m.config.targets).toEqual(['codex'])
     expect(m.config.profile).toBe('local')
     expect(m.vars.default).toEqual({ a: 'd' })
-    expect(m.vars.active).toEqual({ a: 'l', b: 'x' })
+    expect(m.vars.active).toEqual({ a: '2', b: 'true', c: '{"nested":"x"}' })
   })
   it('profile default falls back to default vars', () => {
     const repo: RepoManifest = {
       skills: { sources: [], skills: [] },
       mcp: [],
-      varsFiles: { default: { a: 'd' } },
+      varsFiles: {
+        default: { format: 'legacy', entries: { a: { type: 'string', value: 'd' } } },
+      },
       repoConfig: {},
       memoriesFiles: {},
     }

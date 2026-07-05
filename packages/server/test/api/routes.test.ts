@@ -29,7 +29,13 @@ vi.mock('@loom/core', () => ({
 }))
 vi.mock('../../src/platform/node/index.js', () => ({
   createNodePlatform: vi.fn(() => ({
-    fs: {},
+    fs: {
+      readFile: vi.fn(async () => {
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+      }),
+      exists: vi.fn(async () => false),
+      readDir: vi.fn(async () => []),
+    },
     git: { status: vi.fn(async () => ({ dirty: false })), add: vi.fn(), commit: vi.fn() },
     proc: {},
   })),

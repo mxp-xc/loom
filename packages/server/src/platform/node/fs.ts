@@ -1,7 +1,6 @@
 import {
   symlink,
   rm,
-  unlink,
   readFile,
   writeFile as fsWriteFile,
   mkdir as fsMkdir,
@@ -10,12 +9,15 @@ import {
   lstat,
   copyFile,
   rename,
+  realpath,
 } from 'node:fs/promises'
 import { join, isAbsolute, dirname } from 'node:path'
 import type { IFileSystem } from '../../ports/fs.js'
 
 export interface FsOptions {
   forceLinkError?: string | null
+  rename?: (from: string, to: string) => Promise<void>
+  platform?: NodeJS.Platform
 }
 
 export class NodeFileSystem implements IFileSystem {
@@ -116,9 +118,57 @@ export class NodeFileSystem implements IFileSystem {
     await rm(path, { recursive: true, force: true })
   }
 
-  async removeFile(path: string): Promise<void> {
-    await unlink(path).catch(() => {})
+  async replaceFile(tempPath: string, targetPath: string): Promise<void> {
+    await fsMkdir(dirname(targetPath), { recursive: true })
+    if ((this.opts.platform ?? process.platform) !== 'win32') {
+      await (this.opts.rename ?? rename)(tempPath, targetPath)
+      return
+    }
+    const backupPath = `${targetPath}.replace-backup-${process.pid}-${crypto.randomUUID()}`
+    let backedUp = false
+    try {
+      try {
+        await (this.opts.rename ?? rename)(targetPath, backupPath)
+        backedUp = true
+      } catch (error) {
+        if (!isMissing(error)) throw error
+      }
+      await (this.opts.rename ?? rename)(tempPath, targetPath)
+      if (backedUp) await rm(backupPath, { force: true })
+    } catch (error) {
+      if (backedUp) {
+        try {
+          await rm(targetPath, { force: true })
+          await (this.opts.rename ?? rename)(backupPath, targetPath)
+        } catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], 'file replacement and rollback failed', {
+            cause: error,
+          })
+        }
+      }
+      throw error
+    }
   }
+
+  async removeFile(path: string): Promise<void> {
+    try {
+      const entry = await lstat(path)
+      if (entry.isDirectory() && !entry.isSymbolicLink()) {
+        throw new Error(`refuse to remove directory as file: ${path}`)
+      }
+      await rm(path, { recursive: false, force: true })
+    } catch (error) {
+      if (!isMissing(error)) throw error
+    }
+  }
+
+  async realPath(path: string): Promise<string> {
+    return realpath(path)
+  }
+}
+
+function isMissing(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
 }
 
 function resolveAbs(p: string): string {

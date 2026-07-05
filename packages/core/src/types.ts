@@ -1,3 +1,5 @@
+import type { VarsEnvironment } from './vars-types.js'
+
 export type AgentId = 'claude-code' | 'codex' | 'opencode'
 export type McpType = 'stdio' | 'sse' | 'http'
 
@@ -91,7 +93,7 @@ export interface Manifest {
 export interface RepoManifest {
   skills: SkillsManifest
   mcp: McpServer[]
-  varsFiles: Record<string, VarsFile>
+  varsFiles: Record<string, VarsEnvironment>
   repoConfig: Config
   memoriesFiles: Record<string, string>
 }

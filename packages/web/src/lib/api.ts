@@ -1,15 +1,67 @@
+import type {
+  DeleteImpact,
+  VarEntryInput,
+  RevealedVarEntry,
+  VarsDiagnostic,
+  VarsEnvironment,
+  VarsMutationResponse,
+  VarsResolution,
+} from './vars'
+
 const base = '/api'
 
-function json<T>(res: Response): Promise<T> {
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly diagnostics?: VarsDiagnostic[],
+    options?: { cause?: unknown; details?: Record<string, unknown> },
+  ) {
+    super(message, options)
+    this.name = 'ApiError'
+    this.details = options?.details
+  }
+  readonly details?: Record<string, unknown>
+}
+
+async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    return res.text().then(
-      (t) => {
-        throw new Error(`${res.status} ${res.statusText}${t ? `: ${t}` : ''}`)
-      },
-      () => {
-        throw new Error(`${res.status} ${res.statusText}`)
-      },
-    )
+    let text = ''
+    try {
+      text = await res.text()
+      const payload = JSON.parse(text) as {
+        error?:
+          | ({ code?: string; message?: string; diagnostics?: VarsDiagnostic[] } & Record<
+              string,
+              unknown
+            >)
+          | string
+        message?: string
+        diagnostics?: VarsDiagnostic[]
+      }
+      const nested = typeof payload.error === 'object' ? payload.error : undefined
+      const message =
+        nested?.message ??
+        payload.message ??
+        (typeof payload.error === 'string' ? payload.error : undefined)
+      throw new ApiError(
+        message ?? `${res.status} ${res.statusText}`,
+        res.status,
+        nested?.code,
+        nested?.diagnostics ?? payload.diagnostics,
+        { details: nested },
+      )
+    } catch (cause) {
+      if (cause instanceof ApiError) throw cause
+      throw new ApiError(
+        `${res.status} ${res.statusText}${text ? `: ${text}` : ''}`,
+        res.status,
+        undefined,
+        undefined,
+        { cause },
+      )
+    }
   }
   return res.json() as Promise<T>
 }
@@ -22,7 +74,84 @@ function post(path: string, body: unknown) {
   })
 }
 
+function put(path: string, body: unknown) {
+  return fetch(`${base}${path}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+function del(path: string, body: unknown) {
+  return fetch(`${base}${path}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
 export const api = {
+  vars: {
+    listEnvironments: (repoPath: string) =>
+      fetch(`${base}/vars/environments?repoPath=${encodeURIComponent(repoPath)}`).then(
+        json,
+      ) as Promise<{
+        ok: true
+        environments: string[]
+        diagnostics?: VarsDiagnostic[]
+      }>,
+    getEnvironment: (repoPath: string, environment: string) =>
+      fetch(
+        `${base}/vars/environments/${encodeURIComponent(environment)}?repoPath=${encodeURIComponent(repoPath)}`,
+      ).then(json) as Promise<{ ok: true; name: string; environment: VarsEnvironment }>,
+    createEnvironment: (repoPath: string, environment: string) =>
+      post('/vars/environments', { repoPath, environment }).then(json) as Promise<{
+        ok: true
+        environment: string
+      }>,
+    deleteEnvironment: (repoPath: string, environment: string) =>
+      del('/vars/environments', { repoPath, environment }).then(json) as Promise<{ ok: true }>,
+    setVariable: (repoPath: string, environment: string, key: string, entry: VarEntryInput) =>
+      put('/vars/variables', { repoPath, environment, key, entry }).then(
+        json,
+      ) as Promise<VarsMutationResponse>,
+    renameVariable: (repoPath: string, environment: string, oldKey: string, newKey: string) =>
+      post('/vars/variables/rename', { repoPath, environment, oldKey, newKey }).then(
+        json,
+      ) as Promise<VarsMutationResponse>,
+    inspectVariableDelete: (repoPath: string, environment: string, key: string) =>
+      post('/vars/variables/delete-impact', { repoPath, environment, key }).then(json) as Promise<{
+        ok: true
+        impact: DeleteImpact
+      }>,
+    deleteVariable: (
+      repoPath: string,
+      environment: string,
+      key: string,
+      options: { confirmed?: boolean; impactToken?: string } = {},
+    ) =>
+      del('/vars/variables', { repoPath, environment, key, ...options }).then(
+        json,
+      ) as Promise<VarsMutationResponse>,
+    resolve: (repoPath: string, chain: string[]) =>
+      post('/vars/resolve', { repoPath, chain }).then(json) as Promise<VarsResolution>,
+    validateDraft: (
+      repoPath: string,
+      chain: string[],
+      environment: string,
+      key: string,
+      entry: VarEntryInput,
+    ) =>
+      post('/vars/validate', { repoPath, chain, environment, key, entry }).then(json) as Promise<{
+        ok: true
+        resolution: VarsResolution
+      }>,
+    revealVariable: (repoPath: string, environment: string, key: string) =>
+      post('/vars/variables/reveal', { repoPath, environment, key }).then(json) as Promise<{
+        ok: true
+        entry: RevealedVarEntry
+      }>,
+  },
   init: () =>
     post('/init', {}).then(json) as Promise<{ ok: boolean; active_repo: string; repoPath: string }>,
   status: () =>

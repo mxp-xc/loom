@@ -25,7 +25,7 @@ vi.mock('../src/lib/api', () => ({
 }))
 
 describe('App', () => {
-  it('renders navigation with four items', async () => {
+  it('renders navigation with five items', async () => {
     render(
       <ThemeProvider defaultTheme="light">
         <MemoryRouter>
@@ -35,6 +35,7 @@ describe('App', () => {
     )
     expect(await screen.findByText('Skills', { exact: true })).toBeDefined()
     expect(screen.getByText('MCP servers', { exact: true })).toBeDefined()
+    expect(screen.getByText('Variables', { exact: true })).toBeDefined()
     expect(screen.getByText('Sync', { exact: true })).toBeDefined()
     expect(screen.getByText('Settings', { exact: true })).toBeDefined()
   })

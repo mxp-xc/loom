@@ -35,9 +35,12 @@ export function createApp(): Hono {
   return app
 }
 
-export function startApiServer(port = Number(process.env.LOOM_PORT ?? 3000)) {
+export function startApiServer(
+  port = Number(process.env.LOOM_PORT ?? 3000),
+  serveOverride?: typeof import('@hono/node-server').serve,
+) {
   return import('@hono/node-server').then(({ serve }) =>
-    serve({ fetch: createApp().fetch, port, hostname: '127.0.0.1' }, (info) =>
+    (serveOverride ?? serve)({ fetch: createApp().fetch, port, hostname: '127.0.0.1' }, (info) =>
       logger.info('server started', { port: info.port }),
     ),
   )

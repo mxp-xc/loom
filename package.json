@@ -12,8 +12,8 @@
     "test:watch": "vitest",
     "build": "bun run --workspaces build",
     "build:web": "bun --filter @loom/web build",
-    "format": "prettier --write 'packages/**/*.{ts,tsx,css,json}' '*.{json,md}' --ignore-path .gitignore",
-    "format:check": "prettier --check 'packages/**/*.{ts,tsx,css,json}' '*.{json,md}' --ignore-path .gitignore",
+    "format": "prettier --write 'packages/**/*.{ts,tsx,css,json,html}' 'docs/index.md' 'docs/ui/{index,vars}.md' 'docs/superpowers/plans/2026-07-05-vars-management.md' 'docs/superpowers/specs/2026-07-05-vars-management-design.md' '*.{json,md}' --ignore-path .gitignore",
+    "format:check": "prettier --check 'packages/**/*.{ts,tsx,css,json,html}' 'docs/index.md' 'docs/ui/{index,vars}.md' 'docs/superpowers/plans/2026-07-05-vars-management.md' 'docs/superpowers/specs/2026-07-05-vars-management-design.md' '*.{json,md}' --ignore-path .gitignore",
     "prepare": "husky"
   },
   "workspaces": [

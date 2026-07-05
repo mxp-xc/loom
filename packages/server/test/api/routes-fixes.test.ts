@@ -8,7 +8,7 @@ const memFiles: Record<string, string> = {}
 const memFs = {
   readFile: vi.fn(async (p: string) => {
     const n = p.replace(/\\/g, '/')
-    if (!(n in memFiles)) throw new Error('not found')
+    if (!(n in memFiles)) throw Object.assign(new Error('not found'), { code: 'ENOENT' })
     return memFiles[n]
   }),
   writeFile: vi.fn(async (p: string, c: string) => {

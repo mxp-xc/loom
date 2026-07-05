@@ -3,11 +3,11 @@ import { syncPush } from '../../sync/push.js'
 import { SyncSessionError } from '../../sync/session-manager.js'
 import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
-import type { RouteDeps } from '../router.js'
+import type { SyncRouteDeps } from '../router.js'
 
 const syncLogger = logger.child('sync')
 
-export function createSyncRoutes(deps: RouteDeps): Hono {
+export function createSyncRoutes(deps: SyncRouteDeps): Hono {
   const app = new Hono()
 
   app.post('/sync/pull', async (c) => {

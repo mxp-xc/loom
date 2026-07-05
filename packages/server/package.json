@@ -9,6 +9,7 @@
     }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
     "dev": "bun src/index.ts",
     "start": "bun src/index.ts",
     "test": "vitest run"

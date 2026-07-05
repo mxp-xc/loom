@@ -206,6 +206,61 @@ body {
 .main {
   padding: 20px 26px;
   overflow: auto;
+  min-width: 0;
+}
+
+@media (max-width: 700px) {
+  .statusline {
+    gap: 8px;
+    padding-inline: 12px;
+    overflow: hidden;
+  }
+  .statusline .v {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .shell {
+    display: block;
+    height: auto;
+    min-height: calc(100% - 32px);
+  }
+  .sidebar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 6px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-section {
+    display: none;
+  }
+  .nav-item {
+    min-height: 44px;
+    flex: 1 1 auto;
+    justify-content: center;
+    padding: 8px 10px;
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+  }
+  .nav-item.active {
+    border-bottom-color: var(--signal);
+    background: var(--accent);
+  }
+  .sidebar > div:last-child {
+    width: 100%;
+    margin-top: 0 !important;
+    padding: 6px !important;
+    border-top: 0 !important;
+  }
+  .main {
+    width: 100%;
+    min-width: 0;
+    padding: 12px;
+    overflow: visible;
+  }
 }
 .head {
   display: flex;
