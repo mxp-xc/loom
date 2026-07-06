@@ -7,6 +7,8 @@ import Skills from '../src/views/skills/Skills'
 import SkillSourceList from '../src/views/skills/SkillSourceList'
 import AddSkillModal from '../src/views/skills/AddSkillModal'
 import Sync from '../src/views/Sync'
+import Mcp from '../src/views/Mcp'
+import Memory from '../src/views/Memory'
 
 if (!Range.prototype.getClientRects) {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList
@@ -28,52 +30,247 @@ vi.mock('../src/lib/api', () => ({
     setSyncRemote: vi.fn(async () => ({ ok: true })),
     getConfig: vi.fn(async () => ({ effective: {}, repo: {}, local: {} })),
     scanLocalSkills: vi.fn(async () => ({ ok: true, skills: [] })),
+    scanSource: vi.fn(async () => ({ ok: true, members: [] })),
+    getSourceRefs: vi.fn(async () => ({ ok: true, branches: [], tags: [] })),
+    setSourceMembers: vi.fn(async () => ({ ok: true })),
+    updateSourceMeta: vi.fn(async () => ({ ok: true })),
+    updateSkillTargets: vi.fn(async () => ({ ok: true })),
     updateLocalSkillTargets: vi.fn(async () => ({ ok: true })),
+    deleteSource: vi.fn(async () => ({ ok: true })),
+    deleteLocalSkill: vi.fn(async () => ({ ok: true })),
+    addMcpServer: vi.fn(async () => ({ ok: true })),
+    updateMcpServer: vi.fn(async () => ({ ok: true })),
+    updateMcpTargets: vi.fn(async () => ({ ok: true })),
+    deleteMcpServer: vi.fn(async () => ({ ok: true })),
+    getMemory: vi.fn(async () => ({ memories: [], active: null, activeContent: '' })),
+    setMemoryActive: vi.fn(async () => ({ ok: true })),
+    createMemory: vi.fn(async () => ({ ok: true })),
+    renameMemory: vi.fn(async () => ({ ok: true })),
+    deleteMemory: vi.fn(async () => ({ ok: true })),
+    saveMemoryContent: vi.fn(async () => ({ ok: true })),
     getManifest: vi.fn(async (repoPath: string) =>
-      repoPath === '/tmp/skills-layout'
+      repoPath === '/tmp/mcp-layout'
         ? {
-            skills: {
-              sources: [
-                {
-                  url: 'https://github.com/obra/superpowers.git',
-                  ref: 'main',
-                  type: 'branch',
-                  members: [
-                    {
-                      name: 'systematic-debugging',
-                      targets: ['claude-code', 'codex', 'opencode'],
-                    },
-                  ],
-                },
-              ],
-              skills: [
-                {
-                  id: 'test-qa-skill',
-                  path: './assets/skills/test-qa-skill',
-                  available: false,
-                  targets: ['claude-code', 'codex', 'opencode'],
-                },
-                {
-                  id: 'frontend-design',
-                  targets: [],
-                },
-              ],
-            },
-            mcp: [],
+            skills: { sources: [], skills: [] },
+            mcp: [
+              {
+                id: 'test-mcp',
+                type: 'stdio',
+                command: 'echo',
+                args: ['hello'],
+                env: { FOO: 'bar' },
+                targets: ['codex'],
+              },
+              {
+                id: 'remote-mcp',
+                type: 'http',
+                url: 'https://example.test/mcp',
+                headers: { Authorization: 'Bearer token' },
+                targets: [],
+              },
+            ],
             vars: { default: {}, active: {} },
-            config: { targets: ['claude-code', 'codex'] },
+            config: { targets: ['claude-code', 'codex', 'opencode'] },
             errors: [],
           }
-        : {
-            skills: { sources: [], skills: [] },
-            mcp: [],
-            vars: { default: {}, active: {} },
-            config: { targets: ['claude-code', 'codex'] },
-            errors: [],
-          },
+        : repoPath === '/tmp/skills-layout'
+          ? {
+              skills: {
+                sources: [
+                  {
+                    url: 'https://github.com/obra/superpowers.git',
+                    ref: 'main',
+                    type: 'branch',
+                    members: [
+                      {
+                        name: 'systematic-debugging',
+                        targets: ['claude-code', 'codex', 'opencode'],
+                      },
+                    ],
+                  },
+                ],
+                skills: [
+                  {
+                    id: 'test-qa-skill',
+                    path: './assets/skills/test-qa-skill',
+                    available: false,
+                    targets: ['claude-code', 'codex', 'opencode'],
+                  },
+                  {
+                    id: 'frontend-design',
+                    targets: [],
+                  },
+                ],
+              },
+              mcp: [],
+              vars: { default: {}, active: {} },
+              config: { targets: ['claude-code', 'codex'] },
+              errors: [],
+            }
+          : {
+              skills: { sources: [], skills: [] },
+              mcp: [],
+              vars: { default: {}, active: {} },
+              config: { targets: ['claude-code', 'codex'] },
+              errors: [],
+            },
     ),
   },
 }))
+
+describe('MCP view', () => {
+  it('edits a server in a modal using the create-style form', async () => {
+    render(<Mcp repoPath="/tmp/mcp-layout" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 MCP Server test-mcp' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑 MCP Server' })
+
+    const idInput = within(dialog).getByLabelText('id') as HTMLInputElement
+    expect(idInput.value).toBe('test-mcp')
+    expect(idInput.disabled).toBe(true)
+
+    fireEvent.change(within(dialog).getByLabelText('command'), { target: { value: 'node' } })
+    expect(within(dialog).queryByText('targets')).toBeNull()
+    expect(within(dialog).queryByLabelText('env（JSON）')).toBeNull()
+
+    fireEvent.change(within(dialog).getByLabelText('env file'), {
+      target: { value: 'FOO=baz' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存修改' }))
+
+    await waitFor(() =>
+      expect(api.updateMcpServer).toHaveBeenCalledWith({
+        repo: '/tmp/mcp-layout',
+        id: 'test-mcp',
+        server: expect.objectContaining({
+          id: 'test-mcp',
+          type: 'stdio',
+          command: 'node',
+          args: ['hello'],
+          env: { FOO: 'baz' },
+          targets: ['codex'],
+        }),
+      }),
+    )
+  })
+
+  it('supports MCP env key value rows with add and delete controls', async () => {
+    render(<Mcp repoPath="/tmp/mcp-layout" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 MCP Server test-mcp' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑 MCP Server' })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '切换 env 为 key value 编辑' }))
+    fireEvent.change(within(dialog).getByLabelText('env key 1'), { target: { value: 'FOO' } })
+    fireEvent.change(within(dialog).getByLabelText('env value 1'), { target: { value: 'baz' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '新增 env 行' }))
+    fireEvent.change(within(dialog).getByLabelText('env key 2'), { target: { value: 'TOKEN' } })
+    fireEvent.change(within(dialog).getByLabelText('env value 2'), { target: { value: 'abc 123' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除 env 行 1' }))
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存修改' }))
+
+    await waitFor(() =>
+      expect(api.updateMcpServer).toHaveBeenCalledWith({
+        repo: '/tmp/mcp-layout',
+        id: 'test-mcp',
+        server: expect.objectContaining({
+          env: { TOKEN: 'abc 123' },
+          targets: ['codex'],
+        }),
+      }),
+    )
+  })
+
+  it('omits targets from the Add MCP Server modal', async () => {
+    render(<Mcp repoPath="/tmp/mcp-layout" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add server' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add MCP Server' })
+
+    expect(within(dialog).queryByText('targets')).toBeNull()
+    expect(within(dialog).queryByLabelText('env（JSON）')).toBeNull()
+    expect(within(dialog).getByLabelText('env file')).toBeDefined()
+  })
+  it('bulk toggles MCP server targets with mixed state feedback', async () => {
+    render(<Mcp repoPath="/tmp/mcp-layout" />)
+
+    const codexBulk = await screen.findByRole('button', {
+      name: 'CX：部分 MCP servers 已选择',
+    })
+    expect(codexBulk.getAttribute('data-tooltip')).toBe('CX：部分已选择')
+
+    fireEvent.click(codexBulk)
+
+    await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(2))
+    expect(api.updateMcpTargets).toHaveBeenCalledWith({
+      repo: '/tmp/mcp-layout',
+      id: 'test-mcp',
+      targets: ['codex'],
+    })
+    expect(api.updateMcpTargets).toHaveBeenCalledWith({
+      repo: '/tmp/mcp-layout',
+      id: 'remote-mcp',
+      targets: ['codex'],
+    })
+  })
+
+  it('updates MCP bulk targets one server at a time', async () => {
+    let releaseFirst!: () => void
+    const callsBefore = vi.mocked(api.updateMcpTargets).mock.calls.length
+    vi.mocked(api.updateMcpTargets).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseFirst = () => resolve({ ok: true })
+        }) as never,
+    )
+
+    render(<Mcp repoPath="/tmp/mcp-layout" />)
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'CX：部分 MCP servers 已选择',
+      }),
+    )
+
+    await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(callsBefore + 1))
+    releaseFirst()
+    await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(callsBefore + 2))
+    vi.mocked(api.updateMcpTargets).mockResolvedValue({ ok: true } as never)
+  })
+})
+
+describe('Memory view', () => {
+  it('uses icon action buttons with tooltips for activate rename and delete', async () => {
+    vi.mocked(api.getMemory).mockResolvedValue({
+      memories: [{ name: 'v1' }],
+      active: 'v1',
+      activeContent: '# v1',
+    } as never)
+
+    render(<Memory repoPath="/tmp/memory-actions" />)
+
+    const names = await screen.findAllByText('v1')
+    const row = names.find((item) => item.closest('.mem-item'))?.closest('.mem-item') as HTMLElement
+    expect(row).not.toBeNull()
+
+    const deactivate = within(row).getByRole('button', { name: '取消激活 memory v1' })
+    const rename = within(row).getByRole('button', { name: '重命名 memory v1' })
+    const remove = within(row).getByRole('button', { name: '删除 memory v1' })
+
+    expect(deactivate.getAttribute('data-tooltip')).toBe('取消激活')
+    expect(rename.getAttribute('data-tooltip')).toBe('重命名')
+    expect(remove.getAttribute('data-tooltip')).toBe('删除')
+
+    fireEvent.click(deactivate)
+    await waitFor(() =>
+      expect(api.setMemoryActive).toHaveBeenCalledWith({
+        repo: '/tmp/memory-actions',
+        name: null,
+      }),
+    )
+  })
+})
 
 describe('Skills view', () => {
   it('renders heading and project button', async () => {
@@ -133,6 +330,35 @@ describe('Skills view', () => {
     expect(screen.getByRole('button', { name: '全部展开' })).toBeDefined()
     expect(screen.queryByText('test-qa-skill')).toBeNull()
   })
+
+  it('updates skill bulk targets one item at a time', async () => {
+    let releaseFirst!: () => void
+    const sourceCallsBefore = vi.mocked(api.updateSkillTargets).mock.calls.length
+    const localCallsBefore = vi.mocked(api.updateLocalSkillTargets).mock.calls.length
+    vi.mocked(api.updateSkillTargets).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseFirst = () => resolve({ ok: true })
+        }) as never,
+    )
+
+    render(
+      <MemoryRouter>
+        <Skills repoPath="/tmp/skills-layout" />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'CX：部分已选择' }))
+
+    await waitFor(() => expect(api.updateSkillTargets).toHaveBeenCalledTimes(sourceCallsBefore + 1))
+    expect(api.updateLocalSkillTargets).toHaveBeenCalledTimes(localCallsBefore)
+
+    releaseFirst()
+    await waitFor(() =>
+      expect(api.updateLocalSkillTargets).toHaveBeenCalledTimes(localCallsBefore + 2),
+    )
+    vi.mocked(api.updateSkillTargets).mockResolvedValue({ ok: true } as never)
+  })
 })
 
 describe('Add Skill modal', () => {
@@ -189,7 +415,7 @@ describe('Skill source updates', () => {
     expect(onToggleGroup).toHaveBeenCalledTimes(2)
 
     fireEvent.click(screen.getByRole('link'))
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑 source superpowers' }))
     expect(onToggleGroup).toHaveBeenCalledTimes(2)
     expect(onOpenEdit).toHaveBeenCalledTimes(1)
   })
@@ -239,12 +465,92 @@ describe('Skill source updates', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Check' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Update' }))
+    fireEvent.click(screen.getByRole('button', { name: '检查更新 source superpowers' }))
+    fireEvent.click(await screen.findByRole('button', { name: '更新 source superpowers' }))
 
     await waitFor(() =>
       expect(api.performUpdate).toHaveBeenCalledWith(expect.objectContaining({ newRef: 'v6.1.1' })),
     )
+  })
+
+  it('requires confirmation before deleting a source', async () => {
+    const reload = vi.fn()
+    render(
+      <SkillSourceList
+        repoPath="/tmp/delete-source"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  url: 'https://github.com/obra/superpowers.git',
+                  ref: 'main',
+                  members: [],
+                },
+              ],
+              skills: [],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: [] },
+            errors: [],
+          } as never
+        }
+        reload={reload}
+        showToast={vi.fn()}
+        setError={vi.fn()}
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set()}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '删除 source superpowers' }))
+    expect(api.deleteSource).not.toHaveBeenCalled()
+
+    const dialog = screen.getByRole('dialog', { name: '删除 source' })
+    expect(within(dialog).getByText(/superpowers/)).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除' }))
+    await waitFor(() =>
+      expect(api.deleteSource).toHaveBeenCalledWith({
+        repo: '/tmp/delete-source',
+        url: 'https://github.com/obra/superpowers.git',
+      }),
+    )
+    expect(reload).toHaveBeenCalled()
+  })
+  it('lets Edit Source select all and clear all scanned members', async () => {
+    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
+      ok: true,
+      branches: ['main'],
+      tags: [],
+    } as never)
+    vi.mocked(api.scanSource).mockResolvedValueOnce({
+      ok: true,
+      members: [
+        { name: 'brainstorming', path: 'brainstorming/SKILL.md' },
+        { name: 'systematic-debugging', path: 'systematic-debugging/SKILL.md' },
+      ],
+    } as never)
+
+    render(
+      <MemoryRouter>
+        <Skills repoPath="/tmp/skills-layout" />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 source superpowers' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Source · superpowers' })
+    await within(dialog).findByText('brainstorming')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '全选' }))
+    expect(within(dialog).getByText('已选 2 / 2')).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '全不选' }))
+    expect(within(dialog).getByText('已选 0 / 2')).toBeDefined()
   })
 })
 
@@ -255,8 +561,8 @@ describe('Sync view', () => {
         <Sync repoPath="/tmp/r" />
       </MemoryRouter>,
     )
-    expect(screen.getByText('拉取', { exact: true })).toBeDefined()
-    expect(screen.getByText('上传', { exact: true })).toBeDefined()
+    expect(screen.getByRole('button', { name: '拉取' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '上传' })).toBeDefined()
     await waitFor(() => expect(api.getSyncRemote).toHaveBeenCalledWith('/tmp/r'))
   })
 

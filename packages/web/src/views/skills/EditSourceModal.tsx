@@ -259,6 +259,40 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
         </div>
       )}
 
+      {members.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            marginBottom: 8,
+            fontFamily: mono,
+            fontSize: 11,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              const all = selected.size === members.length
+              setSelected(all ? new Set() : new Set(members.map((m) => m.name)))
+            }}
+            style={{
+              background: 'none',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius)',
+              padding: '2px 8px',
+              color: 'var(--muted)',
+              cursor: 'pointer',
+            }}
+          >
+            {selected.size === members.length ? '全不选' : '全选'}
+          </button>
+          <span style={{ color: 'var(--muted)' }}>
+            已选 {selected.size} / {members.length}
+          </span>
+        </div>
+      )}
+
       <div style={listBox}>
         {scanning ? (
           <div style={placeholderStyle}>扫描中…</div>

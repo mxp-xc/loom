@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { ArrowDownToLine, Upload } from 'lucide-react'
 import { api, type GitConflictFile, type SyncPullResponse } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { IconButton } from '@/components/ui/IconButton'
 import Toast from '@/components/Toast'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
@@ -199,24 +200,22 @@ export default function Sync({ repoPath }: { repoPath: string }) {
               : '点击拉取并按 Git 规则合并远程变更'}
         </span>
         <span className="acts">
-          <Button
-            size="sm"
-            variant="secondary"
+          <IconButton
+            label="拉取"
+            tooltip={busy === 'pull' ? '拉取中…' : '拉取'}
             onClick={pullRemote}
             disabled={busy !== null || !remote || conflicts.length > 0}
           >
             <ArrowDownToLine className="h-3.5 w-3.5" />
-            {busy === 'pull' ? '拉取中…' : '拉取'}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
+          </IconButton>
+          <IconButton
+            label="上传"
+            tooltip={busy === 'push' ? '上传中…' : '上传'}
             onClick={pushRemote}
             disabled={busy !== null || !remote || conflicts.length > 0}
           >
             <Upload className="h-3.5 w-3.5" />
-            {busy === 'push' ? '上传中…' : '上传'}
-          </Button>
+          </IconButton>
         </span>
       </div>
 

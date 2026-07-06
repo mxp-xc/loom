@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
-import { Button } from '@/components/ui/button'
+import { IconButton } from '@/components/ui/IconButton'
 import { X } from 'lucide-react'
 
 interface ModalProps {
@@ -159,15 +159,14 @@ export default function Modal({
           >
             {title}
           </span>
-          <Button
-            variant="ghost"
-            size="xs"
+          <IconButton
+            label="关闭"
+            tooltip="关闭"
             disabled={busy}
             onClick={() => onCloseRef.current()}
-            aria-label="关闭"
           >
             <X className="h-4 w-4" />
-          </Button>
+          </IconButton>
         </div>
         <div style={{ padding: '18px 20px' }}>{children}</div>
       </div>

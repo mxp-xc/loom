@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { api } from '@/lib/api'
 import { AGENTS, agentShort } from '@/lib/agents'
+import { IconButton } from '@/components/ui/IconButton'
+import { Check, Eraser, X } from 'lucide-react'
 
 export type ConfigLevel = 'effective' | 'repo' | 'local'
 
@@ -312,18 +314,25 @@ export function ConfigField({
                   autoFocus
                 />
                 <span className="cfg-unit">{field.unit}</span>
-                <button className="gbtn" onClick={() => save(editValue || null)} disabled={saving}>
-                  {saving ? '...' : '✓'}
-                </button>
-                <button
-                  className="gbtn"
+                <IconButton
+                  label={`保存 ${field.label}`}
+                  tooltip={saving ? '保存中…' : '保存'}
+                  tone="success"
+                  onClick={() => save(editValue || null)}
+                  disabled={saving}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </IconButton>
+                <IconButton
+                  label={`取消编辑 ${field.label}`}
+                  tooltip="取消"
                   onClick={() => {
                     onDraftChange(field.key, undefined)
                     setErr(null)
                   }}
                 >
-                  ✕
-                </button>
+                  <X className="h-3.5 w-3.5" />
+                </IconButton>
                 {err && <span style={{ fontSize: 11, color: 'var(--error)' }}>{err}</span>}
               </>
             ) : (
@@ -337,9 +346,15 @@ export function ConfigField({
                 </span>
                 <span className="cfg-unit">{field.unit}</span>
                 {canEdit && value != null && (
-                  <button className="gbtn warn" onClick={clearValue} disabled={saving} title="清空">
-                    {saving ? '...' : '✕'}
-                  </button>
+                  <IconButton
+                    label={`清空 ${field.label}`}
+                    tooltip={saving ? '清空中…' : '清空'}
+                    tone="warning"
+                    onClick={clearValue}
+                    disabled={saving}
+                  >
+                    <Eraser className="h-3.5 w-3.5" />
+                  </IconButton>
                 )}
               </>
             ))}
@@ -352,18 +367,25 @@ export function ConfigField({
                   onChange={(e) => onDraftChange(field.key, e.target.value)}
                   autoFocus
                 />
-                <button className="gbtn" onClick={() => save(editValue || null)} disabled={saving}>
-                  {saving ? '...' : '✓'}
-                </button>
-                <button
-                  className="gbtn"
+                <IconButton
+                  label={`保存 ${field.label}`}
+                  tooltip={saving ? '保存中…' : '保存'}
+                  tone="success"
+                  onClick={() => save(editValue || null)}
+                  disabled={saving}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </IconButton>
+                <IconButton
+                  label={`取消编辑 ${field.label}`}
+                  tooltip="取消"
                   onClick={() => {
                     onDraftChange(field.key, undefined)
                     setErr(null)
                   }}
                 >
-                  ✕
-                </button>
+                  <X className="h-3.5 w-3.5" />
+                </IconButton>
                 {err && <span style={{ fontSize: 11, color: 'var(--error)' }}>{err}</span>}
               </>
             ) : (
@@ -380,9 +402,15 @@ export function ConfigField({
                   {value != null ? String(value) : isInherited ? '' : '— 未设置'}
                 </span>
                 {canEdit && value != null && (
-                  <button className="gbtn warn" onClick={clearValue} disabled={saving} title="清空">
-                    {saving ? '...' : '✕'}
-                  </button>
+                  <IconButton
+                    label={`清空 ${field.label}`}
+                    tooltip={saving ? '清空中…' : '清空'}
+                    tone="warning"
+                    onClick={clearValue}
+                    disabled={saving}
+                  >
+                    <Eraser className="h-3.5 w-3.5" />
+                  </IconButton>
                 )}
               </>
             ))}

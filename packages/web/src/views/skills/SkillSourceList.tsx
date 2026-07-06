@@ -2,16 +2,10 @@ import { useState } from 'react'
 import { api } from '@/lib/api'
 import { agentShort, agentColor, type AgentId } from '@/lib/agents'
 import { deriveRepoId, type SkillSource, type Manifest } from '@loom/core'
+import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
-import {
-  AlertTriangle,
-  ChevronDown,
-  MoreHorizontal,
-  RefreshCw,
-  Pencil,
-  Trash2,
-  ScanLine,
-} from 'lucide-react'
+import { IconButton } from '@/components/ui/IconButton'
+import { AlertTriangle, ChevronDown, RefreshCw, Pencil, Trash2, ScanLine } from 'lucide-react'
 import type { SkillDetail } from './types'
 
 interface Props {
@@ -28,16 +22,8 @@ interface Props {
 }
 
 type SourceUpdate = 'repair' | { label: string; newRef?: string }
-
-const menuStyle: React.CSSProperties = {
-  position: 'absolute',
-  zIndex: 10,
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius)',
-  background: 'var(--card)',
-  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-  minWidth: 120,
-}
+type DeleteTarget =
+  { kind: 'source'; url: string; label: string } | { kind: 'local'; id: string; label: string }
 
 const chevronStyle = (isCollapsed: boolean): React.CSSProperties => ({
   color: 'var(--signal)',
@@ -74,7 +60,8 @@ export default function SkillSourceList({
   const [checking, setChecking] = useState<string | null>(null)
   const [updates, setUpdates] = useState<Record<string, SourceUpdate>>({})
   const [updating, setUpdating] = useState<string | null>(null)
-  const [menuOpen, setMenuOpen] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   const agents = manifest.config?.targets ?? []
   const visibleAgents: AgentId[] = agents
@@ -164,25 +151,31 @@ export default function SkillSourceList({
     }
   }
 
-  const handleDeleteSource = async (url: string) => {
-    setMenuOpen(null)
-    try {
-      await api.deleteSource({ repo: repoPath, url })
-      showToast('已删除 source')
-      reload()
-    } catch (e) {
-      setError(e)
-    }
+  const requestDeleteSource = (url: string, label: string) => {
+    setDeleteTarget({ kind: 'source', url, label })
   }
 
-  const handleDeleteLocal = async (id: string) => {
-    setMenuOpen(null)
+  const requestDeleteLocal = (id: string) => {
+    setDeleteTarget({ kind: 'local', id, label: id })
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleteBusy(true)
     try {
-      await api.deleteLocalSkill({ repo: repoPath, id })
-      showToast('已删除 local skill')
+      if (deleteTarget.kind === 'source') {
+        await api.deleteSource({ repo: repoPath, url: deleteTarget.url })
+        showToast('已删除 source')
+      } else {
+        await api.deleteLocalSkill({ repo: repoPath, id: deleteTarget.id })
+        showToast('已删除 local skill')
+      }
+      setDeleteTarget(null)
       reload()
     } catch (e) {
       setError(e)
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
@@ -190,10 +183,6 @@ export default function SkillSourceList({
 
   return (
     <>
-      {menuOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 5 }} onClick={() => setMenuOpen(null)} />
-      )}
-
       <div className="skill-groups">
         {/* Remote sources */}
         {manifest.skills.sources.map((src) => {
@@ -271,86 +260,53 @@ export default function SkillSourceList({
                   </span>
                 )}
                 <span className="gacts" onClick={(e) => e.stopPropagation()}>
-                  <Button
-                    variant="secondary"
+                  <IconButton
+                    label={`检查更新 source ${repoId}`}
+                    tooltip={checking === src.url ? '检查中…' : '检查更新'}
                     size="sm"
-                    className="source-action-button"
                     onClick={() => handleCheck(src)}
                     disabled={checking === src.url}
-                    title="检查更新"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
-                    {checking === src.url ? '...' : 'Check'}
-                  </Button>
+                  </IconButton>
                   {updates[src.url] && (
-                    <Button
-                      variant="secondary"
+                    <IconButton
+                      label={`更新 source ${repoId}`}
+                      tooltip={updating === src.url ? '更新中…' : '更新'}
                       size="sm"
-                      className="source-action-button"
                       onClick={() => handlePerformUpdate(src)}
                       disabled={updating === src.url}
-                      style={{
-                        color: 'var(--warn)',
-                        borderColor: 'color-mix(in srgb, var(--warn) 40%, transparent)',
-                      }}
-                      title="更新到最新版本"
+                      tone="warning"
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
-                      {updating === src.url ? '...' : 'Update'}
-                    </Button>
+                    </IconButton>
                   )}
-                  <Button
-                    variant="secondary"
+                  <IconButton
+                    label={`编辑 source ${repoId}`}
+                    tooltip="编辑"
                     size="sm"
-                    className="source-action-button"
                     onClick={() => onOpenEdit(src)}
-                    title="编辑 source"
                   >
                     <Pencil className="h-3.5 w-3.5" />
-                    Edit
-                  </Button>
-                  <Button
-                    variant="ghost"
+                  </IconButton>
+                  <IconButton
+                    label={`扫描 source ${repoId}`}
+                    tooltip="scan"
                     size="sm"
-                    onClick={() => setMenuOpen(menuOpen === src.url ? null : src.url)}
-                    title="更多操作"
+                    onClick={() => onOpenScan(src)}
                   >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
+                    <ScanLine className="h-3.5 w-3.5" />
+                  </IconButton>
+                  <IconButton
+                    label={`删除 source ${repoId}`}
+                    tooltip="删除"
+                    size="sm"
+                    tone="danger"
+                    onClick={() => requestDeleteSource(src.url, repoId)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </IconButton>
                 </span>
-                {menuOpen === src.url && (
-                  <div
-                    style={{ ...menuStyle, right: 14, top: '100%' }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
-                      onClick={() => {
-                        setMenuOpen(null)
-                        onOpenScan(src)
-                      }}
-                    >
-                      <ScanLine className="h-3 w-3" />
-                      scan
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        justifyContent: 'flex-start',
-                        color: 'var(--error)',
-                      }}
-                      onClick={() => handleDeleteSource(src.url)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                      删除
-                    </Button>
-                  </div>
-                )}
               </div>
               {isExpanded &&
                 src.members?.map((m) => {
@@ -460,33 +416,14 @@ export default function SkillSourceList({
                       )}
                     </span>
                     <span className="skill-actions">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          setMenuOpen(menuOpen === 'local:' + s.id ? null : 'local:' + s.id)
-                        }
+                      <IconButton
+                        label={`删除 local skill ${s.id}`}
+                        tooltip="删除"
+                        tone="danger"
+                        onClick={() => requestDeleteLocal(s.id)}
                       >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                      {menuOpen === 'local:' + s.id && (
-                        <div style={{ ...menuStyle, right: 0, top: '100%', minWidth: 100 }}>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              justifyContent: 'flex-start',
-                              color: 'var(--error)',
-                            }}
-                            onClick={() => handleDeleteLocal(s.id)}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            删除
-                          </Button>
-                        </div>
-                      )}
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </IconButton>
                     </span>
                   </div>
                 )
@@ -509,8 +446,41 @@ export default function SkillSourceList({
         </div>
       </div>
       <div className="hint">
-        source 级操作(更新 ref / scan / 删除)在分组头 ⋯ 菜单;发现安装新 source 走右上 + Add source
+        source 级操作(更新 ref / scan / 删除)在分组头右侧;发现安装新 source 走右上 + Add source
       </div>
+
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => {
+          if (!deleteBusy) setDeleteTarget(null)
+        }}
+        title={deleteTarget?.kind === 'local' ? '删除 local skill' : '删除 source'}
+        width={380}
+        busy={deleteBusy}
+      >
+        <p style={{ color: 'var(--text)', fontSize: 13 }}>
+          确认删除 <strong>{deleteTarget?.label}</strong>？此操作不可撤销。
+        </p>
+        <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={deleteBusy}
+            onClick={() => setDeleteTarget(null)}
+          >
+            取消
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={deleteBusy}
+            style={{ color: 'var(--error)' }}
+            onClick={() => void confirmDelete()}
+          >
+            {deleteBusy ? '删除中…' : '删除'}
+          </Button>
+        </div>
+      </Modal>
     </>
   )
 }

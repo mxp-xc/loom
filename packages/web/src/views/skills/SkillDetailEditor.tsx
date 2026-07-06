@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
 import MarkdownPreview from '@/components/MarkdownPreview'
-import { Button } from '@/components/ui/button'
 import { Copy, Check } from 'lucide-react'
+import { IconButton } from '@/components/ui/IconButton'
 import { AGENTS, agentShort, agentColor, agentSkillPath, type AgentId } from '@/lib/agents'
 import type { SkillDetail } from './types'
 
@@ -150,13 +150,18 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
                     >
                       {p}
                     </span>
-                    <Button variant="ghost" size="xs" onClick={() => copyPath(p)} title="复制">
+                    <IconButton
+                      label={copiedPath === p ? `已复制 ${p}` : `复制 ${p}`}
+                      tooltip={copiedPath === p ? '已复制' : '复制'}
+                      tone={copiedPath === p ? 'success' : 'default'}
+                      onClick={() => copyPath(p)}
+                    >
                       {copiedPath === p ? (
                         <Check className="h-3 w-3" />
                       ) : (
                         <Copy className="h-3 w-3" />
                       )}
-                    </Button>
+                    </IconButton>
                   </div>
                 )
               })}

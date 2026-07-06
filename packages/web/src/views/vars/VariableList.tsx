@@ -1,6 +1,7 @@
 import { AlertTriangle, KeyRound, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Button } from '../../components/ui/button'
+import { IconButton } from '../../components/ui/IconButton'
 import type { VarEntry, VarsDiagnostic } from '../../lib/vars'
 
 interface Props {
@@ -79,27 +80,18 @@ export default function VariableList({
                 {warningText && <span className="vars-variable-note">{warningText}</span>}
               </span>
               <span className="vars-variable-row-actions">
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="secondary"
-                  aria-label={`编辑变量 ${key}`}
-                  onClick={() => onEdit(key)}
-                >
+                <IconButton label={`编辑变量 ${key}`} tooltip="编辑" onClick={() => onEdit(key)}>
                   <Pencil size={13} />
-                  编辑
-                </Button>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost"
+                </IconButton>
+                <IconButton
                   className="vars-variable-delete"
-                  aria-label={`删除变量 ${key}`}
+                  label={`删除变量 ${key}`}
+                  tooltip="删除"
+                  tone="danger"
                   onClick={() => onDelete(key)}
                 >
                   <Trash2 size={13} />
-                  删除
-                </Button>
+                </IconButton>
               </span>
             </div>
           )

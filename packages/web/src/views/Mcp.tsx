@@ -1,17 +1,558 @@
-import { useEffect, useState } from 'react'
-import { api } from '@/lib/api'
+import { useEffect, useState, type CSSProperties } from 'react'
+import { type McpServer, type McpType } from '@loom/core'
+import { Check, Copy, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import Modal from '@/components/Modal'
 import Toast from '@/components/Toast'
-import { agentShort, agentColor, type AgentId } from '@/lib/agents'
-import { inputStyle } from '@/lib/styles'
 import { Button } from '@/components/ui/button'
-import { Plus, RefreshCw, Trash2, Copy, Check, Pencil } from 'lucide-react'
-import { type McpServer, type McpType } from '@loom/core'
+import { IconButton } from '@/components/ui/IconButton'
 import { useManifest } from '@/hooks/useManifest'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
+import { api } from '@/lib/api'
+import { agentColor, agentShort, type AgentId } from '@/lib/agents'
+import { inputStyle } from '@/lib/styles'
 
 const MCP_TYPES: McpType[] = ['stdio', 'sse', 'http']
+
+type McpServerModalMode = 'create' | 'edit'
+
+interface McpServerFormState {
+  id: string
+  type: McpType
+  command: string
+  args: string
+  url: string
+  env: string
+  headers: string
+  targets: AgentId[]
+}
+
+type RecordEditMode = 'file' | 'pairs'
+
+interface RecordRow {
+  id: string
+  key: string
+  value: string
+}
+
+let recordRowId = 0
+
+function newRecordRow(key = '', value = ''): RecordRow {
+  recordRowId += 1
+  return { id: String(recordRowId), key, value }
+}
+
+function emptyMcpForm(): McpServerFormState {
+  return {
+    id: '',
+    type: 'stdio',
+    command: '',
+    args: '',
+    url: '',
+    env: '',
+    headers: '',
+    targets: [],
+  }
+}
+
+function recordToLines(record: Record<string, string> | undefined): string {
+  return Object.entries(record ?? {})
+    .map(([key, value]) => `${key}=${value ?? ''}`)
+    .join('\n')
+}
+
+function rowsFromRecord(record: Record<string, string> | undefined): RecordRow[] {
+  const rows = Object.entries(record ?? {}).map(([key, value]) => newRecordRow(key, value ?? ''))
+  return rows.length > 0 ? rows : [newRecordRow()]
+}
+
+function rowsFromLines(value: string): RecordRow[] {
+  const rows = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+    .map((line) => {
+      const normalized = line.startsWith('export ') ? line.slice(7).trimStart() : line
+      const equalsAt = normalized.indexOf('=')
+      if (equalsAt === -1) return newRecordRow(normalized, '')
+      return newRecordRow(
+        normalized.slice(0, equalsAt).trim(),
+        unquoteRecordValue(normalized.slice(equalsAt + 1).trim()),
+      )
+    })
+  return rows.length > 0 ? rows : [newRecordRow()]
+}
+
+function rowsToLines(rows: RecordRow[]): string {
+  return rows
+    .filter((row) => row.key.trim() || row.value.trim())
+    .map((row) => `${row.key.trim()}=${row.value}`)
+    .join('\n')
+}
+
+function serverToForm(server: McpServer | undefined): McpServerFormState {
+  if (!server) return emptyMcpForm()
+  return {
+    id: server.id,
+    type: server.type,
+    command: server.command ?? '',
+    args: server.args?.join(' ') ?? '',
+    url: server.url ?? '',
+    env: recordToLines(server.env),
+    headers: recordToLines(server.headers),
+    targets: (server.targets ?? []) as AgentId[],
+  }
+}
+
+function unquoteRecordValue(value: string): string {
+  if (value.length >= 2) {
+    const quote = value[0]
+    if ((quote === '"' || quote === "'") && value[value.length - 1] === quote) {
+      return value.slice(1, -1)
+    }
+  }
+  return value
+}
+
+function parseRecordLines(value: string, label: string): Record<string, string> | undefined {
+  const record: Record<string, string> = {}
+  value.split(/\r?\n/).forEach((rawLine, index) => {
+    const trimmed = rawLine.trim()
+    if (!trimmed || trimmed.startsWith('#')) return
+
+    const line = trimmed.startsWith('export ') ? trimmed.slice(7).trimStart() : trimmed
+    const equalsAt = line.indexOf('=')
+    if (equalsAt === -1) {
+      throw new Error(`${label} 第 ${index + 1} 行需要 KEY=value`)
+    }
+
+    const key = line.slice(0, equalsAt).trim()
+    if (!key) {
+      throw new Error(`${label} 第 ${index + 1} 行缺少 key`)
+    }
+    record[key] = unquoteRecordValue(line.slice(equalsAt + 1).trim())
+  })
+
+  return Object.keys(record).length > 0 ? record : undefined
+}
+
+function buildServerFromForm(form: McpServerFormState, idOverride?: string): McpServer {
+  const id = (idOverride ?? form.id).trim()
+  if (!id) throw new Error('id 不能为空')
+  if (form.type === 'stdio' && !form.command.trim()) throw new Error('command 不能为空')
+  if (form.type !== 'stdio' && !form.url.trim()) throw new Error('url 不能为空')
+
+  const env = parseRecordLines(form.env, 'env')
+  const targets = form.targets.length > 0 ? form.targets : undefined
+
+  if (form.type === 'stdio') {
+    return {
+      id,
+      type: form.type,
+      command: form.command.trim(),
+      args: form.args.trim() ? form.args.trim().split(/\s+/) : undefined,
+      env,
+      targets,
+    }
+  }
+
+  return {
+    id,
+    type: form.type,
+    url: form.url.trim(),
+    env,
+    headers: parseRecordLines(form.headers, 'headers'),
+    targets,
+  }
+}
+
+function fieldStyle(marginBottom = 14): CSSProperties {
+  return { marginBottom }
+}
+
+function RecordField({
+  name,
+  mode,
+  value,
+  rows,
+  setMode,
+  onTextChange,
+  onRowsChange,
+  marginBottom = 14,
+}: {
+  name: 'env' | 'headers'
+  mode: RecordEditMode
+  value: string
+  rows: RecordRow[]
+  setMode: (mode: RecordEditMode) => void
+  onTextChange: (value: string) => void
+  onRowsChange: (rows: RecordRow[]) => void
+  marginBottom?: number
+}) {
+  const syncRows = (nextRows: RecordRow[]) => {
+    onRowsChange(nextRows)
+    onTextChange(rowsToLines(nextRows))
+  }
+
+  const switchMode = () => {
+    if (mode === 'file') {
+      onRowsChange(rowsFromLines(value))
+      setMode('pairs')
+    } else {
+      onTextChange(rowsToLines(rows))
+      setMode('file')
+    }
+  }
+
+  const modeLabel =
+    mode === 'file' ? `切换 ${name} 为 key value 编辑` : `切换 ${name} 为 env file 编辑`
+
+  return (
+    <div className="mcp-field" style={fieldStyle(marginBottom)}>
+      <div className="mcp-record-head">
+        <span className="label">{name}</span>
+        <Button
+          type="button"
+          variant="secondary"
+          size="xs"
+          aria-label={modeLabel}
+          onClick={switchMode}
+        >
+          {mode === 'file' ? 'key/value' : 'env file'}
+        </Button>
+      </div>
+
+      {mode === 'file' ? (
+        <textarea
+          aria-label={`${name} file`}
+          className="mcp-json"
+          value={value}
+          onChange={(event) => onTextChange(event.target.value)}
+          placeholder={name === 'env' ? 'KEY=value' : 'Header-Name=value'}
+        />
+      ) : (
+        <div className="mcp-kv-list">
+          {rows.map((row, index) => (
+            <div className="mcp-kv-row" key={row.id}>
+              <input
+                aria-label={`${name} key ${index + 1}`}
+                value={row.key}
+                onChange={(event) => {
+                  const next = rows.map((item) =>
+                    item.id === row.id ? { ...item, key: event.target.value } : item,
+                  )
+                  syncRows(next)
+                }}
+                placeholder="KEY"
+                style={inputStyle}
+              />
+              <input
+                aria-label={`${name} value ${index + 1}`}
+                value={row.value}
+                onChange={(event) => {
+                  const next = rows.map((item) =>
+                    item.id === row.id ? { ...item, value: event.target.value } : item,
+                  )
+                  syncRows(next)
+                }}
+                placeholder="value"
+                style={inputStyle}
+              />
+              <IconButton
+                label={`删除 ${name} 行 ${index + 1}`}
+                tooltip="删除行"
+                tone="danger"
+                onClick={() => {
+                  const next =
+                    rows.length <= 1 ? [newRecordRow()] : rows.filter((item) => item.id !== row.id)
+                  syncRows(next)
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </IconButton>
+            </div>
+          ))}
+          <IconButton
+            label={`新增 ${name} 行`}
+            tooltip="新增行"
+            onClick={() => syncRows([...rows, newRecordRow()])}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </IconButton>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function McpServerModal({
+  open,
+  mode,
+  initialServer,
+  busy,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean
+  mode: McpServerModalMode
+  initialServer?: McpServer
+  busy: boolean
+  error: string | null
+  onClose: () => void
+  onSubmit: (form: McpServerFormState) => void
+}) {
+  const [form, setForm] = useState<McpServerFormState>(() => serverToForm(initialServer))
+  const [envMode, setEnvMode] = useState<RecordEditMode>('file')
+  const [headersMode, setHeadersMode] = useState<RecordEditMode>('file')
+  const [envRows, setEnvRows] = useState<RecordRow[]>(() => rowsFromRecord(initialServer?.env))
+  const [headersRows, setHeadersRows] = useState<RecordRow[]>(() =>
+    rowsFromRecord(initialServer?.headers),
+  )
+
+  useEffect(() => {
+    if (!open) return
+    setForm(mode === 'edit' ? serverToForm(initialServer) : emptyMcpForm())
+    setEnvMode('file')
+    setHeadersMode('file')
+    setEnvRows(rowsFromRecord(mode === 'edit' ? initialServer?.env : undefined))
+    setHeadersRows(rowsFromRecord(mode === 'edit' ? initialServer?.headers : undefined))
+  }, [initialServer?.id, mode, open])
+
+  const setField = <K extends keyof McpServerFormState>(key: K, value: McpServerFormState[K]) => {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const title = mode === 'edit' ? '编辑 MCP Server' : 'Add MCP Server'
+  const submitText =
+    mode === 'edit' ? (busy ? '保存中…' : '保存修改') : busy ? '添加中…' : '添加 MCP Server'
+
+  return (
+    <Modal open={open} onClose={onClose} title={title} busy={busy}>
+      {error && (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: 8,
+            borderRadius: 'var(--radius)',
+            fontSize: 12,
+            fontFamily: "'JetBrains Mono', monospace",
+            color: 'var(--error)',
+            border: '1px solid var(--error)',
+            background: 'var(--card)',
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <label className="mcp-field" style={fieldStyle()}>
+        <span className="label">id</span>
+        <input
+          data-autofocus
+          value={form.id}
+          onChange={(event) => setField('id', event.target.value)}
+          placeholder="my-mcp-server"
+          disabled={mode === 'edit'}
+          style={inputStyle}
+        />
+      </label>
+
+      <div className="mcp-field" style={fieldStyle()}>
+        <span className="label">type</span>
+        <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+          {MCP_TYPES.map((type) => (
+            <Button
+              key={type}
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setField('type', type)}
+              style={{
+                flex: 1,
+                border: '1px solid var(--border)',
+                background: form.type === type ? 'var(--bg)' : 'transparent',
+                color: form.type === type ? 'var(--bright)' : 'var(--muted)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              {type}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {form.type === 'stdio' ? (
+        <>
+          <label className="mcp-field" style={fieldStyle()}>
+            <span className="label">command</span>
+            <input
+              value={form.command}
+              onChange={(event) => setField('command', event.target.value)}
+              placeholder="npx"
+              style={inputStyle}
+            />
+          </label>
+          <label className="mcp-field" style={fieldStyle(18)}>
+            <span className="label">args（空格分隔）</span>
+            <input
+              value={form.args}
+              onChange={(event) => setField('args', event.target.value)}
+              placeholder="-y @modelcontextprotocol/server-filesystem /path"
+              style={inputStyle}
+            />
+          </label>
+        </>
+      ) : (
+        <label className="mcp-field" style={fieldStyle(18)}>
+          <span className="label">url</span>
+          <input
+            value={form.url}
+            onChange={(event) => setField('url', event.target.value)}
+            placeholder="http://localhost:3001/sse"
+            style={inputStyle}
+          />
+        </label>
+      )}
+
+      <RecordField
+        name="env"
+        mode={envMode}
+        value={form.env}
+        rows={envRows}
+        setMode={setEnvMode}
+        onTextChange={(value) => setField('env', value)}
+        onRowsChange={setEnvRows}
+      />
+
+      {form.type !== 'stdio' && (
+        <RecordField
+          name="headers"
+          mode={headersMode}
+          value={form.headers}
+          rows={headersRows}
+          setMode={setHeadersMode}
+          onTextChange={(value) => setField('headers', value)}
+          onRowsChange={setHeadersRows}
+        />
+      )}
+
+      <Button
+        type="button"
+        variant="primary"
+        style={{ width: '100%' }}
+        onClick={() => onSubmit(form)}
+        disabled={busy}
+      >
+        {submitText}
+      </Button>
+    </Modal>
+  )
+}
+
+function McpTargetsBar({
+  repoPath,
+  servers,
+  agents,
+  reload,
+  setError,
+}: {
+  repoPath: string
+  servers: McpServer[]
+  agents: AgentId[]
+  reload: () => void
+  setError: (e: unknown) => void
+}) {
+  const [updatingAgent, setUpdatingAgent] = useState<AgentId | null>(null)
+
+  if (servers.length === 0 || agents.length === 0) return null
+
+  const setAll = async (agent: AgentId) => {
+    if (updatingAgent) return
+    const allOn = servers.every((server) => (server.targets ?? []).includes(agent))
+    try {
+      setUpdatingAgent(agent)
+      for (const server of servers) {
+        const targets = server.targets ?? []
+        const next = allOn
+          ? targets.filter((item) => item !== agent)
+          : targets.includes(agent)
+            ? targets
+            : [...targets, agent]
+        await api.updateMcpTargets({ repo: repoPath, id: server.id, targets: next })
+      }
+      reload()
+    } catch (e) {
+      setError(e)
+    } finally {
+      setUpdatingAgent(null)
+    }
+  }
+
+  return (
+    <div
+      className="global-targets-bar"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr) auto',
+        alignItems: 'center',
+        gap: 12,
+        marginTop: 14,
+        marginBottom: 6,
+        padding: '8px 14px',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-card)',
+        background: 'var(--card)',
+      }}
+    >
+      <span
+        style={{
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: 11,
+          color: 'var(--muted)',
+        }}
+      >
+        批量设置 · 应用于全部 MCP servers
+      </span>
+      <span className="cfg-chips" style={{ display: 'flex', gap: 7 }}>
+        {agents.map((agent) => {
+          const count = servers.filter((server) => (server.targets ?? []).includes(agent)).length
+          const state = count === 0 ? 'off' : count === servers.length ? 'on' : 'mixed'
+          const stateText =
+            state === 'on'
+              ? '全部 MCP servers 已选择'
+              : state === 'mixed'
+                ? '部分 MCP servers 已选择'
+                : '未选择 MCP servers'
+          const tooltip =
+            state === 'on' ? '全部已选择' : state === 'mixed' ? '部分已选择' : '未选择'
+          return (
+            <button
+              key={agent}
+              type="button"
+              className={`achip ${state}`}
+              style={{ '--c': agentColor[agent] } as CSSProperties}
+              aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
+              aria-label={`${agentShort[agent]}：${stateText}`}
+              data-tooltip={`${agentShort[agent]}：${tooltip}`}
+              disabled={updatingAgent !== null}
+              onClick={() => setAll(agent)}
+            >
+              {agentShort[agent]}
+              {state === 'mixed' && (
+                <span className="achip-count">
+                  {count}/{servers.length}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </span>
+    </div>
+  )
+}
 
 export default function Mcp({ repoPath }: { repoPath: string }) {
   const { error, setError } = useViewError()
@@ -22,29 +563,42 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   const { toast, showToast, dismiss } = useToast()
   const [selected, setSelected] = useState<string | null>(null)
   const [projecting, setProjecting] = useState(false)
-  const [addOpen, setAddOpen] = useState(false)
-  const [addBusy, setAddBusy] = useState(false)
-  const [addErr, setAddErr] = useState<string | null>(null)
-  const [srvId, setSrvId] = useState('')
-  const [srvType, setSrvType] = useState<McpType>('stdio')
-  const [srvCommand, setSrvCommand] = useState('')
-  const [srvArgs, setSrvArgs] = useState('')
-  const [srvUrl, setSrvUrl] = useState('')
-  const [srvTargets, setSrvTargets] = useState<string[]>([])
+  const [modalMode, setModalMode] = useState<McpServerModalMode | null>(null)
+  const [modalBusy, setModalBusy] = useState(false)
+  const [modalError, setModalError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [editing, setEditing] = useState(false)
-  const [editType, setEditType] = useState<McpType>('stdio')
-  const [editCommand, setEditCommand] = useState('')
-  const [editArgs, setEditArgs] = useState('')
-  const [editUrl, setEditUrl] = useState('')
-  const [editEnv, setEditEnv] = useState('{}')
-  const [editHeaders, setEditHeaders] = useState('{}')
-  const [editBusy, setEditBusy] = useState(false)
-  const [editErr, setEditErr] = useState<string | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
+
+  const servers = manifest?.mcp ?? []
+  const visibleAgents = (manifest?.config?.targets ?? []) as AgentId[]
+  const selectedServer = servers.find((server) => server.id === selected)
+
   useEffect(() => {
-    if (!selected && manifest?.mcp?.length) setSelected(manifest.mcp[0].id)
-  }, [manifest, selected])
+    if (servers.length === 0) {
+      setSelected(null)
+      return
+    }
+    if (!selected || !servers.some((server) => server.id === selected)) {
+      setSelected(servers[0].id)
+    }
+  }, [selected, servers])
+
+  const openCreate = () => {
+    setModalError(null)
+    setModalMode('create')
+  }
+
+  const openEdit = () => {
+    if (!selectedServer) return
+    setModalError(null)
+    setModalMode('edit')
+  }
+
+  const closeModal = () => {
+    if (modalBusy) return
+    setModalMode(null)
+    setModalError(null)
+  }
 
   const project = async () => {
     setProjecting(true)
@@ -59,112 +613,27 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     }
   }
 
-  const resetAddForm = () => {
-    setAddErr(null)
-    setSrvId('')
-    setSrvType('stdio')
-    setSrvCommand('')
-    setSrvArgs('')
-    setSrvUrl('')
-    setSrvTargets([])
-  }
-  const openAdd = () => {
-    resetAddForm()
-    setAddOpen(true)
-  }
-  const closeAdd = () => setAddOpen(false)
-
-  const handleAddServer = async () => {
-    if (!srvId.trim()) {
-      setAddErr('id 不能为空')
-      return
-    }
-    if (srvType === 'stdio' && !srvCommand.trim()) {
-      setAddErr('command 不能为空')
-      return
-    }
-    if (srvType !== 'stdio' && !srvUrl.trim()) {
-      setAddErr('url 不能为空')
-      return
-    }
-    setAddBusy(true)
-    setAddErr(null)
+  const handleSubmitServer = async (form: McpServerFormState) => {
+    setModalBusy(true)
+    setModalError(null)
     try {
-      const server: any = { id: srvId.trim(), type: srvType }
-      if (srvType === 'stdio') {
-        server.command = srvCommand.trim()
-        const argsStr = srvArgs.trim()
-        server.args = argsStr ? argsStr.split(/\s+/) : undefined
+      const server = buildServerFromForm(
+        form,
+        modalMode === 'edit' ? selectedServer?.id : undefined,
+      )
+      if (modalMode === 'edit') {
+        if (!selectedServer) return
+        await api.updateMcpServer({ repo: repoPath, id: selectedServer.id, server })
+        showToast('MCP Server 已保存')
       } else {
-        server.url = srvUrl.trim()
+        await api.addMcpServer({ repo: repoPath, server })
       }
-      if (srvTargets.length > 0) server.targets = srvTargets
-      await api.addMcpServer({ repo: repoPath, server })
-      closeAdd()
+      setModalMode(null)
       reload()
     } catch (e) {
-      setAddErr(e instanceof Error ? e.message : String(e))
+      setModalError(e instanceof Error ? e.message : String(e))
     } finally {
-      setAddBusy(false)
-    }
-  }
-
-  const toggleTarget = (a: AgentId) => {
-    setSrvTargets((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]))
-  }
-
-  const agents = manifest?.config?.targets ?? []
-  const visibleAgents: AgentId[] = agents
-
-  const selectedServer = manifest?.mcp?.find((s) => s.id === selected)
-
-  useEffect(() => {
-    if (!selectedServer) return
-    setEditing(false)
-    setEditType(selectedServer.type)
-    setEditCommand(selectedServer.command ?? '')
-    setEditArgs(selectedServer.args?.join(' ') ?? '')
-    setEditUrl(selectedServer.url ?? '')
-    setEditEnv(JSON.stringify(selectedServer.env ?? {}, null, 2))
-    setEditHeaders(JSON.stringify(selectedServer.headers ?? {}, null, 2))
-    setEditErr(null)
-  }, [selectedServer?.id])
-
-  const handleSaveEdit = async () => {
-    if (!selectedServer) return
-    if (editType === 'stdio' && !editCommand.trim()) return setEditErr('command 不能为空')
-    if (editType !== 'stdio' && !editUrl.trim()) return setEditErr('url 不能为空')
-    setEditBusy(true)
-    setEditErr(null)
-    try {
-      const env = JSON.parse(editEnv || '{}')
-      const headers = JSON.parse(editHeaders || '{}')
-      const server: McpServer =
-        editType === 'stdio'
-          ? {
-              id: selectedServer.id,
-              type: editType,
-              command: editCommand.trim(),
-              args: editArgs.trim() ? editArgs.trim().split(/\s+/) : undefined,
-              env,
-              targets: selectedServer.targets,
-            }
-          : {
-              id: selectedServer.id,
-              type: editType,
-              url: editUrl.trim(),
-              headers,
-              env,
-              targets: selectedServer.targets,
-            }
-      await api.updateMcpServer({ repo: repoPath, id: selectedServer.id, server })
-      setEditing(false)
-      showToast('MCP Server 已保存')
-      reload()
-    } catch (e) {
-      setEditErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setEditBusy(false)
+      setModalBusy(false)
     }
   }
 
@@ -175,7 +644,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     if (!server) return
     const currentTargets = server.targets ?? []
     const newTargets = currentTargets.includes(agent)
-      ? currentTargets.filter((a) => a !== agent)
+      ? currentTargets.filter((item) => item !== agent)
       : [...currentTargets, agent]
     try {
       await api.updateMcpTargets({ repo: repoPath, id: server.id, targets: newTargets })
@@ -203,17 +672,21 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
       <div className="head">
         <div>
           <div className="page-title">MCP Servers</div>
-          <div className="page-sub">{manifest?.mcp?.length ?? 0} servers</div>
+          <div className="page-sub">{servers.length} servers</div>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <Button variant="primary" size="sm" onClick={openAdd}>
+          <Button variant="primary" size="sm" onClick={openCreate}>
             <Plus className="h-3.5 w-3.5" />
             Add server
           </Button>
-          <Button variant="secondary" size="sm" onClick={project} disabled={projecting}>
+          <IconButton
+            label="投影 MCP"
+            tooltip={projecting ? '投影中…' : '投影'}
+            onClick={project}
+            disabled={projecting}
+          >
             <RefreshCw className="h-3.5 w-3.5" />
-            {projecting ? '投影中…' : '投影'}
-          </Button>
+          </IconButton>
         </div>
       </div>
 
@@ -234,7 +707,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         </div>
       )}
 
-      {manifest?.mcp?.length === 0 && manifest && (
+      {servers.length === 0 && manifest && (
         <div
           style={{
             marginTop: 18,
@@ -252,6 +725,14 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         </div>
       )}
 
+      <McpTargetsBar
+        repoPath={repoPath}
+        servers={servers}
+        agents={visibleAgents}
+        reload={reload}
+        setError={setError}
+      />
+
       <div
         style={{
           marginTop: 18,
@@ -265,43 +746,49 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           background: 'var(--card)',
         }}
       >
-        {/* List */}
         <div className="mlist" style={{ borderRight: '1px solid var(--border)' }}>
-          {manifest?.mcp?.map((srv) => {
-            const srvAgents = srv.targets ?? []
-            const isRemote = srv.type === 'sse' || srv.type === 'http'
+          {servers.map((server) => {
+            const serverAgents = server.targets ?? []
+            const isRemote = server.type === 'sse' || server.type === 'http'
             return (
               <div
-                key={srv.id}
-                className={'mcp' + (selected === srv.id ? ' sel' : '')}
-                onClick={() => setSelected(srv.id)}
+                key={server.id}
+                className={'mcp' + (selected === server.id ? ' sel' : '')}
+                onClick={() => setSelected(server.id)}
               >
                 <div className="mcp-top">
-                  <span className="mid">{srv.id}</span>
-                  <span className={'mtype' + (isRemote ? ' remote' : '')}>{srv.type}</span>
+                  <span className="mid">{server.id}</span>
+                  <span className={'mtype' + (isRemote ? ' remote' : '')}>{server.type}</span>
                   <span className="mcnt">
-                    {srvAgents.filter((agent) => visibleAgents.includes(agent)).length}/
+                    {serverAgents.filter((agent) => visibleAgents.includes(agent)).length}/
                     {visibleAgents.length}
                   </span>
                 </div>
                 <div className="mcp-bottom">
                   <span className="mcmd">
-                    {srv.type === 'stdio' ? `${srv.command} ${srv.args?.join(' ') ?? ''}` : srv.url}
+                    {server.type === 'stdio'
+                      ? `${server.command} ${server.args?.join(' ') ?? ''}`
+                      : server.url}
                   </span>
-                  {visibleAgents.map((a) => (
+                  {visibleAgents.map((agent) => (
                     <button
                       type="button"
-                      key={a}
-                      className={'tg ' + (srvAgents.includes(a) ? 'on' : 'off')}
-                      style={{ ['--c' as string]: agentColor[a], cursor: 'pointer' }}
-                      aria-pressed={srvAgents.includes(a)}
-                      aria-label={`${srv.id}：${agentShort[a]}`}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleToggleTarget(a, srv)
+                      key={agent}
+                      className={'tg ' + (serverAgents.includes(agent) ? 'on' : 'off')}
+                      style={
+                        {
+                          '--c': agentColor[agent],
+                          cursor: 'pointer',
+                        } as CSSProperties
+                      }
+                      aria-pressed={serverAgents.includes(agent)}
+                      aria-label={`${server.id}：${agentShort[agent]}`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        handleToggleTarget(agent, server)
                       }}
                     >
-                      {agentShort[a]}
+                      {agentShort[agent]}
                     </button>
                   ))}
                 </div>
@@ -310,147 +797,65 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           })}
         </div>
 
-        {/* Detail */}
         <div style={{ padding: '18px 24px', overflow: 'auto' }}>
           {selectedServer ? (
             <>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span className="page-title" style={{ fontSize: 16 }}>
                   {selectedServer.id}
                 </span>
                 <span className={'mtype' + (selectedServer.type !== 'stdio' ? ' remote' : '')}>
                   {selectedServer.type}
                 </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleCopy}
-                  title="拷贝配置 JSON"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '4px 10px',
-                  }}
-                >
-                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  <span style={{ fontSize: 11 }}>{copied ? '已拷贝' : '拷贝'}</span>
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => setEditing((value) => !value)}>
-                  <Pencil className="h-3.5 w-3.5" />
-                  {editing ? '取消编辑' : '编辑'}
-                </Button>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                  <IconButton
+                    label={
+                      copied
+                        ? `已拷贝 MCP Server ${selectedServer.id}`
+                        : `拷贝 MCP Server ${selectedServer.id}`
+                    }
+                    tooltip={copied ? '已拷贝' : '拷贝配置 JSON'}
+                    onClick={handleCopy}
+                    tone={copied ? 'success' : 'default'}
+                  >
+                    {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  </IconButton>
+                  <IconButton
+                    label={`编辑 MCP Server ${selectedServer.id}`}
+                    tooltip="编辑"
+                    onClick={openEdit}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </IconButton>
+                  <IconButton
+                    label={`删除 MCP Server ${selectedServer.id}`}
+                    tooltip="删除"
+                    tone="danger"
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </IconButton>
+                </div>
               </div>
-              {editing && (
-                <div className="mcp-editor">
-                  {editErr && <div className="mem-err">{editErr}</div>}
-                  <label className="mcp-field">
-                    <span className="label">id（不可修改）</span>
-                    <input style={inputStyle} value={selectedServer.id} disabled />
-                  </label>
-                  <div className="mcp-field">
-                    <span className="label">type</span>
-                    <div className="cfg-seg">
-                      {MCP_TYPES.map((type) => (
-                        <button
-                          key={type}
-                          type="button"
-                          className={'cfg-seg-opt' + (editType === type ? ' on' : '')}
-                          onClick={() => setEditType(type)}
-                        >
-                          {type}
-                        </button>
-                      ))}
+
+              {selectedServer.type === 'stdio' ? (
+                <>
+                  <div style={{ marginTop: 16 }}>
+                    <span className="label">command</span>
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: 13,
+                        color: 'var(--text)',
+                      }}
+                    >
+                      {selectedServer.command}
                     </div>
                   </div>
-                  {editType === 'stdio' ? (
-                    <>
-                      <label className="mcp-field">
-                        <span className="label">command</span>
-                        <input
-                          style={inputStyle}
-                          value={editCommand}
-                          onChange={(e) => setEditCommand(e.target.value)}
-                        />
-                      </label>
-                      <label className="mcp-field">
-                        <span className="label">args（空格分隔）</span>
-                        <input
-                          style={inputStyle}
-                          value={editArgs}
-                          onChange={(e) => setEditArgs(e.target.value)}
-                        />
-                      </label>
-                    </>
-                  ) : (
-                    <label className="mcp-field">
-                      <span className="label">url</span>
-                      <input
-                        style={inputStyle}
-                        value={editUrl}
-                        onChange={(e) => setEditUrl(e.target.value)}
-                      />
-                    </label>
-                  )}
-                  <label className="mcp-field">
-                    <span className="label">env（JSON）</span>
-                    <textarea
-                      className="mcp-json"
-                      value={editEnv}
-                      onChange={(e) => setEditEnv(e.target.value)}
-                    />
-                  </label>
-                  {editType !== 'stdio' && (
-                    <label className="mcp-field">
-                      <span className="label">headers（JSON）</span>
-                      <textarea
-                        className="mcp-json"
-                        value={editHeaders}
-                        onChange={(e) => setEditHeaders(e.target.value)}
-                      />
-                    </label>
-                  )}
-                  <Button variant="primary" size="sm" onClick={handleSaveEdit} disabled={editBusy}>
-                    {editBusy ? '保存中…' : '保存修改'}
-                  </Button>
-                </div>
-              )}
-              {!editing && (
-                <>
-                  {selectedServer.type === 'stdio' ? (
-                    <>
-                      <div style={{ marginTop: 16 }}>
-                        <span className="label">command</span>
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontFamily: "'JetBrains Mono', monospace",
-                            fontSize: 13,
-                            color: 'var(--text)',
-                          }}
-                        >
-                          {selectedServer.command}
-                        </div>
-                      </div>
-                      {selectedServer.args && (
-                        <div style={{ marginTop: 12 }}>
-                          <span className="label">args</span>
-                          <div
-                            style={{
-                              marginTop: 4,
-                              fontFamily: "'JetBrains Mono', monospace",
-                              fontSize: 13,
-                              color: 'var(--text)',
-                            }}
-                          >
-                            {selectedServer.args.join(' ')}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div style={{ marginTop: 16 }}>
-                      <span className="label">url</span>
+                  {selectedServer.args && (
+                    <div style={{ marginTop: 12 }}>
+                      <span className="label">args</span>
                       <div
                         style={{
                           marginTop: 4,
@@ -459,63 +864,66 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                           color: 'var(--text)',
                         }}
                       >
-                        {selectedServer.url}
+                        {selectedServer.args.join(' ')}
                       </div>
                     </div>
                   )}
-                  {selectedServer.env && Object.keys(selectedServer.env).length > 0 && (
-                    <div style={{ marginTop: 12 }}>
-                      <span className="label">env</span>
-                      <div
-                        style={{
-                          marginTop: 4,
-                          fontFamily: "'JetBrains Mono', monospace",
-                          fontSize: 12,
-                          color: 'var(--muted)',
-                        }}
-                      >
-                        {Object.entries(selectedServer.env).map(([k, v]) => (
-                          <div key={k}>
-                            {k}: {v}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {selectedServer.type !== 'stdio' &&
-                    selectedServer.headers &&
-                    Object.keys(selectedServer.headers).length > 0 && (
-                      <div style={{ marginTop: 12 }}>
-                        <span className="label">headers</span>
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontFamily: "'JetBrains Mono', monospace",
-                            fontSize: 12,
-                            color: 'var(--muted)',
-                          }}
-                        >
-                          {Object.entries(selectedServer.headers).map(([k, v]) => (
-                            <div key={k}>
-                              {k}: {v}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                 </>
+              ) : (
+                <div style={{ marginTop: 16 }}>
+                  <span className="label">url</span>
+                  <div
+                    style={{
+                      marginTop: 4,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 13,
+                      color: 'var(--text)',
+                    }}
+                  >
+                    {selectedServer.url}
+                  </div>
+                </div>
               )}
-              <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  style={{ color: 'var(--error)' }}
-                  onClick={() => setDeleteOpen(true)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  删除
-                </Button>
-              </div>
+              {selectedServer.env && Object.keys(selectedServer.env).length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <span className="label">env</span>
+                  <div
+                    style={{
+                      marginTop: 4,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 12,
+                      color: 'var(--muted)',
+                    }}
+                  >
+                    {Object.entries(selectedServer.env).map(([key, value]) => (
+                      <div key={key}>
+                        {key}: {value}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {selectedServer.type !== 'stdio' &&
+                selectedServer.headers &&
+                Object.keys(selectedServer.headers).length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <span className="label">headers</span>
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: 12,
+                        color: 'var(--muted)',
+                      }}
+                    >
+                      {Object.entries(selectedServer.headers).map(([key, value]) => (
+                        <div key={key}>
+                          {key}: {value}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
             </>
           ) : (
             <div style={{ color: 'var(--muted)', textAlign: 'center', paddingTop: 60 }}>
@@ -525,134 +933,16 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         </div>
       </div>
 
-      {/* Add Server Modal */}
-      <Modal open={addOpen} onClose={closeAdd} title="Add MCP Server">
-        {addErr && (
-          <div
-            style={{
-              marginBottom: 12,
-              padding: 8,
-              borderRadius: 'var(--radius)',
-              fontSize: 12,
-              fontFamily: "'JetBrains Mono', monospace",
-              color: 'var(--error)',
-              border: '1px solid var(--error)',
-              background: 'var(--card)',
-            }}
-          >
-            {addErr}
-          </div>
-        )}
+      <McpServerModal
+        open={modalMode !== null}
+        mode={modalMode ?? 'create'}
+        initialServer={modalMode === 'edit' ? selectedServer : undefined}
+        busy={modalBusy}
+        error={modalError}
+        onClose={closeModal}
+        onSubmit={handleSubmitServer}
+      />
 
-        <div style={{ marginBottom: 14 }}>
-          <span className="label">
-            id <span style={{ color: 'var(--error)' }}>*</span>
-          </span>
-          <input
-            value={srvId}
-            onChange={(e) => setSrvId(e.target.value)}
-            placeholder="my-mcp-server"
-            style={inputStyle}
-          />
-        </div>
-
-        <div style={{ marginBottom: 14 }}>
-          <span className="label">type</span>
-          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-            {MCP_TYPES.map((t) => (
-              <Button
-                key={t}
-                variant="ghost"
-                size="sm"
-                onClick={() => setSrvType(t)}
-                style={{
-                  flex: 1,
-                  border: '1px solid var(--border)',
-                  background: srvType === t ? 'var(--bg)' : 'transparent',
-                  color: srvType === t ? 'var(--bright)' : 'var(--muted)',
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}
-              >
-                {t}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        {srvType === 'stdio' ? (
-          <>
-            <div style={{ marginBottom: 14 }}>
-              <span className="label">
-                command <span style={{ color: 'var(--error)' }}>*</span>
-              </span>
-              <input
-                value={srvCommand}
-                onChange={(e) => setSrvCommand(e.target.value)}
-                placeholder="npx"
-                style={inputStyle}
-              />
-            </div>
-            <div style={{ marginBottom: 18 }}>
-              <span className="label">
-                args <span style={{ color: 'var(--muted)' }}>(空格分隔)</span>
-              </span>
-              <input
-                value={srvArgs}
-                onChange={(e) => setSrvArgs(e.target.value)}
-                placeholder="-y @modelcontextprotocol/server-filesystem /path"
-                style={inputStyle}
-              />
-            </div>
-          </>
-        ) : (
-          <div style={{ marginBottom: 18 }}>
-            <span className="label">
-              url <span style={{ color: 'var(--error)' }}>*</span>
-            </span>
-            <input
-              value={srvUrl}
-              onChange={(e) => setSrvUrl(e.target.value)}
-              placeholder="http://localhost:3001/sse"
-              style={inputStyle}
-            />
-          </div>
-        )}
-
-        <div style={{ marginBottom: 18 }}>
-          <span className="label">
-            targets <span style={{ color: 'var(--muted)' }}>(可选)</span>
-          </span>
-          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-            {visibleAgents.map((a) => (
-              <span
-                key={a}
-                className={'tg ' + (srvTargets.includes(a) ? 'on' : 'off')}
-                style={{
-                  ['--c' as string]: agentColor[a],
-                  width: 40,
-                  height: 40,
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
-                onClick={() => toggleTarget(a)}
-              >
-                {agentShort[a]}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <Button
-          variant="primary"
-          style={{ width: '100%' }}
-          onClick={handleAddServer}
-          disabled={addBusy}
-        >
-          {addBusy ? '添加中…' : '添加 MCP Server'}
-        </Button>
-      </Modal>
       <Modal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}

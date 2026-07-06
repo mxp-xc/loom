@@ -4,8 +4,10 @@ import { agentShort, agentColor, type AgentId } from '@/lib/agents'
 import MemoryEditor from '@/components/MemoryEditor'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
+import { IconButton } from '@/components/ui/IconButton'
 import { useToast } from '@/hooks/useToast'
 import { useManifest } from '@/hooks/useManifest'
+import { Pencil, Plus, RefreshCw, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
 
 interface Props {
   repoPath: string
@@ -157,16 +159,16 @@ export default function Memory({ repoPath }: Props) {
       <aside className="mem-list">
         <div className="mem-list-head">
           <span className="label">memories</span>
-          <Button
-            variant="ghost"
-            size="xs"
+          <IconButton
+            label="新建 memory"
+            tooltip="新建"
             onClick={() => {
               setCreating(true)
               setDraftName('')
             }}
           >
-            + 新建
-          </Button>
+            <Plus className="h-3.5 w-3.5" />
+          </IconButton>
         </div>
         <div className="mem-global-targets">
           <span className="label">投影目标</span>
@@ -209,24 +211,37 @@ export default function Memory({ repoPath }: Props) {
               />
               <span className="mem-name">{m.name}</span>
               <span className="mem-actions" onClick={(e) => e.stopPropagation()}>
-                <button
-                  className="mem-act activate"
+                <IconButton
+                  label={active === m.name ? `取消激活 memory ${m.name}` : `激活 memory ${m.name}`}
+                  tooltip={active === m.name ? '取消激活' : '激活'}
+                  pressed={active === m.name}
+                  tone={active === m.name ? 'success' : 'default'}
                   onClick={() => activate(active === m.name ? null : m.name)}
                 >
-                  {active === m.name ? '取消激活' : '激活'}
-                </button>
-                <button
-                  className="mem-act"
+                  {active === m.name ? (
+                    <ToggleRight className="h-3.5 w-3.5" />
+                  ) : (
+                    <ToggleLeft className="h-3.5 w-3.5" />
+                  )}
+                </IconButton>
+                <IconButton
+                  label={`重命名 memory ${m.name}`}
+                  tooltip="重命名"
                   onClick={() => {
                     setRenaming(m.name)
                     setDraftName(m.name)
                   }}
                 >
-                  重命名
-                </button>
-                <button className="mem-act danger" onClick={() => setDeleting(m.name)}>
-                  删除
-                </button>
+                  <Pencil className="h-3.5 w-3.5" />
+                </IconButton>
+                <IconButton
+                  label={`删除 memory ${m.name}`}
+                  tooltip="删除"
+                  tone="danger"
+                  onClick={() => setDeleting(m.name)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </IconButton>
               </span>
             </div>
           ))}
@@ -238,15 +253,15 @@ export default function Memory({ repoPath }: Props) {
           <>
             <div className="mem-detail-head">
               <span className="mem-detail-name">{selected}</span>
-              <Button
-                variant="secondary"
-                size="sm"
+              <IconButton
+                label="投影 memory"
+                tooltip={projecting ? '投影中…' : '投影'}
                 onClick={project}
                 disabled={projecting}
                 style={{ marginLeft: 'auto' }}
               >
-                {projecting ? '投影中…' : '投影'}
-              </Button>
+                <RefreshCw className="h-3.5 w-3.5" />
+              </IconButton>
             </div>
             <div className="mem-detail-body">
               <MemoryEditor

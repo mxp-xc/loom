@@ -111,6 +111,105 @@ body {
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 35%, transparent);
 }
+.icon-button {
+  position: relative;
+  flex-shrink: 0;
+  gap: 0;
+  aspect-ratio: 1;
+  color: var(--m2);
+}
+.icon-button:hover:not(:disabled) {
+  color: var(--bright);
+}
+.icon-button[data-tone='danger'] {
+  color: var(--error);
+}
+.icon-button[data-tone='warning'] {
+  color: var(--warn);
+}
+.icon-button[data-tone='success'] {
+  color: var(--signal);
+}
+.icon-button[data-tone='danger']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 9%, transparent);
+}
+.icon-button[data-tone='warning']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warn) 11%, transparent);
+}
+.icon-button[data-tone='success']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--signal) 9%, transparent);
+}
+.icon-button::after {
+  display: none;
+}
+.icon-button-floating-tooltip {
+  position: fixed;
+  z-index: 2000;
+  max-width: min(220px, calc(100vw - 16px));
+  padding: 4px 7px;
+  overflow: hidden;
+  color: var(--bright);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  box-shadow: var(--shadow-popover);
+  transform: translate(-50%, -100%);
+  animation: icon-tooltip-in 0.12s var(--ease);
+}
+.cfg-chips .achip[data-tooltip] {
+  position: relative;
+}
+.cfg-chips .achip[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: auto;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  z-index: 1000;
+  max-width: 220px;
+  padding: 4px 7px;
+  overflow: hidden;
+  color: var(--bright);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  box-shadow: var(--shadow-popover);
+  transform: translate(-50%, 3px);
+  transition:
+    opacity 0.12s var(--ease),
+    transform 0.12s var(--ease),
+    visibility 0.12s var(--ease);
+}
+.cfg-chips .achip[data-tooltip]:hover::after,
+.cfg-chips .achip[data-tooltip]:focus-visible::after {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+@keyframes icon-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% + 3px));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%);
+  }
+}
 /* divider rows */
 .divide-y > :not(:last-child) {
   border-bottom: 1px solid var(--border);
@@ -584,10 +683,15 @@ textarea:focus {
   color: var(--muted);
 }
 .local-tag {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
   font-family: 'JetBrains Mono', monospace;
   font-size: 9px;
-  padding: 1px 5px;
+  height: 16px;
+  padding: 0 5px;
   border-radius: var(--radius);
+  line-height: 1;
   background: rgba(56, 189, 248, 0.12);
   color: var(--info);
   border: 1px solid color-mix(in srgb, var(--info) 30%, transparent);
@@ -695,6 +799,12 @@ textarea:focus {
   display: grid;
   gap: 6px;
 }
+.mcp-record-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .mcp-json {
   min-height: 96px;
   padding: 10px 12px;
@@ -706,6 +816,16 @@ textarea:focus {
   font:
     12px/1.6 'JetBrains Mono',
     monospace;
+}
+.mcp-kv-list {
+  display: grid;
+  gap: 6px;
+}
+.mcp-kv-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 6px;
 }
 
 /* big toggle */
@@ -1120,10 +1240,13 @@ textarea:focus {
 .cfg-chips .achip {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
+  min-height: 28px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   font-weight: 600;
+  line-height: 1;
   padding: 4px 10px;
   border-radius: var(--radius);
   cursor: pointer;
@@ -1147,8 +1270,13 @@ textarea:focus {
   background: color-mix(in srgb, var(--c) 10%, transparent);
 }
 .cfg-chips .achip-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 12px;
   font-size: 9px;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
   opacity: 0.8;
 }
 .cfg-chips .achip.off:hover {
@@ -1310,6 +1438,17 @@ textarea:focus {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .icon-button-floating-tooltip {
+    animation: none;
+  }
+  .cfg-chips .achip[data-tooltip]::after {
+    transition: none;
+    transform: translate(-50%, 0);
+  }
+  .cfg-chips .achip[data-tooltip]:hover::after,
+  .cfg-chips .achip[data-tooltip]:focus-visible::after {
+    transform: translate(-50%, 0);
+  }
   .sdot.yellow {
     animation: none;
   }
