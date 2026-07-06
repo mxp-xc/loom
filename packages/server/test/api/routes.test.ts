@@ -12,6 +12,18 @@ const platformGit = vi.hoisted(() => ({
   commit: vi.fn(),
 }))
 
+vi.mock('../../src/lib/logger.js', () => {
+  const logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    flush: async () => {},
+    child: () => logger,
+  }
+  return { logger }
+})
+
 vi.mock('../../src/projection/executor.js', () => ({
   executeProjection: vi.fn(async () => ({ ok: true })),
 }))

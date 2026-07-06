@@ -1,51 +1,27 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { afterAll, describe, expect, it } from 'vitest'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { simpleGit } from 'simple-git'
 import { SyncSessionManager } from '../../src/sync/session-manager'
+import { cleanupGitTestTemplates, createDivergedRepo } from '../helpers/git'
 
 const created: string[] = []
 
-afterEach(async () => {
+afterAll(async () => {
   for (const path of created.splice(0)) await rm(path, { recursive: true, force: true })
+  await cleanupGitTestTemplates()
 })
 
 async function setupRepo(base: string, local: string, remote: string) {
-  const root = await mkdtemp(join(tmpdir(), 'loom-session-'))
-  const home = join(root, 'home')
-  const repo = join(root, 'repo')
-  const bare = join(root, 'remote.git')
-  const peer = join(root, 'peer')
+  const { root, home, repo } = await createDivergedRepo([
+    { path: 'skills.yaml', base, ours: local, theirs: remote },
+  ])
   created.push(root)
-
-  await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
-  await simpleGit().clone(bare, repo)
-  const git = simpleGit(repo)
-  await git.addConfig('user.email', 'test@loom.local')
-  await git.addConfig('user.name', 'Loom Test')
-  await writeFile(join(repo, 'skills.yaml'), base)
-  await git.add('.')
-  await git.commit('base')
-  await git.push('origin', 'HEAD:main')
-
-  await writeFile(join(repo, 'skills.yaml'), local)
-  await git.add('.')
-  await git.commit('local')
-
-  await simpleGit().clone(bare, peer)
-  const remoteGit = simpleGit(peer)
-  await remoteGit.addConfig('user.email', 'test@loom.local')
-  await remoteGit.addConfig('user.name', 'Loom Test')
-  await writeFile(join(peer, 'skills.yaml'), remote)
-  await remoteGit.add('.')
-  await remoteGit.commit('remote')
-  await remoteGit.push('origin', 'HEAD:main')
 
   return { home, repo, root }
 }
 
-describe('SyncSessionManager', () => {
+describe.concurrent('SyncSessionManager', () => {
   it('keeps conflicts isolated and restores the active session after reload', async () => {
     const { home, repo } = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
     const manager = new SyncSessionManager({ home })

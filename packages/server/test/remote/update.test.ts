@@ -2,12 +2,12 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { simpleGit } from 'simple-git'
 import { NodeGit } from '../../src/platform/node/git'
 import { NodeFileSystem } from '../../src/platform/node/fs'
 import { checkUpdates, performUpdate } from '../../src/remote/update'
 import type { SkillSource } from '@loom/core'
 import type { ScannedMember } from '../../src/projection/scan'
+import { testGit } from '../helpers/git'
 
 describe('checkUpdates', () => {
   it('hasUpdate when remote tag commit != pinned_commit', async () => {
@@ -30,12 +30,10 @@ describe('performUpdate', () => {
   let bare: string
   beforeAll(async () => {
     bare = await mkdtemp(join(tmpdir(), 'updbare-'))
-    await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
+    await testGit().raw(['init', '--bare', '-b', 'main', bare])
     const w = await mkdtemp(join(tmpdir(), 'updw-'))
-    const g = simpleGit(w)
+    const g = testGit(w)
     await g.raw(['init', '-b', 'main'])
-    await g.addConfig('user.email', 't@t.t')
-    await g.addConfig('user.name', 't')
     await mkdir(join(w, 'skills', 'brainstorming'), { recursive: true })
     await writeFile(
       join(w, 'skills', 'brainstorming', 'SKILL.md'),

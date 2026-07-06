@@ -119,6 +119,7 @@ describe('Vars diagnostics actions', () => {
   })
 
   it('refreshes changed impact and requires a second confirmation', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     vi.mocked(api.vars.inspectVariableDelete).mockResolvedValue({
       ok: true,
       impact: { direct: [], transitive: [], impactToken: 'v1' },
@@ -136,18 +137,23 @@ describe('Vars diagnostics actions', () => {
         }),
       )
       .mockResolvedValueOnce({ ok: true, changed: ['base'], diagnostics: [] })
-    render(<Vars repoPath="/repo" />)
-    fireEvent.click(await screen.findByRole('button', { name: '删除变量 API_URL' }))
-    fireEvent.click(await screen.findByRole('button', { name: '确认删除' }))
-    expect(await screen.findByText('依赖已变化，请重新确认')).toBeDefined()
-    expect(screen.getByText('base / NEW')).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
-    await waitFor(() =>
-      expect(api.vars.deleteVariable).toHaveBeenLastCalledWith('/repo', 'base', 'API_URL', {
-        confirmed: true,
-        impactToken: 'v2',
-      }),
-    )
+    try {
+      render(<Vars repoPath="/repo" />)
+      fireEvent.click(await screen.findByRole('button', { name: '删除变量 API_URL' }))
+      fireEvent.click(await screen.findByRole('button', { name: '确认删除' }))
+      expect(await screen.findByText('依赖已变化，请重新确认')).toBeDefined()
+      expect(screen.getByText('base / NEW')).toBeDefined()
+      expect(consoleError).toHaveBeenCalledWith('Failed to delete variable', expect.any(ApiError))
+      fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
+      await waitFor(() =>
+        expect(api.vars.deleteVariable).toHaveBeenLastCalledWith('/repo', 'base', 'API_URL', {
+          confirmed: true,
+          impactToken: 'v2',
+        }),
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it('renames through the variable name field and reloads the selected key', async () => {
@@ -192,17 +198,23 @@ describe('Vars diagnostics actions', () => {
   })
 
   it('shows operation failure toast and field diagnostics for rename conflict', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     vi.mocked(api.vars.renameVariable).mockRejectedValue(
       new ApiError('冲突', 409, 'variable_conflict', [
         { code: 'variable_conflict', severity: 'error', key: 'CLIENT', message: '变量已存在' },
       ]),
     )
-    render(<Vars repoPath="/repo" />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑变量 API_URL' }))
-    fireEvent.change(screen.getByLabelText('变量名'), { target: { value: 'CLIENT' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存变量' }))
-    expect(await screen.findByText('重命名失败：冲突')).toBeDefined()
-    expect(screen.getByText('变量已存在')).toBeDefined()
+    try {
+      render(<Vars repoPath="/repo" />)
+      fireEvent.click(await screen.findByRole('button', { name: '编辑变量 API_URL' }))
+      fireEvent.change(screen.getByLabelText('变量名'), { target: { value: 'CLIENT' } })
+      fireEvent.click(screen.getByRole('button', { name: '保存变量' }))
+      expect(await screen.findByText('重命名失败：冲突')).toBeDefined()
+      expect(screen.getByText('变量已存在')).toBeDefined()
+      expect(consoleError).toHaveBeenCalledWith('Failed to save variable', expect.any(ApiError))
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it('reloads diagnostics after delete and clears the warning after repair', async () => {

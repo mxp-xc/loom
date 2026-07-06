@@ -4,15 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { simpleGit } from 'simple-git'
 import { NodeGit } from '../../../src/platform/node/git'
+import { testGit } from '../../helpers/git'
 
 async function makeBareWithCommit(): Promise<string> {
   const bare = await mkdtemp(join(tmpdir(), 'bare-'))
-  await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
+  await testGit().raw(['init', '--bare', '-b', 'main', bare])
   const work = await mkdtemp(join(tmpdir(), 'work-'))
-  const wg = simpleGit(work)
+  const wg = testGit(work)
   await wg.raw(['init', '-b', 'main'])
-  await wg.addConfig('user.email', 't@t.t')
-  await wg.addConfig('user.name', 't')
   await writeFile(join(work, 'a.txt'), 'x')
   await wg.add('.')
   await wg.commit('init')
@@ -65,10 +64,8 @@ describe('NodeGit', () => {
     await git.clone(bare, dest, false)
     const work2 = await mkdtemp(join(tmpdir(), 'w2-'))
     created.push(work2)
-    const w2 = simpleGit(work2)
+    const w2 = testGit(work2)
     await w2.clone(bare, '.')
-    await w2.addConfig('user.email', 't@t.t')
-    await w2.addConfig('user.name', 't')
     await writeFile(join(work2, 'b.txt'), 'y')
     await w2.add('.')
     await w2.commit('c2')
@@ -86,9 +83,7 @@ describe('NodeGit', () => {
     created.push(dest)
     const git = new NodeGit()
     await git.clone(bare, dest, false)
-    const wg = simpleGit(dest)
-    await wg.addConfig('user.email', 't@t.t')
-    await wg.addConfig('user.name', 't')
+    const wg = testGit(dest)
     await writeFile(join(dest, 'c.txt'), 'z')
     await wg.add('.')
     await wg.commit('c3')

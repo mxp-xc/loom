@@ -30,12 +30,13 @@ describe('repo config read errors', () => {
       readFile: vi.fn(async () => `active_repo: [${secret}`),
       exists: vi.fn(async () => true),
     }
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
     const error = await readYaml(fs, '/repo/config.yaml').catch((caught) => caught)
     expect(error).toMatchObject({ code: 'yaml_invalid', cause: expect.any(Error) })
     expect(String(error)).not.toContain(secret)
     expect(error.stack).not.toContain(secret)
 
-    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
     const localError = await readLocalConfig(fs, '/home').catch((caught) => caught)
     expect(localError).toMatchObject({ code: 'yaml_invalid', cause: expect.any(Error) })
     expect(String(localError)).not.toContain(secret)

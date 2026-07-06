@@ -1,80 +1,30 @@
 import { describe, it, expect, afterAll } from 'vitest'
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
+import { readFile, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { simpleGit } from 'simple-git'
 import { NodeGit } from '../../src/platform/node/git'
 import { NodeFileSystem } from '../../src/platform/node/fs'
 import { abortConflictMerge, saveConflict, syncPull } from '../../src/sync/pull'
+import { cleanupGitTestTemplates, createDivergedRepo, type DivergedFile } from '../helpers/git'
 
 const created: string[] = []
+
 afterAll(async () => {
   for (const p of created.splice(0)) await rm(p, { recursive: true, force: true }).catch(() => {})
+  await cleanupGitTestTemplates()
 })
 
 async function setupRepo(contentBase: string, ours: string, theirs: string): Promise<string> {
-  const repo = await mkdtemp(join(tmpdir(), 'syncrepo-'))
-  const g = simpleGit(repo)
-  await g.raw(['init', '-b', 'main'])
-  await g.addConfig('user.email', 't@t.t')
-  await g.addConfig('user.name', 't')
-  await writeFile(join(repo, 'skills.yaml'), contentBase)
-  await g.add('.')
-  await g.commit('base')
-  const bare = await mkdtemp(join(tmpdir(), 'syncbare-'))
-  await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
-  await g.addRemote('origin', bare)
-  await g.push('origin', 'HEAD:main')
-  await writeFile(join(repo, 'skills.yaml'), ours)
-  await g.add('.')
-  await g.commit('ours')
-  const w2 = await mkdtemp(join(tmpdir(), 'syncw2-'))
-  const gw2 = simpleGit(w2)
-  await gw2.clone(bare, '.')
-  await gw2.addConfig('user.email', 't@t.t')
-  await gw2.addConfig('user.name', 't')
-  await writeFile(join(w2, 'skills.yaml'), theirs)
-  await gw2.add('.')
-  await gw2.commit('theirs')
-  await gw2.push('origin', 'HEAD:main')
-  await g.fetch('origin')
-  created.push(repo, bare, w2)
+  const { root, repo } = await createDivergedRepo([
+    { path: 'skills.yaml', base: contentBase, ours, theirs },
+  ])
+  created.push(root)
   return repo
 }
 
-async function setupRepoMulti(
-  files: { path: string; base?: string; ours?: string; theirs?: string }[],
-): Promise<string> {
-  const repo = await mkdtemp(join(tmpdir(), 'syncrepo-'))
-  const g = simpleGit(repo)
-  await g.raw(['init', '-b', 'main'])
-  await g.addConfig('user.email', 't@t.t')
-  await g.addConfig('user.name', 't')
-  const writeAt = async (root: string, p: string, c: string) => {
-    await mkdir(join(root, dirname(p)), { recursive: true }).catch(() => {})
-    await writeFile(join(root, p), c)
-  }
-  for (const f of files) if (f.base !== undefined) await writeAt(repo, f.path, f.base)
-  await g.add('.')
-  await g.commit('base')
-  const bare = await mkdtemp(join(tmpdir(), 'syncbare-'))
-  await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
-  await g.addRemote('origin', bare)
-  await g.push('origin', 'HEAD:main')
-  for (const f of files) if (f.ours !== undefined) await writeAt(repo, f.path, f.ours)
-  await g.add('.')
-  await g.commit('ours')
-  const w2 = await mkdtemp(join(tmpdir(), 'syncw2-'))
-  const gw2 = simpleGit(w2)
-  await gw2.clone(bare, '.')
-  await gw2.addConfig('user.email', 't@t.t')
-  await gw2.addConfig('user.name', 't')
-  for (const f of files) if (f.theirs !== undefined) await writeAt(w2, f.path, f.theirs)
-  await gw2.add('.')
-  await gw2.commit('theirs')
-  await gw2.push('origin', 'HEAD:main')
-  await g.fetch('origin')
-  created.push(repo, bare, w2)
+async function setupRepoMulti(files: DivergedFile[]): Promise<string> {
+  const { root, repo } = await createDivergedRepo(files)
+  created.push(root)
   return repo
 }
 
@@ -84,7 +34,7 @@ const B =
 const C =
   'sources:\n  - url: github:x/a\n    ref: v1\n  - url: github:x/c\n    ref: v1\nskills: []\n'
 
-describe('syncPull', () => {
+describe.concurrent('syncPull', () => {
   it('keeps native Git conflict state for competing line edits', async () => {
     const repo = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
     const result = await syncPull(repo, new NodeGit(), new NodeFileSystem())

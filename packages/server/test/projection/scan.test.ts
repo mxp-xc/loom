@@ -8,6 +8,18 @@ import { NodeFileSystem } from '../../src/platform/node/fs'
 import type { IGit } from '../../src/ports/git'
 import type { IProcess } from '../../src/ports/process'
 
+vi.mock('../../src/lib/logger.js', () => {
+  const logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    flush: async () => {},
+    child: () => logger,
+  }
+  return { logger }
+})
+
 let root: string
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'scan-'))

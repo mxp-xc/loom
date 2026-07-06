@@ -6,6 +6,7 @@ import { simpleGit } from 'simple-git'
 import { NodeGit } from '../../src/platform/node/git'
 import { syncPush } from '../../src/sync/push'
 import type { IGit } from '../../src/ports/git'
+import { testGit } from '../helpers/git'
 
 function fakeGit(overrides: Partial<IGit>): IGit {
   return {
@@ -46,12 +47,10 @@ describe('syncPush', () => {
   const created: string[] = []
   beforeAll(async () => {
     bare = await mkdtemp(join(tmpdir(), 'pushbare-'))
-    await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
+    await testGit().raw(['init', '--bare', '-b', 'main', bare])
     const w = await mkdtemp(join(tmpdir(), 'pushw-'))
-    const gw = simpleGit(w)
+    const gw = testGit(w)
     await gw.raw(['init', '-b', 'main'])
-    await gw.addConfig('user.email', 't@t.t')
-    await gw.addConfig('user.name', 't')
     await writeFile(join(w, 'a.txt'), 'x')
     await gw.add('.')
     await gw.commit('init')
@@ -249,10 +248,8 @@ describe('syncPush', () => {
     await simpleGit().clone(bare, dest)
     const w2 = await mkdtemp(join(tmpdir(), 'pushw2-'))
     created.push(w2)
-    const gw2 = simpleGit(w2)
+    const gw2 = testGit(w2)
     await gw2.clone(bare, '.')
-    await gw2.addConfig('user.email', 't@t.t')
-    await gw2.addConfig('user.name', 't')
     await writeFile(join(w2, 'b.txt'), 'y')
     await gw2.add('.')
     await gw2.commit('remote-update')

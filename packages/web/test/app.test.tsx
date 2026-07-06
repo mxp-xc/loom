@@ -5,6 +5,8 @@ import { MemoryRouter } from 'react-router-dom'
 import { ThemeProvider } from '../src/theme'
 import App from '../src/App'
 
+const routerFuture = { v7_startTransition: true, v7_relativeSplatPath: true } as const
+
 vi.mock('../src/lib/api', () => ({
   api: {
     init: vi.fn(async () => ({ ok: true, active_repo: 'default', repoPath: '/tmp/r' })),
@@ -28,7 +30,7 @@ describe('App', () => {
   it('renders navigation with five items', async () => {
     render(
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter>
+        <MemoryRouter future={routerFuture}>
           <App />
         </MemoryRouter>
       </ThemeProvider>,

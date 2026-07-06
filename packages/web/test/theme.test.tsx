@@ -80,6 +80,11 @@ describe('ThemeProvider', () => {
       useTheme()
       return null
     }
-    expect(() => render(<Orphan />)).toThrow(/useTheme must be used within ThemeProvider/)
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      expect(() => render(<Orphan />)).toThrow(/useTheme must be used within ThemeProvider/)
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })

@@ -14,6 +14,7 @@ import StringValueEditor from './StringValueEditor'
 const JsonValueEditor = lazy(() => import('./JsonValueEditor'))
 
 const MASK = '••••••••'
+class StaleRevealResponse extends Error {}
 type SecretState = 'masked-unmodified' | 'revealed' | 'edited'
 
 interface Props {
@@ -179,12 +180,13 @@ export default function VariableEditor({
         currentKey.current !== capturedKey ||
         currentType.current !== 'secret'
       )
-        throw new Error('stale reveal response')
+        throw new StaleRevealResponse()
       draftRevision.current += 1
       setDraft(value)
       setSecretState('revealed')
       return value
     } catch (cause) {
+      if (cause instanceof StaleRevealResponse) throw cause
       console.error('Failed to reveal secret variable', cause)
       if (mounted.current && generation === revealSequence.current)
         setFieldError('密钥显示失败，请重试')

@@ -321,6 +321,7 @@ describe('variable editors', () => {
   })
 
   it('validates before save and does not PUT when server validation fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const order: string[] = []
     const diagnosticError = new ApiError('invalid', 422, 'validation_failed', [
       {
@@ -338,12 +339,17 @@ describe('variable editors', () => {
     const onSave = vi.fn(async () => {
       order.push('save')
     })
-    editor({ type: 'string', value: '${MISSING}' }, onSave, validateDraft)
-    fireEvent.click(screen.getByRole('button', { name: '保存变量' }))
-    expect((await screen.findByRole('alert')).textContent).toContain('MISSING_REFERENCE')
-    expect(screen.getByRole('alert').textContent).toContain('DEMO → MISSING')
-    expect(order).toEqual(['validate'])
-    expect(onSave).not.toHaveBeenCalled()
+    try {
+      editor({ type: 'string', value: '${MISSING}' }, onSave, validateDraft)
+      fireEvent.click(screen.getByRole('button', { name: '保存变量' }))
+      expect((await screen.findByRole('alert')).textContent).toContain('MISSING_REFERENCE')
+      expect(screen.getByRole('alert').textContent).toContain('DEMO → MISSING')
+      expect(order).toEqual(['validate'])
+      expect(onSave).not.toHaveBeenCalled()
+      expect(consoleError).toHaveBeenCalledWith('Failed to save variable', diagnosticError)
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it('debounces server preview, ignores stale responses, and cancels updates after unmount', async () => {

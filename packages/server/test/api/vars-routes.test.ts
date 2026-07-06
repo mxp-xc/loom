@@ -11,6 +11,18 @@ import {
 } from '../../src/api/routes/vars.js'
 import { registerRoutes } from '../../src/api/router.js'
 
+vi.mock('../../src/lib/logger.js', () => {
+  const logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    flush: async () => {},
+    child: () => logger,
+  }
+  return { logger }
+})
+
 describe('vars HTTP API', () => {
   let root: string
   let home: string

@@ -2,21 +2,19 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { simpleGit } from 'simple-git'
 import { NodeGit } from '../../src/platform/node/git'
 import { NodeFileSystem } from '../../src/platform/node/fs'
 import { installSkill } from '../../src/remote/install'
+import { testGit } from '../helpers/git'
 
 describe('installSkill', () => {
   let bare: string
   beforeAll(async () => {
     bare = await mkdtemp(join(tmpdir(), 'instbare-'))
-    await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
+    await testGit().raw(['init', '--bare', '-b', 'main', bare])
     const w = await mkdtemp(join(tmpdir(), 'instw-'))
-    const g = simpleGit(w)
+    const g = testGit(w)
     await g.raw(['init', '-b', 'main'])
-    await g.addConfig('user.email', 't@t.t')
-    await g.addConfig('user.name', 't')
     await mkdir(join(w, 'skills', 'brainstorming'), { recursive: true })
     await writeFile(
       join(w, 'skills', 'brainstorming', 'SKILL.md'),

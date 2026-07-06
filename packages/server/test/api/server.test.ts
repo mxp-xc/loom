@@ -5,6 +5,18 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import { createApp, startApiServer } from '../../src/api/server'
 
+vi.mock('../../src/lib/logger.js', () => {
+  const logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    flush: async () => {},
+    child: () => logger,
+  }
+  return { logger }
+})
+
 vi.mock('../../src/api/router.js', () => ({
   registerRoutes: () => new Hono().get('/health', (c) => c.json({ ok: true })),
 }))

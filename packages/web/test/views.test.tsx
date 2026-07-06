@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { api } from '../src/lib/api'
@@ -15,6 +15,12 @@ import { useManifestOperations } from '../src/hooks/useManifestOperations'
 
 if (!Range.prototype.getClientRects) {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList
+}
+
+const routerFuture = { v7_startTransition: true, v7_relativeSplatPath: true } as const
+
+function TestRouter({ children }: { children: ReactNode }) {
+  return <MemoryRouter future={routerFuture}>{children}</MemoryRouter>
 }
 
 vi.mock('../src/lib/api', () => ({
@@ -380,9 +386,9 @@ describe('Memory view', () => {
 describe('Skills view', () => {
   it('renders heading and project button', async () => {
     render(
-      <MemoryRouter>
+      <TestRouter>
         <Skills repoPath="/tmp/r" />
-      </MemoryRouter>,
+      </TestRouter>,
     )
     expect(await screen.findByText('投影', { exact: false })).toBeDefined()
   })
@@ -399,9 +405,9 @@ describe('Skills view', () => {
 
     try {
       render(
-        <MemoryRouter>
+        <TestRouter>
           <Skills repoPath={repoPath} />
-        </MemoryRouter>,
+        </TestRouter>,
       )
 
       await screen.findByText('还没有配置任何 Skill')
@@ -424,9 +430,9 @@ describe('Skills view', () => {
 
   it('defaults every group to collapsed and supports bulk and individual toggles', async () => {
     render(
-      <MemoryRouter>
+      <TestRouter>
         <Skills repoPath="/tmp/skills-layout" />
-      </MemoryRouter>,
+      </TestRouter>,
     )
 
     const expandAll = await screen.findByRole('button', { name: '全部展开' })
@@ -474,9 +480,9 @@ describe('Skills view', () => {
   it('projects skills after an individual target chip is toggled', async () => {
     const projectCallsBefore = vi.mocked(api.project).mock.calls.length
     render(
-      <MemoryRouter>
+      <TestRouter>
         <Skills repoPath="/tmp/skills-layout" />
-      </MemoryRouter>,
+      </TestRouter>,
     )
 
     fireEvent.click(await screen.findByRole('button', { name: '全部展开' }))
@@ -507,9 +513,9 @@ describe('Skills view', () => {
     )
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <Skills repoPath="/tmp/skills-layout" />
-      </MemoryRouter>,
+      </TestRouter>,
     )
 
     fireEvent.click(await screen.findByRole('button', { name: 'CX：部分已选择' }))
@@ -776,9 +782,9 @@ describe('Skill source updates', () => {
     } as never)
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <Skills repoPath="/tmp/skills-layout" />
-      </MemoryRouter>,
+      </TestRouter>,
     )
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑 source superpowers' }))
@@ -842,9 +848,9 @@ describe('Skill source updates', () => {
 describe('Sync view', () => {
   it('renders pull and push buttons', async () => {
     render(
-      <MemoryRouter>
+      <TestRouter>
         <Sync repoPath="/tmp/r" />
-      </MemoryRouter>,
+      </TestRouter>,
     )
     expect(screen.getByRole('button', { name: '拉取' })).toBeDefined()
     expect(screen.getByRole('button', { name: '上传' })).toBeDefined()
@@ -870,9 +876,9 @@ describe('Sync view', () => {
     })
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <Sync repoPath="/tmp/restored" />
-      </MemoryRouter>,
+      </TestRouter>,
     )
 
     expect(await screen.findByText('skills.yaml')).toBeDefined()
@@ -900,9 +906,9 @@ describe('Sync view', () => {
     })
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <Sync repoPath="/tmp/r" />
-      </MemoryRouter>,
+      </TestRouter>,
     )
     fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
 
@@ -937,9 +943,9 @@ describe('Sync view', () => {
     })
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <Sync repoPath="/tmp/r" />
-      </MemoryRouter>,
+      </TestRouter>,
     )
     fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
 
@@ -1063,9 +1069,9 @@ describe('Sync view', () => {
     })
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <Sync repoPath="/tmp/r" />
-      </MemoryRouter>,
+      </TestRouter>,
     )
     fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
 
