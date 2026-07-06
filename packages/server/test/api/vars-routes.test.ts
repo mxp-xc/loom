@@ -42,6 +42,10 @@ describe('vars HTTP API', () => {
     return { response, body: (await response.json()) as any }
   }
 
+  async function symlinkDirectory(target: string, path: string) {
+    await symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir')
+  }
+
   it('lists environments and masks secrets in environment details', async () => {
     const listed = await json(`/vars/environments?repoPath=${encodeURIComponent(root)}`)
     expect(listed.response.status).toBe(200)
@@ -126,7 +130,7 @@ describe('vars HTTP API', () => {
 
   it('accepts the active repository through a symlink alias', async () => {
     const alias = join(home, 'authorized-alias')
-    await symlink(root, alias, 'dir')
+    await symlinkDirectory(root, alias)
     const response = await app.request(`/vars/environments?repoPath=${encodeURIComponent(alias)}`)
     expect(response.status).toBe(200)
   })
@@ -162,7 +166,7 @@ describe('vars HTTP API', () => {
       if (path === alias && armed) {
         armed = false
         await rm(alias, { force: true })
-        if (!removeAliasInstead) await symlink(unauthorized, alias, 'dir')
+        if (!removeAliasInstead) await symlinkDirectory(unauthorized, alias)
       }
       return canonical
     }
@@ -174,7 +178,7 @@ describe('vars HTTP API', () => {
     })
     const resetAlias = async (remove = false) => {
       await rm(alias, { force: true })
-      await symlink(root, alias, 'dir')
+      await symlinkDirectory(root, alias)
       removeAliasInstead = remove
       armed = true
     }
@@ -502,7 +506,7 @@ describe('vars HTTP API', () => {
 
   it('serializes mutations across canonical repository aliases and releases the lock after failure', async () => {
     const alias = `${root}-alias`
-    await symlink(root, alias, 'dir')
+    await symlinkDirectory(root, alias)
     let activeReplacements = 0
     let maximumReplacements = 0
     let failNextReplacement = false
@@ -699,8 +703,9 @@ describe('vars HTTP API', () => {
     })
     const fs = new NodeFileSystem()
     const controlledFs = Object.create(fs) as NodeFileSystem
+    const devVarsPathSuffix = join('vars', 'dev.yaml')
     controlledFs.readFile = async (path: string) => {
-      if (path.endsWith('/vars/dev.yaml') && !writerStarted) {
+      if (path.endsWith(devVarsPathSuffix) && !writerStarted) {
         activeReaders += 1
         maximumReaders = Math.max(maximumReaders, activeReaders)
         readersStarted += 1

@@ -48,7 +48,7 @@ describe('agent paths', () => {
   it('opencode config dir is ~/.config/opencode on darwin (not Library/Application Support)', () => {
     delete process.env.OPENCODE_CONFIG_DIR
     const dir = agentConfigDir('opencode')
-    expect(dir.endsWith('.config/opencode')).toBe(true)
+    expect(dir.endsWith(join('.config', 'opencode'))).toBe(true)
     expect(dir).not.toContain('Application Support')
   })
   it('agentMemoryFile: claude-code -> CLAUDE.md, others -> AGENTS.md', () => {

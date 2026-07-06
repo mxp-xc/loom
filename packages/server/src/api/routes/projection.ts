@@ -1,44 +1,17 @@
 import { Hono } from 'hono'
 import { join, dirname, basename as pathBasename, isAbsolute } from 'node:path'
 import { glob } from 'tinyglobby'
-import { executeProjection } from '../../projection/executor.js'
-import { scanSourceMembers } from '../../projection/scan.js'
-import { mergeLocalSkills } from '../../projection/scan.js'
-import {
-  loadRepoManifest,
-  mergeConfig,
-  buildManifest,
-  planProjection,
-  deriveRepoId,
-  type AgentId,
-} from '@loom/core'
-import { installSkill } from '../../remote/install.js'
-import { createDeps } from '../deps.js'
-import { readRepoFiles, readLocalConfig } from '../repo-config.js'
+import { parseSourceMemberSkillId, sourceIdentity } from '@loom/core'
+import { loadProjectionManifest, projectRepository } from '../../projection/workflow.js'
 import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
 import type { RouteDeps } from '../router.js'
-import type { IFileSystem } from '../../ports/fs.js'
-import type { LocalSkill } from '@loom/core'
 
 // Resolve a local skill path that may be relative (e.g. "./assets/skills/x")
 // against the repo root, so SKILL.md reads/writes land in the right place
 // regardless of the server's current working directory.
 const resolveSkillDir = (localPath: string, repoPath: string) =>
   isAbsolute(localPath) ? localPath : join(repoPath, localPath)
-
-export async function annotateLocalSkillAvailability(
-  fs: Pick<IFileSystem, 'exists'>,
-  repoPath: string,
-  skills: LocalSkill[],
-): Promise<void> {
-  await Promise.all(
-    skills.map(async (skill) => {
-      if (!skill.path) return
-      skill.available = await fs.exists(join(resolveSkillDir(skill.path, repoPath), 'SKILL.md'))
-    }),
-  )
-}
 
 const apiLogger = logger.child('api')
 
@@ -52,50 +25,15 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
     try {
       repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
     } catch (e) {
+      apiLogger.error('invalid repository path for projection', { err: e, repo })
       return c.json(
         { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
         400,
       )
     }
     apiLogger.info('projection started', { repoPath })
-    // Detect installed agents
-    const allAgents: AgentId[] =
-      body.installedAgents ?? (['claude-code', 'codex', 'opencode'] as AgentId[])
-    const installed = new Set<AgentId>()
-    for (const a of allAgents) {
-      try {
-        if (await deps.proc.isInstalled(a)) installed.add(a)
-      } catch {
-        /* proc not available, assume installed */ installed.add(a)
-      }
-    }
-    // Build manifest from repo files if not provided
-    let mf = body.manifest
-    if (!mf) {
-      const files = await readRepoFiles(deps.fs, repoPath)
-      const repoManifest = loadRepoManifest(files)
-      repoManifest.skills.skills = await mergeLocalSkills(
-        deps.fs,
-        repoPath,
-        repoManifest.skills.skills,
-      )
-      const localConfig = await readLocalConfig(deps.fs, deps.home)
-      mf = buildManifest(repoManifest, localConfig as any)
-    }
-    // Plan projection (use provided plan or build from manifest)
-    const plan = body.plan ?? planProjection(mf, mf.config, installed)
-    const projDeps = createDeps(
-      { fs: deps.fs, git: deps.git, proc: deps.proc },
-      repoPath,
-      installed,
-    )
-    const varsCtx = body.varsCtx ?? {
-      env: {},
-      activeProfile: mf.vars.active,
-      defaultProfile: mf.vars.default,
-    }
     const scope = (body.scope ?? 'all') as 'skills' | 'mcp' | 'memory' | 'all'
-    const res = await executeProjection(plan, mf, varsCtx, projDeps, scope)
+    const res = await projectRepository(deps, repoPath, { ...body, scope })
     if (res.ok) {
       apiLogger.info('projection completed', { repoPath })
     } else {
@@ -114,48 +52,13 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
     try {
       repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
     } catch (e) {
+      apiLogger.error('invalid repository path for manifest', { err: e, repo })
       return c.json(
         { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
         400,
       )
     }
-    const files = await readRepoFiles(deps.fs, repoPath)
-    const repoManifest = loadRepoManifest(files)
-    const localConfig = await readLocalConfig(deps.fs, deps.home)
-    // Auto-discover members for sources that have none listed in skills.yaml
-    for (const src of repoManifest.skills.sources ?? []) {
-      if (src.members && src.members.length > 0) continue
-      const repoId = deriveRepoId(src.url)
-      const cacheDir = join(repoPath, 'remote-cache', repoId)
-      // A source may arrive via sync/pull without a local cache clone.
-      // Auto-install so member discovery works on every machine.
-      if (!(await deps.fs.exists(cacheDir))) {
-        try {
-          await installSkill(deps.git, deps.fs, src.url, src.ref, repoPath, repoId)
-        } catch (e) {
-          apiLogger.error('auto-install failed for source', { url: src.url, err: e })
-          continue
-        }
-      }
-      if (!(await deps.fs.exists(cacheDir))) continue
-      try {
-        const scanned = await scanSourceMembers(deps.fs, cacheDir, { url: src.url, ref: src.ref })
-        if (scanned.length > 0) {
-          src.members = scanned.map((m) => ({ name: m.name, targets: (src as any).targets ?? [] }))
-        }
-      } catch {
-        /* scan failure: leave members unset */
-      }
-    }
-    // Auto-discover repo-local skills under assets/skills so they show up
-    // even when not explicitly listed in skills.yaml.
-    repoManifest.skills.skills = await mergeLocalSkills(
-      deps.fs,
-      repoPath,
-      repoManifest.skills.skills,
-    )
-    await annotateLocalSkillAvailability(deps.fs, repoPath, repoManifest.skills.skills)
-    const manifest = buildManifest(repoManifest, localConfig as any)
+    const manifest = await loadProjectionManifest(deps, repoPath)
     return c.json(manifest)
   })
 
@@ -166,6 +69,7 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
       try {
         repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
       } catch (e) {
+        apiLogger.error('invalid repository path for skill read', { err: e, repo })
         return c.json(
           { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
           400,
@@ -177,12 +81,9 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
 
       let skillDir: string | null = null
       if (sourceUrl) {
-        const repoId = deriveRepoId(sourceUrl)
-        const memberName = skillId.startsWith(repoId + '-')
-          ? skillId.slice(repoId.length + 1)
-          : skillId.startsWith(repoId + '/')
-            ? skillId.slice(repoId.length + 1)
-            : skillId
+        const identity = sourceIdentity(sourceUrl)
+        const repoId = identity.repoId
+        const memberName = parseSourceMemberSkillId(skillId, identity)
         const cacheDir = join(repoPath, 'remote-cache', repoId)
         if (await deps.fs.exists(cacheDir)) {
           const matches = await glob('**/SKILL.md', {
@@ -212,12 +113,13 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
         try {
           const content = await deps.fs.readFile(skillFile)
           return c.json({ ok: true, content, path: skillFile })
-        } catch {
-          /* fall through */
+        } catch (e) {
+          apiLogger.error('failed to read skill content file', { err: e, path: skillFile })
         }
       }
       return c.json({ ok: false, error: 'not_found', message: `SKILL.md not found for ${skillId}` })
     } catch (e) {
+      apiLogger.error('failed to read skill content', { err: e })
       return c.json({
         ok: false,
         error: 'read_failed',
@@ -233,6 +135,7 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
       try {
         repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
       } catch (e) {
+        apiLogger.error('invalid repository path for skill write', { err: e, repo })
         return c.json(
           { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
           400,

@@ -5,14 +5,17 @@ import {
   deleteVariable,
   danglingDiagnostics,
   inspectVariableDelete,
+  normalizeVarEntry,
+  prepareVarsMutationPersistence,
   renameVariable,
-  resolveVarsChain,
+  resolveVarsLifecycle,
   setVariable,
   type VarEntry,
-  type JsonValue,
+  type VarsLifecycleResolution,
   type VarsDiagnostic,
   type VarsEnvironment,
   type VarsMutationResult,
+  validateVarDraft,
 } from '@loom/core'
 import { logger } from '../../lib/logger.js'
 import { VarsStore } from '../../vars/store.js'
@@ -73,33 +76,9 @@ function keyField(value: unknown, name = 'key'): string {
   return key
 }
 
-function isJsonValue(value: unknown): value is JsonValue {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
-  if (typeof value === 'number') return Number.isFinite(value)
-  if (Array.isArray(value)) return value.every(isJsonValue)
-  return (
-    typeof value === 'object' && Object.values(value as Record<string, unknown>).every(isJsonValue)
-  )
-}
-
 function entryField(value: unknown): VarEntry {
-  const entry = object(value)
-  switch (entry.type) {
-    case 'string':
-    case 'secret':
-      if (typeof entry.value === 'string') return { type: entry.type, value: entry.value }
-      break
-    case 'number':
-      if (typeof entry.value === 'number' && Number.isFinite(entry.value))
-        return { type: 'number', value: entry.value }
-      break
-    case 'boolean':
-      if (typeof entry.value === 'boolean') return { type: 'boolean', value: entry.value }
-      break
-    case 'json':
-      if (isJsonValue(entry.value)) return { type: 'json', value: entry.value }
-      break
-  }
+  const entry = normalizeVarEntry(value)
+  if (entry) return entry
   throw new ApiError(400, 'invalid_request', 'entry 无效')
 }
 
@@ -127,25 +106,25 @@ function maskEnvironment(environment: VarsEnvironment) {
 
 function presentResolvedValues(
   values: Record<string, VarEntry>,
-  dependencies: Record<string, string[]>,
+  secretTaintedKeys: string[],
 ): Record<string, VarEntry | { type: VarEntry['type']; value: string; masked: true }> {
-  const tainted = new Map<string, boolean>()
-  const isTainted = (key: string): boolean => {
-    const cached = tainted.get(key)
-    if (cached !== undefined) return cached
-    tainted.set(key, false)
-    const value = values[key]
-    const result = value?.type === 'secret' || (dependencies[key] ?? []).some(isTainted)
-    tainted.set(key, result)
-    return result
-  }
-
+  const tainted = new Set(secretTaintedKeys)
   return Object.fromEntries(
     Object.entries(values).map(([key, entry]) => [
       key,
-      isTainted(key) ? { ...entry, value: MASK, masked: true } : entry,
+      tainted.has(key) ? { ...entry, value: MASK, masked: true } : entry,
     ]),
   )
+}
+
+function presentResolution(resolution: Extract<VarsLifecycleResolution, { ok: true }>) {
+  return {
+    ok: true,
+    values: presentResolvedValues(resolution.values, resolution.secretTaintedKeys),
+    sources: resolution.sources,
+    dependencies: resolution.dependencies,
+    diagnostics: resolution.diagnostics,
+  }
 }
 
 function errorResponse(c: Context, error: unknown, operation: string, repoPath?: string) {
@@ -299,9 +278,10 @@ export function varsAccessPendingWritersForTest(): number {
   )
 }
 
-function mutationError(result: VarsMutationResult): ApiError | undefined {
-  const diagnostic = result.diagnostics.find((item) => item.severity === 'error')
-  if (!diagnostic) return undefined
+type MutationFailure = Extract<ReturnType<typeof prepareVarsMutationPersistence>, { ok: false }>
+
+function mutationError(failure: MutationFailure): ApiError {
+  const diagnostic = failure.diagnostic
   const status =
     diagnostic.code === 'environment_not_found' || diagnostic.code === 'not_found'
       ? 404
@@ -314,17 +294,15 @@ function mutationError(result: VarsMutationResult): ApiError | undefined {
     status,
     diagnostic.code,
     diagnostic.message,
-    result.diagnostics,
-    result.deleteImpact ? { deleteImpact: result.deleteImpact } : undefined,
+    failure.diagnostics,
+    failure.deleteImpact ? { deleteImpact: failure.deleteImpact } : undefined,
   )
 }
 
 async function persistMutation(store: VarsStore, result: VarsMutationResult): Promise<void> {
-  const failure = mutationError(result)
-  if (failure) throw failure
-  await store.writeMany(
-    Object.fromEntries(result.changed.map((name) => [name, result.environments[name]])),
-  )
+  const plan = prepareVarsMutationPersistence(result)
+  if (!plan.ok) throw mutationError(plan)
+  await store.writeMany(plan.environments)
 }
 
 export function createVarsRoutes(deps: RouteDeps): Hono {
@@ -515,7 +493,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
           throw new ApiError(400, 'invalid_request', 'chain 无效')
         }
         return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
-          const result = resolveVarsChain(
+          const result = resolveVarsLifecycle(
             await loadAll(storeFor(deps, authorizedRepoPath)),
             request.chain as string[],
           )
@@ -523,7 +501,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
             throw new ApiError(422, 'resolution_failed', '变量解析失败', result.diagnostics)
           return c.json({
             ok: true,
-            values: presentResolvedValues(result.values, result.dependencies),
+            values: presentResolvedValues(result.values, result.secretTaintedKeys),
             sources: result.sources,
             dependencies: result.dependencies,
             diagnostics: result.diagnostics,
@@ -564,33 +542,17 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
           throw new ApiError(400, 'invalid_request', 'chain 无效')
         return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
           const environments = await loadAll(storeFor(deps, authorizedRepoPath))
-          const mutation = setVariable(environments, environment, key, entry)
-          const errors = mutation.diagnostics.filter((item) => item.severity === 'error')
-          if (errors.some((item) => item.code !== 'missing_reference')) {
-            throw new ApiError(422, 'validation_failed', '变量验证失败', mutation.diagnostics)
-          }
-          const overlay =
-            errors.length === 0
-              ? mutation.environments
-              : {
-                  ...environments,
-                  [environment]: {
-                    ...environments[environment],
-                    entries: { ...environments[environment].entries, [key]: entry },
-                  },
-                }
-          const result = resolveVarsChain(overlay, request.chain as string[])
+          const result = validateVarDraft(environments, {
+            environment,
+            key,
+            entry,
+            chain: request.chain as string[],
+          })
           if (!result.ok)
             throw new ApiError(422, 'validation_failed', '变量验证失败', result.diagnostics)
           return c.json({
             ok: true,
-            resolution: {
-              ok: true,
-              values: presentResolvedValues(result.values, result.dependencies),
-              sources: result.sources,
-              dependencies: result.dependencies,
-              diagnostics: result.diagnostics,
-            },
+            resolution: presentResolution(result.resolution),
           })
         })
       },

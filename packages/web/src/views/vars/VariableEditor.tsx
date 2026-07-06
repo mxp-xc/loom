@@ -101,9 +101,9 @@ export default function VariableEditor({
     if (type === 'secret' && secretState === 'masked-unmodified') return
     const parsed = parseDraft(type, draft)
     if (!normalizedKey || !parsed.entry) return
-    const entry = parsed.entry
+    const draftEntry = parsed.entry
     const timer = window.setTimeout(() => {
-      void validateDraft(normalizedKey, entry).then(
+      void validateDraft(normalizedKey, draftEntry).then(
         ({ resolution: validated }) => {
           if (sequence !== previewSequence.current) return
           const value = validated.values[normalizedKey]

@@ -2,7 +2,7 @@ import { join, dirname } from 'node:path'
 import { ClaudeCodeAdapter } from '../adapters/claude-code.js'
 import { CodexAdapter } from '../adapters/codex.js'
 import { OpenCodeAdapter } from '../adapters/opencode.js'
-import type { ProjectionDeps } from '../projection/executor.js'
+import type { ProjectionDeps } from './executor.js'
 import type { AgentId } from '@loom/core'
 import { logger } from '../lib/logger.js'
 import { skillPathFor } from '../remote/cache.js'
@@ -12,22 +12,20 @@ import type { IProcess } from '../ports/process.js'
 
 const projectionLogger = logger.child('projection')
 
-export function createDeps(
+export function createProjectionDeps(
   platform: { fs: IFileSystem; git: IGit; proc: IProcess },
   repoPath: string,
   installedAgents: Set<AgentId>,
+  home: string,
 ): ProjectionDeps {
-  // State file records mcp ids loom projected per agent, so we can tell
-  // loom-managed entries (removable when manifest deletes them) apart from
-  // user-handwritten ones (must be preserved). Lives outside the git repo
-  // (machine-local); loss degrades to preserving all existing entries.
-  const home = process.env.HOME || process.env.USERPROFILE || ''
   const stateFile = join(home, '.loom', 'state', basenameRepo(repoPath), 'projected-mcp.json')
   const fs = platform.fs
   const readState = async (): Promise<Record<string, string[]>> => {
     try {
       return JSON.parse(await fs.readFile(stateFile)) as Record<string, string[]>
-    } catch {
+    } catch (err) {
+      if (!isMissing(err))
+        projectionLogger.error('failed to read projection state', { err, stateFile })
       return {}
     }
   }
@@ -62,11 +60,14 @@ export function createDeps(
 }
 
 function basenameRepo(repoPath: string): string {
-  // Derive a stable state dir name from the repo path's last segment.
   const seg =
     repoPath
       .replace(/[\\/]+$/, '')
       .split(/[\\/]/)
       .pop() ?? 'default'
   return seg || 'default'
+}
+
+function isMissing(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
 }

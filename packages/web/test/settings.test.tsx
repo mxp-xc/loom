@@ -2,8 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import Settings from '../src/views/Settings'
-
-const { refreshManifest } = vi.hoisted(() => ({ refreshManifest: vi.fn(async () => {}) }))
+import { api } from '../src/lib/api'
 
 vi.mock('../src/lib/api', () => ({
   api: {
@@ -13,10 +12,15 @@ vi.mock('../src/lib/api', () => ({
       local: { active_repo: 'default' },
     })),
     putConfig: vi.fn(async () => ({ ok: true })),
+    getManifest: vi.fn(async () => ({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['claude-code'] },
+      errors: [],
+    })),
   },
 }))
-
-vi.mock('../src/hooks/useManifest', () => ({ refreshManifest }))
 
 describe('Settings', () => {
   it('renders three state tabs (最终结果/仓库级/本地级)', async () => {
@@ -42,12 +46,14 @@ describe('Settings', () => {
   })
 
   it('refreshes shared manifest after saving targets', async () => {
+    const getConfigCallsBefore = vi.mocked(api.getConfig).mock.calls.length
     render(<Settings repoPath="/tmp/r" />)
     await screen.findByText('最终结果')
     fireEvent.click(screen.getByText('仓库级'))
     fireEvent.click(screen.getByText('CC'))
 
-    await waitFor(() => expect(refreshManifest).toHaveBeenCalledWith('/tmp/r'))
+    await waitFor(() => expect(api.getManifest).toHaveBeenCalledWith('/tmp/r'))
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(getConfigCallsBefore + 2))
   })
 
   it('does not render the old global save bar actions', async () => {

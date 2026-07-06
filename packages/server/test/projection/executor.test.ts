@@ -3,6 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { executeProjection } from '../../src/projection/executor'
+import { createProjectionDeps } from '../../src/projection/deps'
 import { NodeFileSystem } from '../../src/platform/node/fs'
 import { ClaudeCodeAdapter } from '../../src/adapters/claude-code'
 import type { ProjectionPlan, Manifest, AgentId } from '@loom/core'
@@ -163,5 +164,36 @@ describe('executeProjection', () => {
     const dest = join(home, '.claude', 'skills', 'frontend-design')
     expect(await fs.isLink(dest)).toBe(false)
     expect(await fs.exists(join(dest, 'SKILL.md'))).toBe(true)
+  })
+  it('projection deps write managed MCP state under explicit workflow home', async () => {
+    const fs = new NodeFileSystem()
+    const explicitHome = await mkdtemp(join(tmpdir(), 'explicit-home-'))
+    const envHome = await mkdtemp(join(tmpdir(), 'env-home-'))
+    vi.stubEnv('HOME', envHome)
+    try {
+      const repoPath = join(srcDir, 'repo-for-state')
+      const deps = createProjectionDeps(
+        { fs, git: {} as never, proc: {} as never },
+        repoPath,
+        installed,
+        explicitHome,
+      )
+
+      await deps.setManagedMcpIds?.('claude-code', ['playwright'])
+
+      expect(
+        await fs.exists(
+          join(explicitHome, '.loom', 'state', 'repo-for-state', 'projected-mcp.json'),
+        ),
+      ).toBe(true)
+      expect(
+        await fs.exists(join(envHome, '.loom', 'state', 'repo-for-state', 'projected-mcp.json')),
+      ).toBe(false)
+    } finally {
+      await Promise.all([
+        rm(explicitHome, { recursive: true, force: true }),
+        rm(envHome, { recursive: true, force: true }),
+      ])
+    }
   })
 })

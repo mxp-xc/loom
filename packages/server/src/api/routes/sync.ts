@@ -4,6 +4,7 @@ import { SyncSessionError } from '../../sync/session-manager.js'
 import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
 import type { SyncRouteDeps } from '../router.js'
+import { classifySyncGitError, syncErrorMessage } from '../../sync/errors.js'
 
 const syncLogger = logger.child('sync')
 
@@ -63,17 +64,9 @@ export function createSyncRoutes(deps: SyncRouteDeps): Hono {
     try {
       const { repo } = await c.req.json()
       repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      const status = await deps.git.status(repoPath)
-      if (status.dirty) {
-        await deps.git.add(repoPath, ['.'])
-        await deps.git.commit(repoPath, 'loom: sync changes')
-      }
-      return c.json(await syncPush(repoPath, deps.git))
+      return c.json(await syncPush(repoPath, deps.git, syncLogger))
     } catch (err) {
-      syncLogger.error('push failed', { err, repoPath })
-      const message = String((err as Error)?.message ?? err)
-      const noRemote = /no remote|could not find remote|not a git repository/i.test(message)
-      return c.json({ ok: false, error: noRemote ? 'no_remote' : 'other', message })
+      return syncError(c, err, { repoPath, operation: 'push' })
     }
   })
 
@@ -111,16 +104,12 @@ export function createSyncRoutes(deps: SyncRouteDeps): Hono {
 
 function syncError(c: any, err: unknown, context: Record<string, unknown>) {
   syncLogger.error(`${String(context.operation)} failed`, { err, ...context })
-  const message = String((err as Error)?.message ?? err)
+  const message = syncErrorMessage(err)
   const error =
     err instanceof SyncSessionError
       ? err.code
       : message.includes('未解决的冲突标记')
         ? 'unresolved_markers'
-        : /invalid repo/i.test(message)
-          ? 'invalid_repo'
-          : /no remote|could not find remote|does not appear to be a git/i.test(message)
-            ? 'no_remote'
-            : 'other'
+        : classifySyncGitError(message)
   return c.json({ ok: false, error, message }, error === 'invalid_repo' ? 400 : 200)
 }

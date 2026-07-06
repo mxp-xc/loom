@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { inputStyle } from '@/lib/styles'
 import { Search, FolderInput, RefreshCw } from 'lucide-react'
 import { Segmented } from './Segmented'
 import type { ScanMember, LocalScanResult } from './types'
+import { useManifestOperations } from '@/hooks/useManifestOperations'
 
 interface Props {
   open: boolean
   repoPath: string
-  reload: () => void
   onClose: () => void
 }
 
@@ -85,7 +84,10 @@ function SearchInput({
   )
 }
 
-export default function AddSkillModal({ open, repoPath, reload, onClose }: Props) {
+export default function AddSkillModal({ open, repoPath, onClose }: Props) {
+  const operations = useManifestOperations(repoPath)
+  const { scanLocalSkills, loadSourceRefs, scanSourceMembers, addLocalSkills, addSource } =
+    operations
   const [addTab, setAddTab] = useState<'local' | 'source'>('local')
   const [addBusy, setAddBusy] = useState(false)
   const [addErr, setAddErr] = useState<string | null>(null)
@@ -128,9 +130,9 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
       setLocalScanning(true)
       setAddErr(null)
       try {
-        const res = await api.scanLocalSkills(d, repoPath)
+        const res = await scanLocalSkills(d)
         if (res.ok) {
-          const skills = res.skills ?? []
+          const skills = res.result?.skills ?? []
           setLocalSkills(skills)
           // Pre-select everything discovered so the bulk-import button is
           // immediately useful; the user can untick what they don't want.
@@ -138,17 +140,13 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
         } else {
           setLocalSkills([])
           setLocalSelected(new Set())
-          setAddErr(res.message || res.error || '扫描失败')
+          setAddErr(res.message || '扫描失败')
         }
-      } catch (e) {
-        setLocalSkills([])
-        setLocalSelected(new Set())
-        setAddErr(e instanceof Error ? e.message : String(e))
       } finally {
         setLocalScanning(false)
       }
     },
-    [repoPath],
+    [scanLocalSkills],
   )
 
   // Browse via the native directory picker (webkitdirectory). The browser
@@ -235,19 +233,17 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
     setSrcRefsLoading(true)
     setAddErr(null)
     try {
-      const res = await api.getSourceRefs(url)
+      const res = await loadSourceRefs(url)
       if (res.ok) {
-        const branches = res.branches ?? []
-        const tags = res.tags ?? []
+        const branches = res.result?.branches ?? []
+        const tags = res.result?.tags ?? []
         setSrcBranches(branches)
         setSrcTags(tags)
         const list = srcType === 'tag' ? tags : branches
         setSrcRef(list[0] ?? '')
       } else {
-        setAddErr(res.message || res.error || '获取 refs 失败')
+        setAddErr(res.message || '获取 refs 失败')
       }
-    } catch (e) {
-      setAddErr(e instanceof Error ? e.message : String(e))
     } finally {
       setSrcRefsLoading(false)
     }
@@ -269,16 +265,15 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
     setAddErr(null)
     setSrcMembers([])
     try {
-      const res = await api.scanSource(srcUrl.trim())
-      if (Array.isArray(res.members)) {
-        setSrcMembers(res.members)
+      const res = await scanSourceMembers(srcUrl.trim())
+      if (res.ok && Array.isArray(res.result?.members)) {
+        const members = res.result.members as ScanMember[]
+        setSrcMembers(members)
         // Pre-select not-yet-installed members; installed ones stay locked.
-        setSrcSelected(new Set(res.members.filter((m) => !m.installed).map((m) => m.name)))
+        setSrcSelected(new Set(members.filter((m) => !m.installed).map((m) => m.name)))
       } else {
-        setAddErr('扫描失败')
+        setAddErr(res.message || '扫描失败')
       }
-    } catch (e) {
-      setAddErr(e instanceof Error ? e.message : String(e))
     } finally {
       setSrcScanning(false)
     }
@@ -293,30 +288,12 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
     setAddBusy(true)
     setAddErr(null)
     try {
-      let res: { ok: boolean; count?: number; message?: string; error?: string }
-      if (pickedExternal) {
-        // External folder: write file contents into <repo>/assets/skills.
-        const skillsWithFiles = selected.map((s) => ({
-          name: s.name,
-          files: pickedFiles.get(s.name) ?? [],
-        }))
-        res = await api.writeLocalSkills({ repo: repoPath, skills: skillsWithFiles })
-      } else {
-        // Already under <repo>/assets/skills — just register a ref entry.
-        res = await api.importLocalSkills({
-          repo: repoPath,
-          skills: selected.map((s) => ({ name: s.name, path: s.path })),
-          mode: 'ref',
-        })
-      }
+      const res = await addLocalSkills({ skills: selected, pickedExternal, pickedFiles })
       if (res.ok) {
         onClose()
-        reload()
       } else {
-        setAddErr(res.message || res.error || '导入失败')
+        setAddErr(res.message || '导入失败')
       }
-    } catch (e) {
-      setAddErr(e instanceof Error ? e.message : String(e))
     } finally {
       setAddBusy(false)
     }
@@ -330,23 +307,13 @@ export default function AddSkillModal({ open, repoPath, reload, onClose }: Props
     setAddBusy(true)
     setAddErr(null)
     try {
-      await api.addSource({ repo: repoPath, url: srcUrl.trim(), ref: srcRef.trim() || 'main' })
-      // Persist selected members from Scan so they aren't lost.
-      if (srcSelected.size > 0) {
-        try {
-          await api.setSourceMembers({
-            repo: repoPath,
-            url: srcUrl.trim(),
-            members: [...srcSelected],
-          })
-        } catch {
-          // Source was created successfully; member selection failure is non-fatal.
-        }
-      }
-      onClose()
-      reload()
-    } catch (e) {
-      setAddErr(e instanceof Error ? e.message : String(e))
+      const res = await addSource({
+        url: srcUrl.trim(),
+        ref: srcRef.trim() || 'main',
+        members: [...srcSelected],
+      })
+      if (res.ok) onClose()
+      else setAddErr(res.message || '添加 source 失败')
     } finally {
       setAddBusy(false)
     }

@@ -1,27 +1,19 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
-import { deriveRepoId, type SkillSource } from '@loom/core'
+import { sourceIdentity, type SkillSource } from '@loom/core'
 import { sortSkillMembers, type RefreshMember } from './types'
+import type { ManifestOperations } from '@/hooks/useManifestOperations'
 
 interface Props {
-  repoPath: string
   source: SkillSource | null
-  showToast: (msg: string) => void
-  setError: (e: unknown) => void
+  operations: ManifestOperations
   onClose: () => void
   onConfirm: () => void
 }
 
-export default function MemberScanModal({
-  repoPath,
-  source,
-  showToast,
-  setError,
-  onClose,
-  onConfirm,
-}: Props) {
+export default function MemberScanModal({ source, operations, onClose, onConfirm }: Props) {
+  const { refreshSourceMembers, saveSourceMembers } = operations
   const [members, setMembers] = useState<RefreshMember[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [scanning, setScanning] = useState(false)
@@ -40,25 +32,17 @@ export default function MemberScanModal({
     let active = true
     setScanning(true)
     void (async () => {
-      try {
-        const res = await api.refreshSource(repoPath, source.url, source.ref)
-        if (!active) return
-        if (res.ok) {
-          const mems = sortSkillMembers(res.members ?? [])
-          const existing = new Set((source.members ?? []).map((m) => m.name))
-          setMembers(mems)
-          // Pre-select members already configured; new ones left unchecked so
-          // the user explicitly opts in instead of silently enabling everything.
-          setSelected(new Set(mems.filter((m) => existing.has(m.name)).map((m) => m.name)))
-          setScanning(false)
-        } else {
-          setError(res.message ?? res.error ?? '扫描失败')
-          setScanning(false)
-          onClose()
-        }
-      } catch (e) {
-        if (!active) return
-        setError(e)
+      const res = await refreshSourceMembers(source, { shouldNotify: () => active })
+      if (!active) return
+      if (res.ok) {
+        const mems = sortSkillMembers((res.result?.members ?? []) as RefreshMember[])
+        const existing = new Set((source.members ?? []).map((m) => m.name))
+        setMembers(mems)
+        // Pre-select members already configured; new ones left unchecked so
+        // the user explicitly opts in instead of silently enabling everything.
+        setSelected(new Set(mems.filter((m) => existing.has(m.name)).map((m) => m.name)))
+        setScanning(false)
+      } else {
         setScanning(false)
         onClose()
       }
@@ -66,25 +50,14 @@ export default function MemberScanModal({
     return () => {
       active = false
     }
-  }, [source, repoPath])
+  }, [refreshSourceMembers, source])
 
   const handleConfirm = async (selectedNames: string[]) => {
     if (!source) return
     setSaving(true)
     try {
-      const res = await api.setSourceMembers({
-        repo: repoPath,
-        url: source.url,
-        members: selectedNames,
-      })
-      if (res.ok) {
-        showToast(`${deriveRepoId(source.url)}: ${selectedNames.length} members`)
-        onConfirm()
-      } else {
-        setError(res.message ?? res.error ?? '保存失败')
-      }
-    } catch (e) {
-      setError(e)
+      const res = await saveSourceMembers(source, selectedNames)
+      if (res.ok) onConfirm()
     } finally {
       setSaving(false)
     }
@@ -98,7 +71,7 @@ export default function MemberScanModal({
       onClose={() => {
         if (!saving) onClose()
       }}
-      title={`Scan · ${source ? deriveRepoId(source.url) : ''}`}
+      title={`Scan · ${source ? sourceIdentity(source).repoId : ''}`}
       width={520}
       minHeight={300}
     >

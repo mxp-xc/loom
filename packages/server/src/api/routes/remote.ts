@@ -105,7 +105,11 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
           body.newRef || undefined,
         )
         if (result.changed) await writeYaml(deps.fs, filePath, result.data)
-      } catch {
+      } catch (err) {
+        remoteLogger.warn('failed to persist pinned source commit', {
+          err,
+          source: body.source?.url,
+        })
         /* best-effort: cache is updated even if yaml write fails */
       }
       remoteLogger.info('update completed', { source: body.source?.url, commit: res.pinned_commit })
@@ -127,6 +131,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
       const members = await discoverSkills(deps.git, deps.fs, url)
       return c.json({ members })
     } catch (e) {
+      remoteLogger.error('source scan failed', { err: e })
       return c.json({
         ok: false,
         error: 'scan_failed',
@@ -145,6 +150,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
       try {
         repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
       } catch (e) {
+        remoteLogger.error('source refresh repo resolution failed', { err: e, repo })
         return c.json(
           { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
           400,
@@ -159,12 +165,13 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
       if (!(await deps.fs.exists(cacheDir))) {
         await installSkill(deps.git, deps.fs, url, ref ?? 'main', repoPath, sourceId)
       }
-      const scanned = await scanSourceMembers(deps.fs, cacheDir, { url, ref: ref ?? 'main' })
+      const scanned = await scanSourceMembers(cacheDir, { url, ref: ref ?? 'main' })
       return c.json({
         ok: true,
         members: scanned.map((m) => ({ name: m.name, path: m.path })),
       })
     } catch (e) {
+      remoteLogger.error('source refresh failed', { err: e })
       return c.json({
         ok: false,
         error: 'refresh_failed',
@@ -184,6 +191,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
         tags: Object.keys(result.tags).sort().reverse(),
       })
     } catch (e) {
+      remoteLogger.error('source refs failed', { err: e })
       return c.json({
         ok: false,
         error: 'refs_failed',

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { resolveVars, resolveVarsChain } from '../src/vars'
+import {
+  prepareVarsMutationPersistence,
+  resolveVarsLifecycle,
+  validateVarDraft,
+} from '../src/vars-lifecycle'
 import type { VarsEnvironment } from '../src/vars-types'
 
 const typed = (entries: VarsEnvironment['entries']): VarsEnvironment => ({
@@ -259,6 +264,135 @@ describe('resolveVarsChain', () => {
         EMPTY: { type: 'string', value: '' },
         COLONS: { type: 'string', value: 'a:b' },
       },
+    })
+  })
+})
+
+describe('vars lifecycle', () => {
+  it('validates a draft through an overlay without mutating the source environments', () => {
+    const environments = {
+      dev: typed({
+        API_KEY: { type: 'secret', value: 'top-secret' },
+        HOST: { type: 'string', value: 'localhost' },
+      }),
+    }
+
+    const result = validateVarDraft(environments, {
+      environment: 'dev',
+      key: 'DRAFT',
+      entry: { type: 'string', value: 'token=${API_KEY}' },
+      chain: ['dev'],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.resolution.values.DRAFT).toEqual({
+      type: 'string',
+      value: 'token=top-secret',
+    })
+    expect(result.resolution.secretTaintedKeys).toEqual(['API_KEY', 'DRAFT'])
+    expect(environments.dev.entries.DRAFT).toBeUndefined()
+  })
+
+  it('validates drafts by resolving a tolerated missing-reference overlay afterward', () => {
+    const result = validateVarDraft(
+      { dev: typed({}) },
+      {
+        environment: 'dev',
+        key: 'DRAFT',
+        entry: { type: 'string', value: '${MISSING}' },
+        chain: ['dev'],
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      diagnostics: [
+        {
+          code: 'MISSING_REFERENCE',
+          severity: 'error',
+          environment: 'dev',
+          key: 'DRAFT',
+          path: ['DRAFT', 'MISSING'],
+          message: '变量 DRAFT 引用了不存在的变量 MISSING',
+        },
+      ],
+    })
+  })
+
+  it('reports every resolved value transitively tainted by a secret without masking values', () => {
+    const result = resolveVarsLifecycle(
+      {
+        dev: typed({
+          API_KEY: { type: 'secret', value: 'top-secret' },
+          DIRECT: { type: 'string', value: '${API_KEY}' },
+          MIDDLE: { type: 'string', value: 'prefix-${DIRECT}-suffix' },
+          MULTI_HOP: { type: 'string', value: '${MIDDLE}' },
+          HOST: { type: 'string', value: 'localhost' },
+          URL: { type: 'string', value: 'https://${HOST}' },
+        }),
+      },
+      ['dev'],
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.values.MIDDLE).toEqual({
+      type: 'string',
+      value: 'prefix-top-secret-suffix',
+    })
+    expect(result.secretTaintedKeys).toEqual(['API_KEY', 'DIRECT', 'MIDDLE', 'MULTI_HOP'])
+    expect(result.values.URL).toEqual({ type: 'string', value: 'https://localhost' })
+  })
+
+  it('prepares mutation persistence from the mutation result semantics', () => {
+    const changed = prepareVarsMutationPersistence({
+      environments: {
+        dev: typed({ NEXT: { type: 'string', value: 'ok' } }),
+      },
+      changed: ['dev'],
+      diagnostics: [],
+    })
+
+    expect(changed).toEqual({
+      ok: true,
+      environments: {
+        dev: typed({ NEXT: { type: 'string', value: 'ok' } }),
+      },
+    })
+
+    const failed = prepareVarsMutationPersistence({
+      environments: { dev: typed({}) },
+      changed: [],
+      diagnostics: [
+        {
+          code: 'missing_reference',
+          severity: 'error',
+          environment: 'dev',
+          key: 'NEXT',
+          message: '变量 NEXT 引用了不存在的变量 MISSING',
+        },
+      ],
+    })
+
+    expect(failed).toEqual({
+      ok: false,
+      diagnostic: {
+        code: 'missing_reference',
+        severity: 'error',
+        environment: 'dev',
+        key: 'NEXT',
+        message: '变量 NEXT 引用了不存在的变量 MISSING',
+      },
+      diagnostics: [
+        {
+          code: 'missing_reference',
+          severity: 'error',
+          environment: 'dev',
+          key: 'NEXT',
+          message: '变量 NEXT 引用了不存在的变量 MISSING',
+        },
+      ],
     })
   })
 })

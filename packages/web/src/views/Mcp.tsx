@@ -6,9 +6,13 @@ import Toast from '@/components/Toast'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
 import { useManifest } from '@/hooks/useManifest'
+import {
+  normalizeManifestOperationError,
+  useManifestOperations,
+  type ManifestOperations,
+} from '@/hooks/useManifestOperations'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
-import { api } from '@/lib/api'
 import { agentColor, agentShort, type AgentId } from '@/lib/agents'
 import { inputStyle } from '@/lib/styles'
 
@@ -453,43 +457,17 @@ function McpServerModal({
 }
 
 function McpTargetsBar({
-  repoPath,
   servers,
   agents,
-  reload,
-  setError,
+  operations,
 }: {
-  repoPath: string
   servers: McpServer[]
   agents: AgentId[]
-  reload: () => void
-  setError: (e: unknown) => void
+  operations: ManifestOperations
 }) {
-  const [updatingAgent, setUpdatingAgent] = useState<AgentId | null>(null)
-
   if (servers.length === 0 || agents.length === 0) return null
 
-  const setAll = async (agent: AgentId) => {
-    if (updatingAgent) return
-    const allOn = servers.every((server) => (server.targets ?? []).includes(agent))
-    try {
-      setUpdatingAgent(agent)
-      for (const server of servers) {
-        const targets = server.targets ?? []
-        const next = allOn
-          ? targets.filter((item) => item !== agent)
-          : targets.includes(agent)
-            ? targets
-            : [...targets, agent]
-        await api.updateMcpTargets({ repo: repoPath, id: server.id, targets: next })
-      }
-      reload()
-    } catch (e) {
-      setError(e)
-    } finally {
-      setUpdatingAgent(null)
-    }
-  }
+  const anyUpdating = agents.some((agent) => operations.pending.mcp.allTargets(agent))
 
   return (
     <div
@@ -537,8 +515,8 @@ function McpTargetsBar({
               aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
               aria-label={`${agentShort[agent]}：${stateText}`}
               data-tooltip={`${agentShort[agent]}：${tooltip}`}
-              disabled={updatingAgent !== null}
-              onClick={() => setAll(agent)}
+              disabled={anyUpdating}
+              onClick={() => void operations.setAllMcpTargets(servers, agent)}
             >
               {agentShort[agent]}
               {state === 'mixed' && (
@@ -556,16 +534,24 @@ function McpTargetsBar({
 
 export default function Mcp({ repoPath }: { repoPath: string }) {
   const { error, setError } = useViewError()
-  const { manifest, reload } = useManifest(repoPath, {
+  const { manifest } = useManifest(repoPath, {
     onError: setError,
     onSuccess: () => setError(null),
   })
   const { toast, showToast, dismiss } = useToast()
+  const operations = useManifestOperations(repoPath, {
+    onError: setError,
+    onSuccess: () => setError(null),
+    onToast: showToast,
+  })
   const [selected, setSelected] = useState<string | null>(null)
-  const [projecting, setProjecting] = useState(false)
   const [modalMode, setModalMode] = useState<McpServerModalMode | null>(null)
   const [modalBusy, setModalBusy] = useState(false)
   const [modalError, setModalError] = useState<string | null>(null)
+  const modalOperations = useManifestOperations(repoPath, {
+    onError: setModalError,
+    onToast: showToast,
+  })
   const [copied, setCopied] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
 
@@ -600,19 +586,6 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     setModalError(null)
   }
 
-  const project = async () => {
-    setProjecting(true)
-    try {
-      await api.project({ repo: repoPath, scope: 'mcp' })
-      showToast('投影完成')
-      reload()
-    } catch (e) {
-      setError(e)
-    } finally {
-      setProjecting(false)
-    }
-  }
-
   const handleSubmitServer = async (form: McpServerFormState) => {
     setModalBusy(true)
     setModalError(null)
@@ -621,17 +594,18 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         form,
         modalMode === 'edit' ? selectedServer?.id : undefined,
       )
+      let result
       if (modalMode === 'edit') {
         if (!selectedServer) return
-        await api.updateMcpServer({ repo: repoPath, id: selectedServer.id, server })
-        showToast('MCP Server 已保存')
+        result = await modalOperations.updateMcpServer(selectedServer.id, server)
       } else {
-        await api.addMcpServer({ repo: repoPath, server })
+        result = await modalOperations.addMcpServer(server)
       }
-      setModalMode(null)
-      reload()
-    } catch (e) {
-      setModalError(e instanceof Error ? e.message : String(e))
+      if (result.ok) setModalMode(null)
+      else setModalError(result.message || '保存 MCP Server 失败')
+    } catch (err) {
+      console.error({ err }, 'Failed to submit MCP server')
+      setModalError(normalizeManifestOperationError(err, '保存 MCP Server 失败'))
     } finally {
       setModalBusy(false)
     }
@@ -643,15 +617,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   ) => {
     if (!server) return
     const currentTargets = server.targets ?? []
-    const newTargets = currentTargets.includes(agent)
-      ? currentTargets.filter((item) => item !== agent)
-      : [...currentTargets, agent]
-    try {
-      await api.updateMcpTargets({ repo: repoPath, id: server.id, targets: newTargets })
-      reload()
-    } catch (e) {
-      setError(e)
-    }
+    await operations.toggleMcpTarget({ ...server, targets: currentTargets }, agent)
   }
 
   const handleCopy = () => {
@@ -681,9 +647,9 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           </Button>
           <IconButton
             label="投影 MCP"
-            tooltip={projecting ? '投影中…' : '投影'}
-            onClick={project}
-            disabled={projecting}
+            tooltip={operations.pending.project('mcp') ? '投影中…' : '投影'}
+            onClick={() => void operations.project('mcp')}
+            disabled={operations.pending.project('mcp')}
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </IconButton>
@@ -725,13 +691,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         </div>
       )}
 
-      <McpTargetsBar
-        repoPath={repoPath}
-        servers={servers}
-        agents={visibleAgents}
-        reload={reload}
-        setError={setError}
-      />
+      <McpTargetsBar servers={servers} agents={visibleAgents} operations={operations} />
 
       <div
         style={{
@@ -962,13 +922,10 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
             style={{ color: 'var(--error)' }}
             onClick={async () => {
               if (!selectedServer) return
-              try {
-                await api.deleteMcpServer({ repo: repoPath, id: selectedServer.id })
+              const result = await operations.deleteMcpServer(selectedServer.id)
+              if (result.ok) {
                 setDeleteOpen(false)
                 setSelected(null)
-                reload()
-              } catch (e) {
-                setError(e)
               }
             }}
           >

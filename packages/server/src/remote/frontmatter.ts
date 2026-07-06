@@ -14,11 +14,15 @@ export function parseSkillMeta(
   skillPath: string,
 ): SkillMeta | null {
   const { data } = matter(content)
-  const name = (data.name as string) ?? dirName
-  if (!NAME_REGEX.test(name)) return null
+  if (!NAME_REGEX.test(dirName)) return null
   return {
-    name,
+    name: dirName,
     description: (data.description as string) ?? '',
     path: skillPath,
   }
+}
+
+export function parseSkillFrontmatterName(content: string): string | null {
+  const { data } = matter(content)
+  return typeof data.name === 'string' ? data.name : null
 }

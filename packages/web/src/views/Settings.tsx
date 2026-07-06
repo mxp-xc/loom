@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { ConfigField, FIELD_SCHEMA, type ConfigLevel } from '@/components/ConfigField'
 import { useViewError } from '@/hooks/useViewError'
-import { refreshManifest } from '@/hooks/useManifest'
+import { useManifestOperations } from '@/hooks/useManifestOperations'
 
 type Config = Record<string, unknown>
 
@@ -44,6 +44,10 @@ function hasPath(obj: Record<string, unknown>, path: string): boolean {
 export default function Settings({ repoPath }: { repoPath: string }) {
   const [cfg, setCfg] = useState<ConfigResponse | null>(null)
   const { error, setError } = useViewError()
+  const operations = useManifestOperations(repoPath, {
+    onError: setError,
+    onSuccess: () => setError(null),
+  })
   const [level, setLevel] = useState<ConfigLevel>(() => {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(LS_LEVEL) : null
     return saved === 'effective' || saved === 'repo' || saved === 'local' ? saved : 'effective'
@@ -70,15 +74,17 @@ export default function Settings({ repoPath }: { repoPath: string }) {
   }, [repoPath])
 
   const reload = () => {
-    api
+    return api
       .getConfig(repoPath)
       .then((c) => setCfg(c as ConfigResponse))
       .catch((e) => setError(e))
   }
 
-  const reloadAll = () => {
-    reload()
-    refreshManifest(repoPath).catch((e) => setError(e))
+  const commitField = async (field: string, value: unknown) => {
+    if (level === 'effective') return
+    const result = await operations.saveConfig({ level, field, value })
+    if (!result.ok) throw new Error(result.message || '保存配置失败')
+    await reload()
   }
 
   const handleDraftChange = (key: string, value: string | undefined) => {
@@ -109,7 +115,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
         <button
           onClick={() => {
             setError(null)
-            reload()
+            void reload()
           }}
           style={{
             fontSize: 13,
@@ -203,8 +209,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
                     effectiveValue={getPath(cfg.effective, field.key)}
                     inRepo={hasPath(cfg.repo, field.key)}
                     inLocal={hasPath(cfg.local, field.key)}
-                    repoPath={repoPath}
-                    onSaved={reloadAll}
+                    onCommit={commitField}
                     draft={drafts[field.key]}
                     onDraftChange={handleDraftChange}
                   />

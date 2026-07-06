@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { planProjection } from '../src/projection'
+import {
+  formatSourceMemberSkillId,
+  parseSourceMemberSkillId,
+  planProjection,
+  resolveSkillNaming,
+  sourceIdentity,
+} from '../src/projection'
 import type { Manifest } from '../src/types'
 
 const manifest: Manifest = {
@@ -169,5 +175,29 @@ describe('planProjection skill_naming', () => {
       (l) => l.source !== 'local' && (l.source as any).memberName === 'brainstorming',
     )
     expect(link!.skillId).toBe('superpowers/brainstorming')
+  })
+})
+
+describe('source identity helpers', () => {
+  it('derive repo id and select default naming in one place', () => {
+    expect(sourceIdentity({ url: 'https://github.com/obra/superpowers.git' })).toEqual({
+      repoId: 'superpowers',
+    })
+    expect(resolveSkillNaming({})).toBe('dir')
+    expect(resolveSkillNaming({ skill_naming: 'hyphen' })).toBe('hyphen')
+  })
+
+  it('formats and parses source member skill ids for dir and hyphen naming', () => {
+    const source = { url: 'github:obra/superpowers', ref: 'main' }
+
+    expect(formatSourceMemberSkillId(source, 'brainstorming', { skill_naming: 'dir' })).toBe(
+      'superpowers/brainstorming',
+    )
+    expect(formatSourceMemberSkillId(source, 'brainstorming', { skill_naming: 'hyphen' })).toBe(
+      'superpowers-brainstorming',
+    )
+    expect(parseSourceMemberSkillId('superpowers/brainstorming', source)).toBe('brainstorming')
+    expect(parseSourceMemberSkillId('superpowers-brainstorming', source)).toBe('brainstorming')
+    expect(parseSourceMemberSkillId('custom-name', source)).toBe('custom-name')
   })
 })

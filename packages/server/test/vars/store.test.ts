@@ -18,6 +18,16 @@ const typed = (value: string) => ({
   entries: { KEY: { type: 'string' as const, value } },
 })
 
+async function symlinkDirectory(target: string, path: string) {
+  await import('node:fs/promises').then((m) =>
+    m.symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir'),
+  )
+}
+
+async function symlinkFile(target: string, path: string) {
+  await import('node:fs/promises').then((m) => m.symlink(target, path, 'file'))
+}
+
 describe('VarsStore', () => {
   it('validates environment names before constructing paths', async () => {
     const store = new VarsStore(root, new NodeFileSystem())
@@ -174,7 +184,7 @@ describe('VarsStore', () => {
   it('rejects every operation when vars is a symlink outside the repository', async () => {
     const outside = await mkdtemp(join(tmpdir(), 'loom-vars-outside-'))
     try {
-      await import('node:fs/promises').then((m) => m.symlink(outside, join(root, 'vars')))
+      await symlinkDirectory(outside, join(root, 'vars'))
       await import('node:fs/promises').then((m) =>
         m.writeFile(join(outside, 'dev.yaml'), 'KEY: safe\n'),
       )
@@ -197,11 +207,17 @@ describe('VarsStore', () => {
   })
 
   it('rejects every operation when an environment yaml is a symlink outside the repository', async () => {
-    const outside = join(root, 'outside.yaml')
     const fs = new NodeFileSystem()
     await fs.mkdir(join(root, 'vars'))
-    await fs.writeFile(outside, 'KEY: secret\n')
-    await import('node:fs/promises').then((m) => m.symlink(outside, join(root, 'vars', 'dev.yaml')))
+    const outside =
+      process.platform === 'win32'
+        ? await mkdtemp(join(root, 'outside-env-'))
+        : join(root, 'outside.yaml')
+    const protectedFile = process.platform === 'win32' ? join(outside, 'secret.yaml') : outside
+    await fs.writeFile(protectedFile, 'KEY: secret\n')
+    if (process.platform === 'win32')
+      await symlinkDirectory(outside, join(root, 'vars', 'dev.yaml'))
+    else await symlinkFile(outside, join(root, 'vars', 'dev.yaml'))
     const store = new VarsStore(root, fs)
     const operations = [
       () => store.list(),
@@ -212,6 +228,6 @@ describe('VarsStore', () => {
     ]
     for (const operation of operations)
       await expect(operation()).rejects.toMatchObject({ code: 'vars_symlink_not_allowed' })
-    expect(await fs.readFile(outside)).toBe('KEY: secret\n')
+    expect(await fs.readFile(protectedFile)).toBe('KEY: secret\n')
   })
 })

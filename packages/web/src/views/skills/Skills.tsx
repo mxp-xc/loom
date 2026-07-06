@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import Toast from '@/components/Toast'
-import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { ChevronsDownUp, ChevronsUpDown, Plus, RefreshCw } from 'lucide-react'
 import { useManifest } from '@/hooks/useManifest'
+import { useManifestOperations } from '@/hooks/useManifestOperations'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
 import type { SkillSource } from '@loom/core'
@@ -17,35 +17,21 @@ import type { SkillDetail } from './types'
 
 export default function Skills({ repoPath }: { repoPath: string }) {
   const { error, setError } = useViewError()
-  const { manifest, reload } = useManifest(repoPath, {
+  const { manifest } = useManifest(repoPath, {
     onError: setError,
     onSuccess: () => setError(null),
   })
   const { toast, showToast, dismiss } = useToast()
-  const [projecting, setProjecting] = useState(false)
+  const operations = useManifestOperations(repoPath, {
+    onError: setError,
+    onSuccess: () => setError(null),
+    onToast: showToast,
+  })
   const [addOpen, setAddOpen] = useState(false)
   const [scanSource, setScanSource] = useState<SkillSource | null>(null)
   const [detail, setDetail] = useState<SkillDetail | null>(null)
   const [editSource, setEditSource] = useState<SkillSource | null>(null)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
-
-  const project = async () => {
-    setProjecting(true)
-    setError(null)
-    try {
-      const res = (await api.project({ repo: repoPath, scope: 'skills' })) as any
-      if (res.ok) {
-        showToast('投影完成')
-        reload()
-      } else {
-        setError(res.message || '投影失败')
-      }
-    } catch (e) {
-      setError(e)
-    } finally {
-      setProjecting(false)
-    }
-  }
 
   const sourceCount = manifest?.skills?.sources?.length ?? 0
   const localCount = manifest?.skills?.skills?.length ?? 0
@@ -99,11 +85,11 @@ export default function Skills({ repoPath }: { repoPath: string }) {
             variant="secondary"
             size="sm"
             className="project-button"
-            onClick={project}
-            disabled={projecting}
+            onClick={() => void operations.project('skills')}
+            disabled={operations.pending.project('skills')}
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            {projecting ? '投影中…' : '投影'}
+            {operations.pending.project('skills') ? '投影中…' : '投影'}
           </Button>
         </div>
       </div>
@@ -162,18 +148,10 @@ export default function Skills({ repoPath }: { repoPath: string }) {
 
       {manifest && (
         <>
-          <GlobalTargetsBar
-            repoPath={repoPath}
-            manifest={manifest}
-            reload={reload}
-            setError={setError}
-          />
+          <GlobalTargetsBar manifest={manifest} operations={operations} />
           <SkillSourceList
-            repoPath={repoPath}
             manifest={manifest}
-            reload={reload}
-            showToast={showToast}
-            setError={setError}
+            operations={operations}
             onOpenDetail={setDetail}
             onOpenScan={setScanSource}
             onOpenEdit={setEditSource}
@@ -184,15 +162,10 @@ export default function Skills({ repoPath }: { repoPath: string }) {
       )}
 
       <MemberScanModal
-        repoPath={repoPath}
         source={scanSource}
-        showToast={showToast}
-        setError={setError}
+        operations={operations}
         onClose={() => setScanSource(null)}
-        onConfirm={() => {
-          setScanSource(null)
-          reload()
-        }}
+        onConfirm={() => setScanSource(null)}
       />
 
       <SkillDetailEditor
@@ -202,21 +175,13 @@ export default function Skills({ repoPath }: { repoPath: string }) {
         onClose={() => setDetail(null)}
       />
 
-      <AddSkillModal
-        open={addOpen}
-        repoPath={repoPath}
-        reload={reload}
-        onClose={() => setAddOpen(false)}
-      />
+      <AddSkillModal open={addOpen} repoPath={repoPath} onClose={() => setAddOpen(false)} />
       <EditSourceModal
         repoPath={repoPath}
         source={editSource}
         showToast={showToast}
         onClose={() => setEditSource(null)}
-        onSaved={() => {
-          setEditSource(null)
-          reload()
-        }}
+        onSaved={() => setEditSource(null)}
       />
     </div>
   )

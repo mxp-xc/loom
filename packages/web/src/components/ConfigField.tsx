@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { api } from '@/lib/api'
 import { AGENTS, agentShort } from '@/lib/agents'
 import { IconButton } from '@/components/ui/IconButton'
 import { Check, Eraser, X } from 'lucide-react'
@@ -146,8 +145,7 @@ interface ConfigFieldProps {
   effectiveValue: unknown
   inRepo: boolean
   inLocal: boolean
-  repoPath: string
-  onSaved: () => void
+  onCommit: (key: string, value: unknown) => Promise<void>
   draft: string | undefined
   onDraftChange: (key: string, value: string | undefined) => void
 }
@@ -159,8 +157,7 @@ export function ConfigField({
   effectiveValue,
   inRepo,
   inLocal,
-  repoPath,
-  onSaved,
+  onCommit,
   draft,
   onDraftChange,
 }: ConfigFieldProps) {
@@ -186,14 +183,8 @@ export function ConfigField({
     setSaving(true)
     setErr(null)
     try {
-      await api.putConfig({
-        repo: repoPath,
-        level: level as 'repo' | 'local',
-        field: field.key,
-        value: v,
-      })
+      await onCommit(field.key, v)
       onDraftChange(field.key, undefined)
-      onSaved()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -206,13 +197,7 @@ export function ConfigField({
     setSaving(true)
     setErr(null)
     try {
-      await api.putConfig({
-        repo: repoPath,
-        level: level as 'repo' | 'local',
-        field: field.key,
-        value: null,
-      })
-      onSaved()
+      await onCommit(field.key, null)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {

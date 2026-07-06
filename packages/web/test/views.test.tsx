@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { api } from '../src/lib/api'
 import Skills from '../src/views/skills/Skills'
 import SkillSourceList from '../src/views/skills/SkillSourceList'
 import AddSkillModal from '../src/views/skills/AddSkillModal'
+import EditSourceModal from '../src/views/skills/EditSourceModal'
 import Sync from '../src/views/Sync'
 import Mcp from '../src/views/Mcp'
 import Memory from '../src/views/Memory'
+import { useManifestOperations } from '../src/hooks/useManifestOperations'
 
 if (!Range.prototype.getClientRects) {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList
@@ -32,6 +35,8 @@ vi.mock('../src/lib/api', () => ({
     scanLocalSkills: vi.fn(async () => ({ ok: true, skills: [] })),
     scanSource: vi.fn(async () => ({ ok: true, members: [] })),
     getSourceRefs: vi.fn(async () => ({ ok: true, branches: [], tags: [] })),
+    refreshSource: vi.fn(async () => ({ ok: true, members: [] })),
+    addSource: vi.fn(async () => ({ ok: true })),
     setSourceMembers: vi.fn(async () => ({ ok: true })),
     updateSourceMeta: vi.fn(async () => ({ ok: true })),
     updateSkillTargets: vi.fn(async () => ({ ok: true })),
@@ -118,6 +123,82 @@ vi.mock('../src/lib/api', () => ({
   },
 }))
 
+function SkillSourceListHarness({
+  repoPath,
+  manifest,
+  showToast = vi.fn(),
+  setError = vi.fn(),
+  onOpenDetail,
+  onOpenScan,
+  onOpenEdit,
+  expandedGroups,
+  onToggleGroup,
+}: {
+  repoPath: string
+  manifest: any
+  showToast?: (message: string) => void
+  setError?: (error: string) => void
+  onOpenDetail: (detail: any) => void
+  onOpenScan: (source: any) => void
+  onOpenEdit: (source: any) => void
+  expandedGroups: Set<string>
+  onToggleGroup: (key: string) => void
+}) {
+  const operations = useManifestOperations(repoPath, { onError: setError, onToast: showToast })
+  return (
+    <SkillSourceList
+      manifest={manifest}
+      operations={operations}
+      onOpenDetail={onOpenDetail}
+      onOpenScan={onOpenScan}
+      onOpenEdit={onOpenEdit}
+      expandedGroups={expandedGroups}
+      onToggleGroup={onToggleGroup}
+    />
+  )
+}
+
+function EditSourceSwitchHarness() {
+  const [source, setSource] = useState<any>(null)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          setSource({
+            url: 'https://example.test/alpha.git',
+            ref: 'main',
+            type: 'branch',
+            members: [],
+          })
+        }
+      >
+        open alpha
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          setSource({
+            url: 'https://example.test/beta.git',
+            ref: 'main',
+            type: 'branch',
+            members: [],
+          })
+        }
+      >
+        open beta
+      </button>
+      <EditSourceModal
+        repoPath="/tmp/edit-switch"
+        source={source}
+        showToast={vi.fn()}
+        onClose={() => setSource(null)}
+        onSaved={() => setSource(null)}
+      />
+    </>
+  )
+}
+
 describe('MCP view', () => {
   it('edits a server in a modal using the create-style form', async () => {
     render(<Mcp repoPath="/tmp/mcp-layout" />)
@@ -192,6 +273,30 @@ describe('MCP view', () => {
     expect(within(dialog).queryByLabelText('env（JSON）')).toBeNull()
     expect(within(dialog).getByLabelText('env file')).toBeDefined()
   })
+
+  it('shows local validation errors in the Add MCP Server modal', async () => {
+    const callsBefore = vi.mocked(api.addMcpServer).mock.calls.length
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      render(<Mcp repoPath="/tmp/mcp-layout" />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Add server' }))
+      const dialog = await screen.findByRole('dialog', { name: 'Add MCP Server' })
+
+      fireEvent.click(within(dialog).getByRole('button', { name: '添加 MCP Server' }))
+
+      expect(await within(dialog).findByText('id 不能为空')).toBeDefined()
+      expect(api.addMcpServer).toHaveBeenCalledTimes(callsBefore)
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        'Failed to submit MCP server',
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   it('bulk toggles MCP server targets with mixed state feedback', async () => {
     render(<Mcp repoPath="/tmp/mcp-layout" />)
 
@@ -282,6 +387,41 @@ describe('Skills view', () => {
     expect(await screen.findByText('投影', { exact: false })).toBeDefined()
   })
 
+  it('clears stale project errors after a successful project mutation refreshes manifest', async () => {
+    const repoPath = '/tmp/skills-project-error-clear'
+    const getManifestCallsBefore = vi.mocked(api.getManifest).mock.calls.length
+    const projectCallsBefore = vi.mocked(api.project).mock.calls.length
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(api.project).mockResolvedValueOnce({
+      ok: false,
+      message: '投影失败: stale yaml',
+    } as never)
+
+    try {
+      render(
+        <MemoryRouter>
+          <Skills repoPath={repoPath} />
+        </MemoryRouter>,
+      )
+
+      await screen.findByText('还没有配置任何 Skill')
+      await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(getManifestCallsBefore + 1))
+
+      fireEvent.click(screen.getByRole('button', { name: '投影' }))
+
+      expect(await screen.findByText('投影失败: stale yaml')).toBeDefined()
+      await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 1))
+
+      fireEvent.click(screen.getByRole('button', { name: '投影' }))
+
+      await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 2))
+      await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(getManifestCallsBefore + 2))
+      await waitFor(() => expect(screen.queryByText('投影失败: stale yaml')).toBeNull())
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   it('defaults every group to collapsed and supports bulk and individual toggles', async () => {
     render(
       <MemoryRouter>
@@ -363,19 +503,103 @@ describe('Skills view', () => {
 
 describe('Add Skill modal', () => {
   it('scans ~/.agents/skills when opened', async () => {
-    render(<AddSkillModal open repoPath="/tmp/r" reload={vi.fn()} onClose={vi.fn()} />)
+    render(<AddSkillModal open repoPath="/tmp/r" onClose={vi.fn()} />)
     await waitFor(() =>
       expect(api.scanLocalSkills).toHaveBeenCalledWith('~/.agents/skills', '/tmp/r'),
     )
   })
+
+  it('keeps the source modal open when members fail after source creation', async () => {
+    const onClose = vi.fn()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const getManifestCallsBefore = vi.mocked(api.getManifest).mock.calls.length
+    vi.mocked(api.scanSource).mockResolvedValueOnce({
+      ok: true,
+      members: [{ name: 'alpha', path: 'alpha/SKILL.md' }],
+    } as never)
+    vi.mocked(api.addSource).mockResolvedValueOnce({ ok: true } as never)
+    vi.mocked(api.setSourceMembers).mockResolvedValueOnce({
+      ok: false,
+      message: 'members write failed',
+    } as never)
+
+    try {
+      render(<AddSkillModal open repoPath="/tmp/r" onClose={onClose} />)
+
+      const dialog = await screen.findByRole('dialog', { name: 'Add Skill' })
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Source' }))
+      fireEvent.change(within(dialog).getByPlaceholderText('https://github.com/org/repo'), {
+        target: { value: 'https://example.test/skills.git' },
+      })
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Scan' }))
+      expect(await within(dialog).findByText('alpha')).toBeDefined()
+
+      fireEvent.click(within(dialog).getByRole('button', { name: '添加 Source' }))
+
+      expect(await within(dialog).findByText(/members write failed/)).toBeDefined()
+      await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(getManifestCallsBefore + 1))
+      expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
+      expect(onClose).not.toHaveBeenCalled()
+      expect(screen.getByRole('dialog', { name: 'Add Skill' })).toBeDefined()
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: 'source:add',
+          result: expect.objectContaining({ ok: false }),
+        }),
+        expect.any(String),
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
 })
 
 describe('Skill source updates', () => {
+  it('opens source member detail with the configured source member skill id', () => {
+    const onOpenDetail = vi.fn()
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/detail-source"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  url: 'https://github.com/obra/superpowers.git',
+                  ref: 'main',
+                  members: [{ name: 'systematic-debugging', targets: ['codex'] }],
+                },
+              ],
+              skills: [],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: ['codex'], skill_naming: 'hyphen' },
+            errors: [],
+          } as never
+        }
+        onOpenDetail={onOpenDetail}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set(['https://github.com/obra/superpowers.git-main'])}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByText('systematic-debugging'))
+
+    expect(onOpenDetail).toHaveBeenCalledWith({
+      skillId: 'superpowers-systematic-debugging',
+      source: 'https://github.com/obra/superpowers.git',
+      targets: ['codex'],
+    })
+  })
+
   it('toggles from the group header but not from links or actions', () => {
     const onToggleGroup = vi.fn()
     const onOpenEdit = vi.fn()
     render(
-      <SkillSourceList
+      <SkillSourceListHarness
         repoPath="/tmp/header-click"
         manifest={
           {
@@ -395,9 +619,6 @@ describe('Skill source updates', () => {
             errors: [],
           } as never
         }
-        reload={vi.fn()}
-        showToast={vi.fn()}
-        setError={vi.fn()}
         onOpenDetail={vi.fn()}
         onOpenScan={vi.fn()}
         onOpenEdit={onOpenEdit}
@@ -432,7 +653,7 @@ describe('Skill source updates', () => {
     } as never)
 
     render(
-      <SkillSourceList
+      <SkillSourceListHarness
         repoPath="/tmp/tag-update"
         manifest={
           {
@@ -454,9 +675,7 @@ describe('Skill source updates', () => {
             errors: [],
           } as never
         }
-        reload={vi.fn()}
         showToast={vi.fn()}
-        setError={vi.fn()}
         onOpenDetail={vi.fn()}
         onOpenScan={vi.fn()}
         onOpenEdit={vi.fn()}
@@ -474,9 +693,8 @@ describe('Skill source updates', () => {
   })
 
   it('requires confirmation before deleting a source', async () => {
-    const reload = vi.fn()
     render(
-      <SkillSourceList
+      <SkillSourceListHarness
         repoPath="/tmp/delete-source"
         manifest={
           {
@@ -496,9 +714,6 @@ describe('Skill source updates', () => {
             errors: [],
           } as never
         }
-        reload={reload}
-        showToast={vi.fn()}
-        setError={vi.fn()}
         onOpenDetail={vi.fn()}
         onOpenScan={vi.fn()}
         onOpenEdit={vi.fn()}
@@ -520,7 +735,7 @@ describe('Skill source updates', () => {
         url: 'https://github.com/obra/superpowers.git',
       }),
     )
-    expect(reload).toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '删除 source' })).toBeNull())
   })
   it('lets Edit Source select all and clear all scanned members', async () => {
     vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
@@ -551,6 +766,52 @@ describe('Skill source updates', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: '全不选' }))
     expect(within(dialog).getByText('已选 0 / 2')).toBeDefined()
+  })
+
+  it('does not show stale Edit Source errors after switching source', async () => {
+    let rejectAlphaRefs!: (error: Error) => void
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(api.getSourceRefs)
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectAlphaRefs = reject
+          }) as never,
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        branches: ['main'],
+        tags: [],
+      } as never)
+    vi.mocked(api.scanSource).mockResolvedValue({ ok: true, members: [] } as never)
+
+    try {
+      render(<EditSourceSwitchHarness />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
+      expect(await screen.findByRole('dialog', { name: /Edit Source/ })).toBeDefined()
+
+      fireEvent.click(screen.getByRole('button', { name: 'open beta' }))
+      await waitFor(() =>
+        expect(api.getSourceRefs).toHaveBeenCalledWith('https://example.test/beta.git'),
+      )
+
+      await act(async () => {
+        rejectAlphaRefs(new Error('alpha refs failed'))
+        await Promise.resolve()
+      })
+
+      expect(screen.queryByText('alpha refs failed')).toBeNull()
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: 'source:refs:https://example.test/alpha.git',
+          err: expect.any(Error),
+        }),
+        expect.any(String),
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })
 

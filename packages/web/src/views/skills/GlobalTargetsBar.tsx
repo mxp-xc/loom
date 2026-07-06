@@ -1,20 +1,16 @@
-import { useState } from 'react'
-import { AGENTS, agentShort, agentColor, type AgentId } from '@/lib/agents'
+import { agentShort, agentColor, type AgentId } from '@/lib/agents'
 import type { Manifest } from '@loom/core'
 import { Link } from 'react-router-dom'
 import { Settings2 } from 'lucide-react'
 import { IconButton } from '@/components/ui/IconButton'
-import { api } from '@/lib/api'
+import type { ManifestOperations } from '@/hooks/useManifestOperations'
 
 interface Props {
-  repoPath: string
   manifest: Manifest
-  reload: () => void
-  setError: (e: unknown) => void
+  operations: ManifestOperations
 }
 
-export default function GlobalTargetsBar({ repoPath, manifest, reload, setError }: Props) {
-  const [updatingAgent, setUpdatingAgent] = useState<AgentId | null>(null)
+export default function GlobalTargetsBar({ manifest, operations }: Props) {
   const agents = (manifest.config?.targets ?? []) as AgentId[]
   const sourceCount = manifest.skills?.sources?.length ?? 0
   const localCount = manifest.skills?.skills?.length ?? 0
@@ -25,40 +21,7 @@ export default function GlobalTargetsBar({ repoPath, manifest, reload, setError 
     ...(manifest.skills?.skills.map((skill) => ({ kind: 'local' as const, skill })) ?? []),
   ]
 
-  const setAll = async (agent: AgentId) => {
-    if (updatingAgent) return
-    const allOn =
-      skills.length > 0 &&
-      skills.every((item) => {
-        const targets = item.kind === 'source' ? item.member.targets : item.skill.targets
-        return (targets ?? []).includes(agent)
-      })
-    try {
-      setUpdatingAgent(agent)
-      for (const item of skills) {
-        const targets =
-          item.kind === 'source' ? (item.member.targets ?? []) : (item.skill.targets ?? [])
-        const next = allOn
-          ? targets.filter((a) => a !== agent)
-          : AGENTS.filter((a) => a === agent || targets.includes(a))
-        if (item.kind === 'source') {
-          await api.updateSkillTargets({
-            repo: repoPath,
-            sourceUrl: item.source.url,
-            memberName: item.member.name,
-            targets: next,
-          })
-        } else {
-          await api.updateLocalSkillTargets({ repo: repoPath, id: item.skill.id, targets: next })
-        }
-      }
-      reload()
-    } catch (e) {
-      setError(e)
-    } finally {
-      setUpdatingAgent(null)
-    }
-  }
+  const anyUpdating = agents.some((agent) => operations.pending.skills.allTargets(agent))
 
   if (sourceCount === 0 && localCount === 0) return null
 
@@ -104,8 +67,8 @@ export default function GlobalTargetsBar({ repoPath, manifest, reload, setError 
               aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
               aria-label={`${agentShort[agent]}：${state === 'on' ? '全部已选择' : state === 'mixed' ? '部分已选择' : '全部未选择'}`}
               data-tooltip={`${agentShort[agent]}：${tooltip}`}
-              disabled={updatingAgent !== null}
-              onClick={() => setAll(agent)}
+              disabled={anyUpdating}
+              onClick={() => void operations.setAllSkillTargets(manifest, agent)}
             >
               {agentShort[agent]}
               {state === 'mixed' && (

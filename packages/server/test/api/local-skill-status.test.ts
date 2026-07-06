@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { createSkillsYamlRoutes } from '../../src/api/routes/skills-yaml'
-import { annotateLocalSkillAvailability } from '../../src/api/routes/projection'
+import { annotateLocalSkillAvailability } from '../../src/projection/workflow'
 
 describe('local skill availability', () => {
   it('marks refs by checking their SKILL.md file', async () => {

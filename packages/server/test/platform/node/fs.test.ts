@@ -110,9 +110,21 @@ describe('NodeFileSystem', () => {
     expect(await fs.exists(file)).toBe(false)
     const directory = join(root, 'directory')
     await mkdir(directory)
+    const linkTarget = join(root, 'link-target')
+    await writeFile(linkTarget, 'target')
     const link = join(root, 'file-link')
-    await symlink(file, link)
-    await fs.removeFile(link)
+    let linkCreated = false
+    try {
+      await symlink(linkTarget, link)
+      linkCreated = true
+    } catch (error) {
+      if (!isWindowsFileSymlinkPrivilegeError(error)) throw error
+    }
+    if (linkCreated) {
+      await fs.removeFile(link)
+      expect(await fs.isLink(link)).toBe(false)
+      expect(await fs.exists(linkTarget)).toBe(true)
+    }
     await expect(fs.removeFile(directory)).rejects.toThrow()
   })
   it('createLink makes a link to a dir target, returns fallback null', async () => {
@@ -219,3 +231,13 @@ describe('NodeFileSystem', () => {
     },
   )
 })
+
+function isWindowsFileSymlinkPrivilegeError(error: unknown): boolean {
+  return (
+    platform() === 'win32' &&
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'EPERM'
+  )
+}

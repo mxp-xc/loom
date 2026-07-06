@@ -54,7 +54,7 @@ export async function performUpdate(
   }
   await git.checkout(cacheDir, newRef)
   const pinned_commit = await git.revParseHead(cacheDir)
-  const newMembers = await scanSourceMembers(fs, cacheDir, { url: _source.url, ref: newRef })
+  const newMembers = await scanSourceMembers(cacheDir, { url: _source.url, ref: newRef })
   const newNames = new Set(newMembers.map((m) => m.name))
   const orphans = oldMembers.filter((m) => !newNames.has(m.name))
   return { pinned_commit, orphans, newMembers }

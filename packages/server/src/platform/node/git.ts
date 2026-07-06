@@ -1,5 +1,5 @@
 import { simpleGit, type SimpleGit } from 'simple-git'
-import type { IGit } from '../../ports/git.js'
+import type { GitPushResult, IGit } from '../../ports/git.js'
 
 export class NodeGit implements IGit {
   private git(path?: string): SimpleGit {
@@ -87,17 +87,15 @@ export class NodeGit implements IGit {
     await this.git(repoPath).commit(msg)
   }
 
-  async push(
-    repoPath: string,
-  ): Promise<{ ok: boolean; nonFastForward?: boolean; message?: string }> {
+  async push(repoPath: string): Promise<GitPushResult> {
     try {
       await this.git(repoPath).push('origin', 'HEAD')
       return { ok: true }
-    } catch (e: any) {
-      const msg = String(e?.message ?? e)
+    } catch (err) {
+      const msg = String((err as Error)?.message ?? err)
       const nonFastForward =
         /non-fast-forward|fetch first|updates were rejected because the tip/i.test(msg)
-      return { ok: false, nonFastForward, message: msg }
+      return { ok: false, nonFastForward, message: msg, cause: err }
     }
   }
 

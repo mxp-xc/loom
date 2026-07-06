@@ -1,10 +1,11 @@
 import { glob } from 'tinyglobby'
 import { join, dirname, basename } from 'node:path'
 import type { IFileSystem } from '../ports/fs.js'
-import type { SkillSource, AgentId, Manifest, LocalSkill } from '@loom/core'
-import { planProjection, deriveRepoId, type ProjectionPlan, type LinkPlan } from '@loom/core'
+import type { SkillSource, LocalSkill } from '@loom/core'
+import { logger } from '../lib/logger.js'
 
 const DEFAULT_IGNORE = ['**/.git/**', '**/node_modules/**', '**/.cache/**']
+const scanLogger = logger.child('projection.scan')
 
 export interface ScannedMember {
   name: string
@@ -12,16 +13,30 @@ export interface ScannedMember {
 }
 
 export async function scanSourceMembers(
-  fs: IFileSystem,
   repoPath: string,
   src: SkillSource,
 ): Promise<ScannedMember[]> {
   const pattern = src.scan ?? '**/SKILL.md'
-  void fs
   const matches = await glob(pattern, { cwd: repoPath, ignore: DEFAULT_IGNORE, onlyFiles: true })
-  return matches
-    .map((m) => ({ name: basename(dirname(m)), path: join(repoPath, dirname(m)) }))
-    .sort((a, b) => a.name.localeCompare(b.name))
+  const members: ScannedMember[] = []
+  for (const match of matches) {
+    const memberName = supportedSourceMemberName(match)
+    if (!memberName) {
+      scanLogger.warn('unsupported source skill layout; expected skills/<name>/SKILL.md', {
+        url: src.url,
+        path: match,
+      })
+      continue
+    }
+    members.push({ name: memberName, path: join(repoPath, dirname(match)) })
+  }
+  return members.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export function supportedSourceMemberName(match: string): string | null {
+  const parts = match.split(/[/\\]+/)
+  if (parts.length !== 3 || parts[0] !== 'skills' || parts[2] !== 'SKILL.md') return null
+  return parts[1] || null
 }
 
 // Auto-discover repo-local skills under <repo>/assets/skills and merge them
@@ -39,7 +54,8 @@ export async function mergeLocalSkills(
   let matches: string[] = []
   try {
     matches = await glob('**/SKILL.md', { cwd: dir, ignore: DEFAULT_IGNORE, onlyFiles: true })
-  } catch {
+  } catch (err) {
+    scanLogger.error('failed to scan local skills', { err, dir })
     return existing
   }
   const have = new Set(existing.map((s) => s.id))
@@ -48,51 +64,4 @@ export async function mergeLocalSkills(
     if (!have.has(name)) out.push({ id: name })
   }
   return out
-}
-
-export function resolveFullLinks(
-  manifest: Manifest,
-  scanResults: Map<string, ScannedMember[]>,
-  effectiveConfig: Manifest['config'],
-  installedAgents: Set<AgentId>,
-): ProjectionPlan {
-  const base = planProjection(manifest, effectiveConfig, installedAgents)
-  const naming = effectiveConfig.skill_naming ?? 'dir'
-  const globalTargets = effectiveConfig.targets ?? []
-  const globalTargetSet = new Set(globalTargets)
-  const skipped: AgentId[] = []
-  const activeTargets = (ts: AgentId[]): AgentId[] => {
-    const out: AgentId[] = []
-    for (const a of ts) {
-      if (!globalTargetSet.has(a)) continue
-      if (installedAgents.has(a)) out.push(a)
-      else skipped.push(a)
-    }
-    return out
-  }
-  const links: LinkPlan[] = base.links.filter((l) => l.source === 'local')
-  for (const src of manifest.skills.sources) {
-    const repoId = deriveRepoId(src.url)
-    const scanned = scanResults.get(src.url) ?? []
-    const overrideByName = new Map((src.members ?? []).map((m) => [m.name, m]))
-    for (const m of scanned) {
-      const ov = overrideByName.get(m.name)
-      const enabled = ov?.enabled ?? true
-      const ts = activeTargets(enabled === false ? [] : (ov?.targets ?? []))
-      links.push({
-        skillId: naming === 'hyphen' ? `${repoId}-${m.name}` : `${repoId}/${m.name}`,
-        source: { repoId, memberName: m.name },
-        targets: ts,
-      })
-    }
-  }
-
-  const allSkipped = [...new Set([...base.skippedAgents, ...skipped])]
-  return {
-    links,
-    mcpEntries: base.mcpEntries,
-    memoryPlan: base.memoryPlan,
-    skippedAgents: allSkipped,
-    strategy: base.strategy,
-  }
 }

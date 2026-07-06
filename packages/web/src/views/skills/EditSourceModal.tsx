@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { api } from '@/lib/api'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { inputStyle } from '@/lib/styles'
 import { Search } from 'lucide-react'
 import { Segmented } from './Segmented'
-import { deriveRepoId, type SkillSource } from '@loom/core'
+import { sourceIdentity, type SkillSource } from '@loom/core'
 import { sortSkillMembers, type ScanMember } from './types'
+import { useManifestOperations } from '@/hooks/useManifestOperations'
 
 interface Props {
   repoPath: string
@@ -64,6 +64,8 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
   const [search, setSearch] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const operations = useManifestOperations(repoPath, { onError: setError, onToast: showToast })
+  const { loadSourceRefs, scanSourceMembers, saveSource } = operations
 
   // Re-initialise whenever a source is opened: pre-fill url/type/ref from
   // the source, fetch the available refs, scan the members, and pre-select
@@ -94,20 +96,18 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
     void (async () => {
       setRefsLoading(true)
       try {
-        const res = await api.getSourceRefs(url)
+        const res = await loadSourceRefs(url, { shouldNotify: () => active })
         if (!active) return
         if (res.ok) {
-          const br = res.branches ?? []
-          const tg = res.tags ?? []
+          const br = res.result?.branches ?? []
+          const tg = res.result?.tags ?? []
           setBranches(br)
           setTags(tg)
           const list = initType === 'tag' ? tg : br
           setRef(source.ref && list.includes(source.ref) ? source.ref : (list[0] ?? ''))
         } else {
-          setError(res.message || res.error || '获取 refs 失败')
+          setError(res.message || '获取 refs 失败')
         }
-      } catch (e) {
-        if (active) setError(e instanceof Error ? e.message : String(e))
       } finally {
         if (active) setRefsLoading(false)
       }
@@ -116,15 +116,16 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
     void (async () => {
       setScanning(true)
       try {
-        const res = await api.scanSource(url)
+        const res = await scanSourceMembers(url, { shouldNotify: () => active })
         if (!active) return
-        if (Array.isArray(res.members)) {
-          setMembers(sortSkillMembers(res.members))
+        if (res.ok && Array.isArray(res.result?.members)) {
+          const scanned = res.result.members as ScanMember[]
+          setMembers(sortSkillMembers(scanned))
           // Pre-select scanned members that are already configured on the source.
-          setSelected(new Set(res.members.filter((m) => existing.has(m.name)).map((m) => m.name)))
+          setSelected(new Set(scanned.filter((m) => existing.has(m.name)).map((m) => m.name)))
+        } else if (!res.ok) {
+          setError(res.message || '扫描失败')
         }
-      } catch (e) {
-        if (active) setError(e instanceof Error ? e.message : String(e))
       } finally {
         if (active) setScanning(false)
       }
@@ -133,7 +134,7 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
     return () => {
       active = false
     }
-  }, [source])
+  }, [loadSourceRefs, scanSourceMembers, source])
 
   const handleTypeChange = (t: 'branch' | 'tag') => {
     setType(t)
@@ -146,35 +147,12 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
     setSaving(true)
     setError(null)
     try {
-      // Persist ref/type changes if they differ from the original source
-      const refChanged = ref !== source.ref
-      const typeChanged = type !== (source.type ?? 'branch')
-      if (refChanged || typeChanged) {
-        const metaRes = await api.updateSourceMeta({
-          repo: repoPath,
-          url: source.url,
-          ref: refChanged ? ref : undefined,
-          type: typeChanged ? type : undefined,
-        })
-        if (!metaRes.ok) {
-          setError(metaRes.message || metaRes.error || '更新 source 元信息失败')
-          setSaving(false)
-          return
-        }
-      }
-      const res = await api.setSourceMembers({
-        repo: repoPath,
-        url: source.url,
-        members: [...selected],
-      })
+      const res = await saveSource({ source, ref, type, members: [...selected] })
       if (res.ok) {
-        showToast(`${deriveRepoId(source.url)} 已更新`)
         onSaved()
       } else {
-        setError(res.message || res.error || '保存失败')
+        setError(res.message || '保存失败')
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)
     }
@@ -182,7 +160,7 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
 
   if (!source) return null
 
-  const repoId = deriveRepoId(source.url)
+  const repoId = sourceIdentity(source).repoId
   const refOptions = type === 'tag' ? tags : branches
   const filtered = members.filter((m) => m.name.toLowerCase().includes(search.trim().toLowerCase()))
 

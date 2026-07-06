@@ -6,7 +6,9 @@ export * from './merge.js'
 export * from './projection.js'
 export * from './mutators.js'
 export * from './vars.js'
+export * from './vars-lifecycle.js'
 export * from './vars-graph.js'
+export { normalizeVarEntry } from './vars-value.js'
 export {
   deleteVariable,
   renameVariable,

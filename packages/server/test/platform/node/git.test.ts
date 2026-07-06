@@ -74,8 +74,12 @@ describe('NodeGit', () => {
     await w2.commit('c2')
     await w2.push('origin', 'main:main')
     const res = await git.push(dest)
-    expect(res.ok).toBe(false)
+    if (res.ok) throw new Error('expected push to fail')
     expect(res.nonFastForward).toBe(true)
+    expect(res.cause).toBeInstanceOf(Error)
+    expect(String((res.cause as Error).message)).toMatch(
+      /non-fast-forward|fetch first|updates were rejected because the tip/i,
+    )
   })
   it('push succeeds when local ahead, returns ok:true', async () => {
     const dest = await mkdtemp(join(tmpdir(), 'pushok-'))

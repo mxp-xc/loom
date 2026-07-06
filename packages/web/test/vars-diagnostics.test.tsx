@@ -96,8 +96,15 @@ describe('Vars diagnostics actions', () => {
     })
     render(<Vars repoPath="/repo" />)
     fireEvent.click(await screen.findByRole('button', { name: '删除变量 API_URL' }))
-    const dialog = await screen.findByRole('dialog', { name: '删除变量 API_URL' })
-    expect(within(dialog).getByText('直接依赖')).toBeDefined()
+    await waitFor(() =>
+      expect(api.vars.inspectVariableDelete).toHaveBeenCalledWith('/repo', 'base', 'API_URL'),
+    )
+    const dialog = await screen.findByRole(
+      'dialog',
+      { name: '删除变量 API_URL' },
+      { timeout: 3000 },
+    )
+    expect(await within(dialog).findByText('直接依赖', {}, { timeout: 3000 })).toBeDefined()
     expect(within(dialog).getByText('base / CLIENT')).toBeDefined()
     expect(within(dialog).getByText('间接依赖')).toBeDefined()
     expect(within(dialog).getByText('prod / DEPLOY')).toBeDefined()

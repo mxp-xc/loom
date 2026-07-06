@@ -1,19 +1,21 @@
 import { useState } from 'react'
-import { api } from '@/lib/api'
 import { agentShort, agentColor, type AgentId } from '@/lib/agents'
-import { deriveRepoId, type SkillSource, type Manifest } from '@loom/core'
+import {
+  formatSourceMemberSkillId,
+  sourceIdentity,
+  type SkillSource,
+  type Manifest,
+} from '@loom/core'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
 import { AlertTriangle, ChevronDown, RefreshCw, Pencil, Trash2, ScanLine } from 'lucide-react'
 import type { SkillDetail } from './types'
+import type { ManifestOperations, SourceUpdateState } from '@/hooks/useManifestOperations'
 
 interface Props {
-  repoPath: string
   manifest: Manifest
-  reload: () => void
-  showToast: (msg: string) => void
-  setError: (e: unknown) => void
+  operations: ManifestOperations
   onOpenDetail: (d: SkillDetail) => void
   onOpenScan: (src: SkillSource) => void
   onOpenEdit: (src: SkillSource) => void
@@ -21,7 +23,6 @@ interface Props {
   onToggleGroup: (key: string) => void
 }
 
-type SourceUpdate = 'repair' | { label: string; newRef?: string }
 type DeleteTarget =
   { kind: 'source'; url: string; label: string } | { kind: 'local'; id: string; label: string }
 
@@ -46,22 +47,16 @@ const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
 )
 
 export default function SkillSourceList({
-  repoPath,
   manifest,
-  reload,
-  showToast,
-  setError,
+  operations,
   onOpenDetail,
   onOpenScan,
   onOpenEdit,
   expandedGroups,
   onToggleGroup,
 }: Props) {
-  const [checking, setChecking] = useState<string | null>(null)
-  const [updates, setUpdates] = useState<Record<string, SourceUpdate>>({})
-  const [updating, setUpdating] = useState<string | null>(null)
+  const [updates, setUpdates] = useState<Record<string, SourceUpdateState>>({})
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
-  const [deleteBusy, setDeleteBusy] = useState(false)
 
   const agents = manifest.config?.targets ?? []
   const visibleAgents: AgentId[] = agents
@@ -72,82 +67,30 @@ export default function SkillSourceList({
     sourceUrl: string,
     memberName: string,
     agent: AgentId,
-    currentTargets: string[],
+    currentTargets: AgentId[],
   ) => {
-    const newTargets = currentTargets.includes(agent)
-      ? currentTargets.filter((a) => a !== agent)
-      : [...currentTargets, agent]
-    try {
-      await api.updateSkillTargets({ repo: repoPath, sourceUrl, memberName, targets: newTargets })
-      reload()
-    } catch (e) {
-      setError(e)
-    }
+    await operations.toggleSourceSkillTarget(sourceUrl, memberName, agent, currentTargets)
   }
 
-  const handleLocalChipToggle = async (id: string, agent: AgentId, currentTargets: string[]) => {
-    const newTargets = currentTargets.includes(agent)
-      ? currentTargets.filter((a) => a !== agent)
-      : [...currentTargets, agent]
-    try {
-      await api.updateLocalSkillTargets({ repo: repoPath, id, targets: newTargets })
-      reload()
-    } catch (e) {
-      setError(e)
-    }
+  const handleLocalChipToggle = async (id: string, agent: AgentId, currentTargets: AgentId[]) => {
+    await operations.toggleLocalSkillTarget(id, agent, currentTargets)
   }
 
   const handleCheck = async (src: SkillSource) => {
-    setChecking(src.url)
-    try {
-      const res = (await api.update(repoPath, [src])) as any
-      if (res.updates?.[0]?.hasUpdate) {
-        const u = res.updates[0]
-        if (u.needsRepair) {
-          setUpdates((prev) => ({ ...prev, [src.url]: 'repair' }))
-          showToast(`${deriveRepoId(src.url)} 缓存损坏,请点击 update 修复`)
-          return
-        }
-        // Tag tracking shows the tag name; branch tracking shows a short commit hash.
-        const latest = u.latestTag ?? (u.latestCommit ? u.latestCommit.slice(0, 7) : 'unknown')
-        setUpdates((prev) => ({
-          ...prev,
-          [src.url]: { label: latest, newRef: u.latestTag },
-        }))
-        showToast(`${deriveRepoId(src.url)} 有更新: ${src.ref} -> ${latest}`)
-      } else {
-        showToast(`${deriveRepoId(src.url)} 已是最新`)
-      }
-    } catch (e) {
-      setError(e)
-    } finally {
-      setChecking(null)
+    const result = await operations.checkSourceUpdate(src)
+    if (result.ok && result.result?.update) {
+      setUpdates((prev) => ({ ...prev, [src.url]: result.result!.update! }))
     }
   }
 
   const handlePerformUpdate = async (src: SkillSource) => {
-    setUpdating(src.url)
-    try {
-      const repoId = deriveRepoId(src.url)
-      const update = updates[src.url]
-      const res = (await api.performUpdate({
-        source: src,
-        newRef: update && update !== 'repair' ? (update.newRef ?? src.ref) : src.ref,
-        repo: repoPath,
-        sourceId: repoId,
-        oldMembers: src.members ?? [],
-      })) as any
-      showToast(`${repoId} 已更新到 ${res.pinned_commit?.slice(0, 7) ?? src.ref}`)
+    const result = await operations.performSourceUpdate(src, updates[src.url])
+    if (result.ok) {
       setUpdates((prev) => {
         const n = { ...prev }
         delete n[src.url]
         return n
       })
-      reload()
-    } catch (e) {
-      setError(e)
-    } finally {
-      setUpdating(null)
     }
   }
 
@@ -161,32 +104,30 @@ export default function SkillSourceList({
 
   const confirmDelete = async () => {
     if (!deleteTarget) return
-    setDeleteBusy(true)
-    try {
-      if (deleteTarget.kind === 'source') {
-        await api.deleteSource({ repo: repoPath, url: deleteTarget.url })
-        showToast('已删除 source')
-      } else {
-        await api.deleteLocalSkill({ repo: repoPath, id: deleteTarget.id })
-        showToast('已删除 local skill')
-      }
+    const result =
+      deleteTarget.kind === 'source'
+        ? await operations.deleteSource(deleteTarget.url)
+        : await operations.deleteLocalSkill(deleteTarget.id)
+    if (result.ok) {
       setDeleteTarget(null)
-      reload()
-    } catch (e) {
-      setError(e)
-    } finally {
-      setDeleteBusy(false)
     }
   }
 
   if (sourceCount === 0 && localCount === 0) return null
+
+  const deleteBusy =
+    deleteTarget?.kind === 'source'
+      ? operations.pending.source.delete(deleteTarget.url)
+      : deleteTarget?.kind === 'local'
+        ? operations.pending.skills.deleteLocal(deleteTarget.id)
+        : false
 
   return (
     <>
       <div className="skill-groups">
         {/* Remote sources */}
         {manifest.skills.sources.map((src) => {
-          const repoId = deriveRepoId(src.url)
+          const repoId = sourceIdentity(src).repoId
           const key = src.url + '-' + src.ref
           const isExpanded = expandedGroups.has(key)
           const sourceUpdate = updates[src.url]
@@ -262,20 +203,20 @@ export default function SkillSourceList({
                 <span className="gacts" onClick={(e) => e.stopPropagation()}>
                   <IconButton
                     label={`检查更新 source ${repoId}`}
-                    tooltip={checking === src.url ? '检查中…' : '检查更新'}
+                    tooltip={operations.pending.source.check(src) ? '检查中…' : '检查更新'}
                     size="sm"
                     onClick={() => handleCheck(src)}
-                    disabled={checking === src.url}
+                    disabled={operations.pending.source.check(src)}
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
                   </IconButton>
                   {updates[src.url] && (
                     <IconButton
                       label={`更新 source ${repoId}`}
-                      tooltip={updating === src.url ? '更新中…' : '更新'}
+                      tooltip={operations.pending.source.update(src) ? '更新中…' : '更新'}
                       size="sm"
                       onClick={() => handlePerformUpdate(src)}
-                      disabled={updating === src.url}
+                      disabled={operations.pending.source.update(src)}
                       tone="warning"
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
@@ -311,7 +252,7 @@ export default function SkillSourceList({
               {isExpanded &&
                 src.members?.map((m) => {
                   const isEnabled = m.enabled !== false
-                  const mTargets = m.targets ?? []
+                  const mTargets = (m.targets ?? []) as AgentId[]
                   return (
                     <div key={m.name} className="skill">
                       <span className={'sdot ' + (isEnabled ? 'green' : 'dim')} />
@@ -319,10 +260,7 @@ export default function SkillSourceList({
                         className={'sname clickable' + (isEnabled ? '' : ' dim')}
                         onClick={() =>
                           onOpenDetail({
-                            skillId:
-                              manifest.config?.skill_naming === 'hyphen'
-                                ? `${repoId}-${m.name}`
-                                : `${repoId}/${m.name}`,
+                            skillId: formatSourceMemberSkillId(src, m.name, manifest.config),
                             source: src.url,
                             targets: mTargets,
                           })
@@ -374,7 +312,7 @@ export default function SkillSourceList({
             </div>
             {expandedGroups.has('local') &&
               manifest.skills.skills.map((s) => {
-                const lTargets = s.targets ?? []
+                const lTargets = (s.targets ?? []) as AgentId[]
                 const missing = Boolean(s.path && s.available === false)
                 return (
                   <div key={s.id} className={'skill' + (missing ? ' skill-missing' : '')}>

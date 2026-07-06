@@ -3,6 +3,12 @@ import { Hono } from 'hono'
 import * as yaml from 'js-yaml'
 import { registerRoutes } from '../../src/api/router'
 
+const logFns = vi.hoisted(() => ({
+  error: vi.fn(),
+  warn: vi.fn(),
+  info: vi.fn(),
+}))
+
 const memFiles: Record<string, string> = {}
 
 const memFs = {
@@ -38,6 +44,14 @@ vi.mock('@loom/core', async () => {
 })
 vi.mock('../../src/platform/node/index.js', () => ({
   createNodePlatform: vi.fn(() => ({ fs: memFs, git: {}, proc: {} })),
+}))
+vi.mock('../../src/lib/logger.js', () => ({
+  logger: {
+    child: vi.fn(() => logFns),
+    error: logFns.error,
+    warn: logFns.warn,
+    info: logFns.info,
+  },
 }))
 vi.mock('../../src/platform/node/init.js', () => ({ initLoom: vi.fn() }))
 vi.mock('../../src/api/repo.js', () => ({
@@ -151,6 +165,43 @@ describe('source scan', () => {
     const body = await res.json()
     expect(body.members).toHaveLength(2)
     expect(body.members[0].name).toBe('brainstorming')
+  })
+
+  it('POST /api/sources/scan logs scan failures', async () => {
+    logFns.error.mockClear()
+    const { discoverSkills } = await import('../../src/remote/discover.js')
+    const err = new Error('scan exploded')
+    vi.mocked(discoverSkills).mockRejectedValueOnce(err)
+
+    const res = await app.request('/api/sources/scan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://github.com/obra/superpowers' }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: 'scan_failed',
+      message: 'scan exploded',
+    })
+    expect(logFns.error).toHaveBeenCalledWith('source scan failed', { err })
+  })
+
+  it('POST /api/sources/refs logs refs failures', async () => {
+    logFns.error.mockClear()
+    const res = await app.request('/api/sources/refs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://github.com/obra/superpowers' }),
+    })
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).error).toBe('refs_failed')
+    expect(logFns.error).toHaveBeenCalledWith(
+      'source refs failed',
+      expect.objectContaining({ err: expect.any(TypeError) }),
+    )
   })
 })
 

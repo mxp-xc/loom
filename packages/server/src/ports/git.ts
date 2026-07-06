@@ -1,3 +1,6 @@
+export type GitPushResult =
+  { ok: true } | { ok: false; nonFastForward?: boolean; message?: string; cause?: unknown }
+
 export interface IGit {
   init(repoPath: string): Promise<void>
   fetch(repoPath: string): Promise<void>
@@ -11,7 +14,7 @@ export interface IGit {
   checkout(repoPath: string, ref: string): Promise<void>
   add(repoPath: string, paths: string[]): Promise<void>
   commit(repoPath: string, msg: string): Promise<void>
-  push(repoPath: string): Promise<{ ok: boolean; nonFastForward?: boolean; message?: string }>
+  push(repoPath: string): Promise<GitPushResult>
   status(repoPath: string): Promise<{ dirty: boolean }>
   show(repoPath: string, ref: string, path: string): Promise<string>
   revParseHead(repoPath: string): Promise<string>
