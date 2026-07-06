@@ -62,6 +62,7 @@ export async function executeProjection(
           const skillsDir = agentSkillsDir(agent)
           await fs.mkdir(skillsDir, true)
           const dest = join(skillsDir, link.skillId)
+          await fs.mkdir(join(dest, '..'), true)
           if (await fs.isLink(dest)) {
             await fs.removeLink(dest)
           } else if (await fs.exists(dest)) {

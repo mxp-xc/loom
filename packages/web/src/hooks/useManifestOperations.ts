@@ -536,6 +536,17 @@ export function useManifestOperations(
     [repoPath, run],
   )
 
+  const projectSkillsAfterTargetUpdate = useCallback(
+    async (saveTargets: () => Promise<MaybeOkResponse>): Promise<MaybeOkResponse> => {
+      const saved = await saveTargets()
+      if (responseFailureMessage(saved, '保存 targets 失败')) return saved
+      const projected = (await api.project({ repo: repoPath, scope: 'skills' })) as MaybeOkResponse
+      const projectError = responseFailureMessage(projected, '投影失败')
+      return projectError ? { ok: false, message: projectError } : projected
+    },
+    [repoPath],
+  )
+
   const deleteSource = useCallback(
     (url: string) =>
       run(
@@ -561,15 +572,18 @@ export function useManifestOperations(
       run(
         pendingKey.sourceSkillTarget(sourceUrl, memberName),
         () =>
-          api.updateSkillTargets({
-            repo: repoPath,
-            sourceUrl,
-            memberName,
-            targets: toggleTarget(currentTargets, agent),
-          }) as Promise<MaybeOkResponse>,
+          projectSkillsAfterTargetUpdate(
+            () =>
+              api.updateSkillTargets({
+                repo: repoPath,
+                sourceUrl,
+                memberName,
+                targets: toggleTarget(currentTargets, agent),
+              }) as Promise<MaybeOkResponse>,
+          ),
         { failureMessage: '保存 targets 失败' },
       ),
-    [repoPath, run],
+    [projectSkillsAfterTargetUpdate, repoPath, run],
   )
 
   const toggleLocalSkillTarget = useCallback(
@@ -577,14 +591,17 @@ export function useManifestOperations(
       run(
         pendingKey.localSkillTarget(id),
         () =>
-          api.updateLocalSkillTargets({
-            repo: repoPath,
-            id,
-            targets: toggleTarget(currentTargets, agent),
-          }) as Promise<MaybeOkResponse>,
+          projectSkillsAfterTargetUpdate(
+            () =>
+              api.updateLocalSkillTargets({
+                repo: repoPath,
+                id,
+                targets: toggleTarget(currentTargets, agent),
+              }) as Promise<MaybeOkResponse>,
+          ),
         { failureMessage: '保存 targets 失败' },
       ),
-    [repoPath, run],
+    [projectSkillsAfterTargetUpdate, repoPath, run],
   )
 
   const setAllSkillTargets = useCallback(

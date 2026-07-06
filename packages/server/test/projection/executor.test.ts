@@ -59,6 +59,39 @@ describe('executeProjection', () => {
       JSON.parse(await fs.readFile(join(home, '.claude.json'))).mcpServers.playwright.command,
     ).toBe('npx')
   })
+  it('creates parent directories for source skill ids that include a repo prefix', async () => {
+    const fs = new NodeFileSystem()
+    const remoteSkillDir = join(srcDir, 'remote-member')
+    await mkdir(remoteSkillDir, { recursive: true })
+    await writeFile(join(remoteSkillDir, 'SKILL.md'), 'remote')
+    const remotePlan: ProjectionPlan = {
+      links: [
+        {
+          skillId: 'superpowers/finishing-a-development-branch',
+          source: { repoId: 'superpowers', memberName: 'finishing-a-development-branch' },
+          targets: ['claude-code'],
+        },
+      ],
+      mcpEntries: [],
+      memoryPlan: { active: null, content: null, targets: [] },
+      skippedAgents: [],
+      strategy: 'link',
+    }
+
+    const res = await executeProjection(remotePlan, { ...manifest, mcp: [] }, varsCtx, {
+      fs,
+      adapters: { 'claude-code': new ClaudeCodeAdapter() },
+      installedAgents: installed,
+      resolveSkillSrc: () => remoteSkillDir,
+    })
+
+    expect(res.ok).toBe(true)
+    expect(
+      await fs.exists(
+        join(home, '.claude', 'skills', 'superpowers', 'finishing-a-development-branch'),
+      ),
+    ).toBe(true)
+  })
   it('failure rolls back: removes built links + restores MCP backup', async () => {
     const fs = new NodeFileSystem()
     await fs.writeFile(

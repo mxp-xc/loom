@@ -471,6 +471,30 @@ describe('Skills view', () => {
     expect(screen.queryByText('test-qa-skill')).toBeNull()
   })
 
+  it('projects skills after an individual target chip is toggled', async () => {
+    const projectCallsBefore = vi.mocked(api.project).mock.calls.length
+    render(
+      <MemoryRouter>
+        <Skills repoPath="/tmp/skills-layout" />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '全部展开' }))
+    const frontendRow = screen.getByText('frontend-design').closest('.skill')
+    expect(frontendRow).not.toBeNull()
+    fireEvent.click(within(frontendRow as HTMLElement).getByRole('button', { name: 'CX' }))
+
+    await waitFor(() =>
+      expect(api.updateLocalSkillTargets).toHaveBeenCalledWith({
+        repo: '/tmp/skills-layout',
+        id: 'frontend-design',
+        targets: ['codex'],
+      }),
+    )
+    await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 1))
+    expect(api.project).toHaveBeenLastCalledWith({ repo: '/tmp/skills-layout', scope: 'skills' })
+  })
+
   it('updates skill bulk targets one item at a time', async () => {
     let releaseFirst!: () => void
     const sourceCallsBefore = vi.mocked(api.updateSkillTargets).mock.calls.length
