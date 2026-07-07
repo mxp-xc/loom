@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
 import { registerRoutes } from '../../src/api/router'
 import { loadProjectionManifest, projectRepository } from '../../src/projection/workflow.js'
-import { syncPush } from '../../src/sync/push'
+import { syncForcePush, syncPush } from '../../src/sync/push'
 
 const platformGit = vi.hoisted(() => ({
   status: vi.fn(async () => {
@@ -10,6 +10,17 @@ const platformGit = vi.hoisted(() => ({
   }),
   add: vi.fn(),
   commit: vi.fn(),
+  forcePush: vi.fn(),
+}))
+
+const syncManager = vi.hoisted(() => ({
+  pull: vi.fn(async () => ({ conflicts: [], clean: true })),
+  forcePull: vi.fn(async () => ({ conflicts: [], clean: true })),
+  getSession: vi.fn(async () => null),
+  saveConflict: vi.fn(async () => ({ clean: true, remaining: [] })),
+  abort: vi.fn(async () => undefined),
+  recover: vi.fn(async () => undefined),
+  startMaintenance: vi.fn(() => () => undefined),
 }))
 
 vi.mock('../../src/lib/logger.js', () => {
@@ -41,15 +52,19 @@ vi.mock('../../src/projection/workflow.js', () => ({
 vi.mock('../../src/sync/session-manager.js', () => ({
   SyncSessionError: class SyncSessionError extends Error {},
   SyncSessionManager: class SyncSessionManager {
-    pull = vi.fn(async () => ({ conflicts: [], clean: true }))
-    getSession = vi.fn(async () => null)
-    saveConflict = vi.fn(async () => ({ clean: true, remaining: [] }))
-    abort = vi.fn(async () => undefined)
-    recover = vi.fn(async () => undefined)
-    startMaintenance = vi.fn(() => () => undefined)
+    pull = syncManager.pull
+    forcePull = syncManager.forcePull
+    getSession = syncManager.getSession
+    saveConflict = syncManager.saveConflict
+    abort = syncManager.abort
+    recover = syncManager.recover
+    startMaintenance = syncManager.startMaintenance
   },
 }))
-vi.mock('../../src/sync/push.js', () => ({ syncPush: vi.fn(async () => ({ ok: true })) }))
+vi.mock('../../src/sync/push.js', () => ({
+  syncPush: vi.fn(async () => ({ ok: true })),
+  syncForcePush: vi.fn(async () => ({ ok: true })),
+}))
 vi.mock('@loom/core', () => ({
   loadRepoManifest: vi.fn(() => ({
     repoConfig: { targets: ['claude-code'] },
@@ -163,6 +178,30 @@ describe('API routes', () => {
       error: 'no_remote',
       message: 'missing remote',
     })
+  })
+  it('POST /api/sync/force-push delegates to the force push workflow and returns its result', async () => {
+    const res = await app.request('/api/sync/force-push', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/tmp/r' }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect(syncForcePush).toHaveBeenCalledWith('/tmp/r', platformGit, expect.any(Object))
+    expect(platformGit.forcePush).not.toHaveBeenCalled()
+  })
+
+  it('POST /api/sync/force-pull delegates to the sync manager and returns its result', async () => {
+    const res = await app.request('/api/sync/force-pull', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/tmp/r' }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, clean: true, conflicts: [] })
+    expect(syncManager.forcePull).toHaveBeenCalledWith('/tmp/r')
   })
   it('POST /api/sync/conflicts/save returns remaining conflicts', async () => {
     const res = await app.request('/api/sync/conflicts/save', {

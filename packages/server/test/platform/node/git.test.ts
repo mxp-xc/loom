@@ -91,6 +91,39 @@ describe('NodeGit', () => {
     expect(res.ok).toBe(true)
     expect(res.nonFastForward).not.toBe(true)
   })
+  it('forcePush overwrites a remote that is ahead', async () => {
+    const dest = await mkdtemp(join(tmpdir(), 'forcepush-'))
+    created.push(dest)
+    const git = new NodeGit()
+    await git.clone(bare, dest, false)
+
+    const work2 = await mkdtemp(join(tmpdir(), 'forcepush-w2-'))
+    created.push(work2)
+    const remotePeer = testGit(work2)
+    await remotePeer.clone(bare, '.')
+    await writeFile(join(work2, 'remote.txt'), 'remote')
+    await remotePeer.add('.')
+    await remotePeer.commit('remote ahead')
+    await remotePeer.push('origin', 'main:main')
+
+    const local = testGit(dest)
+    await writeFile(join(dest, 'local.txt'), 'local')
+    await local.add('.')
+    await local.commit('local overwrite')
+
+    const res = await git.forcePush(dest)
+
+    expect(res).toEqual({ ok: true })
+    const verifierPath = await mkdtemp(join(tmpdir(), 'forcepush-verify-'))
+    created.push(verifierPath)
+    await testGit(verifierPath).clone(bare, '.')
+    expect(await simpleGit(verifierPath).raw(['ls-tree', '-r', '--name-only', 'HEAD'])).toContain(
+      'local.txt',
+    )
+    expect(
+      await simpleGit(verifierPath).raw(['ls-tree', '-r', '--name-only', 'HEAD']),
+    ).not.toContain('remote.txt')
+  })
 
   describe('show/revParseHead/lsTree', () => {
     it('show reads file content at ref', async () => {

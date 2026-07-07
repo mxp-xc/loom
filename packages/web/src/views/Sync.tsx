@@ -3,6 +3,7 @@ import { ArrowDownToLine, Upload } from 'lucide-react'
 import { api, type GitConflictFile, type SyncPullResponse } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
+import Modal from '@/components/Modal'
 import Toast from '@/components/Toast'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
@@ -23,6 +24,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
   const [pushResult, setPushResult] = useState<{ ok?: boolean; nonFastForward?: boolean } | null>(
     null,
   )
+  const [confirming, setConfirming] = useState<'force-pull' | 'force-push' | null>(null)
   const { error, setError } = useViewError()
   const { toast, showToast, dismiss } = useToast()
   const totalConflictCount = conflicts.length ? (pull?.conflicts.length ?? conflicts.length) : 0
@@ -129,6 +131,44 @@ export default function Sync({ repoPath }: { repoPath: string }) {
     }
   }
 
+  const forcePullRemote = async () => {
+    setBusy('force-pull')
+    setError(null)
+    try {
+      const result = await api.syncForcePull(repoPath)
+      if (!result.ok) throw new Error(result.message ?? result.error ?? '强制拉取失败')
+      setPull(result)
+      setConflicts([])
+      setPushResult(null)
+      setConfirming(null)
+      showToast('强制拉取完成')
+    } catch (err) {
+      setError(messageOf(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const forcePushRemote = async () => {
+    setBusy('force-push')
+    setError(null)
+    try {
+      const result = (await api.syncForcePush(repoPath)) as {
+        ok?: boolean
+        error?: string
+        message?: string
+      }
+      if (!result.ok) throw new Error(result.message ?? result.error ?? '强制推送失败')
+      setPushResult(null)
+      setConfirming(null)
+      showToast('强制推送完成')
+    } catch (err) {
+      setError(messageOf(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const saveRemote = async () => {
     if (!remoteInput.trim()) return setError('remote URL 不能为空')
     setBusy('remote')
@@ -141,6 +181,14 @@ export default function Sync({ repoPath }: { repoPath: string }) {
       setBusy(null)
     }
   }
+
+  const forceDisabled = busy !== null || !remote || conflicts.length > 0
+  const confirmTitle = confirming === 'force-pull' ? '确认强制拉取' : '确认强制推送'
+  const confirmMessage =
+    confirming === 'force-pull'
+      ? '本地未提交修改、本地提交、未跟踪文件和目录都会被远端覆盖或删除。'
+      : '远端内容会被本地配置覆盖。其他设备已推送但本地没有的内容可能丢失。'
+  const confirmBusy = busy === 'force-pull' || busy === 'force-push'
 
   return (
     <div>
@@ -216,6 +264,24 @@ export default function Sync({ repoPath }: { repoPath: string }) {
           >
             <Upload className="h-3.5 w-3.5" />
           </IconButton>
+          <IconButton
+            label="强制拉取"
+            tooltip={busy === 'force-pull' ? '强制拉取中…' : '强制拉取'}
+            tone="danger"
+            onClick={() => setConfirming('force-pull')}
+            disabled={forceDisabled}
+          >
+            <ArrowDownToLine className="h-3.5 w-3.5" />
+          </IconButton>
+          <IconButton
+            label="强制推送"
+            tooltip={busy === 'force-push' ? '强制推送中…' : '强制推送'}
+            tone="danger"
+            onClick={() => setConfirming('force-push')}
+            disabled={forceDisabled}
+          >
+            <Upload className="h-3.5 w-3.5" />
+          </IconButton>
         </span>
       </div>
 
@@ -256,6 +322,44 @@ export default function Sync({ repoPath }: { repoPath: string }) {
       {pushResult?.ok && (
         <div style={{ marginTop: 12, color: 'var(--primary)', fontSize: 12 }}>✓ 上传成功</div>
       )}
+      <Modal
+        open={confirming !== null}
+        onClose={() => {
+          if (!confirmBusy) setConfirming(null)
+        }}
+        title={confirmTitle}
+        width={420}
+        busy={confirmBusy}
+      >
+        <div style={{ display: 'grid', gap: 14 }}>
+          <p style={{ margin: 0, color: 'var(--text)', fontSize: 13, lineHeight: 1.7 }}>
+            {confirmMessage}
+          </p>
+          <p style={{ margin: 0, color: 'var(--muted)', fontSize: 12, lineHeight: 1.6 }}>
+            这是不安全操作，确认后无法由 Loom 自动恢复。
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setConfirming(null)}
+              disabled={confirmBusy}
+            >
+              取消
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() =>
+                void (confirming === 'force-pull' ? forcePullRemote() : forcePushRemote())
+              }
+              disabled={confirmBusy}
+            >
+              {confirmBusy ? '执行中…' : confirmTitle}
+            </Button>
+          </div>
+        </div>
+      </Modal>
       {toast && <Toast message={toast} onClose={dismiss} />}
     </div>
   )

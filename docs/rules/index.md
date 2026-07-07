@@ -8,6 +8,7 @@
 2. [跨模块规则](cross-cutting.md) — 适用于 skills、MCP、memory、vars 的通用契约。
 3. [Projection 规则](projection.md) — desired state 如何落到 agent-native 文件。
 4. [Skills 规则](skills.md) — skills/source/local skill 的特有规则。
+5. [Sync 规则](sync.md) — Git 同步、冲突处理和强制同步的安全边界。
 
 ## 规则格式
 

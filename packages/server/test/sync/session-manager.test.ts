@@ -164,4 +164,44 @@ describe.concurrent('SyncSessionManager', () => {
     expect(result.conflicts[0].path).toBe('skills.yaml')
     expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: local\n')
   })
+
+  it('forcePull overwrites tracked local changes with the remote version', async () => {
+    const { home, repo } = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
+    await writeFile(join(repo, 'skills.yaml'), 'value: unsaved local edit\n')
+
+    const result = await new SyncSessionManager({ home }).forcePull(repo)
+
+    expect(result).toEqual({ clean: true, conflicts: [] })
+    expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: remote\n')
+  })
+
+  it('forcePull discards local-only commits and deletes untracked files and directories', async () => {
+    const { home, repo } = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
+    await mkdir(join(repo, 'scratch'), { recursive: true })
+    await writeFile(join(repo, 'scratch', 'note.txt'), 'temporary\n')
+    await writeFile(join(repo, 'loose.txt'), 'temporary\n')
+
+    const result = await new SyncSessionManager({ home }).forcePull(repo)
+
+    expect(result.clean).toBe(true)
+    const git = simpleGit(repo)
+    expect(await git.raw(['rev-parse', 'HEAD'])).toBe(await git.raw(['rev-parse', 'origin/main']))
+    await expect(readFile(join(repo, 'scratch', 'note.txt'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(readFile(join(repo, 'loose.txt'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('forcePull refuses to discard an active conflict session', async () => {
+    const { home, repo } = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
+    const manager = new SyncSessionManager({ home })
+    await manager.pull(repo)
+
+    await expect(manager.forcePull(repo)).rejects.toMatchObject({
+      code: 'active_session_exists',
+      message: '请先解决或放弃当前同步会话',
+    })
+  })
 })

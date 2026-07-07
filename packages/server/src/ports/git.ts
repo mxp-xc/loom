@@ -15,6 +15,7 @@ export interface IGit {
   add(repoPath: string, paths: string[]): Promise<void>
   commit(repoPath: string, msg: string): Promise<void>
   push(repoPath: string): Promise<GitPushResult>
+  forcePush(repoPath: string): Promise<GitPushResult>
   status(repoPath: string): Promise<{ dirty: boolean }>
   show(repoPath: string, ref: string, path: string): Promise<string>
   revParseHead(repoPath: string): Promise<string>

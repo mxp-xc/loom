@@ -57,3 +57,32 @@ export async function syncPush(
     return { ok: false, error, message }
   }
 }
+
+export async function syncForcePush(
+  repoPath: string,
+  git: IGit,
+  logger?: PushLogger,
+): Promise<SyncPushResult> {
+  try {
+    const status = await git.status(repoPath)
+    if (status.dirty) {
+      await git.add(repoPath, ['.'])
+      await git.commit(repoPath, 'loom: sync changes')
+    }
+
+    const result = await git.forcePush(repoPath)
+    if (result.ok) return { ok: true }
+
+    const message = result.message ?? 'force push failed'
+    const { cause, message: _message, ...logResult } = result
+    const error = classifySyncGitError(message)
+    const errorContext = cause === undefined ? {} : { err: cause }
+    logger?.error('force push rejected', { ...errorContext, repoPath, error, result: logResult })
+    return { ok: false, error, message }
+  } catch (err) {
+    const message = syncErrorMessage(err)
+    const error = classifySyncGitError(message)
+    logger?.error('force push failed', { err, repoPath, error })
+    return { ok: false, error, message }
+  }
+}

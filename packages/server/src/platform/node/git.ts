@@ -88,8 +88,16 @@ export class NodeGit implements IGit {
   }
 
   async push(repoPath: string): Promise<GitPushResult> {
+    return this.pushWithArgs(repoPath, ['origin', 'HEAD'])
+  }
+
+  async forcePush(repoPath: string): Promise<GitPushResult> {
+    return this.pushWithArgs(repoPath, ['--force', 'origin', 'HEAD'])
+  }
+
+  private async pushWithArgs(repoPath: string, args: string[]): Promise<GitPushResult> {
     try {
-      await this.git(repoPath).push('origin', 'HEAD')
+      await this.git(repoPath).raw(['push', ...args])
       return { ok: true }
     } catch (err) {
       const msg = String((err as Error)?.message ?? err)

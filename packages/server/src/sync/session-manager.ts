@@ -34,7 +34,12 @@ type Logger = {
 
 export class SyncSessionError extends Error {
   constructor(
-    readonly code: 'session_not_found' | 'repo_busy' | 'storage_quota_exceeded' | 'cleanup_pending',
+    readonly code:
+      | 'session_not_found'
+      | 'repo_busy'
+      | 'storage_quota_exceeded'
+      | 'cleanup_pending'
+      | 'active_session_exists',
     message: string,
   ) {
     super(message)
@@ -182,6 +187,34 @@ export class SyncSessionManager {
       await this.assertSessionSize(session)
       if (!merge.clean) return this.resultFor(session)
       return this.finalize(session)
+    })
+  }
+
+  async forcePull(repoPath: string): Promise<SyncSessionResult> {
+    const canonical = await realpath(repoPath)
+    this.logger?.info?.('force pull started', { repoPath: canonical })
+    return this.withRepoLock(canonical, async () => {
+      await this.retryCleanup()
+      const active = await this.loadForRepo(canonical)
+      if (active) {
+        if (active.status === 'deleting') {
+          throw new SyncSessionError('cleanup_pending', '上一次同步会话仍在清理')
+        }
+        throw new SyncSessionError('active_session_exists', '请先解决或放弃当前同步会话')
+      }
+
+      const git = simpleGit(canonical)
+      await git.raw(['fetch', 'origin', '--tags'])
+      const remoteTip = (await git.raw(['rev-parse', 'FETCH_HEAD'])).trim()
+      try {
+        await git.raw(['rev-parse', 'HEAD'])
+      } catch {
+        await git.raw(['update-ref', 'HEAD', remoteTip])
+      }
+      await git.raw(['reset', '--hard', remoteTip])
+      await git.raw(['clean', '-fd'])
+      this.logger?.info?.('force pull completed', { repoPath: canonical, remoteTip })
+      return { clean: true, conflicts: [] }
     })
   }
 

@@ -167,6 +167,9 @@ export const api = {
     post('/sync/conflicts/save', body).then(json) as Promise<SyncConflictSaveResponse>,
   abortSyncMerge: (sessionId: string) => post('/sync/conflicts/abort', { sessionId }).then(json),
   syncPush: (repo: string) => post('/sync/push', { repo }).then(json),
+  syncForcePush: (repo: string) => post('/sync/force-push', { repo }).then(json),
+  syncForcePull: (repo: string) =>
+    post('/sync/force-pull', { repo }).then(json) as Promise<SyncPullResponse>,
   install: (body: unknown) => post('/install', body).then(json),
   update: (repo: string, sources: unknown[]) => post('/update', { repo, sources }).then(json),
   performUpdate: (body: unknown) => post('/update/perform', body).then(json),

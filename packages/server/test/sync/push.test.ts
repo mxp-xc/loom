@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { simpleGit } from 'simple-git'
 import { NodeGit } from '../../src/platform/node/git'
-import { syncPush } from '../../src/sync/push'
+import { syncForcePush, syncPush } from '../../src/sync/push'
 import type { IGit } from '../../src/ports/git'
 import { testGit } from '../helpers/git'
 
@@ -23,6 +23,7 @@ function fakeGit(overrides: Partial<IGit>): IGit {
     add: vi.fn(),
     commit: vi.fn(),
     push: vi.fn(),
+    forcePush: vi.fn(),
     status: vi.fn(),
     show: vi.fn(),
     revParseHead: vi.fn(),
@@ -257,5 +258,82 @@ describe('syncPush', () => {
     const res = await syncPush(dest, new NodeGit())
     expect(res.ok).toBe(false)
     expect(res.nonFastForward).toBe(true)
+  })
+})
+
+describe('syncForcePush', () => {
+  it('force-pushes a clean repo without creating an auto-commit', async () => {
+    const calls: string[] = []
+    const git = fakeGit({
+      status: vi.fn(async () => {
+        calls.push('status')
+        return { dirty: false }
+      }),
+      add: vi.fn(async () => {
+        calls.push('add')
+      }),
+      commit: vi.fn(async () => {
+        calls.push('commit')
+      }),
+      forcePush: vi.fn(async () => {
+        calls.push('forcePush')
+        return { ok: true }
+      }),
+    })
+
+    const result = await syncForcePush('/repo', git, fakeLogger())
+
+    expect(result).toEqual({ ok: true })
+    expect(calls).toEqual(['status', 'forcePush'])
+    expect(git.add).not.toHaveBeenCalled()
+    expect(git.commit).not.toHaveBeenCalled()
+  })
+
+  it('auto-commits a dirty repo before force-pushing', async () => {
+    const calls: string[] = []
+    const git = fakeGit({
+      status: vi.fn(async () => {
+        calls.push('status')
+        return { dirty: true }
+      }),
+      add: vi.fn(async () => {
+        calls.push('add')
+      }),
+      commit: vi.fn(async () => {
+        calls.push('commit')
+      }),
+      forcePush: vi.fn(async () => {
+        calls.push('forcePush')
+        return { ok: true }
+      }),
+    })
+
+    const result = await syncForcePush('/repo', git, fakeLogger())
+
+    expect(result).toEqual({ ok: true })
+    expect(calls).toEqual(['status', 'add', 'commit', 'forcePush'])
+    expect(git.add).toHaveBeenCalledWith('/repo', ['.'])
+    expect(git.commit).toHaveBeenCalledWith('/repo', 'loom: sync changes')
+  })
+
+  it('classifies force push failures and logs the full error object', async () => {
+    const logger = fakeLogger()
+    const err = new Error('permission denied')
+    const git = fakeGit({
+      status: vi.fn(async () => ({ dirty: false })),
+      forcePush: vi.fn(async () => ({
+        ok: false,
+        message: 'permission denied',
+        cause: err,
+      })),
+    })
+
+    const result = await syncForcePush('/repo', git, logger)
+
+    expect(result).toEqual({ ok: false, error: 'other', message: 'permission denied' })
+    expect(logger.error).toHaveBeenCalledWith(
+      'force push rejected',
+      expect.objectContaining({ err, repoPath: '/repo', error: 'other' }),
+    )
   })
 })

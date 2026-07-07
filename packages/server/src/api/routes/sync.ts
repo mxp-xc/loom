@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { syncPush } from '../../sync/push.js'
+import { syncForcePush, syncPush } from '../../sync/push.js'
 import { SyncSessionError } from '../../sync/session-manager.js'
 import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
@@ -67,6 +67,31 @@ export function createSyncRoutes(deps: SyncRouteDeps): Hono {
       return c.json(await syncPush(repoPath, deps.git, syncLogger))
     } catch (err) {
       return syncError(c, err, { repoPath, operation: 'push' })
+    }
+  })
+
+  app.post('/sync/force-push', async (c) => {
+    let repoPath: string | undefined
+    try {
+      const { repo } = await c.req.json()
+      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      return c.json(await syncForcePush(repoPath, deps.git, syncLogger))
+    } catch (err) {
+      return syncError(c, err, { repoPath, operation: 'force push' })
+    }
+  })
+
+  app.post('/sync/force-pull', async (c) => {
+    let repoPath: string | undefined
+    try {
+      const { repo } = await c.req.json()
+      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      syncLogger.info('force pull requested', { repoPath })
+      const result = await deps.sync.forcePull(repoPath)
+      syncLogger.info('force pull completed', { repoPath, clean: result.clean })
+      return c.json({ ok: true, ...result })
+    } catch (err) {
+      return syncError(c, err, { repoPath, operation: 'force pull' })
     }
   })
 
