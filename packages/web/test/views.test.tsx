@@ -38,6 +38,7 @@ vi.mock('../src/lib/api', () => ({
     getSyncRemote: vi.fn(async () => ({ remoteUrl: null })),
     setSyncRemote: vi.fn(async () => ({ ok: true })),
     getConfig: vi.fn(async () => ({ effective: {}, repo: {}, local: {} })),
+    putConfig: vi.fn(async () => ({ ok: true })),
     scanLocalSkills: vi.fn(async () => ({ ok: true, skills: [] })),
     scanSource: vi.fn(async () => ({ ok: true, members: [] })),
     getSourceRefs: vi.fn(async () => ({ ok: true, branches: [], tags: [] })),
@@ -352,7 +353,31 @@ describe('MCP view', () => {
 })
 
 describe('Memory view', () => {
-  it('uses icon action buttons with tooltips for activate rename and delete', async () => {
+  it('keeps projection target chips informational instead of editing global Settings targets', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex', 'opencode'] },
+      errors: [],
+    } as never)
+    vi.mocked(api.getMemory).mockResolvedValueOnce({
+      memories: [{ name: 'v1' }],
+      active: 'v1',
+      activeContent: '# v1',
+    } as never)
+
+    render(<Memory repoPath="/tmp/memory-targets" />)
+
+    const targetsPanel = await screen.findByText('投影目标')
+    const panel = targetsPanel.closest('.mem-global-targets') as HTMLElement
+    fireEvent.click(within(panel).getByRole('button', { name: 'OC' }))
+
+    expect(api.putConfig).not.toHaveBeenCalled()
+    expect(within(panel).getByRole('button', { name: 'OC' })).toBeDefined()
+  })
+
+  it('uses the active status dot as the only memory activation control', async () => {
     vi.mocked(api.getMemory).mockResolvedValue({
       memories: [{ name: 'v1' }],
       active: 'v1',
@@ -365,15 +390,19 @@ describe('Memory view', () => {
     const row = names.find((item) => item.closest('.mem-item'))?.closest('.mem-item') as HTMLElement
     expect(row).not.toBeNull()
 
-    const deactivate = within(row).getByRole('button', { name: '取消激活 memory v1' })
+    const activeDot = within(row).getByRole('button', { name: '取消激活 memory v1' })
     const rename = within(row).getByRole('button', { name: '重命名 memory v1' })
     const remove = within(row).getByRole('button', { name: '删除 memory v1' })
 
-    expect(deactivate.getAttribute('data-tooltip')).toBe('取消激活')
+    expect(activeDot.classList.contains('mem-active-dot')).toBe(true)
+    expect(activeDot.getAttribute('aria-pressed')).toBe('true')
+    expect(activeDot.getAttribute('data-state')).toBe('active')
+    expect(activeDot.getAttribute('data-tooltip')).toBe('已激活，点击取消')
+    expect(within(row).queryByRole('button', { name: '激活 memory v1' })).toBeNull()
     expect(rename.getAttribute('data-tooltip')).toBe('重命名')
     expect(remove.getAttribute('data-tooltip')).toBe('删除')
 
-    fireEvent.click(deactivate)
+    fireEvent.click(activeDot)
     await waitFor(() =>
       expect(api.setMemoryActive).toHaveBeenCalledWith({
         repo: '/tmp/memory-actions',
@@ -585,6 +614,87 @@ describe('Add Skill modal', () => {
 })
 
 describe('Skill source updates', () => {
+  it('shows a spinning icon while checking a source update', async () => {
+    let releaseCheck!: () => void
+    vi.mocked(api.update).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseCheck = () => resolve({ updates: [] })
+        }) as never,
+    )
+
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/check-source"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  url: 'https://github.com/obra/superpowers.git',
+                  ref: 'main',
+                  members: [],
+                },
+              ],
+              skills: [],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: [] },
+            errors: [],
+          } as never
+        }
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set()}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '检查更新 source superpowers' }))
+
+    const button = await screen.findByRole('button', { name: '检查更新 source superpowers' })
+    expect(button.querySelector('.animate-spin')).not.toBeNull()
+
+    releaseCheck()
+    await waitFor(() => expect(button.querySelector('.animate-spin')).toBeNull())
+  })
+
+  it('opens local skill detail when clicking blank space in the local skill row', () => {
+    const onOpenDetail = vi.fn()
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/local-detail"
+        manifest={
+          {
+            skills: {
+              sources: [],
+              skills: [{ id: 'frontend-design', targets: ['codex'] }],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: ['codex'] },
+            errors: [],
+          } as never
+        }
+        onOpenDetail={onOpenDetail}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set(['local'])}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByText('frontend-design').closest('.skill') as HTMLElement)
+
+    expect(onOpenDetail).toHaveBeenCalledWith({
+      skillId: 'frontend-design',
+      path: undefined,
+      targets: ['codex'],
+    })
+  })
+
   it('opens source member detail with the configured source member skill id', () => {
     const onOpenDetail = vi.fn()
     render(

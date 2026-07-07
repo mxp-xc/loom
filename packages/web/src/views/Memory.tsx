@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
 import { useToast } from '@/hooks/useToast'
 import { useManifest } from '@/hooks/useManifest'
-import { Pencil, Plus, RefreshCw, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
+import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 
 interface Props {
   repoPath: string
@@ -26,19 +26,8 @@ export default function Memory({ repoPath }: Props) {
   const [projecting, setProjecting] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const { showToast } = useToast()
-  const { manifest, reload } = useManifest(repoPath)
+  const { manifest } = useManifest(repoPath)
   const targets = manifest?.config?.targets ?? []
-
-  const toggleTarget = async (a: AgentId) => {
-    const cur = manifest?.config?.targets ?? []
-    const next = cur.includes(a) ? cur.filter((x) => x !== a) : [...cur, a]
-    try {
-      await api.putConfig({ repo: repoPath, level: 'local', field: 'targets', value: next })
-      reload()
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : String(e))
-    }
-  }
 
   const load = async () => {
     try {
@@ -181,7 +170,7 @@ export default function Memory({ repoPath }: Props) {
                 data-a={agentKey(a)}
                 style={{ ['--c' as string]: agentColor[a] }}
                 aria-pressed={targets.includes(a)}
-                onClick={() => toggleTarget(a)}
+                data-tooltip={`${agentShort[a]} 投影目标`}
               >
                 {agentShort[a]}
               </button>
@@ -199,52 +188,51 @@ export default function Memory({ repoPath }: Props) {
               </span>
             </div>
           )}
-          {memories.map((m) => (
-            <div
-              key={m.name}
-              className={'mem-item' + (selected === m.name ? ' sel' : '')}
-              onClick={() => select(m.name)}
-            >
-              <span
-                className={'mem-active-dot' + (active === m.name ? '' : ' dim')}
-                title={active === m.name ? '已激活(将投影)' : '未激活'}
-              />
-              <span className="mem-name">{m.name}</span>
-              <span className="mem-actions" onClick={(e) => e.stopPropagation()}>
-                <IconButton
-                  label={active === m.name ? `取消激活 memory ${m.name}` : `激活 memory ${m.name}`}
-                  tooltip={active === m.name ? '取消激活' : '激活'}
-                  pressed={active === m.name}
-                  tone={active === m.name ? 'success' : 'default'}
-                  onClick={() => activate(active === m.name ? null : m.name)}
-                >
-                  {active === m.name ? (
-                    <ToggleRight className="h-3.5 w-3.5" />
-                  ) : (
-                    <ToggleLeft className="h-3.5 w-3.5" />
-                  )}
-                </IconButton>
-                <IconButton
-                  label={`重命名 memory ${m.name}`}
-                  tooltip="重命名"
-                  onClick={() => {
-                    setRenaming(m.name)
-                    setDraftName(m.name)
+          {memories.map((m) => {
+            const isActive = active === m.name
+            return (
+              <div
+                key={m.name}
+                className={'mem-item' + (selected === m.name ? ' sel' : '')}
+                onClick={() => select(m.name)}
+              >
+                <button
+                  type="button"
+                  className={'mem-active-dot' + (isActive ? '' : ' dim')}
+                  aria-label={isActive ? `取消激活 memory ${m.name}` : `激活 memory ${m.name}`}
+                  aria-pressed={isActive}
+                  data-state={isActive ? 'active' : 'inactive'}
+                  data-tooltip={isActive ? '已激活，点击取消' : '未激活，点击设为投影'}
+                  title={isActive ? '已激活，点击取消' : '未激活，点击设为投影'}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    activate(isActive ? null : m.name)
                   }}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </IconButton>
-                <IconButton
-                  label={`删除 memory ${m.name}`}
-                  tooltip="删除"
-                  tone="danger"
-                  onClick={() => setDeleting(m.name)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </IconButton>
-              </span>
-            </div>
-          ))}
+                />
+                <span className="mem-name">{m.name}</span>
+                <span className="mem-actions" onClick={(e) => e.stopPropagation()}>
+                  <IconButton
+                    label={`重命名 memory ${m.name}`}
+                    tooltip="重命名"
+                    onClick={() => {
+                      setRenaming(m.name)
+                      setDraftName(m.name)
+                    }}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </IconButton>
+                  <IconButton
+                    label={`删除 memory ${m.name}`}
+                    tooltip="删除"
+                    tone="danger"
+                    onClick={() => setDeleting(m.name)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </IconButton>
+                </span>
+              </div>
+            )
+          })}
         </div>
       </aside>
 

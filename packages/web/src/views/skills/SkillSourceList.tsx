@@ -208,7 +208,12 @@ export default function SkillSourceList({
                     onClick={() => handleCheck(src)}
                     disabled={operations.pending.source.check(src)}
                   >
-                    <RefreshCw className="h-3.5 w-3.5" />
+                    <RefreshCw
+                      className={
+                        'h-3.5 w-3.5' +
+                        (operations.pending.source.check(src) ? ' animate-spin' : '')
+                      }
+                    />
                   </IconButton>
                   {updates[src.url] && (
                     <IconButton
@@ -254,21 +259,22 @@ export default function SkillSourceList({
                   const isEnabled = m.enabled !== false
                   const mTargets = (m.targets ?? []) as AgentId[]
                   return (
-                    <div key={m.name} className="skill">
+                    <div
+                      key={m.name}
+                      className="skill"
+                      onClick={() =>
+                        onOpenDetail({
+                          skillId: formatSourceMemberSkillId(src, m.name, manifest.config),
+                          source: src.url,
+                          targets: mTargets,
+                        })
+                      }
+                    >
                       <span className={'sdot ' + (isEnabled ? 'green' : 'dim')} />
-                      <span
-                        className={'sname clickable' + (isEnabled ? '' : ' dim')}
-                        onClick={() =>
-                          onOpenDetail({
-                            skillId: formatSourceMemberSkillId(src, m.name, manifest.config),
-                            source: src.url,
-                            targets: mTargets,
-                          })
-                        }
-                      >
+                      <span className={'sname clickable' + (isEnabled ? '' : ' dim')}>
                         {m.name}
                       </span>
-                      <span className="chips">
+                      <span className="chips" onClick={(e) => e.stopPropagation()}>
                         {visibleAgents.map((a) =>
                           renderChip(a, isEnabled && mTargets.includes(a), () =>
                             handleChipToggle(src.url, m.name, a, mTargets),
@@ -315,7 +321,15 @@ export default function SkillSourceList({
                 const lTargets = (s.targets ?? []) as AgentId[]
                 const missing = Boolean(s.path && s.available === false)
                 return (
-                  <div key={s.id} className={'skill' + (missing ? ' skill-missing' : '')}>
+                  <div
+                    key={s.id}
+                    className={'skill' + (missing ? ' skill-missing' : ' skill-clickable')}
+                    onClick={
+                      missing
+                        ? undefined
+                        : () => onOpenDetail({ skillId: s.id, path: s.path, targets: lTargets })
+                    }
+                  >
                     <span className={'sdot ' + (missing ? 'yellow' : 'green')} />
                     <span className="skill-main">
                       <span className="skill-name-line">
@@ -325,9 +339,10 @@ export default function SkillSourceList({
                           <button
                             type="button"
                             className="sname clickable skill-name-button"
-                            onClick={() =>
+                            onClick={(event) => {
+                              event.stopPropagation()
                               onOpenDetail({ skillId: s.id, path: s.path, targets: lTargets })
-                            }
+                            }}
                           >
                             {s.id}
                           </button>
@@ -346,14 +361,14 @@ export default function SkillSourceList({
                         </span>
                       )}
                     </span>
-                    <span className="chips">
+                    <span className="chips" onClick={(e) => e.stopPropagation()}>
                       {visibleAgents.map((a) =>
                         renderChip(a, lTargets.includes(a), () =>
                           handleLocalChipToggle(s.id, a, lTargets),
                         ),
                       )}
                     </span>
-                    <span className="skill-actions">
+                    <span className="skill-actions" onClick={(e) => e.stopPropagation()}>
                       <IconButton
                         label={`删除 local skill ${s.id}`}
                         tooltip="删除"
