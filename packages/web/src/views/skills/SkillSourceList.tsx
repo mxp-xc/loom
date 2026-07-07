@@ -10,7 +10,7 @@ import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
 import { AlertTriangle, ChevronDown, RefreshCw, Pencil, Trash2, ScanLine } from 'lucide-react'
-import type { SkillDetail } from './types'
+import { sortSkillMembers, type SkillDetail } from './types'
 import type { ManifestOperations, SourceUpdateState } from '@/hooks/useManifestOperations'
 
 interface Props {
@@ -45,6 +45,13 @@ const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
     {agentShort[agent]}
   </button>
 )
+
+function sourceTargetState(src: SkillSource, agent: AgentId) {
+  const members = (src.members ?? []).filter((member) => member.enabled !== false)
+  const count = members.filter((member) => (member.targets ?? []).includes(agent)).length
+  const state = count === 0 ? 'off' : count === members.length ? 'on' : 'mixed'
+  return { count, total: members.length, state }
+}
 
 export default function SkillSourceList({
   manifest,
@@ -201,6 +208,45 @@ export default function SkillSourceList({
                   </span>
                 )}
                 <span className="gacts" onClick={(e) => e.stopPropagation()}>
+                  {visibleAgents.length > 0 && (
+                    <span
+                      className="cfg-chips source-target-chips"
+                      aria-label={`${repoId} 批量投影`}
+                    >
+                      {visibleAgents.map((agent) => {
+                        const { count, total, state } = sourceTargetState(src, agent)
+                        const tooltip =
+                          state === 'on'
+                            ? '全部已选择'
+                            : state === 'mixed'
+                              ? '部分已选择'
+                              : '全部未选择'
+                        const disabled =
+                          total === 0 || operations.pending.skills.sourceTargets(src, agent)
+                        return (
+                          <button
+                            key={agent}
+                            type="button"
+                            className={`achip source-target-chip ${state}`}
+                            style={{ ['--c' as string]: agentColor[agent] }}
+                            aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
+                            aria-label={`${repoId} ${agentShort[agent]}：${tooltip}`}
+                            data-tooltip={`${repoId} ${agentShort[agent]}：${tooltip}`}
+                            disabled={disabled}
+                            onClick={() => void operations.setSourceSkillTargets(src, agent)}
+                          >
+                            {agentShort[agent]}
+                            {state === 'mixed' && (
+                              <span className="achip-count">
+                                {count}/{total}
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </span>
+                  )}
+                  {visibleAgents.length > 0 && <span className="source-actions-divider" />}
                   <IconButton
                     label={`检查更新 source ${repoId}`}
                     tooltip={operations.pending.source.check(src) ? '检查中…' : '检查更新'}
@@ -255,7 +301,7 @@ export default function SkillSourceList({
                 </span>
               </div>
               {isExpanded &&
-                src.members?.map((m) => {
+                sortSkillMembers(src.members ?? []).map((m) => {
                   const isEnabled = m.enabled !== false
                   const mTargets = (m.targets ?? []) as AgentId[]
                   return (

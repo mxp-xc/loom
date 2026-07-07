@@ -93,6 +93,8 @@ const pendingKey = {
     'skills:target:' + sourceUrl + ':' + memberName,
   localSkillTarget: (id: string) => 'skills:local-target:' + id,
   allSkillTargets: (agent: AgentId) => 'skills:all-targets:' + agent,
+  sourceSkillTargets: (sourceUrl: string, agent: AgentId) =>
+    'skills:source-targets:' + sourceUrl + ':' + agent,
   addMcpServer: (id: string) => 'mcp:add:' + id,
   updateMcpServer: (id: string) => 'mcp:update:' + id,
   deleteMcpServer: (id: string) => 'mcp:delete:' + id,
@@ -455,22 +457,40 @@ export function useManifestOperations(
     [repoPath, run],
   )
 
+  const projectSkillsAfterManifestUpdate = useCallback(
+    async (
+      saveManifest: () => Promise<MaybeOkResponse>,
+      failureMessage: string,
+    ): Promise<MaybeOkResponse> => {
+      const saved = await saveManifest()
+      if (responseFailureMessage(saved, failureMessage)) return saved
+      const projected = (await api.project({ repo: repoPath, scope: 'skills' })) as MaybeOkResponse
+      const projectError = responseFailureMessage(projected, '投影失败')
+      return projectError ? { ok: false, message: projectError } : projected
+    },
+    [repoPath],
+  )
+
   const saveSourceMembers = useCallback(
     (source: SkillSource, members: string[]) =>
       run(
         pendingKey.saveSourceMembers(source.url),
         () =>
-          api.setSourceMembers({
-            repo: repoPath,
-            url: source.url,
-            members,
-          }) as Promise<MaybeOkResponse>,
+          projectSkillsAfterManifestUpdate(
+            () =>
+              api.setSourceMembers({
+                repo: repoPath,
+                url: source.url,
+                members,
+              }) as Promise<MaybeOkResponse>,
+            '保存失败',
+          ),
         {
           failureMessage: '保存失败',
           successMessage: () => sourceIdentity(source).repoId + ': ' + members.length + ' members',
         },
       ),
-    [repoPath, run],
+    [projectSkillsAfterManifestUpdate, repoPath, run],
   )
 
   const checkSourceUpdate = useCallback(
@@ -536,17 +556,6 @@ export function useManifestOperations(
     [repoPath, run],
   )
 
-  const projectSkillsAfterTargetUpdate = useCallback(
-    async (saveTargets: () => Promise<MaybeOkResponse>): Promise<MaybeOkResponse> => {
-      const saved = await saveTargets()
-      if (responseFailureMessage(saved, '保存 targets 失败')) return saved
-      const projected = (await api.project({ repo: repoPath, scope: 'skills' })) as MaybeOkResponse
-      const projectError = responseFailureMessage(projected, '投影失败')
-      return projectError ? { ok: false, message: projectError } : projected
-    },
-    [repoPath],
-  )
-
   const deleteSource = useCallback(
     (url: string) =>
       run(
@@ -572,7 +581,7 @@ export function useManifestOperations(
       run(
         pendingKey.sourceSkillTarget(sourceUrl, memberName),
         () =>
-          projectSkillsAfterTargetUpdate(
+          projectSkillsAfterManifestUpdate(
             () =>
               api.updateSkillTargets({
                 repo: repoPath,
@@ -580,10 +589,11 @@ export function useManifestOperations(
                 memberName,
                 targets: toggleTarget(currentTargets, agent),
               }) as Promise<MaybeOkResponse>,
+            '保存 targets 失败',
           ),
         { failureMessage: '保存 targets 失败' },
       ),
-    [projectSkillsAfterTargetUpdate, repoPath, run],
+    [projectSkillsAfterManifestUpdate, repoPath, run],
   )
 
   const toggleLocalSkillTarget = useCallback(
@@ -591,17 +601,18 @@ export function useManifestOperations(
       run(
         pendingKey.localSkillTarget(id),
         () =>
-          projectSkillsAfterTargetUpdate(
+          projectSkillsAfterManifestUpdate(
             () =>
               api.updateLocalSkillTargets({
                 repo: repoPath,
                 id,
                 targets: toggleTarget(currentTargets, agent),
               }) as Promise<MaybeOkResponse>,
+            '保存 targets 失败',
           ),
         { failureMessage: '保存 targets 失败' },
       ),
-    [projectSkillsAfterTargetUpdate, repoPath, run],
+    [projectSkillsAfterManifestUpdate, repoPath, run],
   )
 
   const setAllSkillTargets = useCallback(
@@ -647,7 +658,48 @@ export function useManifestOperations(
               targetsUpdated = true
             }
           }
-          return { ok: true }
+          const projected = (await api.project({
+            repo: repoPath,
+            scope: 'skills',
+          })) as MaybeOkResponse
+          const projectError = responseFailureMessage(projected, '投影失败')
+          return projectError ? { ok: false, message: projectError } : projected
+        },
+        { failureMessage: '批量更新 targets 失败', reloadOnFailure: () => targetsUpdated },
+      )
+    },
+    [repoPath, run],
+  )
+
+  const setSourceSkillTargets = useCallback(
+    (source: SkillSource, agent: AgentId) => {
+      let targetsUpdated = false
+      const members = (source.members ?? []).filter((member) => member.enabled !== false)
+      const allOn =
+        members.length > 0 && members.every((member) => (member.targets ?? []).includes(agent))
+      return run(
+        pendingKey.sourceSkillTargets(source.url, agent),
+        async () => {
+          for (const member of members) {
+            const targets = member.targets ?? []
+            const next = allOn
+              ? targets.filter((target) => target !== agent)
+              : AGENTS.filter((target) => target === agent || targets.includes(target))
+            const result = (await api.updateSkillTargets({
+              repo: repoPath,
+              sourceUrl: source.url,
+              memberName: member.name,
+              targets: next,
+            })) as MaybeOkResponse
+            if (responseFailureMessage(result, '批量更新 targets 失败')) return result
+            targetsUpdated = true
+          }
+          const projected = (await api.project({
+            repo: repoPath,
+            scope: 'skills',
+          })) as MaybeOkResponse
+          const projectError = responseFailureMessage(projected, '投影失败')
+          return projectError ? { ok: false, message: projectError } : projected
         },
         { failureMessage: '批量更新 targets 失败', reloadOnFailure: () => targetsUpdated },
       )
@@ -744,6 +796,8 @@ export function useManifestOperations(
       skills: {
         deleteLocal: (id: string) => pending.has(pendingKey.deleteLocalSkill(id)),
         allTargets: (agent: AgentId) => pending.has(pendingKey.allSkillTargets(agent)),
+        sourceTargets: (source: SkillSource | string, agent: AgentId) =>
+          pending.has(pendingKey.sourceSkillTargets(sourceRef(source), agent)),
       },
       mcp: {
         allTargets: (agent: AgentId) => pending.has(pendingKey.allMcpTargets(agent)),
@@ -772,6 +826,7 @@ export function useManifestOperations(
       toggleSourceSkillTarget,
       toggleLocalSkillTarget,
       setAllSkillTargets,
+      setSourceSkillTargets,
       addMcpServer,
       updateMcpServer,
       deleteMcpServer,
@@ -797,6 +852,7 @@ export function useManifestOperations(
       toggleSourceSkillTarget,
       toggleLocalSkillTarget,
       setAllSkillTargets,
+      setSourceSkillTargets,
       addMcpServer,
       updateMcpServer,
       deleteMcpServer,

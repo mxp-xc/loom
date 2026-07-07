@@ -198,6 +198,96 @@ describe('executeProjection', () => {
     expect(await fs.isLink(dest)).toBe(false)
     expect(await fs.exists(join(dest, 'SKILL.md'))).toBe(true)
   })
+  it('strategy:copy removes stale copied source members when targets are cleared', async () => {
+    const fs = new NodeFileSystem()
+    const remoteSkillDir = join(srcDir, 'remote-member')
+    await mkdir(remoteSkillDir, { recursive: true })
+    await writeFile(join(remoteSkillDir, 'SKILL.md'), 'remote')
+    const sourcePlan: ProjectionPlan = {
+      links: [
+        {
+          skillId: 'superpowers/executing-plans',
+          source: { repoId: 'superpowers', memberName: 'executing-plans' },
+          targets: ['claude-code'],
+        },
+      ],
+      mcpEntries: [],
+      memoryPlan: { active: null, content: null, targets: [] },
+      skippedAgents: [],
+      strategy: 'copy',
+    }
+
+    const first = await executeProjection(sourcePlan, { ...manifest, mcp: [] }, varsCtx, {
+      fs,
+      adapters: { 'claude-code': new ClaudeCodeAdapter() },
+      installedAgents: installed,
+      resolveSkillSrc: () => remoteSkillDir,
+    })
+
+    expect(first.ok).toBe(true)
+    const dest = join(home, '.claude', 'skills', 'superpowers', 'executing-plans')
+    expect(await fs.exists(join(dest, 'SKILL.md'))).toBe(true)
+
+    const cleared = await executeProjection(
+      { ...sourcePlan, links: [{ ...sourcePlan.links[0], targets: [] }] },
+      { ...manifest, mcp: [] },
+      varsCtx,
+      {
+        fs,
+        adapters: { 'claude-code': new ClaudeCodeAdapter() },
+        installedAgents: installed,
+        resolveSkillSrc: () => remoteSkillDir,
+      },
+    )
+
+    expect(cleared.ok).toBe(true)
+    expect(await fs.exists(dest)).toBe(false)
+    expect(await fs.exists(join(home, '.claude', 'skills', 'superpowers'))).toBe(false)
+  })
+  it('strategy:copy keeps unmarked source-member directories during cleanup', async () => {
+    const fs = new NodeFileSystem()
+    const dest = join(home, '.claude', 'skills', 'superpowers', 'executing-plans')
+    await mkdir(dest, { recursive: true })
+    await writeFile(join(dest, 'SKILL.md'), 'user-owned legacy directory')
+    const sourcePlan: ProjectionPlan = {
+      links: [
+        {
+          skillId: 'superpowers/executing-plans',
+          source: { repoId: 'superpowers', memberName: 'executing-plans' },
+          targets: [],
+        },
+      ],
+      mcpEntries: [],
+      memoryPlan: { active: null, content: null, targets: [] },
+      skippedAgents: [],
+      strategy: 'copy',
+    }
+
+    const cleared = await executeProjection(sourcePlan, { ...manifest, mcp: [] }, varsCtx, {
+      fs,
+      adapters: { 'claude-code': new ClaudeCodeAdapter() },
+      installedAgents: installed,
+      resolveSkillSrc: () => null,
+    })
+
+    expect(cleared.ok).toBe(true)
+    expect(await fs.exists(join(dest, 'SKILL.md'))).toBe(true)
+
+    const orphaned = await executeProjection(
+      { ...sourcePlan, links: [] },
+      { ...manifest, mcp: [] },
+      varsCtx,
+      {
+        fs,
+        adapters: { 'claude-code': new ClaudeCodeAdapter() },
+        installedAgents: installed,
+        resolveSkillSrc: () => null,
+      },
+    )
+
+    expect(orphaned.ok).toBe(true)
+    expect(await fs.exists(join(dest, 'SKILL.md'))).toBe(true)
+  })
   it('projection deps write managed MCP state under explicit workflow home', async () => {
     const fs = new NodeFileSystem()
     const explicitHome = await mkdtemp(join(tmpdir(), 'explicit-home-'))

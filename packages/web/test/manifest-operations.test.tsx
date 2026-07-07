@@ -19,6 +19,8 @@ vi.mock('../src/lib/api', () => ({
     addSource: vi.fn(async () => ({ ok: true })),
     setSourceMembers: vi.fn(async () => ({ ok: true })),
     updateSourceMeta: vi.fn(async () => ({ ok: true })),
+    importLocalSkills: vi.fn(async () => ({ ok: true })),
+    writeLocalSkills: vi.fn(async () => ({ ok: true })),
     updateSkillTargets: vi.fn(async () => ({ ok: true })),
     updateLocalSkillTargets: vi.fn(async () => ({ ok: true })),
     updateMcpTargets: vi.fn(async () => ({ ok: true })),
@@ -304,6 +306,33 @@ describe('useManifestOperations', () => {
     }
   })
 
+  it('projects skills after source scan member selection is saved', async () => {
+    let result: Awaited<ReturnType<Operations['saveSourceMembers']>> | undefined
+
+    render(
+      <Harness
+        action={async (ops) => {
+          result = await ops.saveSourceMembers(
+            { url: 'https://example.test/skills.git', ref: 'main' },
+            ['alpha'],
+          )
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() =>
+      expect(api.setSourceMembers).toHaveBeenCalledWith({
+        repo: '/tmp/r',
+        url: 'https://example.test/skills.git',
+        members: ['alpha'],
+      }),
+    )
+    await waitFor(() => expect(result?.ok).toBe(true))
+    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/r', scope: 'skills' })
+  })
+
   it('returns failure and refreshes when skill bulk target update fails after an earlier update', async () => {
     const onError = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -357,6 +386,85 @@ describe('useManifestOperations', () => {
     } finally {
       consoleError.mockRestore()
     }
+  })
+
+  it('projects skills after bulk skill target update succeeds', async () => {
+    let result: Awaited<ReturnType<Operations['setAllSkillTargets']>> | undefined
+
+    render(
+      <Harness
+        action={async (ops) => {
+          result = await ops.setAllSkillTargets(
+            {
+              skills: {
+                sources: [
+                  {
+                    url: 'https://example.test/skills.git',
+                    ref: 'main',
+                    members: [{ name: 'alpha', targets: [] }],
+                  },
+                ],
+                skills: [{ id: 'local-alpha', targets: [] }],
+              },
+              mcp: [],
+              vars: { default: {}, active: {} },
+              config: { targets: ['codex'] },
+              errors: [],
+            } as never,
+            'codex',
+          )
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() => expect(api.updateSkillTargets).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(api.updateLocalSkillTargets).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(result?.ok).toBe(true))
+    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/r', scope: 'skills' })
+  })
+
+  it('projects skills after source bulk target update succeeds', async () => {
+    let result: Awaited<ReturnType<Operations['setSourceSkillTargets']>> | undefined
+
+    render(
+      <Harness
+        action={async (ops) => {
+          result = await ops.setSourceSkillTargets(
+            {
+              url: 'https://example.test/skills.git',
+              ref: 'main',
+              members: [
+                { name: 'alpha', targets: [] },
+                { name: 'beta', enabled: false, targets: [] },
+                { name: 'gamma', targets: ['claude-code'] },
+              ],
+            },
+            'codex',
+          )
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() => expect(api.updateSkillTargets).toHaveBeenCalledTimes(2))
+    expect(api.updateSkillTargets).toHaveBeenNthCalledWith(1, {
+      repo: '/tmp/r',
+      sourceUrl: 'https://example.test/skills.git',
+      memberName: 'alpha',
+      targets: ['codex'],
+    })
+    expect(api.updateSkillTargets).toHaveBeenNthCalledWith(2, {
+      repo: '/tmp/r',
+      sourceUrl: 'https://example.test/skills.git',
+      memberName: 'gamma',
+      targets: ['claude-code', 'codex'],
+    })
+    expect(api.updateLocalSkillTargets).not.toHaveBeenCalled()
+    await waitFor(() => expect(result?.ok).toBe(true))
+    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/r', scope: 'skills' })
   })
 
   it('returns failure and refreshes when MCP bulk target update fails after an earlier update', async () => {

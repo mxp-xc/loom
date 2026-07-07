@@ -152,6 +152,29 @@ describe('DELETE endpoints', () => {
   })
 })
 
+describe('local skill import', () => {
+  const app = new Hono().route('/api', registerRoutes())
+
+  it('stores repo assets skills imports as built-in local skills without ref paths', async () => {
+    memFiles['/tmp/r7/skills.yaml'] = 'sources: []\nskills: []\n'
+
+    const res = await app.request('/api/skills/local/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/r7',
+        mode: 'ref',
+        skills: [{ name: 'test-qa-skill', path: '/tmp/r7/assets/skills/test-qa-skill' }],
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, count: 1 })
+    const parsed = yaml.load(memFiles['/tmp/r7/skills.yaml']) as any
+    expect(parsed.skills).toEqual([{ id: 'test-qa-skill' }])
+  })
+})
+
 describe('source scan', () => {
   const app = new Hono().route('/api', registerRoutes())
 

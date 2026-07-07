@@ -530,6 +530,71 @@ describe('Skills view', () => {
     expect(api.project).toHaveBeenLastCalledWith({ repo: '/tmp/skills-layout', scope: 'skills' })
   })
 
+  it('supports source-level bulk projection chips in the source header', async () => {
+    const projectCallsBefore = vi.mocked(api.project).mock.calls.length
+    const updateCallsBefore = vi.mocked(api.updateSkillTargets).mock.calls.length
+    const manifest = {
+      skills: {
+        sources: [
+          {
+            url: 'https://github.com/obra/superpowers.git',
+            ref: 'v6.1.1',
+            type: 'tag',
+            members: [
+              { name: 'brainstorming', targets: ['codex'] },
+              { name: 'executing-plans', targets: [] },
+              { name: 'disabled-skill', enabled: false, targets: [] },
+            ],
+          },
+        ],
+        skills: [{ id: 'local-only', targets: [] }],
+      },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['claude-code', 'codex', 'opencode'] },
+      errors: [],
+    }
+
+    render(
+      <TestRouter>
+        <SkillSourceListHarness
+          repoPath="/tmp/skills-layout"
+          manifest={manifest}
+          onOpenDetail={vi.fn()}
+          onOpenScan={vi.fn()}
+          onOpenEdit={vi.fn()}
+          expandedGroups={new Set(['https://github.com/obra/superpowers.git-v6.1.1'])}
+          onToggleGroup={vi.fn()}
+        />
+      </TestRouter>,
+    )
+
+    const sourceBulkCodex = screen.getByRole('button', {
+      name: 'superpowers CX：部分已选择',
+    })
+    expect(sourceBulkCodex).toBeDefined()
+    fireEvent.click(sourceBulkCodex)
+
+    await waitFor(() => expect(api.updateSkillTargets).toHaveBeenCalledTimes(updateCallsBefore + 2))
+    expect(api.updateSkillTargets).toHaveBeenNthCalledWith(updateCallsBefore + 1, {
+      repo: '/tmp/skills-layout',
+      sourceUrl: 'https://github.com/obra/superpowers.git',
+      memberName: 'brainstorming',
+      targets: ['codex'],
+    })
+    expect(api.updateSkillTargets).toHaveBeenNthCalledWith(updateCallsBefore + 2, {
+      repo: '/tmp/skills-layout',
+      sourceUrl: 'https://github.com/obra/superpowers.git',
+      memberName: 'executing-plans',
+      targets: ['codex'],
+    })
+    expect(api.updateLocalSkillTargets).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'local-only' }),
+    )
+    await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 1))
+    expect(api.project).toHaveBeenLastCalledWith({ repo: '/tmp/skills-layout', scope: 'skills' })
+  })
+
   it('updates skill bulk targets one item at a time', async () => {
     let releaseFirst!: () => void
     const sourceCallsBefore = vi.mocked(api.updateSkillTargets).mock.calls.length
@@ -733,6 +798,46 @@ describe('Skill source updates', () => {
       source: 'https://github.com/obra/superpowers.git',
       targets: ['codex'],
     })
+  })
+
+  it('renders source members in the same sorted order used by scan', () => {
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/source-order"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  url: 'https://github.com/obra/superpowers.git',
+                  ref: 'main',
+                  members: [
+                    { name: 'writing-plans', targets: [] },
+                    { name: 'brainstorming', targets: [] },
+                    { name: 'executing-plans', targets: [] },
+                  ],
+                },
+              ],
+              skills: [],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: ['opencode'] },
+            errors: [],
+          } as never
+        }
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set(['https://github.com/obra/superpowers.git-main'])}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    const names = Array.from(document.querySelectorAll('.skill .sname')).map((el) =>
+      el.textContent?.trim(),
+    )
+    expect(names).toEqual(['brainstorming', 'executing-plans', 'writing-plans'])
   })
 
   it('toggles from the group header but not from links or actions', () => {

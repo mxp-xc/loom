@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { IFileSystem } from '../ports/fs.js'
 import type {
   IAgentAdapter,
@@ -31,6 +31,7 @@ export interface ProjectionDeps {
 export type ProjectionResult = { ok: true } | { ok: false; failure: ProjectionFailure }
 
 export type ProjectionScope = 'skills' | 'mcp' | 'memory' | 'all'
+const COPY_MARKER = '.loom-projection.json'
 
 export async function executeProjection(
   plan: ProjectionPlan,
@@ -66,14 +67,19 @@ export async function executeProjection(
           if (await fs.isLink(dest)) {
             await fs.removeLink(dest)
           } else if (await fs.exists(dest)) {
-            deps.logger?.warn?.(
-              { dest, skillId: link.skillId },
-              'skip cleanup: target is real file/dir',
-            )
-            continue
+            if (await shouldRemoveRealSkillDir(fs, dest, link)) {
+              await fs.removeDir(dest)
+            } else {
+              deps.logger?.warn?.(
+                { dest, skillId: link.skillId },
+                'skip cleanup: target is real file/dir',
+              )
+              continue
+            }
           }
           if (plan.strategy === 'copy') {
             await fs.copyDir(src, dest)
+            await writeCopyMarker(fs, dest, link.skillId)
           } else {
             await fs.createLink(src, dest)
           }
@@ -89,11 +95,17 @@ export async function executeProjection(
           if (builtDests.has(dest)) continue
           if (await fs.isLink(dest)) {
             await fs.removeLink(dest)
+            await removeEmptySkillParents(fs, agentSkillsDir(agent), dest)
           } else if (await fs.exists(dest)) {
-            deps.logger?.warn?.(
-              { dest, skillId: link.skillId },
-              'skip cleanup: target is real file/dir',
-            )
+            if (await shouldRemoveRealSkillDir(fs, dest, link)) {
+              await fs.removeDir(dest)
+              await removeEmptySkillParents(fs, agentSkillsDir(agent), dest)
+            } else {
+              deps.logger?.warn?.(
+                { dest, skillId: link.skillId },
+                'skip cleanup: target is real file/dir',
+              )
+            }
           }
         }
       }
@@ -190,6 +202,44 @@ export async function executeProjection(
   }
 }
 
+async function writeCopyMarker(fs: IFileSystem, dest: string, skillId: string): Promise<void> {
+  await fs.writeFile(join(dest, COPY_MARKER), JSON.stringify({ skillId, managedBy: 'loom' }) + '\n')
+}
+
+async function isManagedCopy(fs: IFileSystem, dest: string): Promise<boolean> {
+  return fs.exists(join(dest, COPY_MARKER))
+}
+
+async function shouldRemoveRealSkillDir(
+  fs: IFileSystem,
+  dest: string,
+  _link: ProjectionPlan['links'][number],
+): Promise<boolean> {
+  return isManagedCopy(fs, dest)
+}
+
+async function collectProjectedSkillIds(
+  fs: IFileSystem,
+  base: string,
+  prefix = '',
+): Promise<string[]> {
+  let entries: string[]
+  try {
+    entries = await fs.readDir(prefix ? join(base, prefix) : base)
+  } catch {
+    return []
+  }
+  const out: string[] = []
+  for (const entry of entries) {
+    if (entry === COPY_MARKER) continue
+    const rel = prefix ? prefix + '/' + entry : entry
+    const full = join(base, rel)
+    if (await fs.exists(join(full, 'SKILL.md'))) out.push(rel)
+    out.push(...(await collectProjectedSkillIds(fs, base, rel)))
+  }
+  return out
+}
+
 async function cleanOrphanedLinks(
   plan: ProjectionPlan,
   installedAgents: Set<AgentId>,
@@ -200,23 +250,43 @@ async function cleanOrphanedLinks(
   const planSkillIds = new Set(plan.links.map((l) => l.skillId))
   for (const agent of installedAgents) {
     const skillsDir = agentSkillsDir(agent)
-    let entries: string[]
-    try {
-      entries = await fs.readDir(skillsDir)
-    } catch {
-      continue
-    } // dir may not exist yet
-    for (const name of entries) {
-      if (planSkillIds.has(name)) continue
-      const dest = join(skillsDir, name)
+    const skillIds = await collectProjectedSkillIds(fs, skillsDir)
+    for (const skillId of skillIds) {
+      if (planSkillIds.has(skillId)) continue
+      const dest = join(skillsDir, skillId)
       if (await fs.isLink(dest)) {
         await fs.removeLink(dest)
-      }
-      // real file/dir is left untouched (user data)
-      else if (await fs.exists(dest)) {
-        logger?.warn?.({ dest }, 'skip orphan cleanup: target is real file/dir')
+        await removeEmptySkillParents(fs, skillsDir, dest)
+      } else if (await fs.exists(dest)) {
+        if (await isManagedCopy(fs, dest)) {
+          await fs.removeDir(dest)
+          await removeEmptySkillParents(fs, skillsDir, dest)
+        } else {
+          logger?.warn?.({ dest }, 'skip orphan cleanup: target is real file/dir')
+        }
       }
     }
+  }
+}
+
+async function removeEmptySkillParents(
+  fs: IFileSystem,
+  skillsDir: string,
+  removedPath: string,
+): Promise<void> {
+  let current = dirname(removedPath)
+  while (current !== skillsDir) {
+    const parent = dirname(current)
+    if (parent === current) return
+    let entries: string[]
+    try {
+      entries = await fs.readDir(current)
+    } catch {
+      return
+    }
+    if (entries.length > 0) return
+    await fs.removeDir(current)
+    current = parent
   }
 }
 
@@ -259,6 +329,8 @@ export async function applyUndo(u: UndoAction, fs: IFileSystem): Promise<void> {
   if (u.kind === 'unlink') {
     if (await fs.isLink(u.path)) {
       await fs.removeLink(u.path)
+    } else if (await isManagedCopy(fs, u.path)) {
+      await fs.removeDir(u.path)
     } else {
       throw new Error(`cannot rollback copy artifact (not a link): ${u.path}`)
     }

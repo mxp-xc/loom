@@ -503,9 +503,25 @@ textarea:focus {
 .group-head .gacts {
   margin-left: auto;
   display: flex;
+  align-items: center;
   gap: 6px;
   flex-shrink: 0;
   flex-wrap: nowrap;
+}
+.source-target-chips {
+  gap: 5px;
+  flex-wrap: nowrap;
+}
+.cfg-chips .source-target-chip {
+  min-height: 24px;
+  padding: 3px 7px;
+  font-size: 10px;
+}
+.source-actions-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border);
 }
 .source-action-button {
   min-width: 76px;

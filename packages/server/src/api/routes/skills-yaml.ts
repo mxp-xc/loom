@@ -104,10 +104,17 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       // Local skills canonical home is <repo>/assets/skills — this is where
       // projection (resolveSkillSrc) looks for them, and it git-syncs.
       const assetsSkillsDir = join(repoPath, 'assets', 'skills')
+      const assetsSkillsPrefix = assetsSkillsDir.replace(/\\/g, '/').replace(/\/+$/, '')
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
 
       for (const skill of skills) {
+        const skillPath = String(skill.path ?? '')
+          .replace(/\\/g, '/')
+          .replace(/\/+$/, '')
+        const isRepoAssetSkill =
+          skillPath === assetsSkillsPrefix + '/' + skill.name ||
+          skillPath.startsWith(assetsSkillsPrefix + '/' + skill.name + '/')
         if (mode === 'move') {
           const dest = join(assetsSkillsDir, skill.name)
           if (await deps.fs.exists(dest)) {
@@ -122,8 +129,10 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
           const result = addLocalSkill(data, { id: skill.name })
           if (result.changed) Object.assign(data, result.data)
         } else {
-          // ref mode: register with external path as-is
-          const result = addLocalSkill(data, { id: skill.name, path: skill.path })
+          const result = addLocalSkill(
+            data,
+            isRepoAssetSkill ? { id: skill.name } : { id: skill.name, path: skill.path },
+          )
           if (result.changed) Object.assign(data, result.data)
         }
       }
