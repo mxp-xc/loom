@@ -8,7 +8,13 @@ import type {
   ProjectionFailure,
 } from '../ports/adapter.js'
 import type { ProjectionPlan, McpPlanEntry, Manifest, AgentId, McpServer } from '@loom/core'
-import { resolveVars, renderText, type VarsContext } from '@loom/core'
+import {
+  resolveVars,
+  renderText,
+  renderTextWithResolvedVars,
+  type LayeredVarsResolution,
+  type VarsContext,
+} from '@loom/core'
 import { agentMcpFile, agentSkillsDir, agentMemoryFile, agentConfigDir } from '../adapters/paths.js'
 import { mergeMcp } from './mcp-merge.js'
 
@@ -33,6 +39,10 @@ export type ProjectionResult = { ok: true } | { ok: false; failure: ProjectionFa
 export type ProjectionScope = 'skills' | 'mcp' | 'memory' | 'all'
 const COPY_MARKER = '.loom-projection.json'
 
+type AgentAwareVarsContext = VarsContext & {
+  resolveForAgent?: (agent: AgentId) => Promise<LayeredVarsResolution>
+}
+
 export async function executeProjection(
   plan: ProjectionPlan,
   manifest: Manifest,
@@ -52,6 +62,7 @@ export async function executeProjection(
   }
   const journal: ProjectionJournal = { undos: [] }
   const { fs, adapters, installedAgents } = deps
+  const agentAwareVars = varsCtx as AgentAwareVarsContext
   try {
     // Phase A: build enabled links
     if (scope === 'skills' || scope === 'all') {
@@ -120,11 +131,11 @@ export async function executeProjection(
         const adapter = adapters[agent]
         if (!adapter) continue
         const file = agentMcpFile(agent)
-        const fragments = resolveMcpFragments(
+        const fragments = await resolveMcpFragments(
           plan.mcpEntries,
           manifest.mcp,
           agent,
-          varsCtx,
+          agentAwareVars,
           deps.logger,
         )
         // Even with no fragments we must still remove managed entries the manifest deleted.
@@ -145,6 +156,7 @@ export async function executeProjection(
     if (scope === 'memory' || scope === 'all') {
       const mp = plan.memoryPlan
       if (mp.active && mp.content !== null) {
+        const renderedTargets: Array<{ agent: AgentId; path: string; rendered: string }> = []
         for (const agent of mp.targets) {
           const ctx: VarsContext = {
             env: {
@@ -159,12 +171,24 @@ export async function executeProjection(
           }
           let rendered: string
           try {
-            rendered = renderText(mp.content, ctx)
+            if (agentAwareVars.resolveForAgent) {
+              const resolution = await agentAwareVars.resolveForAgent(agent)
+              if (!resolution.ok)
+                throw new Error(resolution.diagnostics.map((item) => item.message).join('; '))
+              const renderResult = renderTextWithResolvedVars(mp.content, resolution)
+              if (!renderResult.ok)
+                throw new Error(renderResult.diagnostics.map((item) => item.message).join('; '))
+              rendered = renderResult.text
+            } else {
+              rendered = renderText(mp.content, ctx)
+            }
           } catch (e) {
             deps.logger?.error({ err: e, agent }, 'memory var resolve failed')
             throw e
           }
-          const path = agentMemoryFile(agent)
+          renderedTargets.push({ agent, path: agentMemoryFile(agent), rendered })
+        }
+        for (const { path, rendered } of renderedTargets) {
           await fs.mkdir(join(path, '..'), true).catch(() => {})
           const backup = (await fs.exists(path)) ? await fs.readFile(path) : null
           journal.undos.push({ kind: 'restoreMemory', path, backup })
@@ -290,24 +314,44 @@ async function removeEmptySkillParents(
   }
 }
 
-function resolveMcpFragments(
+async function resolveMcpFragments(
   entries: McpPlanEntry[],
   mcp: McpServer[],
   agent: AgentId,
-  ctx: VarsContext,
+  ctx: AgentAwareVarsContext,
   logger?: ProjectionDeps['logger'],
-): McpFragment[] {
+): Promise<McpFragment[]> {
   const byId = new Map(mcp.map((s) => [s.id, s]))
   const out: McpFragment[] = []
+  let resolution: Extract<LayeredVarsResolution, { ok: true }> | null = null
+  if (ctx.resolveForAgent) {
+    const resolved = await ctx.resolveForAgent(agent)
+    if (!resolved.ok) {
+      const error = new Error(resolved.diagnostics.map((item) => item.message).join('; '))
+      logger?.error(
+        { err: error, diagnostics: resolved.diagnostics, agent },
+        'mcp var resolve failed for agent',
+      )
+      throw error
+    }
+    resolution = resolved
+  }
   for (const e of entries) {
     if (!e.targets.includes(agent)) continue
     const s = byId.get(e.id)
     if (!s) continue
     try {
-      const rv = (v: string | undefined) => (v === undefined ? undefined : resolveVars(v, ctx))
-      const rva = (v: string[] | undefined) => v?.map((a) => resolveVars(a, ctx))
+      const resolveValue = (value: string) => {
+        if (!resolution) return resolveVars(value, ctx)
+        const rendered = renderTextWithResolvedVars(value, resolution)
+        if (!rendered.ok)
+          throw new Error(rendered.diagnostics.map((item) => item.message).join('; '))
+        return rendered.text
+      }
+      const rv = (v: string | undefined) => (v === undefined ? undefined : resolveValue(v))
+      const rva = (v: string[] | undefined) => v?.map((a) => resolveValue(a))
       const rvm = (v: Record<string, string> | undefined) =>
-        v && Object.fromEntries(Object.entries(v).map(([k, x]) => [k, resolveVars(x, ctx)]))
+        v && Object.fromEntries(Object.entries(v).map(([k, x]) => [k, resolveValue(x)]))
       out.push({
         id: s.id,
         type: s.type,
@@ -319,7 +363,8 @@ function resolveMcpFragments(
         headers: rvm(s.headers),
       })
     } catch (e) {
-      logger?.error({ err: e, mcpId: s.id, agent }, 'mcp var resolve failed, skip this entry')
+      logger?.error({ err: e, mcpId: s.id, agent }, 'mcp var resolve failed for entry')
+      throw e
     }
   }
   return out

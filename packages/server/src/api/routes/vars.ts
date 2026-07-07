@@ -1,6 +1,9 @@
 import { Hono, type Context } from 'hono'
 import { isAbsolute, join, normalize } from 'node:path'
 import {
+  AgentIdSchema,
+  VarDefinitionSchema,
+  VarOverrideSchema,
   VAR_KEY,
   deleteVariable,
   danglingDiagnostics,
@@ -19,6 +22,18 @@ import {
 } from '@loom/core'
 import { logger } from '../../lib/logger.js'
 import { VarsStore } from '../../vars/store.js'
+import {
+  builtinForAgent,
+  deleteAgentAwareBaseKey,
+  readAgentAwareVars,
+  readAgentAwareVarsWithDiagnostics,
+  renameAgentAwareBaseKey,
+  resolveAgentAwareVars,
+  validateAgentAwareBaseDefinitions,
+  writeAgentAwareBase,
+  writeAgentAwareOverride,
+  type VarsLayerKind,
+} from '../../vars/agent-aware.js'
 import { readLocalConfig } from '../repo-config.js'
 import type { RouteDeps } from '../router.js'
 
@@ -80,6 +95,42 @@ function entryField(value: unknown): VarEntry {
   const entry = normalizeVarEntry(value)
   if (entry) return entry
   throw new ApiError(400, 'invalid_request', 'entry 无效')
+}
+
+function definitionField(value: unknown) {
+  const result = VarDefinitionSchema.safeParse(value)
+  if (result.success) return result.data
+  throw new ApiError(400, 'invalid_request', 'definition 无效')
+}
+
+function overrideField(value: unknown) {
+  const result = VarOverrideSchema.safeParse(value)
+  if (result.success) return result.data
+  throw new ApiError(400, 'invalid_request', 'override 无效')
+}
+
+function agentField(value: unknown) {
+  const result = AgentIdSchema.safeParse(value)
+  if (result.success) return result.data
+  throw new ApiError(400, 'invalid_request', 'agent 无效')
+}
+
+function overrideLayerField(value: unknown): Exclude<VarsLayerKind, 'base'> {
+  if (value === 'base-agent' || value === 'local' || value === 'local-agent') return value
+  throw new ApiError(400, 'invalid_request', 'layer 无效')
+}
+
+function assertOverrideMatchesDefinition(definition: VarEntry, override: { value: unknown }): void {
+  const value = override.value
+  const matches =
+    definition.type === 'string' || definition.type === 'secret'
+      ? typeof value === 'string'
+      : definition.type === 'number'
+        ? typeof value === 'number' && Number.isFinite(value)
+        : definition.type === 'boolean'
+          ? typeof value === 'boolean'
+          : true
+  if (!matches) throw new ApiError(422, 'override_type_mismatch', '覆盖值类型与 base 定义不匹配')
 }
 
 async function body(c: Context): Promise<Record<string, unknown>> {
@@ -308,6 +359,271 @@ async function persistMutation(store: VarsStore, result: VarsMutationResult): Pr
 export function createVarsRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
 
+  app.get('/vars/preview', (c) =>
+    run(
+      c,
+      'agent-aware-preview',
+      async () => {
+        const repoPath = repoField(c.req.query('repoPath'))
+        const agent = AgentIdSchema.safeParse(c.req.query('agent'))
+        if (!agent.success) throw new ApiError(400, 'invalid_request', 'agent 无效')
+        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
+          const result = await resolveAgentAwareVars(
+            deps.fs,
+            deps.home,
+            authorizedRepoPath,
+            agent.data,
+          )
+          if (!result.ok)
+            throw new ApiError(422, 'resolution_failed', '变量解析失败', result.diagnostics)
+          return c.json({ ok: true, ...result })
+        })
+      },
+      c.req.query('repoPath'),
+    ),
+  )
+  app.get('/vars/matrix', (c) =>
+    run(
+      c,
+      'agent-aware-matrix',
+      async () => {
+        const repoPath = repoField(c.req.query('repoPath'))
+        const agent = agentField(c.req.query('agent'))
+        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
+          const [readResult, resolution] = await Promise.all([
+            readAgentAwareVarsWithDiagnostics(deps.fs, deps.home, authorizedRepoPath, agent),
+            resolveAgentAwareVars(deps.fs, deps.home, authorizedRepoPath, agent),
+          ])
+          const snapshot = readResult.snapshot
+          const mergedDiagnostics = [
+            ...readResult.diagnostics,
+            ...(!resolution.ok ? resolution.diagnostics : []),
+          ]
+          const builtinKeys = Object.keys(
+            resolution.ok
+              ? Object.fromEntries(
+                  Object.entries(resolution.values).filter(
+                    ([key]) => resolution.sources[key]?.locality === 'builtin',
+                  ),
+                )
+              : builtinForAgent(agent),
+          ).sort()
+          const userKeys = [
+            ...new Set([
+              ...Object.keys(snapshot.base),
+              ...Object.keys(snapshot.baseAgent),
+              ...Object.keys(snapshot.local),
+              ...Object.keys(snapshot.localAgent),
+            ]),
+          ].sort()
+          return c.json({
+            ok: true,
+            agent,
+            builtinKeys,
+            userKeys,
+            snapshot,
+            resolution: resolution.ok ? resolution : { ok: false, diagnostics: mergedDiagnostics },
+          })
+        })
+      },
+      c.req.query('repoPath'),
+    ),
+  )
+
+  app.put('/vars/base-key', async (c) => {
+    let request: Record<string, unknown>
+    try {
+      request = await body(c)
+    } catch (error) {
+      return errorResponse(c, error, 'set-base-key')
+    }
+    return run(
+      c,
+      'set-base-key',
+      async () => {
+        const repoPath = repoField(request.repoPath)
+        const key = keyField(request.key)
+        const definition = definitionField(request.definition)
+        if (key.startsWith('LOOM_'))
+          throw new ApiError(400, 'reserved_builtin_key', 'LOOM_ 前缀保留给 builtin')
+        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
+          const snapshot = await readAgentAwareVars(deps.fs, deps.home, authorizedRepoPath, 'codex')
+          snapshot.base[key] = definition
+          const diagnostics = await validateAgentAwareBaseDefinitions(
+            deps.fs,
+            deps.home,
+            authorizedRepoPath,
+            snapshot.base,
+          )
+          if (diagnostics.length > 0)
+            throw new ApiError(422, 'validation_failed', '变量定义会导致覆盖层失效', diagnostics)
+          await writeAgentAwareBase(deps.fs, authorizedRepoPath, snapshot.base)
+          return c.json({ ok: true })
+        })
+      },
+      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+    )
+  })
+
+  app.delete('/vars/base-key', async (c) => {
+    let request: Record<string, unknown>
+    try {
+      request = await body(c)
+    } catch (error) {
+      return errorResponse(c, error, 'delete-base-key')
+    }
+    return run(
+      c,
+      'delete-base-key',
+      async () => {
+        const repoPath = repoField(request.repoPath)
+        const key = keyField(request.key)
+        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
+          const result = await deleteAgentAwareBaseKey(deps.fs, deps.home, authorizedRepoPath, key)
+          if (result.status === 'missing') throw new ApiError(404, 'not_found', '变量不存在')
+          if (result.status === 'blocked')
+            throw new ApiError(
+              409,
+              'delete_blocked_by_reference',
+              '变量仍被引用',
+              result.diagnostics,
+            )
+          return c.json({ ok: true })
+        })
+      },
+      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+    )
+  })
+
+  app.post('/vars/base-key/rename', async (c) => {
+    let request: Record<string, unknown>
+    try {
+      request = await body(c)
+    } catch (error) {
+      return errorResponse(c, error, 'rename-base-key')
+    }
+    return run(
+      c,
+      'rename-base-key',
+      async () => {
+        const repoPath = repoField(request.repoPath)
+        const oldKey = keyField(request.oldKey, 'oldKey')
+        const newKey = keyField(request.newKey, 'newKey')
+        if (newKey.startsWith('LOOM_'))
+          throw new ApiError(400, 'reserved_builtin_key', 'LOOM_ 前缀保留给 builtin')
+        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
+          const result = await renameAgentAwareBaseKey(
+            deps.fs,
+            deps.home,
+            authorizedRepoPath,
+            oldKey,
+            newKey,
+          )
+          if (result.status === 'missing') throw new ApiError(404, 'not_found', '变量不存在')
+          if (result.status === 'conflict')
+            throw new ApiError(409, 'variable_conflict', '目标变量已存在')
+          if (result.status === 'blocked')
+            throw new ApiError(422, 'validation_failed', '变量覆盖层无效', result.diagnostics)
+          return c.json({ ok: true })
+        })
+      },
+      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+    )
+  })
+
+  app.put('/vars/override', async (c) => {
+    let request: Record<string, unknown>
+    try {
+      request = await body(c)
+    } catch (error) {
+      return errorResponse(c, error, 'set-override')
+    }
+    return run(
+      c,
+      'set-override',
+      async () => {
+        const repoPath = repoField(request.repoPath)
+        const key = keyField(request.key)
+        const layer = overrideLayerField(request.layer)
+        const agent =
+          layer === 'base-agent' || layer === 'local-agent' ? agentField(request.agent) : undefined
+        const override = overrideField(request.override)
+        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
+          const snapshot = await readAgentAwareVars(
+            deps.fs,
+            deps.home,
+            authorizedRepoPath,
+            agent ?? 'codex',
+          )
+          const definition = snapshot.base[key]
+          if (!definition) throw new ApiError(404, 'not_found', '变量不存在')
+          assertOverrideMatchesDefinition(definition, override)
+          const target =
+            layer === 'base-agent'
+              ? snapshot.baseAgent
+              : layer === 'local'
+                ? snapshot.local
+                : snapshot.localAgent
+          target[key] = override
+          await writeAgentAwareOverride(
+            deps.fs,
+            deps.home,
+            authorizedRepoPath,
+            layer,
+            agent,
+            target,
+          )
+          return c.json({ ok: true })
+        })
+      },
+      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+    )
+  })
+
+  app.delete('/vars/override', async (c) => {
+    let request: Record<string, unknown>
+    try {
+      request = await body(c)
+    } catch (error) {
+      return errorResponse(c, error, 'clear-override')
+    }
+    return run(
+      c,
+      'clear-override',
+      async () => {
+        const repoPath = repoField(request.repoPath)
+        const key = keyField(request.key)
+        const layer = overrideLayerField(request.layer)
+        const agent =
+          layer === 'base-agent' || layer === 'local-agent' ? agentField(request.agent) : undefined
+        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
+          const snapshot = await readAgentAwareVars(
+            deps.fs,
+            deps.home,
+            authorizedRepoPath,
+            agent ?? 'codex',
+          )
+          const target =
+            layer === 'base-agent'
+              ? snapshot.baseAgent
+              : layer === 'local'
+                ? snapshot.local
+                : snapshot.localAgent
+          delete target[key]
+          await writeAgentAwareOverride(
+            deps.fs,
+            deps.home,
+            authorizedRepoPath,
+            layer,
+            agent,
+            target,
+          )
+          return c.json({ ok: true })
+        })
+      },
+      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+    )
+  })
   app.get('/vars/environments', (c) =>
     run(
       c,

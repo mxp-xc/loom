@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { VarsCodecError, parseVarsEnvironment, serializeVarsEnvironment } from '../src/vars-codec'
+import {
+  VarsCodecError,
+  parseVarsBaseDefinitions,
+  parseVarsEnvironment,
+  parseVarsOverrides,
+  serializeVarsBaseDefinitions,
+  serializeVarsEnvironment,
+  serializeVarsOverrides,
+} from '../src/vars-codec'
 import type { VarsEnvironment } from '../src/vars-types'
 
 function expectCode(run: () => unknown, code: string): void {
@@ -145,5 +153,57 @@ CONFIG: { type: json, value: { nested: [null, false, 2, ok] } }
       entries: { COUNT: { type: 'number', value: 2 } },
     } as VarsEnvironment
     expectCode(() => serializeVarsEnvironment(invalid), 'vars_environment_invalid')
+  })
+})
+
+describe('agent-aware vars codecs', () => {
+  it('parses and serializes base definitions with string formats', () => {
+    const definitions = parseVarsBaseDefinitions(`
+rtk:
+  type: string
+  format: path
+  value: \${LOOM_CONFIG_DIR}/RTK.md
+rules:
+  type: string
+  format: markdown
+  value: ''
+model:
+  type: json
+  value: { name: gpt-5, temperature: 0.2 }
+`)
+
+    expect(definitions).toEqual({
+      rtk: { type: 'string', format: 'path', value: '${LOOM_CONFIG_DIR}/RTK.md' },
+      rules: { type: 'string', format: 'markdown', value: '' },
+      model: { type: 'json', value: { name: 'gpt-5', temperature: 0.2 } },
+    })
+    expect(parseVarsBaseDefinitions(serializeVarsBaseDefinitions(definitions))).toEqual(definitions)
+  })
+
+  it('parses and serializes value-only overrides', () => {
+    const overrides = parseVarsOverrides(`
+agent_name:
+  value: Codex
+enabled:
+  value: true
+`)
+
+    expect(overrides).toEqual({
+      agent_name: { value: 'Codex' },
+      enabled: { value: true },
+    })
+    expect(parseVarsOverrides(serializeVarsOverrides(overrides))).toEqual(overrides)
+  })
+
+  it('rejects user LOOM_ definitions, invalid formats, and typed override entries', () => {
+    expect(() =>
+      parseVarsBaseDefinitions('LOOM_AGENT: { type: string, value: nope }'),
+    ).toThrowError(expect.objectContaining({ code: 'reserved_builtin_key' }))
+    expect(() =>
+      parseVarsBaseDefinitions('text: { type: string, format: html, value: nope }'),
+    ).toThrowError(expect.objectContaining({ code: 'typed_value_invalid' }))
+    expect(() => parseVarsOverrides('agent_name: { type: string, value: Codex }')).toThrowError(
+      expect.objectContaining({ code: 'override_entry_invalid' }),
+    )
   })
 })

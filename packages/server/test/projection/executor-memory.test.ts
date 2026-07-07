@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { executeProjection } from '../../src/projection/executor.js'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
-import { planProjection } from '@loom/core'
+import { planProjection, resolveLayeredVars } from '@loom/core'
 import type { Manifest, AgentId } from '@loom/core'
 
 describe('executeProjection memory phase', () => {
@@ -87,6 +87,103 @@ describe('executeProjection memory phase', () => {
     )
     expect(res.ok).toBe(true)
     expect(existsSync(join(home, 'claude', 'CLAUDE.md'))).toBe(false)
+  })
+
+  it('scope=memory renders with the agent-aware resolver before writing targets', async () => {
+    const mf: Manifest = {
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      memory: {
+        memories: [{ name: 'v1' }],
+        active: { name: 'v1' },
+        activeContent: '# ${agent_name}\\n@${rtk}',
+      },
+      vars: { default: {}, active: {} },
+      config: { targets: ['claude-code', 'codex'] },
+      errors: [],
+    }
+    const plan = buildPlan(mf, ['claude-code', 'codex'])
+    const varsCtx = {
+      env: {},
+      activeProfile: {},
+      defaultProfile: {},
+      resolveForAgent: async (agent: AgentId) =>
+        resolveLayeredVars({
+          agent,
+          base: {
+            agent_name: { type: 'string', value: 'Agent' },
+            rtk: { type: 'string', format: 'path', value: '${LOOM_CONFIG_DIR}/RTK.md' },
+          },
+          baseAgent: agent === 'codex' ? { agent_name: { value: 'Codex' } } : {},
+          local: { agent_name: { value: 'Local Agent' } },
+          localAgent: agent === 'codex' ? { agent_name: { value: 'Local Codex' } } : {},
+          builtin: {
+            LOOM_CONFIG_DIR: {
+              type: 'string',
+              format: 'path',
+              value: agent === 'codex' ? join(home, 'codex') : join(home, 'claude'),
+            },
+            LOOM_AGENT: { type: 'string', value: agent },
+            LOOM_PROFILE: { type: 'string', value: 'base' },
+            LOOM_SKILLS_DIR: { type: 'string', format: 'path', value: '' },
+            LOOM_AGENT_FILE: {
+              type: 'string',
+              value: agent === 'claude-code' ? 'CLAUDE.md' : 'AGENTS.md',
+            },
+          },
+        }),
+    }
+
+    const res = await executeProjection(
+      plan,
+      mf,
+      varsCtx,
+      {
+        fs,
+        adapters: {},
+        installedAgents: new Set(['claude-code', 'codex']),
+        resolveSkillSrc: () => null,
+      },
+      'memory',
+    )
+
+    expect(res.ok).toBe(true)
+    expect(readFileSync(join(home, 'claude', 'CLAUDE.md'), 'utf8')).toContain('# Local Agent')
+    expect(readFileSync(join(home, 'codex', 'AGENTS.md'), 'utf8')).toContain('# Local Codex')
+  })
+
+  it('scope=memory writes nothing when any agent render fails', async () => {
+    const mf: Manifest = {
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      memory: { memories: [{ name: 'v1' }], active: { name: 'v1' }, activeContent: '${missing}' },
+      vars: { default: {}, active: {} },
+      config: { targets: ['claude-code', 'codex'] },
+      errors: [],
+    }
+    const plan = buildPlan(mf, ['claude-code', 'codex'])
+    const res = await executeProjection(
+      plan,
+      mf,
+      {
+        env: {},
+        activeProfile: {},
+        defaultProfile: {},
+        resolveForAgent: async (agent: AgentId) =>
+          resolveLayeredVars({ agent, base: { ok: { type: 'string', value: 'ok' } } }),
+      },
+      {
+        fs,
+        adapters: {},
+        installedAgents: new Set(['claude-code', 'codex']),
+        resolveSkillSrc: () => null,
+      },
+      'memory',
+    )
+
+    expect(res.ok).toBe(false)
+    expect(existsSync(join(home, 'claude', 'CLAUDE.md'))).toBe(false)
+    expect(existsSync(join(home, 'codex', 'AGENTS.md'))).toBe(false)
   })
 
   it('scope=skills does NOT write memory files', async () => {

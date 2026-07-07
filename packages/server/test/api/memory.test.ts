@@ -124,4 +124,41 @@ describe('memory routes', () => {
     expect(j.rendered).toBe('agent=claude-code file=CLAUDE.md')
     delete process.env.CLAUDE_CONFIG_DIR
   })
+
+  it('POST /memory/preview renders agent-aware repo and local vars', async () => {
+    mkdirSync(join(home, '.loom', 'repos', 'default', 'vars', 'agents'), { recursive: true })
+    mkdirSync(join(home, '.loom', 'local', 'repos', 'default', 'vars'), { recursive: true })
+    writeFileSync(
+      join(home, '.loom', 'repos', 'default', 'vars', 'base.yaml'),
+      [
+        'agent_name:',
+        '  type: string',
+        '  value: Agent',
+        'rtk:',
+        '  type: string',
+        '  format: path',
+        "  value: '${LOOM_CONFIG_DIR}/RTK.md'",
+      ].join('\n'),
+    )
+    writeFileSync(
+      join(home, '.loom', 'repos', 'default', 'vars', 'agents', 'codex.yaml'),
+      'agent_name:\n  value: Codex\n',
+    )
+    writeFileSync(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml'),
+      'agent_name:\n  value: Local Codex\n',
+    )
+    process.env.CODEX_HOME = join(home, 'codex')
+
+    const res = await req('POST', '/api/memory/preview', {
+      repo: 'default',
+      content: '# ${agent_name}\\n@${rtk}',
+      agent: 'codex',
+    })
+    const j = await res.json()
+    expect(res.status).toBe(200)
+    expect(j.rendered).toBe('# Local Codex\\n@' + join(home, 'codex') + '/RTK.md')
+    expect(j.resolution.sources.agent_name).toEqual({ locality: 'local', layer: 'local' })
+    delete process.env.CODEX_HOME
+  })
 })

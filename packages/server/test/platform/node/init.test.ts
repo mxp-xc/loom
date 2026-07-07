@@ -23,8 +23,9 @@ describe('initLoom', () => {
     expect(await fs.exists(join(home, '.loom', 'config.yaml'))).toBe(true)
     expect(await fs.exists(join(home, '.loom', 'repos', 'default', 'skills.yaml'))).toBe(true)
     expect(await fs.exists(join(home, '.loom', 'repos', 'default', 'mcp.yaml'))).toBe(true)
+    expect(await fs.exists(join(home, '.loom', 'repos', 'default', 'vars', 'base.yaml'))).toBe(true)
     expect(await fs.exists(join(home, '.loom', 'repos', 'default', 'vars', 'default.yaml'))).toBe(
-      true,
+      false,
     )
     expect(await fs.exists(join(home, '.loom', 'repos', 'default', '.gitignore'))).toBe(true)
     expect(await simpleGit(join(home, '.loom', 'repos', 'default')).checkIsRepo()).toBe(true)

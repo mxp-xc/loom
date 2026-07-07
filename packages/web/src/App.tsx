@@ -7,6 +7,7 @@ import Memory from './views/Memory'
 import Sync from './views/Sync'
 import Settings from './views/Settings'
 import Vars from './views/vars/Vars'
+import VarsProfileDemo from './views/vars/VarsProfileDemo'
 import { useManifest } from './hooks/useManifest'
 import { useViewError } from './hooks/useViewError'
 import { useTheme } from './theme'
@@ -126,6 +127,7 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
             <Route path="mcp" element={<Mcp repoPath={repoPath} />} />
             <Route path="memory" element={<Memory repoPath={repoPath} />} />
             <Route path="vars" element={<Vars repoPath={repoPath} />} />
+            <Route path="vars-lab" element={<VarsProfileDemo />} />
             <Route path="sync" element={<Sync repoPath={repoPath} />} />
             <Route path="settings" element={<Settings repoPath={repoPath} />} />
           </Routes>

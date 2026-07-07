@@ -6,7 +6,7 @@ import { executeProjection } from '../../src/projection/executor'
 import { createProjectionDeps } from '../../src/projection/deps'
 import { NodeFileSystem } from '../../src/platform/node/fs'
 import { ClaudeCodeAdapter } from '../../src/adapters/claude-code'
-import type { ProjectionPlan, Manifest, AgentId } from '@loom/core'
+import { resolveLayeredVars, type ProjectionPlan, type Manifest, type AgentId } from '@loom/core'
 
 let home: string
 let srcDir: string
@@ -138,7 +138,7 @@ describe('executeProjection', () => {
     expect(res.ok).toBe(true)
     expect(await fs.exists(join(home, '.claude', 'skills', 'frontend-design'))).toBe(false)
   })
-  it('mcp var resolve failure: skip that entry, others written, ok:true', async () => {
+  it('mcp var resolve failure: fails projection instead of silently skipping the entry', async () => {
     const fs = new NodeFileSystem()
     const manifestUndef: Manifest = {
       ...manifest,
@@ -165,11 +165,70 @@ describe('executeProjection', () => {
       resolveSkillSrc: () => null,
       logger: { error: (o) => logs.push(JSON.stringify(o)), warn: () => {} },
     })
+    expect(res.ok).toBe(false)
+    await expect(fs.readFile(join(home, '.claude.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(logs.some((l) => l.includes('broken'))).toBe(true)
+  })
+
+  it('mcp uses the agent-aware resolver when provided', async () => {
+    const fs = new NodeFileSystem()
+    const manifestVars: Manifest = {
+      ...manifest,
+      mcp: [{ id: 'playwright', type: 'stdio', command: '${command}', targets: ['claude-code'] }],
+    }
+    const res = await executeProjection(
+      plan,
+      manifestVars,
+      {
+        env: {},
+        activeProfile: {},
+        defaultProfile: {},
+        resolveForAgent: async (agent: AgentId) =>
+          resolveLayeredVars({
+            agent,
+            base: { command: { type: 'string', value: 'uvx' } },
+          }),
+      },
+      {
+        fs,
+        adapters: { 'claude-code': new ClaudeCodeAdapter() },
+        installedAgents: installed,
+        resolveSkillSrc: () => null,
+      },
+      'mcp',
+    )
+
     expect(res.ok).toBe(true)
     const mcp = JSON.parse(await fs.readFile(join(home, '.claude.json')))
-    expect(mcp.mcpServers.broken).toBeUndefined()
-    expect(mcp.mcpServers.ok.command).toBe('npx')
-    expect(logs.some((l) => l.includes('broken'))).toBe(true)
+    expect(mcp.mcpServers.playwright.command).toBe('uvx')
+  })
+
+  it('mcp projection fails instead of writing empty fragments when agent-aware resolver fails', async () => {
+    const fs = new NodeFileSystem()
+    const res = await executeProjection(
+      plan,
+      manifest,
+      {
+        env: {},
+        activeProfile: {},
+        defaultProfile: {},
+        resolveForAgent: async (agent: AgentId) =>
+          resolveLayeredVars({
+            agent,
+            base: { bad: { type: 'string', value: '${missing}' } },
+          }),
+      },
+      {
+        fs,
+        adapters: { 'claude-code': new ClaudeCodeAdapter() },
+        installedAgents: installed,
+        resolveSkillSrc: () => null,
+      },
+      'mcp',
+    )
+
+    expect(res.ok).toBe(false)
+    expect(await fs.exists(join(home, '.claude.json'))).toBe(false)
   })
   it('manifest errors: rejects projection before any IO', async () => {
     const fs = new NodeFileSystem()

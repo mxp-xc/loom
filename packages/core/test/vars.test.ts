@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { resolveVars, resolveVarsChain } from '../src/vars'
 import {
+  createBuiltinVars,
+  renderTextWithResolvedVars,
+  resolveLayeredVars,
+} from '../src/vars-agent-aware'
+import {
   prepareVarsMutationPersistence,
   resolveVarsLifecycle,
   validateVarDraft,
@@ -264,6 +269,98 @@ describe('resolveVarsChain', () => {
         EMPTY: { type: 'string', value: '' },
         COLONS: { type: 'string', value: 'a:b' },
       },
+    })
+  })
+})
+
+describe('resolveLayeredVars', () => {
+  const baseRef = { locality: 'synced', layer: 'base' } as const
+  const baseAgentRef = { locality: 'synced', layer: 'agent', agent: 'codex' } as const
+  const localRef = { locality: 'local', layer: 'local' } as const
+  const localAgentRef = { locality: 'local', layer: 'agent', agent: 'codex' } as const
+
+  it('merges base, agent, local, local-agent, and builtin layers in order', () => {
+    const result = resolveLayeredVars({
+      agent: 'codex',
+      base: {
+        agent_name: { type: 'string', value: 'Agent' },
+        rtk: { type: 'string', format: 'path', value: '${LOOM_CONFIG_DIR}/RTK.md' },
+      },
+      baseAgent: { agent_name: { value: 'Base Codex' } },
+      local: { agent_name: { value: 'Local Agent' } },
+      localAgent: { agent_name: { value: 'Codex Local' } },
+      builtin: createBuiltinVars({
+        agent: 'codex',
+        configDir: 'C:/Users/10107/.codex',
+        skillsDir: '',
+        agentFile: 'AGENTS.md',
+      }),
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.values.agent_name).toEqual({ type: 'string', value: 'Codex Local' })
+    expect(result.sources.agent_name).toEqual(localAgentRef)
+    expect(result.overrideChains.agent_name).toEqual([
+      baseRef,
+      baseAgentRef,
+      localRef,
+      localAgentRef,
+    ])
+    expect(result.values.rtk).toEqual({
+      type: 'string',
+      format: 'path',
+      value: 'C:/Users/10107/.codex/RTK.md',
+    })
+    expect(result.dependencies.rtk).toEqual(['LOOM_CONFIG_DIR'])
+    expect(result.sources.LOOM_AGENT).toEqual({
+      locality: 'builtin',
+      layer: 'runtime',
+      agent: 'codex',
+    })
+  })
+
+  it('rejects unsupported defaults and json text interpolation', () => {
+    const defaulted = resolveLayeredVars({
+      agent: 'codex',
+      base: { text: { type: 'string', value: '${missing:fallback}' } },
+    })
+    expect(defaulted).toMatchObject({
+      ok: false,
+      diagnostics: [{ code: 'UNSUPPORTED_DEFAULT', key: 'text', path: ['text', 'missing'] }],
+    })
+
+    const json = resolveLayeredVars({
+      agent: 'codex',
+      base: {
+        config: { type: 'json', value: { model: 'gpt-5' } },
+        text: { type: 'string', value: '${config}' },
+      },
+    })
+    expect(json).toMatchObject({
+      ok: false,
+      diagnostics: [{ code: 'JSON_TEXT_INTERPOLATION', key: 'text', path: ['text', 'config'] }],
+    })
+  })
+
+  it('renders text templates with escape handling and diagnostics', () => {
+    const resolution = resolveLayeredVars({
+      agent: 'codex',
+      base: {
+        name: { type: 'string', value: 'Codex' },
+        count: { type: 'number', value: 2 },
+      },
+    })
+    expect(resolution.ok).toBe(true)
+    if (!resolution.ok) return
+    expect(renderTextWithResolvedVars('hi ${name} ${count} \\${literal}', resolution)).toEqual({
+      ok: true,
+      text: 'hi Codex 2 ${literal}',
+      diagnostics: [],
+    })
+    expect(renderTextWithResolvedVars('${missing}', resolution)).toMatchObject({
+      ok: false,
+      diagnostics: [{ code: 'MISSING_REFERENCE', path: ['missing'] }],
     })
   })
 })

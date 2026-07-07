@@ -20,6 +20,7 @@ import { cacheDirFor } from '../remote/cache.js'
 import { installSkill } from '../remote/install.js'
 import { readLocalConfig, readRepoFiles } from '../api/repo-config.js'
 import { executeProjection, type ProjectionResult, type ProjectionScope } from './executor.js'
+import { resolveAgentAwareVars } from '../vars/agent-aware.js'
 import { createProjectionDeps } from './deps.js'
 import { mergeLocalSkills, scanSourceMembers } from './scan.js'
 
@@ -55,7 +56,11 @@ export async function projectRepository(
       env: {},
       activeProfile: manifest.vars.active,
       defaultProfile: manifest.vars.default,
-    } satisfies VarsContext)
+      resolveForAgent: (agent: AgentId) =>
+        resolveAgentAwareVars(deps.fs, deps.home, repoPath, agent),
+    } satisfies VarsContext & {
+      resolveForAgent: (agent: AgentId) => ReturnType<typeof resolveAgentAwareVars>
+    })
   const projectionDeps = createProjectionDeps(
     { fs: deps.fs, git: deps.git, proc: deps.proc },
     repoPath,

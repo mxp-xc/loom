@@ -5,7 +5,9 @@ import type {
   VarsDiagnostic,
   VarsEnvironment,
   VarsMutationResponse,
+  VarsMatrixResponse,
   VarsResolution,
+  VarOverride,
 } from './vars'
 
 const base = '/api'
@@ -151,6 +153,34 @@ export const api = {
         ok: true
         entry: RevealedVarEntry
       }>,
+    getMatrix: (repoPath: string, agent: string) =>
+      fetch(
+        `${base}/vars/matrix?repoPath=${encodeURIComponent(repoPath)}&agent=${encodeURIComponent(agent)}`,
+      ).then(json) as Promise<VarsMatrixResponse>,
+    setBaseKey: (repoPath: string, key: string, definition: VarEntryInput) =>
+      put('/vars/base-key', { repoPath, key, definition }).then(json) as Promise<{ ok: true }>,
+    deleteBaseKey: (repoPath: string, key: string) =>
+      del('/vars/base-key', { repoPath, key }).then(json) as Promise<{ ok: true }>,
+    renameBaseKey: (repoPath: string, oldKey: string, newKey: string) =>
+      post('/vars/base-key/rename', { repoPath, oldKey, newKey }).then(json) as Promise<{
+        ok: true
+      }>,
+    setOverride: (
+      repoPath: string,
+      layer: 'base-agent' | 'local' | 'local-agent',
+      key: string,
+      override: VarOverride,
+      agent?: string,
+    ) =>
+      put('/vars/override', { repoPath, layer, key, override, agent }).then(json) as Promise<{
+        ok: true
+      }>,
+    clearOverride: (
+      repoPath: string,
+      layer: 'base-agent' | 'local' | 'local-agent',
+      key: string,
+      agent?: string,
+    ) => del('/vars/override', { repoPath, layer, key, agent }).then(json) as Promise<{ ok: true }>,
   },
   init: () =>
     post('/init', {}).then(json) as Promise<{ ok: boolean; active_repo: string; repoPath: string }>,

@@ -7,7 +7,7 @@ const SKELETON = {
   gitignore: `remote-cache/\n`,
   skills: `sources: []\nskills: []\n`,
   mcp: `[]\n`,
-  varsDefault: `# default profile vars\n# browsers_path: ~/.cache/ms-playwright\n# work_root: ~/projects\n`,
+  varsBase: `# base vars\n# browsers_path:\n#   type: string\n#   format: path\n#   value: ~/.cache/ms-playwright\n`,
   repoConfig: `# repo-level config (synced via git)\nprofile: local\ntargets: [claude-code, codex, opencode]\nprojection:\n  strategy: link\nupdate_check:\n  enabled: true\n  interval: 6h\n`,
 }
 
@@ -26,7 +26,7 @@ export async function initLoom(homePath: string, fs: IFileSystem, git: IGit): Pr
   await ensure(join(repo, '.gitignore'), SKELETON.gitignore)
   await ensure(join(repo, 'skills.yaml'), SKELETON.skills)
   await ensure(join(repo, 'mcp.yaml'), SKELETON.mcp)
-  await ensure(join(repo, 'vars', 'default.yaml'), SKELETON.varsDefault)
+  await ensure(join(repo, 'vars', 'base.yaml'), SKELETON.varsBase)
   await ensure(join(repo, 'config.yaml'), SKELETON.repoConfig)
   if (!(await fs.exists(join(repo, '.git')))) await git.init(repo)
 }

@@ -1,11 +1,10 @@
 import { Hono } from 'hono'
 import { join, sep } from 'node:path'
-import { renderText } from '@loom/core'
+import { AgentIdSchema } from '@loom/core'
 import { resolveRepoPath } from '../repo.js'
-import { agentConfigDir, agentSkillsDir } from '../../adapters/paths.js'
 import { readYaml, writeYaml } from '../repo-config.js'
 import type { RouteDeps } from '../router.js'
-import type { AgentId } from '@loom/core'
+import { renderAgentAwareText } from '../../vars/agent-aware.js'
 
 const NAME_RE = /^[A-Za-z0-9_-]+$/
 
@@ -170,20 +169,21 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
 
   app.post('/memory/preview', async (c) => {
     try {
-      const { content, agent } = await c.req.json()
-      const a = agent as AgentId
-      const ctx = {
-        env: {
-          LOOM_AGENT: a,
-          LOOM_CONFIG_DIR: agentConfigDir(a),
-          LOOM_SKILLS_DIR: agentSkillsDir(a),
-          LOOM_AGENT_FILE: a === 'claude-code' ? 'CLAUDE.md' : 'AGENTS.md',
-        },
-        activeProfile: {},
-        defaultProfile: {},
-      }
-      const rendered = renderText(content, ctx)
-      return c.json({ rendered })
+      const { repo, content, agent } = await c.req.json()
+      const parsedAgent = AgentIdSchema.safeParse(agent)
+      if (!parsedAgent.success || typeof content !== 'string')
+        return c.json({ ok: false, error: 'invalid_request', message: '请求无效' }, 400)
+      const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      const result = await renderAgentAwareText(
+        deps.fs,
+        deps.home,
+        repoPath,
+        parsedAgent.data,
+        content,
+      )
+      if (!result.ok)
+        return c.json({ ok: false, error: 'render_failed', diagnostics: result.diagnostics }, 400)
+      return c.json({ rendered: result.rendered, diagnostics: [], resolution: result.resolution })
     } catch (e) {
       return c.json(
         { ok: false, error: 'render_failed', message: String((e as Error).message) },

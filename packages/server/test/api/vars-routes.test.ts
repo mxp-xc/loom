@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
@@ -77,6 +77,435 @@ describe('vars HTTP API', () => {
     const listed = await json('/vars/environments?repoPath=default')
     expect(listed.response.status).toBe(200)
     expect(listed.body).toEqual({ ok: true, environments: ['dev'], diagnostics: [] })
+  })
+
+  it('returns an agent-aware key matrix from synced, local, and builtin layers', async () => {
+    await mkdir(join(root, 'vars', 'agents'), { recursive: true })
+    await mkdir(join(home, '.loom', 'local', 'repos', 'default', 'vars', 'agents'), {
+      recursive: true,
+    })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      [
+        'agent_name:',
+        '  type: string',
+        '  value: Agent',
+        'count:',
+        '  type: number',
+        '  value: 1',
+        '',
+      ].join('\n'),
+    )
+    await writeFile(join(root, 'vars', 'agents', 'codex.yaml'), 'agent_name:\n  value: Codex\n')
+    await writeFile(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml'),
+      'count:\n  value: 2\n',
+    )
+    await writeFile(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'agents', 'codex.yaml'),
+      'agent_name:\n  value: Local Codex\n',
+    )
+
+    const result = await json(`/vars/matrix?repoPath=${encodeURIComponent(root)}&agent=codex`)
+
+    expect(result.response.status).toBe(200)
+    expect(result.body.builtinKeys).toContain('LOOM_AGENT')
+    expect(result.body.userKeys).toEqual(['agent_name', 'count'])
+    expect(result.body.resolution.values.agent_name.value).toBe('Local Codex')
+    expect(result.body.resolution.values.count.value).toBe(2)
+    expect(result.body.resolution.sources.agent_name).toMatchObject({
+      locality: 'local',
+      layer: 'agent',
+      agent: 'codex',
+    })
+    expect(result.body.resolution.overrideChains.agent_name).toEqual([
+      { locality: 'synced', layer: 'base' },
+      { locality: 'synced', layer: 'agent', agent: 'codex' },
+      { locality: 'local', layer: 'agent', agent: 'codex' },
+    ])
+  })
+
+  it('sets base definitions and local overrides in their semantic layers', async () => {
+    const created = await json('/vars/base-key', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repoPath: root,
+        key: 'agent_name',
+        definition: { type: 'string', value: 'Agent' },
+      }),
+    })
+    expect(created.response.status).toBe(200)
+    expect(await readFile(join(root, 'vars', 'base.yaml'), 'utf8')).toContain('agent_name:')
+
+    const overridden = await json('/vars/override', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repoPath: root,
+        layer: 'local',
+        key: 'agent_name',
+        override: { value: 'Local Agent' },
+      }),
+    })
+    expect(overridden.response.status).toBe(200)
+    const localPath = join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml')
+    expect(await readFile(localPath, 'utf8')).toContain('Local Agent')
+
+    const matrix = await json(`/vars/matrix?repoPath=${encodeURIComponent(root)}&agent=codex`)
+    expect(matrix.body.resolution.values.agent_name.value).toBe('Local Agent')
+
+    const cleared = await json('/vars/override', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repoPath: root, layer: 'local', key: 'agent_name' }),
+    })
+    expect(cleared.response.status).toBe(200)
+    expect(await readFile(localPath, 'utf8')).not.toContain('agent_name:')
+  })
+
+  it('renames and deletes base keys across known override layers', async () => {
+    await mkdir(join(root, 'vars', 'agents'), { recursive: true })
+    await mkdir(join(home, '.loom', 'local', 'repos', 'default', 'vars', 'agents'), {
+      recursive: true,
+    })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      ['agent_name:', '  type: string', '  value: Agent', ''].join('\n'),
+    )
+    await writeFile(join(root, 'vars', 'agents', 'codex.yaml'), 'agent_name:\n  value: Codex\n')
+    await writeFile(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml'),
+      'agent_name:\n  value: Local\n',
+    )
+    await writeFile(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'agents', 'codex.yaml'),
+      'agent_name:\n  value: Local Codex\n',
+    )
+
+    const renamed = await json('/vars/base-key/rename', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repoPath: root, oldKey: 'agent_name', newKey: 'assistant_name' }),
+    })
+    expect(renamed.response.status).toBe(200)
+
+    const matrix = await json('/vars/matrix?repoPath=' + encodeURIComponent(root) + '&agent=codex')
+    expect(matrix.body.userKeys).toEqual(['assistant_name'])
+    expect(matrix.body.resolution.values.assistant_name.value).toBe('Local Codex')
+    expect(await readFile(join(root, 'vars', 'agents', 'codex.yaml'), 'utf8')).toContain(
+      'assistant_name:',
+    )
+    expect(
+      await readFile(
+        join(home, '.loom', 'local', 'repos', 'default', 'vars', 'agents', 'codex.yaml'),
+        'utf8',
+      ),
+    ).toContain('assistant_name:')
+
+    const deleted = await json('/vars/base-key', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repoPath: root, key: 'assistant_name' }),
+    })
+    expect(deleted.response.status).toBe(200)
+
+    const afterDelete = await json(
+      '/vars/matrix?repoPath=' + encodeURIComponent(root) + '&agent=codex',
+    )
+    expect(afterDelete.body.userKeys).toEqual([])
+    expect(await readFile(join(root, 'vars', 'agents', 'codex.yaml'), 'utf8')).not.toContain(
+      'assistant_name:',
+    )
+    expect(
+      await readFile(
+        join(home, '.loom', 'local', 'repos', 'default', 'vars', 'agents', 'codex.yaml'),
+        'utf8',
+      ),
+    ).not.toContain('assistant_name:')
+  })
+
+  it('returns a repairable matrix with diagnostics when an override file has typed entries', async () => {
+    await mkdir(join(root, 'vars', 'agents'), { recursive: true })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      ['agent_name:', '  type: string', '  value: Agent', ''].join('\n'),
+    )
+    await writeFile(
+      join(root, 'vars', 'agents', 'codex.yaml'),
+      ['agent_name:', '  type: string', '  value: Codex', ''].join('\n'),
+    )
+
+    const result = await json('/vars/matrix?repoPath=' + encodeURIComponent(root) + '&agent=codex')
+
+    expect(result.response.status).toBe(200)
+    expect(result.body.userKeys).toEqual(['agent_name'])
+    expect(result.body.resolution.ok).toBe(false)
+    expect(result.body.resolution.diagnostics[0]).toMatchObject({
+      code: 'override_entry_invalid',
+      layer: 'base-agent',
+    })
+  })
+
+  it('keeps malformed override layers repairable during base mutations', async () => {
+    await mkdir(join(root, 'vars', 'agents'), { recursive: true })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      ['agent_name:', '  type: string', '  value: Agent', ''].join('\n'),
+    )
+    await writeFile(
+      join(root, 'vars', 'agents', 'codex.yaml'),
+      ['agent_name:', '  type: string', '  value: Codex', ''].join('\n'),
+    )
+
+    const rejected = await json('/vars/base-key', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repoPath: root,
+        key: 'other',
+        definition: { type: 'string', value: 'Other' },
+      }),
+    })
+
+    expect(rejected.response.status).toBe(422)
+    expect(rejected.body.error.code).toBe('validation_failed')
+    expect(rejected.body.error.diagnostics[0]).toMatchObject({
+      code: 'override_entry_invalid',
+      layer: 'base-agent',
+    })
+    expect(await readFile(join(root, 'vars', 'base.yaml'), 'utf8')).not.toContain('other:')
+  })
+
+  it('includes orphan override keys in the matrix so they can be cleared', async () => {
+    await mkdir(join(home, '.loom', 'local', 'repos', 'default', 'vars'), { recursive: true })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      ['known:', '  type: string', '  value: Known', ''].join('\n'),
+    )
+    await writeFile(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml'),
+      ['orphan:', '  value: remove-me', ''].join('\n'),
+    )
+
+    const matrix = await json('/vars/matrix?repoPath=' + encodeURIComponent(root) + '&agent=codex')
+
+    expect(matrix.response.status).toBe(200)
+    expect(matrix.body.userKeys).toEqual(['known', 'orphan'])
+    expect(matrix.body.resolution.ok).toBe(false)
+    expect(matrix.body.resolution.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'UNKNOWN_OVERRIDE_KEY', key: 'orphan' }),
+      ]),
+    )
+  })
+
+  it('reports unsupported agent override files as diagnostics without rendering them', async () => {
+    await mkdir(join(root, 'vars', 'agents'), { recursive: true })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      ['agent_name:', '  type: string', '  value: Agent', ''].join('\n'),
+    )
+    await writeFile(join(root, 'vars', 'agents', 'ghost.yaml'), 'agent_name:\n  value: Ghost\n')
+
+    const matrix = await json('/vars/matrix?repoPath=' + encodeURIComponent(root) + '&agent=codex')
+
+    expect(matrix.response.status).toBe(200)
+    expect(matrix.body.resolution.ok).toBe(false)
+    expect(matrix.body.resolution.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'UNKNOWN_AGENT_OVERRIDE_FILE',
+          layer: 'base-agent',
+        }),
+      ]),
+    )
+    expect(matrix.body.snapshot.baseAgent).toEqual({})
+  })
+
+  it('blocks deleting a base key while other vars still reference it', async () => {
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      [
+        'API_URL:',
+        '  type: string',
+        '  value: https://example.test',
+        'CLIENT:',
+        '  type: string',
+        '  value: ' + '$' + '{API_URL}/client',
+        '',
+      ].join('\n'),
+    )
+
+    const deleted = await json('/vars/base-key', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repoPath: root, key: 'API_URL' }),
+    })
+
+    expect(deleted.response.status).toBe(409)
+    expect(deleted.body.error.code).toBe('delete_blocked_by_reference')
+    expect(deleted.body.error.diagnostics[0]).toMatchObject({
+      code: 'REFERENCE_EXISTS',
+      key: 'CLIENT',
+      referencedKey: 'API_URL',
+      layer: 'base',
+    })
+    expect(await readFile(join(root, 'vars', 'base.yaml'), 'utf8')).toContain('API_URL:')
+  })
+
+  it('blocks deleting a base key while memory or MCP consumers still reference it', async () => {
+    await mkdir(join(root, 'memories'), { recursive: true })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      ['API_URL:', '  type: string', '  value: https://example.test', ''].join('\n'),
+    )
+    await writeFile(
+      join(root, 'memories', 'default.md'),
+      'Use ' + '$' + '{API_URL}' + ' in memory\n',
+    )
+    await writeFile(
+      join(root, 'mcp.yaml'),
+      ['servers:', '  - id: api', '    type: stdio', '    command: ' + '$' + '{API_URL}', ''].join(
+        '\n',
+      ),
+    )
+
+    const deleted = await json('/vars/base-key', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repoPath: root, key: 'API_URL' }),
+    })
+
+    expect(deleted.response.status).toBe(409)
+    expect(deleted.body.error.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'CONSUMER_REFERENCE_EXISTS', layer: 'memory' }),
+        expect.objectContaining({ code: 'CONSUMER_REFERENCE_EXISTS', layer: 'mcp' }),
+      ]),
+    )
+    expect(await readFile(join(root, 'vars', 'base.yaml'), 'utf8')).toContain('API_URL:')
+  })
+
+  it('renames base keys and rewrites vars references across base and override layers', async () => {
+    await mkdir(join(home, '.loom', 'local', 'repos', 'default', 'vars'), { recursive: true })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      [
+        'API_URL:',
+        '  type: string',
+        '  value: https://example.test',
+        'CLIENT:',
+        '  type: string',
+        '  value: ' + '$' + '{API_URL}/client',
+        '',
+      ].join('\n'),
+    )
+    await writeFile(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml'),
+      ['CLIENT:', '  value: ' + '$' + '{API_URL}/local', ''].join('\n'),
+    )
+
+    const renamed = await json('/vars/base-key/rename', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repoPath: root, oldKey: 'API_URL', newKey: 'SERVICE_URL' }),
+    })
+
+    expect(renamed.response.status).toBe(200)
+    expect(await readFile(join(root, 'vars', 'base.yaml'), 'utf8')).toContain(
+      '$' + '{SERVICE_URL}/client',
+    )
+    expect(
+      await readFile(
+        join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml'),
+        'utf8',
+      ),
+    ).toContain('$' + '{SERVICE_URL}/local')
+  })
+
+  it('renames base keys and rewrites known consumer references', async () => {
+    await mkdir(join(root, 'memories'), { recursive: true })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      ['API_URL:', '  type: string', '  value: https://example.test', ''].join('\n'),
+    )
+    await writeFile(
+      join(root, 'memories', 'default.md'),
+      'Use ' + '$' + '{API_URL}' + ' in memory\n',
+    )
+    await writeFile(
+      join(root, 'mcp.yaml'),
+      ['servers:', '  - id: api', '    type: stdio', '    command: ' + '$' + '{API_URL}', ''].join(
+        '\n',
+      ),
+    )
+
+    const renamed = await json('/vars/base-key/rename', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repoPath: root, oldKey: 'API_URL', newKey: 'SERVICE_URL' }),
+    })
+
+    expect(renamed.response.status).toBe(200)
+    expect(await readFile(join(root, 'memories', 'default.md'), 'utf8')).toContain(
+      '$' + '{SERVICE_URL}',
+    )
+    expect(await readFile(join(root, 'mcp.yaml'), 'utf8')).toContain('$' + '{SERVICE_URL}')
+  })
+
+  it('rejects overrides that do not match the base definition type before persisting', async () => {
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      ['count:', '  type: number', '  value: 1', ''].join('\n'),
+    )
+
+    const rejected = await json('/vars/override', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repoPath: root,
+        layer: 'local',
+        key: 'count',
+        override: { value: 'not-a-number' },
+      }),
+    })
+
+    expect(rejected.response.status).toBe(422)
+    expect(rejected.body.error.code).toBe('override_type_mismatch')
+    const localPath = join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml')
+    await expect(readFile(localPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects base definition changes that would invalidate existing overrides', async () => {
+    await mkdir(join(home, '.loom', 'local', 'repos', 'default', 'vars'), { recursive: true })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      ['count:', '  type: string', '  value: one', ''].join('\n'),
+    )
+    await writeFile(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml'),
+      ['count:', '  value: local-one', ''].join('\n'),
+    )
+
+    const rejected = await json('/vars/base-key', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repoPath: root,
+        key: 'count',
+        definition: { type: 'number', value: 1 },
+      }),
+    })
+
+    expect(rejected.response.status).toBe(422)
+    expect(rejected.body.error.code).toBe('validation_failed')
+    expect(rejected.body.error.diagnostics[0]).toMatchObject({
+      code: 'OVERRIDE_TYPE_MISMATCH',
+      key: 'count',
+      layer: 'local',
+    })
+    expect(await readFile(join(root, 'vars', 'base.yaml'), 'utf8')).toContain('type: string')
   })
 
   it('rejects every vars operation outside the dynamically active repository', async () => {
