@@ -217,35 +217,9 @@ export default function SkillSourceList({
                   <ChevronDown size={14} style={chevronStyle(!isExpanded)} />
                   {repoId}
                 </button>
-                {src.type === 'tag' ? (
-                  <span
-                    style={{
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: 10,
-                      padding: '1px 6px',
-                      borderRadius: 'var(--radius)',
-                      background: 'rgba(139,92,246,0.14)',
-                      color: 'var(--oc)',
-                      border: '1px solid color-mix(in srgb, var(--oc) 30%, transparent)',
-                    }}
-                  >
-                    tag
-                  </span>
-                ) : (
-                  <span
-                    style={{
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: 10,
-                      padding: '1px 6px',
-                      borderRadius: 'var(--radius)',
-                      background: 'rgba(56,189,248,0.12)',
-                      color: 'var(--info)',
-                      border: '1px solid color-mix(in srgb, var(--info) 30%, transparent)',
-                    }}
-                  >
-                    {src.type ?? 'branch'}
-                  </span>
-                )}
+                <span className={'source-type-badge ' + (src.type === 'tag' ? 'tag' : 'branch')}>
+                  {src.type ?? 'branch'}
+                </span>
                 <a
                   href={src.url.replace(/\.git$/, '')}
                   target="_blank"

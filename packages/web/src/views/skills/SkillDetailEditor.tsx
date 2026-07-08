@@ -97,7 +97,7 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
       open={!!detail}
       onClose={onClose}
       title={detail?.skillId ?? ''}
-      width={760}
+      width={960}
       minHeight={460}
     >
       {detail && (
@@ -195,20 +195,6 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
               }}
             >
               <div className="label">SKILL.md</div>
-              {skillContent && (
-                <IconButton
-                  label={copiedSkillContent ? '已复制 SKILL.md' : '复制 SKILL.md'}
-                  tooltip={copiedSkillContent ? '已复制' : '复制'}
-                  tone={copiedSkillContent ? 'success' : 'default'}
-                  onClick={() => void copySkillContent()}
-                >
-                  {copiedSkillContent ? (
-                    <Check className="h-3 w-3" />
-                  ) : (
-                    <Copy className="h-3 w-3" />
-                  )}
-                </IconButton>
-              )}
             </div>
             <div className="skill-detail-content-frame" data-testid="skill-detail-content-frame">
               {showSkillLoading && (
@@ -231,6 +217,20 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
                 <MarkdownPreview
                   content={skillContent}
                   editable={!detail.source}
+                  toolbarEnd={
+                    <IconButton
+                      label={copiedSkillContent ? '已复制 SKILL.md' : '复制 SKILL.md'}
+                      tooltip={copiedSkillContent ? '已复制' : '复制'}
+                      tone={copiedSkillContent ? 'success' : 'default'}
+                      onClick={() => void copySkillContent()}
+                    >
+                      {copiedSkillContent ? (
+                        <Check className="h-3 w-3" />
+                      ) : (
+                        <Copy className="h-3 w-3" />
+                      )}
+                    </IconButton>
+                  }
                   onSave={async (newContent) => {
                     try {
                       await api.saveSkillContent({

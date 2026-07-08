@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -9,6 +9,7 @@ interface MarkdownPreviewProps {
   content: string
   editable?: boolean
   onSave?: (content: string) => Promise<void>
+  toolbarEnd?: ReactNode
 }
 
 interface FrontmatterField {
@@ -61,7 +62,6 @@ function FrontmatterFormatter({ fields }: { fields: FrontmatterField[] }) {
   if (!fields.length) return null
   return (
     <section className="md-frontmatter" aria-label="SKILL.md metadata">
-      <div className="md-frontmatter-eyebrow">metadata</div>
       <dl className="md-frontmatter-grid">
         {fields.map((field) => (
           <div className="md-frontmatter-row" key={field.key}>
@@ -78,6 +78,7 @@ export default function MarkdownPreview({
   content,
   editable = false,
   onSave,
+  toolbarEnd,
 }: MarkdownPreviewProps) {
   const [mode, setMode] = useState<ViewMode>('preview')
   const [editContent, setEditContent] = useState(content)
@@ -129,7 +130,10 @@ export default function MarkdownPreview({
   const { fields: frontmatterFields, body: markdownBody } = parseFrontmatter(content)
 
   const buttons = (
-    <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+    <div
+      className="md-preview-toolbar"
+      style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center', minHeight: 28 }}
+    >
       <button style={toggleStyle(mode === 'preview')} onClick={() => setMode('preview')}>
         预览
       </button>
@@ -144,12 +148,17 @@ export default function MarkdownPreview({
       >
         {sourceLabel}
       </button>
+      {toolbarEnd && (
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center' }}>
+          {toolbarEnd}
+        </span>
+      )}
       {mode === 'source' && editable && (
         <>
           <button
             style={{
               ...toggleStyle(false),
-              marginLeft: 'auto',
+              marginLeft: toolbarEnd ? 0 : 'auto',
               borderColor: 'var(--primary)',
               color: 'var(--primary)',
             }}
@@ -183,6 +192,7 @@ export default function MarkdownPreview({
             style={{
               width: '100%',
               minHeight: 320,
+              height: 'var(--skill-detail-panel-height)',
               padding: 12,
               background: 'var(--bg)',
               border: '1px solid var(--border)',
@@ -203,7 +213,7 @@ export default function MarkdownPreview({
         {buttons}
         <pre
           style={{
-            maxHeight: 360,
+            height: 'var(--skill-detail-panel-height)',
             overflow: 'auto',
             padding: 12,
             background: 'var(--bg)',
@@ -230,7 +240,7 @@ export default function MarkdownPreview({
       <div
         className="md-preview"
         style={{
-          maxHeight: 360,
+          height: 'var(--skill-detail-panel-height)',
           overflow: 'auto',
           padding: 14,
           background: 'var(--bg)',

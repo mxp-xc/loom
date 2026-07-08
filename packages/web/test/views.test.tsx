@@ -403,14 +403,21 @@ describe('Skill detail modal', () => {
     const dialog = await screen.findByRole('dialog', {
       name: 'superpowers/receiving-code-review',
     })
-    expect(within(dialog).getByTestId('skill-detail-content-frame')).toBeDefined()
+    expect(dialog.getAttribute('style')).toContain('960px')
+    const contentFrame = within(dialog).getByTestId('skill-detail-content-frame')
+    expect(contentFrame).toBeDefined()
     expect(within(dialog).getByText('加载 SKILL.md…')).toBeDefined()
 
     await act(async () => {
       resolveContent({ ok: true, content: '# Loaded skill' })
     })
 
-    expect(await within(dialog).findByText('Loaded skill')).toBeDefined()
+    const loadedHeading = await within(dialog).findByText('Loaded skill')
+    const previewPanel = loadedHeading.closest('.md-preview') as HTMLElement
+    expect(previewPanel.style.height).toBe('var(--skill-detail-panel-height)')
+    expect(previewPanel.style.maxHeight).toBe('')
+    const copyButton = within(dialog).getByRole('button', { name: '复制 SKILL.md' })
+    expect(contentFrame.contains(copyButton)).toBe(true)
   })
 })
 
@@ -975,6 +982,7 @@ describe('Skill source updates', () => {
     await within(dialog).findByText('test-qa-skill')
     expect(within(dialog).queryByText(/name: test-qa-skill/)).toBeNull()
     expect(within(dialog).queryByText(/description: Preview description/)).toBeNull()
+    expect(within(dialog).queryByText('metadata')).toBeNull()
     expect(within(dialog).getByText('name')).toBeDefined()
     expect(within(dialog).getByText('Preview description')).toBeDefined()
     fireEvent.click(within(dialog).getByRole('button', { name: '复制 SKILL.md' }))
