@@ -22,6 +22,7 @@ vi.mock('../src/lib/api', () => ({
     importLocalSkills: vi.fn(async () => ({ ok: true })),
     writeLocalSkills: vi.fn(async () => ({ ok: true })),
     updateSkillTargets: vi.fn(async () => ({ ok: true })),
+    updateSourceSkillTargets: vi.fn(async () => ({ ok: true })),
     updateLocalSkillTargets: vi.fn(async () => ({ ok: true })),
     updateMcpTargets: vi.fn(async () => ({ ok: true })),
   },
@@ -449,19 +450,16 @@ describe('useManifestOperations', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
-    await waitFor(() => expect(api.updateSkillTargets).toHaveBeenCalledTimes(2))
-    expect(api.updateSkillTargets).toHaveBeenNthCalledWith(1, {
+    await waitFor(() => expect(api.updateSourceSkillTargets).toHaveBeenCalledTimes(1))
+    expect(api.updateSourceSkillTargets).toHaveBeenCalledWith({
       repo: '/tmp/r',
       sourceUrl: 'https://example.test/skills.git',
-      memberName: 'alpha',
-      targets: ['codex'],
+      updates: [
+        { memberName: 'alpha', targets: ['codex'] },
+        { memberName: 'gamma', targets: ['claude-code', 'codex'] },
+      ],
     })
-    expect(api.updateSkillTargets).toHaveBeenNthCalledWith(2, {
-      repo: '/tmp/r',
-      sourceUrl: 'https://example.test/skills.git',
-      memberName: 'gamma',
-      targets: ['claude-code', 'codex'],
-    })
+    expect(api.updateSkillTargets).not.toHaveBeenCalled()
     expect(api.updateLocalSkillTargets).not.toHaveBeenCalled()
     await waitFor(() => expect(result?.ok).toBe(true))
     expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/r', scope: 'skills' })

@@ -339,6 +339,11 @@ export const api = {
     memberName: string
     targets: string[]
   }) => post('/skills/targets', body).then(json),
+  updateSourceSkillTargets: (body: {
+    repo: string
+    sourceUrl: string
+    updates: Array<{ memberName: string; targets: string[] }>
+  }) => post('/skills/source-targets', body).then(json),
   updateLocalSkillTargets: (body: { repo: string; id: string; targets: string[] }) =>
     post('/skills/local/targets', body).then(json),
 

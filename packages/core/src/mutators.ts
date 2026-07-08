@@ -95,6 +95,32 @@ export function setSkillTargets(
   return { changed: true, data: { ...skills, sources } }
 }
 
+export function setSourceMemberTargets(
+  skills: SkillsManifest,
+  sourceUrl: string,
+  updates: Array<{ memberName: string; targets: AgentId[] }>,
+): MutationResult<SkillsManifest> {
+  const idx = skills.sources.findIndex((s) => s.url === sourceUrl)
+  if (idx === -1) return { changed: false, data: skills }
+  const source = skills.sources[idx]
+  const members = source.members ? source.members.slice() : []
+
+  for (const update of updates) {
+    const memberName = update.memberName.trim()
+    if (!memberName) continue
+    const memberIdx = members.findIndex((m) => m.name === memberName)
+    if (memberIdx === -1) {
+      members.push({ name: memberName, targets: update.targets })
+    } else {
+      members[memberIdx] = { ...members[memberIdx], targets: update.targets }
+    }
+  }
+
+  const sources = skills.sources.slice()
+  sources[idx] = { ...source, members }
+  return { changed: true, data: { ...skills, sources } }
+}
+
 export function setLocalSkillTargets(
   skills: SkillsManifest,
   id: string,

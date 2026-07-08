@@ -19,6 +19,7 @@ Loom 是 Bun workspace monorepo。共享且无 IO 的领域逻辑在 `packages/c
 - `bun --cwd packages/web dev`：只启动 Vite 前端。
 - `bun run test`：运行全部 Vitest 项目。
 - `bun run test <path>` 或 `bun run test -t "name"`：按文件或用例名过滤测试。
+- 默认验证跑 test 即可，不跑 build 脚本。
 - `bun run format:check`：检查 Prettier 格式。
 - `bun run format`：自动格式化。
 

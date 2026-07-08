@@ -680,20 +680,20 @@ export function useManifestOperations(
       return run(
         pendingKey.sourceSkillTargets(source.url, agent),
         async () => {
-          for (const member of members) {
+          const updates = members.map((member) => {
             const targets = member.targets ?? []
             const next = allOn
               ? targets.filter((target) => target !== agent)
               : AGENTS.filter((target) => target === agent || targets.includes(target))
-            const result = (await api.updateSkillTargets({
-              repo: repoPath,
-              sourceUrl: source.url,
-              memberName: member.name,
-              targets: next,
-            })) as MaybeOkResponse
-            if (responseFailureMessage(result, '批量更新 targets 失败')) return result
-            targetsUpdated = true
-          }
+            return { memberName: member.name, targets: next }
+          })
+          const result = (await api.updateSourceSkillTargets({
+            repo: repoPath,
+            sourceUrl: source.url,
+            updates,
+          })) as MaybeOkResponse
+          if (responseFailureMessage(result, '批量更新 targets 失败')) return result
+          targetsUpdated = updates.length > 0
           const projected = (await api.project({
             repo: repoPath,
             scope: 'skills',

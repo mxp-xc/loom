@@ -10,6 +10,7 @@ import SkillSourceList from '../src/views/skills/SkillSourceList'
 import AddSkillModal from '../src/views/skills/AddSkillModal'
 import EditSourceModal from '../src/views/skills/EditSourceModal'
 import MemberScanModal from '../src/views/skills/MemberScanModal'
+import SkillDetailEditor from '../src/views/skills/SkillDetailEditor'
 import Sync from '../src/views/Sync'
 import Mcp from '../src/views/Mcp'
 import Memory from '../src/views/Memory'
@@ -51,7 +52,9 @@ vi.mock('../src/lib/api', () => ({
     setSourceMembers: vi.fn(async () => ({ ok: true })),
     updateSourceMeta: vi.fn(async () => ({ ok: true })),
     updateSkillTargets: vi.fn(async () => ({ ok: true })),
+    updateSourceSkillTargets: vi.fn(async () => ({ ok: true })),
     updateLocalSkillTargets: vi.fn(async () => ({ ok: true })),
+    getSkillContent: vi.fn(async () => ({ ok: true, content: '# Skill' })),
     deleteSource: vi.fn(async () => ({ ok: true })),
     deleteLocalSkill: vi.fn(async () => ({ ok: true })),
     addMcpServer: vi.fn(async () => ({ ok: true })),
@@ -368,6 +371,43 @@ describe('MCP view', () => {
   })
 })
 
+describe('Skill detail modal', () => {
+  it('reserves the SKILL.md content frame while content is loading', async () => {
+    let resolveContent!: (value: { ok: true; content: string }) => void
+    vi.mocked(api.getSkillContent).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveContent = resolve
+        }) as never,
+    )
+
+    render(
+      <SkillDetailEditor
+        repoPath="/tmp/skills-layout"
+        detail={{
+          skillId: 'superpowers/receiving-code-review',
+          source: 'https://github.com/obra/superpowers.git',
+          targets: ['codex'],
+        }}
+        showToast={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'superpowers/receiving-code-review',
+    })
+    expect(within(dialog).getByTestId('skill-detail-content-frame')).toBeDefined()
+    expect(within(dialog).getByText('加载 SKILL.md…')).toBeDefined()
+
+    await act(async () => {
+      resolveContent({ ok: true, content: '# Loaded skill' })
+    })
+
+    expect(await within(dialog).findByText('Loaded skill')).toBeDefined()
+  })
+})
+
 describe('Memory view', () => {
   it('keeps projection target chips informational instead of editing global Settings targets', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
@@ -572,6 +612,7 @@ describe('Skills view', () => {
   it('supports source-level bulk projection chips in the source header', async () => {
     const projectCallsBefore = vi.mocked(api.project).mock.calls.length
     const updateCallsBefore = vi.mocked(api.updateSkillTargets).mock.calls.length
+    const sourceUpdateCallsBefore = vi.mocked(api.updateSourceSkillTargets).mock.calls.length
     const manifest = {
       skills: {
         sources: [
@@ -614,19 +655,18 @@ describe('Skills view', () => {
     expect(sourceBulkCodex).toBeDefined()
     fireEvent.click(sourceBulkCodex)
 
-    await waitFor(() => expect(api.updateSkillTargets).toHaveBeenCalledTimes(updateCallsBefore + 2))
-    expect(api.updateSkillTargets).toHaveBeenNthCalledWith(updateCallsBefore + 1, {
+    await waitFor(() =>
+      expect(api.updateSourceSkillTargets).toHaveBeenCalledTimes(sourceUpdateCallsBefore + 1),
+    )
+    expect(api.updateSourceSkillTargets).toHaveBeenLastCalledWith({
       repo: '/tmp/skills-layout',
       sourceUrl: 'https://github.com/obra/superpowers.git',
-      memberName: 'brainstorming',
-      targets: ['codex'],
+      updates: [
+        { memberName: 'brainstorming', targets: ['codex'] },
+        { memberName: 'executing-plans', targets: ['codex'] },
+      ],
     })
-    expect(api.updateSkillTargets).toHaveBeenNthCalledWith(updateCallsBefore + 2, {
-      repo: '/tmp/skills-layout',
-      sourceUrl: 'https://github.com/obra/superpowers.git',
-      memberName: 'executing-plans',
-      targets: ['codex'],
-    })
+    expect(api.updateSkillTargets).toHaveBeenCalledTimes(updateCallsBefore)
     expect(api.updateLocalSkillTargets).not.toHaveBeenCalledWith(
       expect.objectContaining({ id: 'local-only' }),
     )

@@ -454,26 +454,36 @@ export default function SkillSourceList({
           if (!deleteBusy) setDeleteTarget(null)
         }}
         title={deleteTarget?.kind === 'local' ? '删除 local skill' : '删除 source'}
-        width={380}
+        width={420}
         busy={deleteBusy}
       >
-        <p style={{ color: 'var(--text)', fontSize: 13 }}>
-          确认删除 <strong>{deleteTarget?.label}</strong>？此操作不可撤销。
-        </p>
-        <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+        <div className="danger-confirm">
+          <div className="danger-confirm-icon" aria-hidden="true">
+            <AlertTriangle size={18} />
+          </div>
+          <div className="danger-confirm-copy">
+            <p className="danger-confirm-title">
+              确认删除 <strong>{deleteTarget?.label}</strong>？
+            </p>
+            <p className="danger-confirm-body">
+              此操作会移除当前配置里的引用，无法在界面中撤销。删除前请确认没有其他 target 依赖它。
+            </p>
+          </div>
+        </div>
+        <div className="danger-confirm-actions">
           <Button
-            variant="ghost"
+            variant="secondary"
             size="sm"
             disabled={deleteBusy}
+            data-autofocus
             onClick={() => setDeleteTarget(null)}
           >
             取消
           </Button>
           <Button
-            variant="ghost"
+            variant="destructive"
             size="sm"
             disabled={deleteBusy}
-            style={{ color: 'var(--error)' }}
             onClick={() => void confirmDelete()}
           >
             {deleteBusy ? '删除中…' : '删除'}

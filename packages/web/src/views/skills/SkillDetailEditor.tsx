@@ -74,6 +74,8 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
     }
   }
 
+  const showSkillLoading = Boolean(detail) && !skillContent && !skillError
+
   return (
     <Modal
       open={!!detail}
@@ -169,41 +171,44 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
           </div>
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
             <div className="label">SKILL.md</div>
-            {skillLoading && (
-              <div style={{ marginTop: 4, fontSize: 12, color: 'var(--muted)' }}>加载中…</div>
-            )}
-            {skillError && (
-              <div
-                style={{
-                  marginTop: 4,
-                  fontSize: 12,
-                  color: 'var(--error)',
-                  fontFamily: "'JetBrains Mono', monospace",
-                }}
-              >
-                {skillError}
-              </div>
-            )}
-            {skillContent && (
-              <MarkdownPreview
-                content={skillContent}
-                editable={!detail.source}
-                onSave={async (newContent) => {
-                  try {
-                    await api.saveSkillContent({
-                      repo: repoPath,
-                      skillId: detail.skillId,
-                      localPath: detail.path,
-                      content: newContent,
-                    })
-                    setSkillContent(newContent)
-                    showToast('已保存')
-                  } catch (e) {
-                    showToast(e instanceof Error ? e.message : String(e))
-                  }
-                }}
-              />
-            )}
+            <div className="skill-detail-content-frame" data-testid="skill-detail-content-frame">
+              {showSkillLoading && (
+                <>
+                  <div className="skill-detail-preview-tabs" aria-hidden="true">
+                    <span className="on">预览</span>
+                    <span>原文</span>
+                  </div>
+                  <div className="skill-detail-loading-panel" role="status">
+                    {skillLoading ? '加载 SKILL.md…' : '准备加载 SKILL.md…'}
+                  </div>
+                </>
+              )}
+              {skillError && (
+                <div className="skill-detail-error" role="alert">
+                  {skillError}
+                </div>
+              )}
+              {skillContent && (
+                <MarkdownPreview
+                  content={skillContent}
+                  editable={!detail.source}
+                  onSave={async (newContent) => {
+                    try {
+                      await api.saveSkillContent({
+                        repo: repoPath,
+                        skillId: detail.skillId,
+                        localPath: detail.path,
+                        content: newContent,
+                      })
+                      setSkillContent(newContent)
+                      showToast('已保存')
+                    } catch (e) {
+                      showToast(e instanceof Error ? e.message : String(e))
+                    }
+                  }}
+                />
+              )}
+            </div>
           </div>
         </div>
       )}

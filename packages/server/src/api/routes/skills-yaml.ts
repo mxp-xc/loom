@@ -7,6 +7,7 @@ import {
   addSource,
   removeSource,
   setSourceMembers,
+  setSourceMemberTargets,
   updateSourceMeta,
   setSkillTargets,
   setLocalSkillTargets,
@@ -386,6 +387,44 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       }
       return c.json({ ok: true })
     } catch (e) {
+      return c.json({
+        ok: false,
+        error: 'update_failed',
+        message: String((e as Error)?.message ?? e),
+      })
+    }
+  })
+
+  app.post('/skills/source-targets', async (c) => {
+    try {
+      const { repo, sourceUrl, updates } = await c.req.json()
+      if (!sourceUrl || typeof sourceUrl !== 'string')
+        return c.json({ ok: false, error: 'invalid_source_url' }, 400)
+      if (!Array.isArray(updates)) return c.json({ ok: false, error: 'invalid_updates' }, 400)
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
+      const memberUpdates = updates.map((update) => ({
+        memberName: String(update?.memberName ?? ''),
+        targets: Array.isArray(update?.targets) ? update.targets : [],
+      }))
+      const filePath = join(repoPath, 'skills.yaml')
+      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
+      const result = setSourceMemberTargets(data, sourceUrl, memberUpdates)
+      if (result.changed) {
+        await writeYaml(deps.fs, filePath, result.data)
+      } else {
+        return c.json({ ok: false, error: 'not_found', message: `Source ${sourceUrl} not found` })
+      }
+      return c.json({ ok: true })
+    } catch (e) {
+      remoteLogger.error('failed to update source member targets', { err: e })
       return c.json({
         ok: false,
         error: 'update_failed',

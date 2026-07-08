@@ -5,6 +5,7 @@ import {
   addSource,
   removeSource,
   setSourceMembers,
+  setSourceMemberTargets,
   setSkillTargets,
   setLocalSkillTargets,
   pinSourceCommit,
@@ -173,6 +174,46 @@ describe('setSkillTargets', () => {
   })
   it('returns changed=false when source not found', () => {
     const result = setSkillTargets(emptySkills, 'missing', 'skill-a', ['codex' as AgentId])
+    expect(result.changed).toBe(false)
+    expect(result.data).toBe(emptySkills)
+  })
+})
+
+describe('setSourceMemberTargets', () => {
+  it('updates multiple existing source members in one mutation', () => {
+    const skills: SkillsManifest = {
+      sources: [
+        {
+          url: 'https://github.com/test/repo',
+          ref: 'main',
+          members: [
+            { name: 'skill-a', targets: ['claude-code' as AgentId] },
+            { name: 'skill-b', enabled: false, targets: [] },
+            { name: 'skill-c', targets: [] },
+          ],
+        },
+      ],
+      skills: [],
+    }
+
+    const result = setSourceMemberTargets(skills, 'https://github.com/test/repo', [
+      { memberName: 'skill-a', targets: ['codex' as AgentId] },
+      { memberName: 'skill-c', targets: ['codex' as AgentId, 'opencode' as AgentId] },
+    ])
+
+    expect(result.changed).toBe(true)
+    expect(result.data.sources[0].members).toEqual([
+      { name: 'skill-a', targets: ['codex'] },
+      { name: 'skill-b', enabled: false, targets: [] },
+      { name: 'skill-c', targets: ['codex', 'opencode'] },
+    ])
+  })
+
+  it('returns changed=false when source not found', () => {
+    const result = setSourceMemberTargets(emptySkills, 'missing', [
+      { memberName: 'skill-a', targets: ['codex' as AgentId] },
+    ])
+
     expect(result.changed).toBe(false)
     expect(result.data).toBe(emptySkills)
   })
