@@ -1,4 +1,11 @@
-import { useEffect, useState } from 'react'
+import {
+  useEffect,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react'
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { api } from './lib/api'
 import ToastHost from './components/ToastHost'
@@ -13,23 +20,116 @@ import { useManifest } from './hooks/useManifest'
 import { useViewError } from './hooks/useViewError'
 import { useTheme } from './theme'
 import { Button } from '@/components/ui/button'
-import { Sun, Moon, Monitor, Braces } from 'lucide-react'
+import {
+  Braces,
+  Command,
+  GripVertical,
+  Monitor,
+  Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PencilLine,
+  RefreshCw,
+  Settings as SettingsIcon,
+  Sparkles,
+  Sun,
+} from 'lucide-react'
 
-function ThemeSwitcher() {
+const SIDEBAR_WIDTH_KEY = 'loom-sidebar-width'
+const SIDEBAR_COLLAPSED_KEY = 'loom-sidebar-collapsed'
+const DEFAULT_SIDEBAR_WIDTH = 208
+const MIN_SIDEBAR_WIDTH = 176
+const MAX_SIDEBAR_WIDTH = 360
+const COLLAPSED_SIDEBAR_WIDTH = 64
+
+function clampSidebarWidth(width: number) {
+  if (!Number.isFinite(width)) return DEFAULT_SIDEBAR_WIDTH
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)))
+}
+
+function readStoredSidebarWidth() {
+  if (typeof localStorage === 'undefined') return DEFAULT_SIDEBAR_WIDTH
+  const stored = Number.parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? '', 10)
+  return Number.isFinite(stored) ? clampSidebarWidth(stored) : DEFAULT_SIDEBAR_WIDTH
+}
+
+function readStoredSidebarCollapsed() {
+  if (typeof localStorage === 'undefined') return false
+  return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'
+}
+
+function useNarrowSidebarViewport() {
+  const [isNarrow, setIsNarrow] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+    return window.matchMedia('(max-width: 700px)').matches
+  })
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia('(max-width: 700px)')
+    const update = () => setIsNarrow(query.matches)
+    update()
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  return isNarrow
+}
+
+function SidebarNavLink({
+  to,
+  label,
+  icon,
+  collapsed,
+}: {
+  to: string
+  label: string
+  icon: ReactNode
+  collapsed: boolean
+}) {
+  return (
+    <NavLink
+      to={to}
+      className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
+      aria-label={label}
+      title={label}
+    >
+      <span className="ic" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="nav-text" aria-hidden={collapsed ? 'true' : undefined}>
+        {label}
+      </span>
+    </NavLink>
+  )
+}
+
+function ThemeSwitcher({ collapsed }: { collapsed: boolean }) {
   const { theme, setTheme } = useTheme()
   const modes: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system']
+  const labels: Record<'light' | 'dark' | 'system', string> = {
+    light: '浅色主题',
+    dark: '深色主题',
+    system: '跟随系统主题',
+  }
   return (
-    <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border)', padding: '10px 18px' }}>
-      <span className="label">theme</span>
-      <div style={{ display: 'flex', gap: '4px', marginTop: '8px' }}>
+    <div className="theme-switcher" data-collapsed={collapsed ? 'true' : undefined}>
+      <span className="label" aria-hidden={collapsed ? 'true' : undefined}>
+        theme
+      </span>
+      <div className="theme-options">
         {modes.map((m) => (
           <Button
             key={m}
             variant="ghost"
             size="xs"
+            aria-label={labels[m]}
+            aria-pressed={theme === m}
+            title={labels[m]}
             onClick={() => setTheme(m)}
             style={{
-              padding: '3px 8px',
+              width: collapsed ? 32 : undefined,
+              padding: collapsed ? 0 : '3px 8px',
               border: '1px solid transparent',
               transition: 'all var(--dur) var(--ease)',
               ...(theme === m
@@ -65,6 +165,69 @@ function ThemeSwitcher() {
 function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string }) {
   const { manifest } = useManifest(repoPath)
   const profile = manifest?.config?.profile ?? ''
+  const isNarrowSidebarViewport = useNarrowSidebarViewport()
+  const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth)
+  const [storedSidebarCollapsed, setStoredSidebarCollapsed] = useState(readStoredSidebarCollapsed)
+  const [resizingSidebar, setResizingSidebar] = useState(false)
+  const sidebarCollapsed = storedSidebarCollapsed && !isNarrowSidebarViewport
+  const shellStyle = {
+    '--sidebar-width': `${sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth}px`,
+  } as CSSProperties
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth))
+  }, [sidebarWidth])
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(storedSidebarCollapsed))
+  }, [storedSidebarCollapsed])
+
+  useEffect(() => {
+    if (!resizingSidebar) return
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      setSidebarWidth(clampSidebarWidth(event.clientX))
+    }
+    const stopResizing = () => setResizingSidebar(false)
+
+    document.body.classList.add('sidebar-resizing')
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopResizing)
+    window.addEventListener('pointercancel', stopResizing)
+
+    return () => {
+      document.body.classList.remove('sidebar-resizing')
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopResizing)
+      window.removeEventListener('pointercancel', stopResizing)
+    }
+  }, [resizingSidebar])
+
+  const beginSidebarResize = (event: PointerEvent<HTMLDivElement>) => {
+    if (sidebarCollapsed) return
+    event.preventDefault()
+    setResizingSidebar(true)
+    setSidebarWidth(clampSidebarWidth(event.clientX))
+  }
+
+  const handleSidebarResizeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (sidebarCollapsed) return
+
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      setSidebarWidth((width) => clampSidebarWidth(width - 16))
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      setSidebarWidth((width) => clampSidebarWidth(width + 16))
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      setSidebarWidth(MIN_SIDEBAR_WIDTH)
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      setSidebarWidth(MAX_SIDEBAR_WIDTH)
+    }
+  }
+
   return (
     <>
       <div className="statusline">
@@ -77,49 +240,93 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
           synced
         </span>
       </div>
-      <div className="shell">
-        <aside className="sidebar">
-          <div className="nav-section">
-            <span className="label">workspace</span>
+      <div
+        className="shell"
+        style={shellStyle}
+        data-sidebar-collapsed={sidebarCollapsed ? 'true' : 'false'}
+        data-sidebar-resizing={resizingSidebar ? 'true' : undefined}
+      >
+        <aside
+          id="loom-main-sidebar"
+          className="sidebar"
+          aria-label="主导航"
+          data-collapsed={sidebarCollapsed ? 'true' : 'false'}
+        >
+          <div className="sidebar-toolbar">
+            <span className="label" aria-hidden={sidebarCollapsed ? 'true' : undefined}>
+              workspace
+            </span>
+            <button
+              className="sidebar-collapse-button"
+              type="button"
+              aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+              aria-expanded={!sidebarCollapsed}
+              aria-controls="loom-main-sidebar"
+              title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+              onClick={() => setStoredSidebarCollapsed((collapsed) => !collapsed)}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            </button>
           </div>
-          <NavLink
+          <SidebarNavLink
             to="/skills"
-            className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
-          >
-            <span className="ic">✦</span>Skills
-          </NavLink>
-          <NavLink to="/mcp" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            <span className="ic">⌘</span>MCP servers
-          </NavLink>
-          <NavLink
+            label="Skills"
+            icon={<Sparkles size={15} />}
+            collapsed={sidebarCollapsed}
+          />
+          <SidebarNavLink
+            to="/mcp"
+            label="MCP servers"
+            icon={<Command size={15} />}
+            collapsed={sidebarCollapsed}
+          />
+          <SidebarNavLink
             to="/memory"
-            className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
-          >
-            <span className="ic">✎</span>Memory
-          </NavLink>
-          <NavLink
+            label="Memory"
+            icon={<PencilLine size={15} />}
+            collapsed={sidebarCollapsed}
+          />
+          <SidebarNavLink
             to="/vars"
-            className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
-          >
-            <Braces className="ic" size={14} />
-            Variables
-          </NavLink>
-          <NavLink
+            label="Variables"
+            icon={<Braces size={15} />}
+            collapsed={sidebarCollapsed}
+          />
+          <SidebarNavLink
             to="/sync"
-            className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
-          >
-            <span className="ic">⇅</span>Sync
-          </NavLink>
+            label="Sync"
+            icon={<RefreshCw size={15} />}
+            collapsed={sidebarCollapsed}
+          />
           <div className="nav-section">
-            <span className="label">system</span>
+            <span className="label" aria-hidden={sidebarCollapsed ? 'true' : undefined}>
+              system
+            </span>
           </div>
-          <NavLink
+          <SidebarNavLink
             to="/settings"
-            className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
-          >
-            <span className="ic">⚙</span>Settings
-          </NavLink>
-          <ThemeSwitcher />
+            label="Settings"
+            icon={<SettingsIcon size={15} />}
+            collapsed={sidebarCollapsed}
+          />
+          <ThemeSwitcher collapsed={sidebarCollapsed} />
+          {!sidebarCollapsed && (
+            <div
+              className="sidebar-resizer"
+              role="separator"
+              aria-label="调整侧边栏宽度"
+              aria-orientation="vertical"
+              aria-valuemin={MIN_SIDEBAR_WIDTH}
+              aria-valuemax={MAX_SIDEBAR_WIDTH}
+              aria-valuenow={sidebarWidth}
+              tabIndex={0}
+              title="拖拽调整侧边栏宽度"
+              onPointerDown={beginSidebarResize}
+              onKeyDown={handleSidebarResizeKeyDown}
+            >
+              <GripVertical size={12} aria-hidden="true" />
+            </div>
+          )}
         </aside>
         <main className="main">
           <Routes>
