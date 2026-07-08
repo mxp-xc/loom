@@ -15,6 +15,7 @@ interface Props {
   content: string
   onSave: (content: string) => Promise<void>
   targets: AgentId[]
+  contextLabel?: string
 }
 
 // Highlight ${VAR} and \${...} escapes for the overlay layer.
@@ -37,8 +38,15 @@ function diagnosticText(diagnostic: VarsDiagnostic): string {
   return `[${diagnostic.code}] ${diagnostic.message}${details.length ? ` · ${details.join(' · ')}` : ''}`
 }
 
-export default function MemoryEditor({ repo, name, content, onSave, targets }: Props) {
-  const [view, setView] = useState<View>('edit')
+export default function MemoryEditor({
+  repo,
+  name,
+  content,
+  onSave,
+  targets,
+  contextLabel,
+}: Props) {
+  const [view, setView] = useState<View>('preview')
   const [edit, setEdit] = useState(content)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -106,6 +114,8 @@ export default function MemoryEditor({ repo, name, content, onSave, targets }: P
   const tab = (v: View, label: string) => (
     <button
       type="button"
+      role="tab"
+      aria-selected={view === v}
       className={cn(styles['cfg-seg-opt'], view === v && styles.on)}
       onClick={() => setView(v)}
     >
@@ -114,11 +124,16 @@ export default function MemoryEditor({ repo, name, content, onSave, targets }: P
   )
 
   return (
-    <div>
+    <div className={styles['mem-editor']}>
       <div className={styles['mem-toolbar']}>
-        <div className={styles['cfg-seg']}>
-          {tab('edit', '编辑')}
+        {contextLabel && (
+          <div className={styles['mem-current']}>
+            <strong>{contextLabel}</strong>
+          </div>
+        )}
+        <div className={styles['cfg-seg']} role="tablist" aria-label="Memory 视图">
           {tab('preview', '预览')}
+          {tab('edit', '编辑')}
           {tab('resolved', '解析预览')}
         </div>
         {view === 'resolved' && (

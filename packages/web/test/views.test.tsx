@@ -423,6 +423,39 @@ describe('Skill detail modal', () => {
 })
 
 describe('Memory view', () => {
+  it('uses the approved compact rail and preview-first workbench layout', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex', 'opencode'] },
+      errors: [],
+    } as never)
+    vi.mocked(api.getMemory).mockResolvedValueOnce({
+      memories: [{ name: 'v1' }, { name: 'review-rules' }],
+      active: 'v1',
+      activeContent: '# Active memory',
+    } as never)
+
+    render(<Memory repoPath="/tmp/memory-layout-approved" />)
+
+    const layout = await screen.findByTestId('memory-layout')
+    expect(layout.getAttribute('data-layout')).toBe('compact-workbench')
+
+    const railHeader = screen.getByTestId('memory-rail-header')
+    const projectButton = screen.getByRole('button', { name: '投影 memory' })
+    expect(railHeader.contains(projectButton)).toBe(true)
+
+    expect(screen.getByRole('tab', { name: '预览' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      '预览',
+      '编辑',
+      '解析预览',
+    ])
+    expect(screen.queryByText('Markdown')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Active memory' })).toBeDefined()
+  })
+
   it('keeps projection target chips informational instead of editing global Settings targets', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
       skills: { sources: [], skills: [] },

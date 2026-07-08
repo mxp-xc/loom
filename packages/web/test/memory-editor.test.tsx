@@ -15,6 +15,27 @@ vi.mock('../src/lib/api', async () => {
 })
 
 describe('MemoryEditor', () => {
+  it('opens in preview mode with preview before edit in the tab order', () => {
+    render(
+      <MemoryEditor
+        repo="/repo"
+        name="default"
+        content="# Preview first"
+        targets={['codex']}
+        onSave={async () => {}}
+      />,
+    )
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      '预览',
+      '编辑',
+      '解析预览',
+    ])
+    expect(screen.getByRole('tab', { name: '预览' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Preview first' })).toBeTruthy()
+  })
+
   it('shows structured resolver diagnostics in the agent rendered preview', async () => {
     vi.mocked(api.previewMemory).mockRejectedValue(
       new ApiError('render failed', 400, 'render_failed', [
@@ -38,7 +59,7 @@ describe('MemoryEditor', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '解析预览' }))
+    fireEvent.click(screen.getByRole('tab', { name: '解析预览' }))
 
     await waitFor(() =>
       expect(api.previewMemory).toHaveBeenCalledWith({
@@ -80,14 +101,14 @@ describe('MemoryEditor', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '解析预览' }))
+    fireEvent.click(screen.getByRole('tab', { name: '解析预览' }))
     expect(await screen.findByText('Rendered once')).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('tab', { name: '编辑' }))
     fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'Use ' + '$' + '{missing}' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '解析预览' }))
+    fireEvent.click(screen.getByRole('tab', { name: '解析预览' }))
 
     await screen.findByLabelText('解析诊断')
     expect(screen.queryByText('Rendered once')).toBeNull()

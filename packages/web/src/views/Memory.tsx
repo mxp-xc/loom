@@ -144,20 +144,37 @@ export default function Memory({ repoPath }: Props) {
   }
 
   return (
-    <div className={styles['mem-layout']}>
+    <div
+      className={styles['mem-layout']}
+      data-layout="compact-workbench"
+      data-testid="memory-layout"
+    >
       <aside className={styles['mem-list']}>
-        <div className={styles['mem-list-head']}>
-          <span className="label">memories</span>
-          <IconButton
-            label="新建 memory"
-            tooltip="新建"
-            onClick={() => {
-              setCreating(true)
-              setDraftName('')
-            }}
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </IconButton>
+        <div className={styles['mem-list-head']} data-testid="memory-rail-header">
+          <div>
+            <span className="label">memories</span>
+            <strong>{memories.length} 份</strong>
+          </div>
+          <div className={styles['mem-list-actions']}>
+            <IconButton
+              label="投影 memory"
+              tooltip={projecting ? '投影中…' : '投影'}
+              onClick={project}
+              disabled={projecting}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </IconButton>
+            <IconButton
+              label="新建 memory"
+              tooltip="新建"
+              onClick={() => {
+                setCreating(true)
+                setDraftName('')
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </IconButton>
+          </div>
         </div>
         <div className={styles['mem-global-targets']} data-testid="memory-targets">
           <span className="label">投影目标</span>
@@ -239,29 +256,16 @@ export default function Memory({ repoPath }: Props) {
 
       <main className={styles['mem-main']}>
         {selected ? (
-          <>
-            <div className={styles['mem-detail-head']}>
-              <span className={styles['mem-detail-name']}>{selected}</span>
-              <IconButton
-                label="投影 memory"
-                tooltip={projecting ? '投影中…' : '投影'}
-                onClick={project}
-                disabled={projecting}
-                style={{ marginLeft: 'auto' }}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-              </IconButton>
-            </div>
-            <div className={styles['mem-detail-body']}>
-              <MemoryEditor
-                repo={repoPath}
-                name={selected}
-                content={selectedContent}
-                onSave={save}
-                targets={targets}
-              />
-            </div>
-          </>
+          <div className={styles['mem-detail-body']}>
+            <MemoryEditor
+              repo={repoPath}
+              name={selected}
+              content={selectedContent}
+              onSave={save}
+              targets={targets}
+              contextLabel={selected}
+            />
+          </div>
         ) : (
           <div className={styles['mem-placeholder']}>选择或新建一份 memory 开始</div>
         )}
