@@ -126,9 +126,14 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
 
   app.post('/sources/scan', async (c) => {
     try {
-      const { url } = await c.req.json()
+      const { url, ref, type, scan } = await c.req.json()
       const { discoverSkills } = await import('../../remote/discover.js')
-      const members = await discoverSkills(deps.git, deps.fs, url)
+      const members = await discoverSkills(deps.git, deps.fs, {
+        url,
+        ...(typeof ref === 'string' && ref.trim() ? { ref: ref.trim() } : {}),
+        ...(type === 'branch' || type === 'tag' ? { type } : {}),
+        ...(typeof scan === 'string' && scan.trim() ? { scan: scan.trim() } : {}),
+      })
       return c.json({ members })
     } catch (e) {
       remoteLogger.error('source scan failed', { err: e })
@@ -145,7 +150,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
   // when the cache is missing/stale.
   app.post('/sources/refresh', async (c) => {
     try {
-      const { repo, url, ref } = await c.req.json()
+      const { repo, url, ref, type, scan } = await c.req.json()
       let repoPath: string
       try {
         repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
@@ -165,10 +170,15 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
       if (!(await deps.fs.exists(cacheDir))) {
         await installSkill(deps.git, deps.fs, url, ref ?? 'main', repoPath, sourceId)
       }
-      const scanned = await scanSourceMembers(cacheDir, { url, ref: ref ?? 'main' })
+      const scanned = await scanSourceMembers(cacheDir, {
+        url,
+        ref: ref ?? 'main',
+        ...(type === 'branch' || type === 'tag' ? { type } : {}),
+        ...(typeof scan === 'string' && scan.trim() ? { scan: scan.trim() } : {}),
+      })
       return c.json({
         ok: true,
-        members: scanned.map((m) => ({ name: m.name, path: m.path })),
+        members: scanned.map((m) => ({ name: m.name, path: m.relativePath ?? 'SKILL.md' })),
       })
     } catch (e) {
       remoteLogger.error('source refresh failed', { err: e })

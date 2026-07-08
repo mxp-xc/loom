@@ -35,44 +35,42 @@ describe('discoverSkills', () => {
     clone: async (_u: string, dest: string) => {
       await cp(srcTmp, dest, { recursive: true })
     },
+    checkout: vi.fn(async () => {}),
   } as unknown as IGit
 
-  it('returns supported skills/<name>/SKILL.md members', async () => {
-    await mkdir(join(srcTmp, 'skills', 'foo'), { recursive: true })
+  it('returns SKILL.md members from any directory using the parent directory name', async () => {
+    await mkdir(join(srcTmp, 'skills', 'engineering', 'foo'), { recursive: true })
     await writeFile(
-      join(srcTmp, 'skills', 'foo', 'SKILL.md'),
+      join(srcTmp, 'skills', 'engineering', 'foo', 'SKILL.md'),
       '---\nname: foo\ndescription: A skill\n---\nbody\n',
     )
 
-    const members = await discoverSkills(
-      cloneLocalSource,
-      new NodeFileSystem(),
-      'github:obra/superpowers',
-    )
+    const members = await discoverSkills(cloneLocalSource, new NodeFileSystem(), {
+      url: 'github:obra/superpowers',
+      ref: 'v1.0.1',
+    } as any)
 
     expect(members.map((m) => m.name)).toEqual(['foo'])
     expect(members[0].description).toBe('A skill')
+    expect(members[0].path).toBe('skills/engineering/foo/SKILL.md')
   })
 
-  it('ignores unsupported SKILL.md layouts with warning context', async () => {
+  it('uses custom scan patterns to restrict discovered members', async () => {
     await mkdir(join(srcTmp, 'packages', 'foo'), { recursive: true })
     await writeFile(
       join(srcTmp, 'packages', 'foo', 'SKILL.md'),
       '---\nname: foo\ndescription: A skill\n---\nbody\n',
     )
-    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    await mkdir(join(srcTmp, 'skills', 'bar'), { recursive: true })
+    await writeFile(join(srcTmp, 'skills', 'bar', 'SKILL.md'), '---\nname: bar\n---\nbody\n')
 
-    const members = await discoverSkills(
-      cloneLocalSource,
-      new NodeFileSystem(),
-      'github:obra/superpowers',
-    )
+    const members = await discoverSkills(cloneLocalSource, new NodeFileSystem(), {
+      url: 'github:obra/superpowers',
+      ref: 'main',
+      scan: 'packages/**/SKILL.md',
+    } as any)
 
-    expect(members).toEqual([])
-    const output = write.mock.calls.map(([value]) => String(value)).join('')
-    expect(output).toContain('unsupported source skill layout; expected skills/<name>/SKILL.md')
-    expect(output).toContain('url=github:obra/superpowers')
-    expect(output).toContain('path=packages/foo/SKILL.md')
+    expect(members.map((m) => m.name)).toEqual(['foo'])
   })
 
   it('filters invalid path member names', async () => {
@@ -112,6 +110,26 @@ describe('discoverSkills', () => {
     expect(output).toContain('path=skills/foo/SKILL.md')
     expect(output).toContain('frontmatterName=bar')
     expect(output).toContain('memberName=foo')
+  })
+
+  it('checks out the requested ref before scanning', async () => {
+    const checkout = vi.fn(async () => {})
+    const git = {
+      clone: async (_u: string, dest: string) => {
+        await cp(srcTmp, dest, { recursive: true })
+      },
+      checkout,
+    } as unknown as IGit
+    await mkdir(join(srcTmp, 'skills', 'foo'), { recursive: true })
+    await writeFile(join(srcTmp, 'skills', 'foo', 'SKILL.md'), '---\nname: foo\n---\n')
+
+    await discoverSkills(git, new NodeFileSystem(), {
+      url: 'github:obra/superpowers',
+      ref: 'v1.0.1',
+      type: 'tag',
+    } as any)
+
+    expect(checkout).toHaveBeenCalledWith(expect.any(String), 'v1.0.1')
   })
 
   it('marks mismatched frontmatter members installed by the returned path member name', async () => {

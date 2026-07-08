@@ -29,6 +29,12 @@ export interface OperationNotificationOptions {
   shouldNotify?: () => boolean
 }
 
+export interface SourceScanOptions extends OperationNotificationOptions {
+  ref?: string
+  type?: 'branch' | 'tag'
+  scan?: string
+}
+
 interface RunOptions<T> extends OperationNotificationOptions {
   reload?: boolean
   reloadOnFailure?: boolean | (() => boolean)
@@ -139,6 +145,10 @@ function logOperationError(key: string, err: unknown, message: string) {
 
 function sourceRef(source: SkillSource | string): string {
   return typeof source === 'string' ? source : source.url
+}
+
+function normalizedScanPattern(scan: string | undefined): string {
+  return scan?.trim() ?? ''
 }
 
 function successMessageFor<T>(
@@ -313,11 +323,18 @@ export function useManifestOperations(
   )
 
   const scanSourceMembers = useCallback(
-    (url: string, options: OperationNotificationOptions = {}) =>
+    (url: string, options: SourceScanOptions = {}) =>
       run(
         pendingKey.scanSourceMembers(url),
         async () => {
-          const result = (await api.scanSource(url)) as {
+          const scan = normalizedScanPattern(options.scan)
+          const ref = options.ref?.trim()
+          const result = (await api.scanSource({
+            url,
+            ...(ref ? { ref } : {}),
+            ...(options.type ? { type: options.type } : {}),
+            ...(scan ? { scan } : {}),
+          })) as {
             ok?: boolean
             members?: SourceScanMember[]
             message?: string
@@ -336,7 +353,7 @@ export function useManifestOperations(
       run(
         pendingKey.refreshSourceMembers(source.url),
         async () => {
-          const result = (await api.refreshSource(repoPath, source.url, source.ref)) as {
+          const result = (await api.refreshSource(repoPath, source)) as {
             ok?: boolean
             members?: SourceRefreshMember[]
             message?: string
@@ -380,7 +397,13 @@ export function useManifestOperations(
   )
 
   const addSource = useCallback(
-    (input: { url: string; ref: string; members: string[] }) => {
+    (input: {
+      url: string
+      ref: string
+      type?: 'branch' | 'tag'
+      scan?: string
+      members: string[]
+    }) => {
       let sourceCreated = false
       return run(
         pendingKey.addSource(),
@@ -389,6 +412,10 @@ export function useManifestOperations(
             repo: repoPath,
             url: input.url,
             ref: input.ref,
+            ...(input.type ? { type: input.type } : {}),
+            ...(normalizedScanPattern(input.scan)
+              ? { scan: normalizedScanPattern(input.scan) }
+              : {}),
           })) as MaybeOkResponse
           if (responseFailureMessage(created, '添加 source 失败')) return created
           sourceCreated = true
@@ -424,19 +451,29 @@ export function useManifestOperations(
   )
 
   const saveSource = useCallback(
-    (input: { source: SkillSource; ref: string; type: 'branch' | 'tag'; members: string[] }) => {
+    (input: {
+      source: SkillSource
+      ref: string
+      type: 'branch' | 'tag'
+      scan?: string
+      members: string[]
+    }) => {
       let sourceMetaUpdated = false
       return run(
         pendingKey.saveSource(input.source.url),
         async () => {
           const refChanged = input.ref !== input.source.ref
           const typeChanged = input.type !== (input.source.type ?? 'branch')
-          if (refChanged || typeChanged) {
+          const nextScan = normalizedScanPattern(input.scan)
+          const sourceScan = normalizedScanPattern(input.source.scan)
+          const scanChanged = nextScan !== sourceScan
+          if (refChanged || typeChanged || scanChanged) {
             const metaResult = (await api.updateSourceMeta({
               repo: repoPath,
               url: input.source.url,
               ref: refChanged ? input.ref : undefined,
               type: typeChanged ? input.type : undefined,
+              scan: scanChanged ? nextScan : undefined,
             })) as MaybeOkResponse
             if (responseFailureMessage(metaResult, '更新 source 元信息失败')) return metaResult
             sourceMetaUpdated = true

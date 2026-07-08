@@ -62,6 +62,33 @@ describe('planProjection', () => {
     )
     expect(p.links.some((l) => l.skillId === 'superpowers-brainstorming')).toBe(true)
   })
+  it('carries source member runtime SKILL.md path into link source metadata', () => {
+    const m: Manifest = {
+      ...manifest,
+      skills: {
+        ...manifest.skills,
+        sources: [
+          {
+            ...manifest.skills.sources[0],
+            members: [
+              {
+                name: 'diagnosing-bugs',
+                path: 'skills/engineering/diagnosing-bugs/SKILL.md',
+                targets: ['codex'],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
+    const link = p.links.find((l) => l.skillId === 'superpowers-diagnosing-bugs')!
+    expect(link.source).toEqual({
+      repoId: 'superpowers',
+      memberName: 'diagnosing-bugs',
+      path: 'skills/engineering/diagnosing-bugs/SKILL.md',
+    })
+  })
   it('enabled:false member -> empty targets', () => {
     const p = planProjection(
       manifest,

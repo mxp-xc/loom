@@ -2,7 +2,7 @@ import type { Manifest, AgentId, Config, Memory, SkillSource } from './types.js'
 
 export interface LinkPlan {
   skillId: string
-  source: 'local' | { repoId: string; memberName: string }
+  source: 'local' | { repoId: string; memberName: string; path?: string }
   targets: AgentId[]
 }
 export interface McpPlanEntry {
@@ -87,7 +87,7 @@ export function planProjection(
       const ts = activeTargets(m.enabled === false ? [] : (m.targets ?? []))
       links.push({
         skillId: formatSourceMemberSkillId({ repoId }, m.name, effectiveConfig),
-        source: { repoId, memberName: m.name },
+        source: { repoId, memberName: m.name, ...(m.path ? { path: m.path } : {}) },
         targets: ts,
       })
     }

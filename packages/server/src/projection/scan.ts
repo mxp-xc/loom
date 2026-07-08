@@ -1,13 +1,15 @@
 import { glob } from 'tinyglobby'
-import { join, dirname, basename } from 'node:path'
+import { join, dirname, basename, isAbsolute } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import type { IFileSystem } from '../ports/fs.js'
-import type { SkillSource, LocalSkill } from '@loom/core'
+import { sourceIdentity, type SkillSource, type LocalSkill } from '@loom/core'
 import { logger } from '../lib/logger.js'
 import { parseSkillMeta } from '../remote/frontmatter.js'
 
+export const DEFAULT_SOURCE_SCAN = '**/SKILL.md'
 const DEFAULT_IGNORE = ['**/.git/**', '**/node_modules/**', '**/.cache/**']
 const scanLogger = logger.child('projection.scan')
+const SOURCE_MEMBER_NAME_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
 export interface ScannedMember {
   name: string
@@ -20,13 +22,16 @@ export async function scanSourceMembers(
   repoPath: string,
   src: SkillSource,
 ): Promise<ScannedMember[]> {
-  const pattern = src.scan ?? '**/SKILL.md'
-  const matches = await glob(pattern, { cwd: repoPath, ignore: DEFAULT_IGNORE, onlyFiles: true })
+  const pattern = validateSourceScanPattern(src.scan?.trim() || DEFAULT_SOURCE_SCAN)
+  const matches = (
+    await glob(pattern, { cwd: repoPath, ignore: DEFAULT_IGNORE, onlyFiles: true })
+  ).sort((a, b) => a.localeCompare(b, 'en'))
+  assertUniqueSourceMemberNames(matches, src)
   const members: ScannedMember[] = []
   for (const match of matches) {
-    const memberName = supportedSourceMemberName(match)
+    const memberName = supportedSourceMemberName(match, src)
     if (!memberName) {
-      scanLogger.warn('unsupported source skill layout; expected skills/<name>/SKILL.md', {
+      scanLogger.warn('unsupported source skill layout; expected **/SKILL.md', {
         url: src.url,
         path: match,
       })
@@ -37,7 +42,16 @@ export async function scanSourceMembers(
     let description = ''
     try {
       const content = await readFile(skillPath, 'utf8')
-      description = parseSkillMeta(content, memberName, skillDir)?.description ?? ''
+      const meta = parseSkillMeta(content, memberName, skillDir)
+      if (!meta) {
+        scanLogger.warn('unsupported source skill member name', {
+          url: src.url,
+          path: match,
+          memberName,
+        })
+        continue
+      }
+      description = meta.description
     } catch (err) {
       scanLogger.error('failed to read source skill metadata', {
         err,
@@ -55,10 +69,47 @@ export async function scanSourceMembers(
   return members.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export function supportedSourceMemberName(match: string): string | null {
-  const parts = match.split(/[/\\]+/)
-  if (parts.length !== 3 || parts[0] !== 'skills' || parts[2] !== 'SKILL.md') return null
-  return parts[1] || null
+export function supportedSourceMemberName(
+  match: string,
+  source?: Pick<SkillSource, 'url'>,
+): string | null {
+  const normalized = match.replace(/\\/g, '/').replace(/^\.\//, '')
+  if (normalized !== 'SKILL.md' && !normalized.endsWith('/SKILL.md')) return null
+  const dir = dirname(normalized)
+  if (dir === '.' || dir === '') return source ? sourceIdentity(source).repoId : null
+  return basename(dir) || null
+}
+
+function assertUniqueSourceMemberNames(matches: string[], source: Pick<SkillSource, 'url'>): void {
+  const seen = new Map<string, string>()
+  for (const match of matches) {
+    const memberName = supportedSourceMemberName(match, source)
+    if (!memberName || !SOURCE_MEMBER_NAME_REGEX.test(memberName)) continue
+    const normalized = match.replace(/\\/g, '/')
+    const previous = seen.get(memberName)
+    if (!previous) {
+      seen.set(memberName, normalized)
+      continue
+    }
+    throw new Error(
+      `Duplicate source skill member name "${memberName}" from ${previous} and ${normalized}`,
+    )
+  }
+}
+
+function validateSourceScanPattern(pattern: string): string {
+  const normalized = pattern.replace(/\\/g, '/').replace(/^\.\//, '')
+  if (
+    !normalized ||
+    isAbsolute(pattern) ||
+    normalized.startsWith('/') ||
+    /^[A-Za-z]:\//.test(normalized) ||
+    normalized.split('/').includes('..') ||
+    (normalized !== 'SKILL.md' && !normalized.endsWith('/SKILL.md'))
+  ) {
+    throw new Error(`Invalid source scan pattern "${pattern}"`)
+  }
+  return normalized
 }
 
 // Auto-discover repo-local skills under <repo>/assets/skills and merge them

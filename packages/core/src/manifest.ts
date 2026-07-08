@@ -65,6 +65,7 @@ export const SkillMemberOverrideSchema = z.object({
 export const SkillSourceSchema = z.object({
   url: z.string().min(1),
   ref: z.string().min(1),
+  type: z.enum(['branch', 'tag']).optional(),
   pinned_commit: z.string().optional(),
   scan: z.string().optional(),
   members: z.array(SkillMemberOverrideSchema).optional(),

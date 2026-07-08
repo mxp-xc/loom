@@ -86,13 +86,18 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
         const memberName = parseSourceMemberSkillId(skillId, identity)
         const cacheDir = join(repoPath, 'remote-cache', repoId)
         if (await deps.fs.exists(cacheDir)) {
-          const matches = await glob('**/SKILL.md', {
-            cwd: cacheDir,
-            ignore: ['**/.git/**', '**/node_modules/**'],
-            onlyFiles: true,
-          })
-          const found = matches.find((m) => pathBasename(dirname(m)) === memberName)
-          if (found) skillDir = join(cacheDir, dirname(found))
+          const requested = sourceSkillDirFromPath(cacheDir, localPath)
+          if (requested) {
+            skillDir = requested
+          } else {
+            const matches = await glob('**/SKILL.md', {
+              cwd: cacheDir,
+              ignore: ['**/.git/**', '**/node_modules/**'],
+              onlyFiles: true,
+            })
+            const found = matches.find((m) => pathBasename(dirname(m)) === memberName)
+            if (found) skillDir = join(cacheDir, dirname(found))
+          }
         }
       } else if (localPath) {
         skillDir = resolveSkillDir(localPath, repoPath)
@@ -175,4 +180,15 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
   })
 
   return app
+}
+
+function sourceSkillDirFromPath(cacheDir: string, skillFilePath: string): string | null {
+  if (!skillFilePath || isAbsolute(skillFilePath)) return null
+  const normalized = skillFilePath.replace(/\\/g, '/').replace(/^\/+/, '')
+  if (!normalized || normalized.split('/').includes('..') || /^[A-Za-z]:\//.test(normalized)) {
+    return null
+  }
+  if (normalized !== 'SKILL.md' && !normalized.endsWith('/SKILL.md')) return null
+  const dir = dirname(normalized)
+  return join(cacheDir, dir === '.' ? '' : dir)
 }

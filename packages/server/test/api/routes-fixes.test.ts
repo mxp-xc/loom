@@ -63,13 +63,13 @@ vi.mock('../../src/remote/discover.js', () => ({
     {
       name: 'brainstorming',
       description: 'desc',
-      path: '/tmp/skills/brainstorming',
+      path: 'skills/brainstorming/SKILL.md',
       installed: false,
     },
     {
       name: 'test-driven-development',
       description: 'desc2',
-      path: '/tmp/skills/tdd',
+      path: 'skills/tdd/SKILL.md',
       installed: true,
     },
   ]),
@@ -179,15 +179,28 @@ describe('source scan', () => {
   const app = new Hono().route('/api', registerRoutes())
 
   it('POST /api/sources/scan returns discovered members', async () => {
+    const { discoverSkills } = await import('../../src/remote/discover.js')
+    vi.mocked(discoverSkills).mockClear()
     const res = await app.request('/api/sources/scan', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ url: 'https://github.com/obra/superpowers' }),
+      body: JSON.stringify({
+        url: 'https://github.com/obra/superpowers',
+        type: 'tag',
+        ref: 'v1.0.1',
+        scan: 'skills/engineering/**/SKILL.md',
+      }),
     })
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.members).toHaveLength(2)
     expect(body.members[0].name).toBe('brainstorming')
+    expect(discoverSkills).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+      url: 'https://github.com/obra/superpowers',
+      type: 'tag',
+      ref: 'v1.0.1',
+      scan: 'skills/engineering/**/SKILL.md',
+    })
   })
 
   it('POST /api/sources/scan logs scan failures', async () => {
@@ -225,6 +238,69 @@ describe('source scan', () => {
       'source refs failed',
       expect.objectContaining({ err: expect.any(TypeError) }),
     )
+  })
+})
+
+describe('source metadata', () => {
+  const app = new Hono().route('/api', registerRoutes())
+
+  it('POST /api/sources stores type and custom scan pattern', async () => {
+    memFiles['/tmp/r8/skills.yaml'] = 'sources: []\nskills: []\n'
+
+    const res = await app.request('/api/sources', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/r8',
+        url: 'https://github.com/mattpocock/skills',
+        type: 'tag',
+        ref: 'v1.0.1',
+        scan: 'skills/engineering/**/SKILL.md',
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).ok).toBe(true)
+    const parsed = yaml.load(memFiles['/tmp/r8/skills.yaml']) as any
+    expect(parsed.sources[0]).toMatchObject({
+      url: 'https://github.com/mattpocock/skills',
+      type: 'tag',
+      ref: 'v1.0.1',
+      scan: 'skills/engineering/**/SKILL.md',
+    })
+  })
+
+  it('POST /api/sources/update updates ref/type and clears empty scan', async () => {
+    memFiles['/tmp/r9/skills.yaml'] = [
+      'sources:',
+      '  - url: https://github.com/mattpocock/skills',
+      '    type: tag',
+      '    ref: v1.0.1',
+      '    scan: skills/engineering/**/SKILL.md',
+      'skills: []',
+      '',
+    ].join('\n')
+
+    const res = await app.request('/api/sources/update', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/r9',
+        url: 'https://github.com/mattpocock/skills',
+        type: 'branch',
+        ref: 'main',
+        scan: '',
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).ok).toBe(true)
+    const parsed = yaml.load(memFiles['/tmp/r9/skills.yaml']) as any
+    expect(parsed.sources[0]).toEqual({
+      url: 'https://github.com/mattpocock/skills',
+      type: 'branch',
+      ref: 'main',
+    })
   })
 })
 

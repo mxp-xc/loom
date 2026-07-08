@@ -255,8 +255,13 @@ export const api = {
     repo: string
     skills: Array<{ name: string; files: Array<{ path: string; content: string }> }>
   }) => post('/skills/local/write', body).then(json) as Promise<{ ok: boolean; count?: number }>,
-  addSource: (body: { repo: string; url: string; ref: string }) =>
-    post('/sources', body).then(json),
+  addSource: (body: {
+    repo: string
+    url: string
+    ref: string
+    type?: 'branch' | 'tag'
+    scan?: string
+  }) => post('/sources', body).then(json),
   addMcpServer: (body: {
     repo: string
     server: {
@@ -300,8 +305,8 @@ export const api = {
     }>,
   setSyncRemote: (body: { repo: string; remoteUrl: string }) =>
     post('/sync/remote', body).then(json),
-  scanSource: (url: string) =>
-    post('/sources/scan', { url }).then(json) as Promise<{
+  scanSource: (body: { url: string; ref?: string; type?: 'branch' | 'tag'; scan?: string }) =>
+    post('/sources/scan', body).then(json) as Promise<{
       members: Array<{ name: string; description: string; path: string; installed: boolean }>
     }>,
   getSourceRefs: (url: string) =>
@@ -312,8 +317,11 @@ export const api = {
       error?: string
       message?: string
     }>,
-  refreshSource: (repo: string, url: string, ref: string) =>
-    post('/sources/refresh', { repo, url, ref }).then(json) as Promise<{
+  refreshSource: (
+    repo: string,
+    source: { url: string; ref: string; type?: 'branch' | 'tag'; scan?: string },
+  ) =>
+    post('/sources/refresh', { repo, ...source }).then(json) as Promise<{
       ok: boolean
       members?: Array<{ name: string; path: string }>
       error?: string
@@ -325,7 +333,13 @@ export const api = {
       error?: string
       message?: string
     }>,
-  updateSourceMeta: (body: { repo: string; url: string; ref?: string; type?: 'branch' | 'tag' }) =>
+  updateSourceMeta: (body: {
+    repo: string
+    url: string
+    ref?: string
+    type?: 'branch' | 'tag'
+    scan?: string
+  }) =>
     post('/sources/update', body).then(json) as Promise<{
       ok: boolean
       error?: string

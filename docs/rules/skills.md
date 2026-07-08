@@ -110,3 +110,37 @@ Examples:
 Tests:
 
 - packages/web/test/views.test.tsx
+
+## R-SKILLS-005 Source scan 使用 ref-aware SKILL.md pattern
+
+Status: active
+Applies to: source scan, source members
+
+Rule:
+Source scan 默认使用 `**/SKILL.md`，并可由 source 的 `scan` pattern 缩小扫描范围。扫描必须基于该 source 当前选择的 ref。任意匹配到的 `SKILL.md` 所在目录都可成为 source member，member name 来自该目录 basename。
+
+Implications:
+
+- `skills/<name>/SKILL.md`、`skills/<category>/<name>/SKILL.md` 和其他目录下的 `SKILL.md` 使用同一套发现规则。
+- 空 `scan` 表示使用默认 `**/SKILL.md`，不写入 manifest。
+- root-level `SKILL.md` 使用 source repo id 作为 member name。
+- Scan results 和保存后的 source members 必须保留 runtime `path`，以便 projection 和详情页读取真实 source member 目录。
+
+Safety:
+
+- 同一 source 内如果多个 `SKILL.md` 派生出相同 member name，scan 必须失败并提示冲突路径，不能静默覆盖。
+- Member name 仍需满足 skill id 命名约束；无效目录名跳过并记录 warning。
+- `path` 只作为 source cache 内的相对 `SKILL.md` 路径使用，不能解析为任意绝对路径或父目录跳转。
+
+Examples:
+
+- `skills/engineering/tdd/SKILL.md` 发现为 member `tdd`，runtime path 为 `skills/engineering/tdd/SKILL.md`。
+- `scan: skills/engineering/**/SKILL.md` 只发现 engineering 范围内的 source members。
+
+Tests:
+
+- packages/server/test/projection/scan.test.ts
+- packages/server/test/remote/discover.test.ts
+- packages/server/test/api/routes-fixes.test.ts
+- packages/web/test/manifest-operations.test.tsx
+- packages/web/test/views.test.tsx

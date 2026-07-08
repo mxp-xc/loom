@@ -1,11 +1,11 @@
-import { join, dirname } from 'node:path'
+import { join, dirname, isAbsolute } from 'node:path'
 import { ClaudeCodeAdapter } from '../adapters/claude-code.js'
 import { CodexAdapter } from '../adapters/codex.js'
 import { OpenCodeAdapter } from '../adapters/opencode.js'
 import type { ProjectionDeps } from './executor.js'
 import type { AgentId } from '@loom/core'
 import { logger } from '../lib/logger.js'
-import { skillPathFor } from '../remote/cache.js'
+import { cacheDirFor, skillPathFor } from '../remote/cache.js'
 import type { IFileSystem } from '../ports/fs.js'
 import type { IGit } from '../ports/git.js'
 import type { IProcess } from '../ports/process.js'
@@ -43,8 +43,7 @@ export function createProjectionDeps(
     installedAgents,
     resolveSkillSrc: (link) => {
       if (link.source === 'local') return join(repoPath, 'assets', 'skills', link.skillId)
-      const { repoId, memberName } = link.source
-      return skillPathFor(repoPath, repoId, memberName)
+      return resolveSourceSkillDir(repoPath, link.source)
     },
     logger: {
       error: (o, m) => projectionLogger.error(m, o as Record<string, unknown>),
@@ -57,6 +56,23 @@ export function createProjectionDeps(
       await writeState(data)
     },
   }
+}
+
+function resolveSourceSkillDir(
+  repoPath: string,
+  source: { repoId: string; memberName: string; path?: string },
+): string {
+  const fallback = skillPathFor(repoPath, source.repoId, source.memberName)
+  if (!source.path || isAbsolute(source.path)) return fallback
+  const normalized = source.path.replace(/\\/g, '/').replace(/^\/+/, '')
+  if (!normalized || normalized.split('/').includes('..') || /^[A-Za-z]:\//.test(normalized)) {
+    return fallback
+  }
+  const sourceDir =
+    normalized === 'SKILL.md' || normalized.endsWith('/SKILL.md')
+      ? dirname(normalized)
+      : normalized.replace(/\/+$/, '')
+  return join(cacheDirFor(repoPath, source.repoId), sourceDir === '.' ? '' : sourceDir)
 }
 
 function basenameRepo(repoPath: string): string {

@@ -30,11 +30,21 @@ afterEach(async () => {
 })
 
 describe('scanSourceMembers', () => {
-  it('finds SKILL.md, member name = parent dir, excludes .git/node_modules/.cache', async () => {
+  it('finds SKILL.md in any directory, member name = parent dir, excludes .git/node_modules/.cache', async () => {
     await mkdir(join(root, 'skills', 'brainstorming'), { recursive: true })
     await writeFile(
       join(root, 'skills', 'brainstorming', 'SKILL.md'),
       '---\ndescription: Debug systematically\n---\nbody',
+    )
+    await mkdir(join(root, 'packages', 'diagnosing-bugs'), { recursive: true })
+    await writeFile(
+      join(root, 'packages', 'diagnosing-bugs', 'SKILL.md'),
+      '---\ndescription: Diagnose before fixing\n---\nbody',
+    )
+    await mkdir(join(root, 'skills', 'engineering', 'tdd'), { recursive: true })
+    await writeFile(
+      join(root, 'skills', 'engineering', 'tdd', 'SKILL.md'),
+      '---\ndescription: Test first\n---\nbody',
     )
     await mkdir(join(root, '.git', 'foo'), { recursive: true })
     await writeFile(join(root, '.git', 'foo', 'SKILL.md'), 'x')
@@ -44,23 +54,64 @@ describe('scanSourceMembers', () => {
       url: 'github:obra/superpowers',
       ref: 'v1',
     })
-    expect(members.map((m) => m.name)).toEqual(['brainstorming'])
-    expect(members[0].path).toBe(join(root, 'skills', 'brainstorming'))
-    expect(members[0].relativePath).toBe('skills/brainstorming/SKILL.md')
-    expect(members[0].description).toBe('Debug systematically')
+    expect(members.map((m) => m.name)).toEqual(['brainstorming', 'diagnosing-bugs', 'tdd'])
+    expect(members.find((m) => m.name === 'brainstorming')).toMatchObject({
+      path: join(root, 'skills', 'brainstorming'),
+      relativePath: 'skills/brainstorming/SKILL.md',
+      description: 'Debug systematically',
+    })
+    expect(members.find((m) => m.name === 'diagnosing-bugs')).toMatchObject({
+      path: join(root, 'packages', 'diagnosing-bugs'),
+      relativePath: 'packages/diagnosing-bugs/SKILL.md',
+      description: 'Diagnose before fixing',
+    })
+    expect(members.find((m) => m.name === 'tdd')).toMatchObject({
+      path: join(root, 'skills', 'engineering', 'tdd'),
+      relativePath: 'skills/engineering/tdd/SKILL.md',
+      description: 'Test first',
+    })
   })
 
-  it('ignores custom scan matches outside the supported skills/<name> layout', async () => {
+  it('uses custom scan pattern to restrict discovered members', async () => {
     await mkdir(join(root, 'packages', 'brainstorming'), { recursive: true })
     await writeFile(join(root, 'packages', 'brainstorming', 'SKILL.md'), 'x')
+    await mkdir(join(root, 'skills', 'engineering', 'tdd'), { recursive: true })
+    await writeFile(join(root, 'skills', 'engineering', 'tdd', 'SKILL.md'), 'x')
 
     const members = await scanSourceMembers(root, {
       url: 'github:obra/superpowers',
       ref: 'v1',
-      scan: 'packages/*/SKILL.md',
+      scan: 'skills/engineering/**/SKILL.md',
     })
 
-    expect(members).toEqual([])
+    expect(members.map((m) => m.name)).toEqual(['tdd'])
+    expect(members[0].relativePath).toBe('skills/engineering/tdd/SKILL.md')
+  })
+
+  it('rejects custom scan patterns that escape the source cache', async () => {
+    await expect(
+      scanSourceMembers(root, {
+        url: 'github:obra/superpowers',
+        ref: 'v1',
+        scan: '../**/SKILL.md',
+      }),
+    ).rejects.toThrow('Invalid source scan pattern "../**/SKILL.md"')
+  })
+
+  it('throws when two discovered members derive the same name', async () => {
+    await mkdir(join(root, 'skills', 'engineering', 'tdd'), { recursive: true })
+    await writeFile(join(root, 'skills', 'engineering', 'tdd', 'SKILL.md'), 'x')
+    await mkdir(join(root, 'skills', 'productivity', 'tdd'), { recursive: true })
+    await writeFile(join(root, 'skills', 'productivity', 'tdd', 'SKILL.md'), 'x')
+
+    await expect(
+      scanSourceMembers(root, {
+        url: 'github:obra/superpowers',
+        ref: 'v1',
+      }),
+    ).rejects.toThrow(
+      'Duplicate source skill member name "tdd" from skills/engineering/tdd/SKILL.md and skills/productivity/tdd/SKILL.md',
+    )
   })
 
   it('enriches configured source members with runtime path and description metadata', async () => {
@@ -78,11 +129,22 @@ describe('scanSourceMembers', () => {
         '',
       ].join('\n'),
     )
-    await mkdir(join(root, 'remote-cache', 'superpowers', 'skills', 'brainstorming'), {
-      recursive: true,
-    })
+    await mkdir(
+      join(root, 'remote-cache', 'superpowers', 'skills', 'engineering', 'brainstorming'),
+      {
+        recursive: true,
+      },
+    )
     await writeFile(
-      join(root, 'remote-cache', 'superpowers', 'skills', 'brainstorming', 'SKILL.md'),
+      join(
+        root,
+        'remote-cache',
+        'superpowers',
+        'skills',
+        'engineering',
+        'brainstorming',
+        'SKILL.md',
+      ),
       '---\ndescription: Runtime source metadata\n---\nbody',
     )
 
@@ -100,7 +162,7 @@ describe('scanSourceMembers', () => {
       {
         name: 'brainstorming',
         targets: ['codex'],
-        path: 'skills/brainstorming/SKILL.md',
+        path: 'skills/engineering/brainstorming/SKILL.md',
         description: 'Runtime source metadata',
       },
     ])
@@ -122,11 +184,22 @@ describe('loadProjectionManifest', () => {
       ].join('\n'),
     )
     await writeFile(join(root, 'config.yaml'), 'targets:\n  - claude-code\nskill_naming: hyphen\n')
-    await mkdir(join(root, 'remote-cache', 'superpowers', 'skills', 'brainstorming'), {
-      recursive: true,
-    })
+    await mkdir(
+      join(root, 'remote-cache', 'superpowers', 'skills', 'engineering', 'brainstorming'),
+      {
+        recursive: true,
+      },
+    )
     await writeFile(
-      join(root, 'remote-cache', 'superpowers', 'skills', 'brainstorming', 'SKILL.md'),
+      join(
+        root,
+        'remote-cache',
+        'superpowers',
+        'skills',
+        'engineering',
+        'brainstorming',
+        'SKILL.md',
+      ),
       'x',
     )
     await mkdir(join(root, 'assets', 'skills', 'ref-skill'), { recursive: true })
@@ -151,7 +224,7 @@ describe('loadProjectionManifest', () => {
     )
 
     expect(manifest.skills.sources[0].members).toEqual([
-      { name: 'brainstorming', targets: [], path: 'skills/brainstorming/SKILL.md' },
+      { name: 'brainstorming', targets: [], path: 'skills/engineering/brainstorming/SKILL.md' },
     ])
     expect(manifest.skills.skills).toContainEqual({
       id: 'ref-skill',
@@ -192,8 +265,8 @@ describe('loadProjectionManifest', () => {
       clone: async (url: string, dest: string) => {
         cloneCalls.push({ url, dest })
         await mkdir(join(dest, '.git'), { recursive: true })
-        await mkdir(join(dest, 'skills', 'brainstorming'), { recursive: true })
-        await writeFile(join(dest, 'skills', 'brainstorming', 'SKILL.md'), 'x')
+        await mkdir(join(dest, 'skills', 'engineering', 'brainstorming'), { recursive: true })
+        await writeFile(join(dest, 'skills', 'engineering', 'brainstorming', 'SKILL.md'), 'x')
       },
       checkout: async () => {},
       revParseHead: async () => 'abc123',
@@ -221,7 +294,9 @@ describe('loadProjectionManifest', () => {
       },
     ])
     expect(
-      await fs.exists(join(root, 'remote-cache', 'superpowers', 'skills', 'brainstorming')),
+      await fs.exists(
+        join(root, 'remote-cache', 'superpowers', 'skills', 'engineering', 'brainstorming'),
+      ),
     ).toBe(true)
     expect(
       await fs.exists(join(root, '.claude', 'skills', 'superpowers', 'brainstorming', 'SKILL.md')),

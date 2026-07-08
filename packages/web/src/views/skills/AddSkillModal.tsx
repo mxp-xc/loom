@@ -75,6 +75,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
   const [srcUrl, setSrcUrl] = useState('')
   const [srcType, setSrcType] = useState<'branch' | 'tag'>('branch')
   const [srcRef, setSrcRef] = useState('')
+  const [srcScan, setSrcScan] = useState('')
   const [srcBranches, setSrcBranches] = useState<string[]>([])
   const [srcTags, setSrcTags] = useState<string[]>([])
   const [srcRefsLoading, setSrcRefsLoading] = useState(false)
@@ -178,6 +179,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     setSrcUrl('')
     setSrcType('branch')
     setSrcRef('')
+    setSrcScan('')
     setSrcBranches([])
     setSrcTags([])
     setSrcMembers([])
@@ -223,7 +225,11 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     setAddErr(null)
     setSrcMembers([])
     try {
-      const res = await scanSourceMembers(srcUrl.trim())
+      const res = await scanSourceMembers(srcUrl.trim(), {
+        ref: srcRef.trim() || undefined,
+        type: srcType,
+        scan: srcScan,
+      })
       if (res.ok && Array.isArray(res.result?.members)) {
         const members = res.result.members as ScanMember[]
         setSrcMembers(members)
@@ -268,6 +274,8 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
       const res = await addSource({
         url: srcUrl.trim(),
         ref: srcRef.trim() || 'main',
+        type: srcType,
+        scan: srcScan,
         members: [...srcSelected],
       })
       if (res.ok) onClose()
@@ -443,6 +451,23 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
                 ))
               )}
             </select>
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label className="label" htmlFor="add-source-scan-pattern">
+              scan pattern
+            </label>
+            <input
+              id="add-source-scan-pattern"
+              aria-label="scan pattern"
+              value={srcScan}
+              onChange={(e) => setSrcScan(e.target.value)}
+              placeholder="**/SKILL.md"
+              style={inputStyle}
+            />
+            <div className="add-skill-helper">
+              留空使用默认 <code style={{ fontFamily: mono }}>**/SKILL.md</code>
+            </div>
           </div>
 
           <Button

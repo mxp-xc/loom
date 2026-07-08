@@ -16,6 +16,8 @@ vi.mock('../src/lib/api', () => ({
     putConfig: vi.fn(async () => ({ ok: true })),
     project: vi.fn(async () => ({ ok: true })),
     getSourceRefs: vi.fn(async () => ({ ok: true, branches: [], tags: [] })),
+    scanSource: vi.fn(async () => ({ ok: true, members: [] })),
+    refreshSource: vi.fn(async () => ({ ok: true, members: [] })),
     addSource: vi.fn(async () => ({ ok: true })),
     setSourceMembers: vi.fn(async () => ({ ok: true })),
     updateSourceMeta: vi.fn(async () => ({ ok: true })),
@@ -223,6 +225,85 @@ describe('useManifestOperations', () => {
     }
   })
 
+  it('scans source members with selected ref/type and custom scan pattern', async () => {
+    render(
+      <Harness
+        action={(ops) =>
+          ops.scanSourceMembers('https://example.test/skills.git', {
+            ref: 'v1.0.1',
+            type: 'tag',
+            scan: 'skills/engineering/**/SKILL.md',
+          })
+        }
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() =>
+      expect(api.scanSource).toHaveBeenCalledWith({
+        url: 'https://example.test/skills.git',
+        ref: 'v1.0.1',
+        type: 'tag',
+        scan: 'skills/engineering/**/SKILL.md',
+      }),
+    )
+  })
+
+  it('refreshes an existing source with its ref and scan pattern', async () => {
+    render(
+      <Harness
+        action={(ops) =>
+          ops.refreshSourceMembers({
+            url: 'https://example.test/skills.git',
+            ref: 'v1.0.1',
+            type: 'tag',
+            scan: 'skills/engineering/**/SKILL.md',
+          })
+        }
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() =>
+      expect(api.refreshSource).toHaveBeenCalledWith('/tmp/r', {
+        url: 'https://example.test/skills.git',
+        ref: 'v1.0.1',
+        type: 'tag',
+        scan: 'skills/engineering/**/SKILL.md',
+      }),
+    )
+  })
+
+  it('passes type and scan when adding a source', async () => {
+    render(
+      <Harness
+        action={(ops) =>
+          ops.addSource({
+            url: 'https://example.test/skills.git',
+            ref: 'v1.0.1',
+            type: 'tag',
+            scan: 'skills/engineering/**/SKILL.md',
+            members: [],
+          })
+        }
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() =>
+      expect(api.addSource).toHaveBeenCalledWith({
+        repo: '/tmp/r',
+        url: 'https://example.test/skills.git',
+        ref: 'v1.0.1',
+        type: 'tag',
+        scan: 'skills/engineering/**/SKILL.md',
+      }),
+    )
+  })
+
   it('returns failure and refreshes when source member save throws after source creation', async () => {
     const onError = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -279,9 +360,15 @@ describe('useManifestOperations', () => {
           onError={onError}
           action={async (ops) => {
             result = await ops.saveSource({
-              source: { url: 'https://example.test/skills.git', ref: 'main', type: 'branch' },
+              source: {
+                url: 'https://example.test/skills.git',
+                ref: 'main',
+                type: 'branch',
+                scan: 'skills/**/SKILL.md',
+              },
               ref: 'develop',
               type: 'branch',
+              scan: '',
               members: ['alpha'],
             })
           }}
@@ -294,6 +381,12 @@ describe('useManifestOperations', () => {
       await waitFor(() => expect(result?.ok).toBe(false))
       expect(result?.message).toBe('members write failed')
       expect(onError).toHaveBeenCalledWith('members write failed')
+      expect(api.updateSourceMeta).toHaveBeenCalledWith({
+        repo: '/tmp/r',
+        url: 'https://example.test/skills.git',
+        ref: 'develop',
+        scan: '',
+      })
       expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
       expect(consoleError).toHaveBeenCalledWith(
         expect.objectContaining({

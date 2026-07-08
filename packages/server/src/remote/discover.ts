@@ -1,59 +1,70 @@
-import { glob } from 'tinyglobby'
-import { join, dirname } from 'node:path'
+import { join } from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import type { IGit } from '../ports/git.js'
 import type { IFileSystem } from '../ports/fs.js'
-import { parseSkillFrontmatterName, parseSkillMeta, type SkillMeta } from './frontmatter.js'
+import { parseSkillFrontmatterName, type SkillMeta } from './frontmatter.js'
 import { resolveGitUrl } from './resolve-url.js'
-import { formatSourceMemberSkillId } from '@loom/core'
+import { formatSourceMemberSkillId, type SkillSource } from '@loom/core'
 import { logger } from '../lib/logger.js'
-import { supportedSourceMemberName } from '../projection/scan.js'
+import { scanSourceMembers } from '../projection/scan.js'
 
-const DEFAULT_IGNORE = ['**/.git/**', '**/node_modules/**', '**/.cache/**']
 const discoverLogger = logger.child('remote.discover')
+
+type DiscoverSkillSource = Pick<SkillSource, 'url'> &
+  Partial<Pick<SkillSource, 'ref' | 'type' | 'scan'>>
 
 export async function discoverSkills(
   git: IGit,
   fs: IFileSystem,
-  url: string,
+  sourceInput: string | DiscoverSkillSource,
   installed: Set<string> = new Set(),
 ): Promise<(SkillMeta & { installed: boolean })[]> {
+  const source = normalizeDiscoverSource(sourceInput)
   const tmp = await mkdtemp(join(tmpdir(), 'discover-'))
   try {
-    await git.clone(resolveGitUrl(url), tmp, true)
-    const matches = await glob('**/SKILL.md', { cwd: tmp, ignore: DEFAULT_IGNORE, onlyFiles: true })
+    await git.clone(resolveGitUrl(source.url), tmp, !source.ref)
+    if (source.ref) await git.checkout(tmp, source.ref)
+    const scanned = await scanSourceMembers(tmp, {
+      url: source.url,
+      ref: source.ref ?? 'HEAD',
+      ...(source.type ? { type: source.type } : {}),
+      ...(source.scan ? { scan: source.scan } : {}),
+    })
     const out: (SkillMeta & { installed: boolean })[] = []
-    for (const m of matches) {
-      const memberName = supportedSourceMemberName(m)
-      if (!memberName) {
-        discoverLogger.warn('unsupported source skill layout; expected skills/<name>/SKILL.md', {
-          url,
-          path: m,
-        })
-        continue
-      }
-      const dir = dirname(m)
-      const content = await fs.readFile(join(tmp, m))
+    for (const member of scanned) {
+      const relativePath = member.relativePath ?? 'SKILL.md'
+      const content = await fs.readFile(join(tmp, relativePath))
       const frontmatterName = parseSkillFrontmatterName(content)
-      if (frontmatterName && frontmatterName !== memberName) {
+      if (frontmatterName && frontmatterName !== member.name) {
         discoverLogger.warn('source skill frontmatter name differs from path member name', {
-          url,
-          path: m,
+          url: source.url,
+          path: relativePath,
           frontmatterName,
-          memberName,
+          memberName: member.name,
         })
       }
-      const meta = parseSkillMeta(content, memberName, join(tmp, dir))
-      if (meta) {
-        out.push({
-          ...meta,
-          installed: installed.has(formatSourceMemberSkillId(url, memberName, 'hyphen')),
-        })
-      }
+      out.push({
+        name: member.name,
+        description: member.description ?? '',
+        path: relativePath,
+        installed: installed.has(formatSourceMemberSkillId(source.url, member.name, 'hyphen')),
+      })
     }
     return out
   } finally {
     await rm(tmp, { recursive: true, force: true })
+  }
+}
+
+function normalizeDiscoverSource(input: string | DiscoverSkillSource): DiscoverSkillSource {
+  if (typeof input === 'string') return { url: input }
+  const ref = input.ref?.trim()
+  const scan = input.scan?.trim()
+  return {
+    url: input.url,
+    ...(ref ? { ref } : {}),
+    ...(input.type ? { type: input.type } : {}),
+    ...(scan ? { scan } : {}),
   }
 }

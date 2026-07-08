@@ -363,6 +363,7 @@ export default function SkillSourceList({
                         onOpenDetail({
                           skillId: formatSourceMemberSkillId(src, m.name, manifest.config),
                           source: src.url,
+                          path: m.path,
                           targets: mTargets,
                         })
                       }

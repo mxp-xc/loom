@@ -1,4 +1,4 @@
-import type { SkillsManifest, McpServer, AgentId, LocalSkill } from './types.js'
+import type { SkillsManifest, McpServer, AgentId, LocalSkill, SkillSource } from './types.js'
 
 export type MutationResult<T> = { changed: boolean; data: T }
 
@@ -22,9 +22,12 @@ export function removeLocalSkill(
 
 export function addSource(
   skills: SkillsManifest,
-  source: { url: string; ref: string },
+  source: Pick<SkillSource, 'url' | 'ref'> & Partial<Pick<SkillSource, 'type' | 'scan'>>,
 ): MutationResult<SkillsManifest> {
-  return { changed: true, data: { ...skills, sources: [...skills.sources, source] } }
+  const next: SkillSource = { url: source.url, ref: source.ref }
+  if (source.type) next.type = source.type
+  if (source.scan?.trim()) next.scan = source.scan.trim()
+  return { changed: true, data: { ...skills, sources: [...skills.sources, next] } }
 }
 
 export function removeSource(skills: SkillsManifest, url: string): MutationResult<SkillsManifest> {
@@ -37,7 +40,7 @@ export function removeSource(skills: SkillsManifest, url: string): MutationResul
 export function updateSourceMeta(
   skills: SkillsManifest,
   url: string,
-  updates: { ref?: string; type?: 'branch' | 'tag' },
+  updates: { ref?: string; type?: 'branch' | 'tag'; scan?: string | null },
 ): MutationResult<SkillsManifest> {
   const idx = skills.sources.findIndex((s) => s.url === url)
   if (idx === -1) return { changed: false, data: skills }
@@ -45,6 +48,11 @@ export function updateSourceMeta(
   const next: typeof source = { ...source }
   if (updates.ref !== undefined) next.ref = updates.ref
   if (updates.type !== undefined) next.type = updates.type
+  if (updates.scan !== undefined) {
+    const scan = updates.scan?.trim() ?? ''
+    if (scan) next.scan = scan
+    else delete next.scan
+  }
   const sources = skills.sources.slice()
   sources[idx] = next
   return { changed: true, data: { ...skills, sources } }

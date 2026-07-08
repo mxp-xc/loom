@@ -32,6 +32,7 @@ const errBox: React.CSSProperties = {
 export default function EditSourceModal({ repoPath, source, showToast, onClose, onSaved }: Props) {
   const [type, setType] = useState<'branch' | 'tag'>('branch')
   const [ref, setRef] = useState('')
+  const [scan, setScan] = useState('')
   const [branches, setBranches] = useState<string[]>([])
   const [tags, setTags] = useState<string[]>([])
   const [refsLoading, setRefsLoading] = useState(false)
@@ -53,15 +54,18 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
       setBranches([])
       setTags([])
       setRef('')
+      setScan('')
       setError(null)
       return
     }
     let active = true
     const url = source.url
     const initType = source.type ?? 'branch'
+    const initScan = source.scan ?? ''
     const existing = new Set((source.members ?? []).map((m) => m.name))
     setType(initType)
     setRef(source.ref ?? '')
+    setScan(initScan)
     setError(null)
     setMembers([])
     setBranches([])
@@ -91,7 +95,12 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
     void (async () => {
       setScanning(true)
       try {
-        const res = await scanSourceMembers(url, { shouldNotify: () => active })
+        const res = await scanSourceMembers(url, {
+          shouldNotify: () => active,
+          ref: source.ref,
+          type: initType,
+          scan: initScan,
+        })
         if (!active) return
         if (res.ok && Array.isArray(res.result?.members)) {
           const scanned = res.result.members as ScanMember[]
@@ -122,7 +131,7 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
     setSaving(true)
     setError(null)
     try {
-      const res = await saveSource({ source, ref, type, members: [...selected] })
+      const res = await saveSource({ source, ref, type, scan, members: [...selected] })
       if (res.ok) {
         onSaved()
       } else {
@@ -130,6 +139,29 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
       }
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleScan = async () => {
+    if (!source) return
+    setScanning(true)
+    setError(null)
+    const existing = new Set((source.members ?? []).map((m) => m.name))
+    try {
+      const res = await scanSourceMembers(source.url, {
+        ref,
+        type,
+        scan,
+      })
+      if (res.ok && Array.isArray(res.result?.members)) {
+        const scanned = res.result.members as ScanMember[]
+        setMembers(sortSkillMembers(scanned))
+        setSelected(new Set(scanned.filter((m) => existing.has(m.name)).map((m) => m.name)))
+      } else if (!res.ok) {
+        setError(res.message || '扫描失败')
+      }
+    } finally {
+      setScanning(false)
     }
   }
 
@@ -195,6 +227,40 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
           </select>
         </div>
       </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <label className="label" htmlFor="edit-source-scan-pattern">
+          scan pattern
+        </label>
+        <input
+          id="edit-source-scan-pattern"
+          aria-label="scan pattern"
+          value={scan}
+          onChange={(e) => setScan(e.target.value)}
+          placeholder="**/SKILL.md"
+          style={inputStyle}
+        />
+        <div
+          style={{
+            marginTop: 6,
+            fontSize: 11,
+            color: 'var(--muted)',
+            fontFamily: mono,
+          }}
+        >
+          留空使用默认 <code style={{ fontFamily: mono }}>**/SKILL.md</code>
+        </div>
+      </div>
+
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => void handleScan()}
+        disabled={scanning}
+        style={{ width: '100%', marginBottom: 14 }}
+      >
+        {scanning ? '扫描中…' : 'Scan'}
+      </Button>
 
       {scanning ? (
         <div className="selectable-list-empty">扫描中…</div>

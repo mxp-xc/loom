@@ -189,6 +189,7 @@ function EditSourceSwitchHarness() {
             url: 'https://example.test/alpha.git',
             ref: 'main',
             type: 'branch',
+            scan: 'skills/engineering/**/SKILL.md',
             members: [],
           })
         }
@@ -807,6 +808,52 @@ describe('Add Skill modal', () => {
     expect((installed as HTMLInputElement).disabled).toBe(true)
   })
 
+  it('scans and adds a source using the selected ref/type and scan pattern', async () => {
+    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
+      ok: true,
+      branches: ['main'],
+      tags: ['v1.0.1'],
+    } as never)
+    vi.mocked(api.scanSource).mockResolvedValueOnce({
+      ok: true,
+      members: [{ name: 'tdd', description: '', path: 'skills/engineering/tdd/SKILL.md' }],
+    } as never)
+
+    render(<AddSkillModal open repoPath="/tmp/add-source-ref-scan" onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    fireEvent.change(screen.getByPlaceholderText('https://github.com/org/repo'), {
+      target: { value: 'https://github.com/mattpocock/skills' },
+    })
+    fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
+    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'tag' }))
+    fireEvent.change(screen.getByLabelText('scan pattern'), {
+      target: { value: 'skills/engineering/**/SKILL.md' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Scan' }))
+
+    expect(await screen.findByText('tdd')).toBeDefined()
+    expect(api.scanSource).toHaveBeenCalledWith({
+      url: 'https://github.com/mattpocock/skills',
+      type: 'tag',
+      ref: 'v1.0.1',
+      scan: 'skills/engineering/**/SKILL.md',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '添加 Source' }))
+
+    await waitFor(() =>
+      expect(api.addSource).toHaveBeenCalledWith({
+        repo: '/tmp/add-source-ref-scan',
+        url: 'https://github.com/mattpocock/skills',
+        type: 'tag',
+        ref: 'v1.0.1',
+        scan: 'skills/engineering/**/SKILL.md',
+      }),
+    )
+  })
+
   it('keeps the source modal open when members fail after source creation', async () => {
     const onClose = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -1029,7 +1076,13 @@ describe('Skill source updates', () => {
                 {
                   url: 'https://github.com/obra/superpowers.git',
                   ref: 'main',
-                  members: [{ name: 'systematic-debugging', targets: ['codex'] }],
+                  members: [
+                    {
+                      name: 'systematic-debugging',
+                      targets: ['codex'],
+                      path: 'skills/engineering/systematic-debugging/SKILL.md',
+                    },
+                  ],
                 },
               ],
               skills: [],
@@ -1053,6 +1106,7 @@ describe('Skill source updates', () => {
     expect(onOpenDetail).toHaveBeenCalledWith({
       skillId: 'superpowers-systematic-debugging',
       source: 'https://github.com/obra/superpowers.git',
+      path: 'skills/engineering/systematic-debugging/SKILL.md',
       targets: ['codex'],
     })
   })
@@ -1268,6 +1322,43 @@ describe('Skill source updates', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: '全不选' }))
     expect(within(dialog).getByText('已选 0 / 2')).toBeDefined()
+  })
+
+  it('Edit Source scans and saves with the source scan pattern', async () => {
+    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
+      ok: true,
+      branches: ['main'],
+      tags: [],
+    } as never)
+    vi.mocked(api.scanSource).mockResolvedValueOnce({
+      ok: true,
+      members: [{ name: 'alpha', path: 'skills/engineering/alpha/SKILL.md', installed: false }],
+    } as never)
+
+    render(<EditSourceSwitchHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    await within(dialog).findByText('alpha')
+
+    expect(api.scanSource).toHaveBeenCalledWith({
+      url: 'https://example.test/alpha.git',
+      ref: 'main',
+      type: 'branch',
+      scan: 'skills/engineering/**/SKILL.md',
+    })
+    fireEvent.change(within(dialog).getByLabelText('scan pattern'), {
+      target: { value: '' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: /保存/ }))
+
+    await waitFor(() =>
+      expect(api.updateSourceMeta).toHaveBeenCalledWith({
+        repo: '/tmp/edit-switch',
+        url: 'https://example.test/alpha.git',
+        scan: '',
+      }),
+    )
   })
 
   it('keeps hidden selected source members while filtering Edit Source members', async () => {

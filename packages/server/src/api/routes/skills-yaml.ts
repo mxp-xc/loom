@@ -202,7 +202,7 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/sources', async (c) => {
     try {
-      const { repo, url, ref } = await c.req.json()
+      const { repo, url, ref, type, scan } = await c.req.json()
       let repoPath: string
       try {
         repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
@@ -214,7 +214,12 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       }
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-      const result = addSource(data, { url, ref })
+      const result = addSource(data, {
+        url,
+        ref,
+        ...(type === 'branch' || type === 'tag' ? { type } : {}),
+        ...(typeof scan === 'string' && scan.trim() ? { scan: scan.trim() } : {}),
+      })
       if (result.changed) await writeYaml(deps.fs, filePath, result.data)
       // Auto-clone source repo to remote-cache so SKILL.md content is available
       const sourceId = deriveRepoId(url)
@@ -224,7 +229,7 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
         // Clone failure shouldn't block source creation; user can retry via check/scan
         remoteLogger.error('auto-install failed for source', { err: installErr, url })
       }
-      return c.json({ ok: true, source: { url, ref } })
+      return c.json({ ok: true, source: result.data.sources[result.data.sources.length - 1] })
     } catch (e) {
       return c.json({
         ok: false,
@@ -298,7 +303,7 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/sources/update', async (c) => {
     try {
-      const { repo, url, ref, type } = await c.req.json()
+      const { repo, url, ref, type, scan } = await c.req.json()
       if (!url || typeof url !== 'string') return c.json({ ok: false, error: 'invalid_url' }, 400)
       let repoPath: string
       try {
@@ -311,9 +316,10 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       }
       const filePath = join(repoPath, 'skills.yaml')
       const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-      const updates: { ref?: string; type?: 'branch' | 'tag' } = {}
+      const updates: { ref?: string; type?: 'branch' | 'tag'; scan?: string | null } = {}
       if (typeof ref === 'string') updates.ref = ref
       if (type === 'branch' || type === 'tag') updates.type = type
+      if (typeof scan === 'string') updates.scan = scan
       const result = updateSourceMeta(data, url, updates)
       if (result.changed) {
         await writeYaml(deps.fs, filePath, result.data)
