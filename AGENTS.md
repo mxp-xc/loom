@@ -23,6 +23,12 @@ Loom 是 Bun workspace monorepo。共享且无 IO 的领域逻辑在 `packages/c
 - `bun run format:check`：检查 Prettier 格式。
 - `bun run format`：自动格式化。
 
+## 本地服务与端口
+
+- 多个 worktree / agent 可同时运行服务；看到 `5173` 或其他端口被占用是正常现象，默认不要排查或清理。
+- 需要服务时直接运行 `bun dev`，让项目自动选择可用端口；前端验证使用该命令输出的 URL。
+- 只管理自己启动的 dev server：重启只重启自己的 session/process，不要 kill、复用或重启用户/其他 worktree 的服务。只有自己的服务启动失败或用户明确要求时，才排查端口。
+
 ## 代码风格与命名约定
 
 使用 ESM TypeScript。源码导入本地文件时写 `.js` 后缀，即使源文件是 `.ts`。格式化由 Prettier 负责：无分号、单引号、trailing comma，并启用 Tailwind 插件。保持 `packages/core` 不依赖文件系统、进程或网络 IO；新增 IO 能力优先通过 server 的 ports/adapters 接入。文件与测试名应直观描述行为，例如 `projection.test.ts`、`executor-memory.test.ts`。
