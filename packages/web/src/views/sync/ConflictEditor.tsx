@@ -5,6 +5,7 @@ import { Decoration, GutterMarker, gutter } from '@codemirror/view'
 import { yaml } from '@codemirror/lang-yaml'
 import { Button } from '@/components/ui/button'
 import type { GitConflictFile } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import {
   applyBlockSide,
   buildMergeModel,
@@ -16,6 +17,7 @@ import {
   type MergeBlock,
   type MergeModel,
 } from './merge-model'
+import styles from './ConflictEditor.module.css'
 
 interface Props {
   conflict: GitConflictFile
@@ -327,11 +329,11 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
     })
 
   return (
-    <section className="conflict-editor-shell">
-      <header className="conflict-editor-header">
+    <section className={styles['conflict-editor-shell']}>
+      <header className={styles['conflict-editor-header']}>
         <strong>{conflict.path}</strong>
         {!conflict.binary && (
-          <div className="conflict-editor-file-actions">
+          <div className={styles['conflict-editor-file-actions']}>
             <Button size="sm" variant="secondary" onClick={keepAutomaticMerge}>
               保留两者
             </Button>
@@ -343,13 +345,13 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
             </Button>
           </div>
         )}
-        <span className="conflict-editor-count">
+        <span className={styles['conflict-editor-count']}>
           文件 {index + 1}/{total}
         </span>
       </header>
 
       {conflict.binary ? (
-        <div className="conflict-binary">
+        <div className={styles['conflict-binary']}>
           <p>二进制文件不能在线编辑，请选择保留的版本。</p>
           <div>
             <Button size="sm" variant="secondary" onClick={() => chooseBinaryFile(conflict.ours)}>
@@ -362,7 +364,7 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
         </div>
       ) : (
         <>
-          <div className="conflict-mobile-tabs">
+          <div className={styles['conflict-mobile-tabs']}>
             {(['local', 'result', 'remote'] as const).map((side) => (
               <button
                 key={side}
@@ -373,27 +375,30 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
               </button>
             ))}
           </div>
-          <div className="conflict-three-way">
-            <div className="conflict-pane" data-mobile-active={mobileSide === 'local'}>
-              <div className="conflict-pane-label">LOCAL</div>
-              <div ref={localHost} className="conflict-pane-editor" />
+          <div className={styles['conflict-three-way']}>
+            <div className={styles['conflict-pane']} data-mobile-active={mobileSide === 'local'}>
+              <div className={styles['conflict-pane-label']}>LOCAL</div>
+              <div ref={localHost} className={styles['conflict-pane-editor']} />
             </div>
-            <div className="conflict-pane is-result" data-mobile-active={mobileSide === 'result'}>
-              <div className="conflict-pane-label">
+            <div
+              className={cn(styles['conflict-pane'], styles['is-result'])}
+              data-mobile-active={mobileSide === 'result'}
+            >
+              <div className={styles['conflict-pane-label']}>
                 <span>RESULT</span>
                 <span>{model.unresolvedCount} 个待处理冲突</span>
               </div>
-              <div ref={resultHost} className="conflict-pane-editor" />
+              <div ref={resultHost} className={styles['conflict-pane-editor']} />
             </div>
-            <div className="conflict-pane" data-mobile-active={mobileSide === 'remote'}>
-              <div className="conflict-pane-label">REMOTE</div>
-              <div ref={remoteHost} className="conflict-pane-editor" />
+            <div className={styles['conflict-pane']} data-mobile-active={mobileSide === 'remote'}>
+              <div className={styles['conflict-pane-label']}>REMOTE</div>
+              <div ref={remoteHost} className={styles['conflict-pane-editor']} />
             </div>
           </div>
         </>
       )}
 
-      <footer className="conflict-editor-footer">
+      <footer className={styles['conflict-editor-footer']}>
         <Button size="sm" variant="secondary" onClick={onAbort} disabled={saving}>
           放弃合并
         </Button>
@@ -408,57 +413,6 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
           {saving ? '保存中…' : total > 1 ? '保存并继续' : '保存并完成合并'}
         </Button>
       </footer>
-      <style>{`
-        .conflict-editor-shell { margin-top:18px; border:1px solid var(--border); border-radius:var(--radius-card); overflow:hidden; background:var(--card); }
-        .conflict-editor-header { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); }
-        .conflict-editor-header strong { font:600 12px 'JetBrains Mono',monospace; }
-        .conflict-editor-file-actions { display:flex; gap:6px; margin-left:auto; }
-        .conflict-editor-file-actions .loom-button { height:27px !important; padding-inline:9px !important; font-size:11px; }
-        .conflict-editor-count { color:var(--muted); font-size:11px; white-space:nowrap; }
-        .conflict-three-way { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr); height:390px; }
-        .conflict-pane { min-width:0; border-right:1px solid var(--border); background:var(--bg); }
-        .conflict-pane:last-child { border-right:0; }
-        .conflict-pane.is-result { background:color-mix(in srgb, var(--card) 65%, var(--bg)); }
-        .conflict-pane-label { height:34px; display:flex; align-items:center; justify-content:space-between; padding:0 11px; border-bottom:1px solid var(--border); color:var(--muted); font:10px 'JetBrains Mono',monospace; letter-spacing:.06em; }
-        .conflict-pane-label span:last-child { color:var(--warn); letter-spacing:0; white-space:nowrap; }
-        .conflict-pane-editor { height:356px; }
-        .cm-line.merge-change { border-inline-start:2px solid transparent; }
-        .cm-line.merge-change-stable { border-inline-start-color:color-mix(in srgb, var(--primary) 72%, transparent); background:color-mix(in srgb, var(--primary) 14%, transparent); }
-        .cm-line.merge-change-conflict { border-inline-start-color:color-mix(in srgb, var(--danger, #dc2626) 72%, transparent); background:color-mix(in srgb, var(--danger, #dc2626) 14%, transparent); }
-        .cm-line.merge-change-applied { border-inline-start-color:color-mix(in srgb, var(--primary) 72%, transparent); background:color-mix(in srgb, var(--primary) 10%, transparent); }
-        .cm-line.merge-change-ignored { border-inline-start-color:color-mix(in srgb, var(--muted) 60%, transparent); background:color-mix(in srgb, var(--muted) 9%, transparent); color:color-mix(in srgb, var(--text) 55%, var(--muted)); }
-        .conflict-editor-shell .cm-activeLine:not(.merge-change) { background:transparent !important; }
-        .conflict-editor-shell .cm-activeLineGutter { background:transparent !important; }
-        .cm-lineNumbers { min-width:42px; }
-        .cm-lineNumbers .cm-gutterElement { padding:0 5px; }
-        .merge-action-gutter { min-width:52px; }
-        .merge-action-gutter .cm-gutterElement { padding:0 5px; }
-        .merge-line-number-action { display:inline-flex; align-items:center; justify-content:center; width:44px; }
-        .merge-block-actions { display:inline-flex; gap:1px; padding:1px; border:1px solid color-mix(in srgb, var(--danger, #dc2626) 55%, var(--border)); border-radius:5px; background:var(--card); vertical-align:middle; }
-        .merge-block-action { width:18px; height:18px; border:0; border-radius:3px; background:transparent; color:var(--text); font:600 11px 'JetBrains Mono',monospace; cursor:pointer; }
-        .merge-block-action:hover { background:var(--accent); }
-        .merge-block-action:disabled { cursor:default; opacity:.35; }
-        .merge-block-action:disabled:hover { background:transparent; }
-        .merge-block-action:focus-visible { outline:2px solid var(--primary); outline-offset:1px; }
-        .merge-block-actions.is-applied { border-color:var(--primary); opacity:.72; }
-        .merge-block-actions.is-ignored { opacity:.38; }
-        .conflict-editor-footer { display:flex; gap:8px; justify-content:flex-end; padding:10px 14px; border-top:1px solid var(--border); }
-        .conflict-binary { padding:16px; }
-        .conflict-binary p { margin:0 0 12px; color:var(--muted); font-size:12px; }
-        .conflict-binary > div { display:flex; gap:8px; }
-        .conflict-mobile-tabs { display:none; }
-        @media (max-width:760px) {
-          .conflict-editor-header { align-items:flex-start; flex-wrap:wrap; }
-          .conflict-editor-file-actions { order:3; width:100%; margin-left:0; }
-          .conflict-editor-count { margin-left:auto; }
-          .conflict-mobile-tabs { display:flex; gap:4px; padding:8px 10px; border-bottom:1px solid var(--border); }
-          .conflict-mobile-tabs button { border:0; border-radius:var(--radius); padding:5px 9px; background:transparent; color:var(--muted); font:10px 'JetBrains Mono',monospace; }
-          .conflict-mobile-tabs button[data-active='true'] { background:var(--accent); color:var(--text); }
-          .conflict-three-way { display:block; height:390px; }
-          .conflict-pane { display:none; height:390px; border-right:0; }
-          .conflict-pane[data-mobile-active='true'] { display:block; }
-        }
-      `}</style>
     </section>
   )
 }

@@ -33,8 +33,8 @@ describe('Settings', () => {
   it('sdot: effective tab active_repo=fixed, targets=repo', async () => {
     render(<Settings repoPath="/tmp/r" />)
     await screen.findByText('最终结果')
-    expect(document.querySelector('.sdot2.dot-fixed')).not.toBeNull()
-    expect(document.querySelector('.sdot2.repo')).not.toBeNull()
+    expect(screen.getByTitle('固定本地级')).toBeDefined()
+    expect(screen.getByTitle('仓库级已设')).toBeDefined()
   })
 
   it('switching to repo tab still shows active_repo as fixed', async () => {
@@ -42,7 +42,7 @@ describe('Settings', () => {
     await screen.findByText('最终结果')
     fireEvent.click(screen.getByText('仓库级'))
     // active_repo is fixed local — dot stays fixed in all panes
-    expect(document.querySelector('.sdot2.dot-fixed')).not.toBeNull()
+    expect(screen.getByTitle('固定本地级')).toBeDefined()
   })
 
   it('refreshes shared manifest after saving targets', async () => {

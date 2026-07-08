@@ -1,0 +1,34 @@
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.skills-head-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.project-button {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+  background: color-mix(in srgb, var(--primary) 9%, var(--card));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 4%, transparent);
+}
+.project-button:hover {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+.page-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--bright);
+  letter-spacing: -0.01em;
+}
+.page-sub {
+  color: var(--m2);
+  font-size: 12px;
+  margin-top: 2px;
+}

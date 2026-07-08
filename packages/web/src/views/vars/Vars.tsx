@@ -2,13 +2,14 @@ import { RefreshCw, Search } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useToast } from '@/hooks/useToast'
 import { AGENTS, agentColor, agentShort } from '../../lib/agents'
-import type { VarsProfileId, VarsProfileEntry } from './profile-model'
+import { cn } from '@/lib/utils'
+import type { VarsProfileId } from './profile-model'
 import { useProfileVars } from './useProfileVars'
 import VarsConfigModal, { type VarsModalState } from './VarsConfigModal'
 import VarsProfileList from './VarsProfileList'
 import VarsProfileTable from './VarsProfileTable'
 import VarsResolvedView from './VarsResolvedView'
-import './vars.css'
+import styles from './Vars.module.css'
 
 type VarsView = 'definitions' | 'resolved'
 
@@ -41,9 +42,9 @@ export default function Vars({ repoPath }: { repoPath: string }) {
 
   if (vars.loading)
     return (
-      <div className="vars-page">
-        <div className="vars-state" role="status">
-          <RefreshCw className="vars-spin" size={20} />
+      <div className={styles['vars-page']}>
+        <div className={styles['vars-state']} role="status">
+          <RefreshCw className={styles['vars-spin']} size={20} />
           正在加载变量…
         </div>
       </div>
@@ -51,8 +52,8 @@ export default function Vars({ repoPath }: { repoPath: string }) {
 
   if (vars.error || !state || !activeProfile)
     return (
-      <div className="vars-page">
-        <div className="vars-state vars-error" role="alert">
+      <div className={styles['vars-page']}>
+        <div className={cn(styles['vars-state'], styles['vars-error'])} role="alert">
           <strong>变量加载失败</strong>
           <span>{vars.error ?? '变量数据为空'}</span>
           <button type="button" onClick={() => void vars.reload()}>
@@ -63,17 +64,17 @@ export default function Vars({ repoPath }: { repoPath: string }) {
     )
 
   return (
-    <div className="vars-page">
-      <header className="vars-topbar">
+    <div className={styles['vars-page']}>
+      <header className={styles['vars-topbar']}>
         <div>
-          <div className="vars-eyebrow">Vars</div>
+          <div className={styles['vars-eyebrow']}>Vars</div>
           <h1>变量配置</h1>
         </div>
-        <div className="vars-tabs" aria-label="Vars 视图">
+        <div className={styles['vars-tabs']} aria-label="Vars 视图">
           <button
             type="button"
             aria-pressed={view === 'definitions'}
-            className={view === 'definitions' ? 'on' : ''}
+            className={view === 'definitions' ? styles.on : undefined}
             onClick={() => setView('definitions')}
           >
             配置管理
@@ -81,19 +82,19 @@ export default function Vars({ repoPath }: { repoPath: string }) {
           <button
             type="button"
             aria-pressed={view === 'resolved'}
-            className={view === 'resolved' ? 'on' : ''}
+            className={view === 'resolved' ? styles.on : undefined}
             onClick={() => setView('resolved')}
           >
             最终结果
           </button>
         </div>
-        <div className="cfg-chips" aria-label="目标 agent">
+        <div className="target-chips" aria-label="目标 agent">
           {AGENTS.map((agent) => (
             <button
               key={agent}
               type="button"
-              className={'achip' + (vars.activeAgent === agent ? ' on' : ' off')}
-              data-a={agent === 'claude-code' ? 'cc' : agent === 'codex' ? 'cx' : 'oc'}
+              className="target-chip"
+              data-state={vars.activeAgent === agent ? 'on' : 'off'}
               style={{ ['--c' as string]: agentColor[agent] }}
               onClick={() => vars.setActiveAgent(agent)}
             >
@@ -104,24 +105,24 @@ export default function Vars({ repoPath }: { repoPath: string }) {
       </header>
 
       {view === 'definitions' ? (
-        <div className="vars-shell">
+        <div className={styles['vars-shell']}>
           <VarsProfileList
             profiles={state.profiles}
             activeProfileId={activeProfile.id}
             onSelect={setActiveProfileId}
           />
-          <main className="vars-main" aria-label="配置管理">
-            <div className="vars-section-head">
+          <main className={styles['vars-main']} aria-label="配置管理">
+            <div className={styles['vars-section-head']}>
               <div>
-                <div className="vars-eyebrow">selected profile</div>
+                <div className={styles['vars-eyebrow']}>selected profile</div>
                 <h2>{activeProfile.name}</h2>
                 <p>{activeProfile.description}</p>
               </div>
-              <div className="vars-toolbar">
+              <div className={styles['vars-toolbar']}>
                 {activeProfile.id === 'local' && (
                   <button
                     type="button"
-                    className="vars-ghost-action"
+                    className={styles['vars-ghost-action']}
                     onClick={() => vars.setShowAvailable((current) => !current)}
                   >
                     {vars.showAvailable ? '隐藏可配置项' : '显示可配置项'}
@@ -129,7 +130,7 @@ export default function Vars({ repoPath }: { repoPath: string }) {
                 )}
                 <button
                   type="button"
-                  className="vars-primary-action"
+                  className={styles['vars-primary-action']}
                   disabled={activeProfile.id === 'builtin'}
                   onClick={() => setModal({ kind: 'add' })}
                 >
@@ -137,7 +138,7 @@ export default function Vars({ repoPath }: { repoPath: string }) {
                 </button>
               </div>
             </div>
-            <label className="vars-search">
+            <label className={styles['vars-search']}>
               <Search size={14} />
               <input
                 value={search}

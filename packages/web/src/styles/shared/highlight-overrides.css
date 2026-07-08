@@ -1,0 +1,33 @@
+[data-theme='light'] .hljs {
+  background: var(--bg);
+  color: var(--text);
+}
+[data-theme='light'] .hljs-comment,
+[data-theme='light'] .hljs-quote {
+  color: var(--muted);
+  font-style: italic;
+}
+[data-theme='light'] .hljs-keyword,
+[data-theme='light'] .hljs-selector-tag,
+[data-theme='light'] .hljs-built_in {
+  color: #059669;
+}
+[data-theme='light'] .hljs-string,
+[data-theme='light'] .hljs-attr {
+  color: #7c3aed;
+}
+[data-theme='light'] .hljs-number,
+[data-theme='light'] .hljs-literal {
+  color: #dc2626;
+}
+[data-theme='light'] .hljs-title,
+[data-theme='light'] .hljs-section,
+[data-theme='light'] .hljs-name {
+  color: #2563eb;
+}
+[data-theme='light'] .hljs-tag {
+  color: var(--muted);
+}
+[data-theme='light'] .hljs-attribute {
+  color: #7c3aed;
+}

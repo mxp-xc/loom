@@ -5,6 +5,7 @@ import { IconButton } from '@/components/ui/IconButton'
 import { agentColor, agentShort } from '../../lib/agents'
 import type { AgentId } from '../../lib/agents'
 import type { VarsProfileEntry } from './profile-model'
+import styles from './Vars.module.css'
 
 type VarsProfileTableProps = {
   entries: VarsProfileEntry[]
@@ -16,13 +17,13 @@ type VarsProfileTableProps = {
 }
 
 function AgentChips({ slots }: { slots: AgentId[] }) {
-  if (slots.length === 0) return <span className="vars-slot-dash">—</span>
+  if (slots.length === 0) return <span className={styles['vars-slot-dash']}>—</span>
   return (
-    <span className="vars-slots">
+    <span className={styles['vars-slots']}>
       {slots.map((slot) => (
         <span
           key={slot}
-          className="vars-slot-chip"
+          className={styles['vars-slot-chip']}
           data-a={slot === 'claude-code' ? 'cc' : slot === 'codex' ? 'cx' : 'oc'}
           style={{ ['--c' as string]: agentColor[slot] }}
         >
@@ -35,11 +36,11 @@ function AgentChips({ slots }: { slots: AgentId[] }) {
 
 function KeyCell({ entry }: { entry: VarsProfileEntry }) {
   return (
-    <span className="vars-key-cell">
-      <span className="vars-key">{entry.key}</span>
-      <span className="vars-type-stack">
-        <span className="vars-type-main">{entry.type}</span>
-        {entry.format && <span className="vars-format">{entry.format}</span>}
+    <span className={styles['vars-key-cell']}>
+      <span className={styles['vars-key']}>{entry.key}</span>
+      <span className={styles['vars-type-stack']}>
+        <span className={styles['vars-type-main']}>{entry.type}</span>
+        {entry.format && <span className={styles['vars-format']}>{entry.format}</span>}
       </span>
     </span>
   )
@@ -54,7 +55,7 @@ function RowActions({
 }: Omit<VarsProfileTableProps, 'entries' | 'search'> & { entry: VarsProfileEntry }) {
   if (entry.state === 'readonly') {
     return (
-      <span className="vars-row-actions">
+      <span className={styles['vars-row-actions']}>
         <IconButton label={'查看 ' + entry.key} tooltip="查看" onClick={() => onView(entry)}>
           <Eye size={14} />
         </IconButton>
@@ -64,7 +65,7 @@ function RowActions({
 
   if (entry.state === 'available') {
     return (
-      <span className="vars-row-actions">
+      <span className={styles['vars-row-actions']}>
         <IconButton
           label={'新建 ' + entry.key + ' 配置'}
           tooltip="新建配置"
@@ -77,7 +78,7 @@ function RowActions({
   }
 
   return (
-    <span className="vars-row-actions">
+    <span className={styles['vars-row-actions']}>
       <IconButton label={'编辑 ' + entry.key} tooltip="编辑" onClick={() => onEdit(entry)}>
         <Pencil size={14} />
       </IconButton>
@@ -85,7 +86,7 @@ function RowActions({
         label={'清除 ' + entry.key + ' 配置'}
         tooltip="清除配置"
         tone="danger"
-        className="vars-danger-action"
+        className={styles['vars-danger-action']}
         onClick={() => onClear(entry)}
       >
         <Trash2 size={14} />
@@ -121,21 +122,21 @@ export default function VarsProfileTable({
         id: 'key',
         header: 'key',
         cell: (entry) => <KeyCell entry={entry} />,
-        className: 'vars-col-key',
+        className: styles['vars-col-key'],
       },
       {
         id: 'value',
         header: '当前值',
         cell: (entry) => entry.valuePreview || '未配置',
-        className: 'vars-col-value',
-        cellClassName: 'vars-value',
+        className: styles['vars-col-value'],
+        cellClassName: styles['vars-value'],
       },
       {
         id: 'slots',
         header: 'Agent 专属',
         cell: (entry) => <AgentChips slots={entry.agentSlots} />,
-        className: 'vars-col-slots',
-        cellClassName: 'vars-slots-cell',
+        className: styles['vars-col-slots'],
+        cellClassName: styles['vars-slots-cell'],
       },
       {
         id: 'actions',
@@ -149,8 +150,8 @@ export default function VarsProfileTable({
             onClear={onClear}
           />
         ),
-        className: 'vars-col-actions',
-        cellClassName: 'vars-actions-cell',
+        className: styles['vars-col-actions'],
+        cellClassName: styles['vars-actions-cell'],
       },
     ],
     [onAdd, onClear, onEdit, onView],
@@ -159,14 +160,14 @@ export default function VarsProfileTable({
   return (
     <DataTable
       ariaLabel="变量列表"
-      className="vars-table"
-      tableClassName="vars-table-grid"
+      className={styles['vars-table']}
+      tableClassName={styles['vars-table-grid']}
       columns={columns}
       rows={visibleEntries}
       getRowId={(entry) => entry.key}
-      rowClassName={(entry) => entry.state}
+      rowClassName={(entry) => styles[entry.state]}
       emptyMessage="当前列表没有变量。"
-      emptyClassName="vars-table-empty"
+      emptyClassName={styles['vars-table-empty']}
     />
   )
 }

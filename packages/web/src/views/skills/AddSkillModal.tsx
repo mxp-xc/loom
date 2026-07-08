@@ -7,6 +7,7 @@ import { FolderInput, RefreshCw } from 'lucide-react'
 import { Segmented } from './Segmented'
 import type { ScanMember, LocalScanResult } from './types'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
+import styles from './AddSkillModal.module.css'
 
 interface Props {
   open: boolean
@@ -293,7 +294,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
 
   return (
     <Modal open={open} onClose={onClose} title="Add Skill" width={600}>
-      <div className="add-skill-tabs">
+      <div className={styles['add-skill-tabs']}>
         <Segmented
           value={addTab}
           onChange={(t) => {
@@ -324,9 +325,9 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
               e.target.value = ''
             }}
           />
-          <div className="add-skill-section">
+          <div className={styles['add-skill-section']}>
             <span className="label">path</span>
-            <div className="add-skill-path-row">
+            <div className={styles['add-skill-path-row']}>
               <input
                 value={localPath}
                 onChange={(e) => {
@@ -358,7 +359,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
                 <RefreshCw className={localScanning ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
               </Button>
             </div>
-            <div className="add-skill-helper">
+            <div className={styles['add-skill-helper']}>
               默认扫描 <code style={{ fontFamily: mono }}>~/.agents/skills</code> 并以 ref
               方式添加；仓库内 <code style={{ fontFamily: mono }}>assets/skills</code>{' '}
               会自动加载。Browse 可将其他目录导入仓库。
@@ -366,7 +367,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
           </div>
 
           {localScanning ? (
-            <div className="add-skill-results" style={listBox}>
+            <div className={styles['add-skill-results']} style={listBox}>
               <div style={placeholderStyle}>扫描中…</div>
             </div>
           ) : (
@@ -382,8 +383,8 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
             />
           )}
 
-          <div className="add-skill-footer">
-            <span className="add-skill-selection">已选择 {localSelected.size} 项</span>
+          <div className={styles['add-skill-footer']}>
+            <span className={styles['add-skill-selection']}>已选择 {localSelected.size} 项</span>
             <Button
               variant="primary"
               onClick={handleAddLocal}

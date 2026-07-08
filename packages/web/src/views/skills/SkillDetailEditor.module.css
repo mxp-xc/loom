@@ -1,0 +1,77 @@
+.chip {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  transition: all var(--dur) var(--ease);
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 15px;
+  padding: 0;
+}
+.chip.active {
+  background: var(--c);
+  color: #fff;
+  border-color: var(--c);
+}
+.chip.inactive {
+  background: transparent;
+  color: var(--c);
+  border-color: color-mix(in srgb, var(--c) 45%, transparent);
+  opacity: 0.5;
+}
+.chip:hover {
+  transform: scale(1.05);
+  border-color: var(--c);
+}
+
+.skill-detail-content-frame {
+  --skill-detail-panel-height: clamp(360px, 48vh, 620px);
+  margin-top: 8px;
+  min-height: calc(var(--skill-detail-panel-height) + 36px);
+}
+.skill-detail-preview-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin-bottom: 8px;
+}
+.skill-detail-preview-tabs span {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.skill-detail-preview-tabs span.on {
+  border-color: var(--primary);
+  background: var(--accent);
+  color: var(--primary);
+}
+.skill-detail-loading-panel,
+.skill-detail-error {
+  box-sizing: border-box;
+  height: var(--skill-detail-panel-height);
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12px;
+}
+.skill-detail-loading-panel {
+  display: grid;
+  place-items: center;
+}
+.skill-detail-error {
+  color: var(--error);
+  font-family: 'JetBrains Mono', monospace;
+}

@@ -282,16 +282,16 @@
   gap: 10px;
 }
 
-.vars-lab-agent-chips .achip[data-a='df'] {
+.vars-lab-agent-chips :global(.target-chip)[data-agent='default'] {
   min-width: 58px;
 }
 
-.vars-lab-agent-chips .achip[data-a='df'].on {
+.vars-lab-agent-chips :global(.target-chip)[data-agent='default'][data-state='on'] {
   background: var(--primary);
   border-color: var(--primary);
 }
 
-.vars-lab-agent-chips .achip[data-a='df'].off {
+.vars-lab-agent-chips :global(.target-chip)[data-agent='default'][data-state='off'] {
   color: var(--primary);
   border-color: color-mix(in srgb, var(--primary) 45%, transparent);
 }

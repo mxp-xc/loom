@@ -439,7 +439,8 @@ describe('Memory view', () => {
     render(<Memory repoPath="/tmp/memory-targets" />)
 
     const targetsPanel = await screen.findByText('投影目标')
-    const panel = targetsPanel.closest('.mem-global-targets') as HTMLElement
+    const panel = screen.getByTestId('memory-targets')
+    expect(panel.contains(targetsPanel)).toBe(true)
     fireEvent.click(within(panel).getByRole('button', { name: 'OC' }))
 
     expect(api.putConfig).not.toHaveBeenCalled()
@@ -455,15 +456,13 @@ describe('Memory view', () => {
 
     render(<Memory repoPath="/tmp/memory-actions" />)
 
-    const names = await screen.findAllByText('v1')
-    const row = names.find((item) => item.closest('.mem-item'))?.closest('.mem-item') as HTMLElement
-    expect(row).not.toBeNull()
+    await screen.findAllByText('v1')
+    const row = screen.getByTestId('memory-row-v1')
 
     const activeDot = within(row).getByRole('button', { name: '取消激活 memory v1' })
     const rename = within(row).getByRole('button', { name: '重命名 memory v1' })
     const remove = within(row).getByRole('button', { name: '删除 memory v1' })
 
-    expect(activeDot.classList.contains('mem-active-dot')).toBe(true)
     expect(activeDot.getAttribute('aria-pressed')).toBe('true')
     expect(activeDot.getAttribute('data-state')).toBe('active')
     expect(activeDot.getAttribute('data-tooltip')).toBe('已激活，点击取消')
@@ -564,63 +563,49 @@ describe('Skills view', () => {
     expect(screen.getByRole('button', { name: '全部收起' })).toBeDefined()
     expect(screen.getByText('systematic-debugging')).toBeDefined()
 
-    const sourceRow = screen.getByText('systematic-debugging').closest('.skill')
-    expect(sourceRow).not.toBeNull()
-    expect(within(sourceRow as HTMLElement).getByText('skills/systematic-debugging')).toBeDefined()
+    const sourceRow = screen.getByTestId('source-skill-systematic-debugging')
+    expect(within(sourceRow).getByText('skills/systematic-debugging')).toBeDefined()
+    expect(within(sourceRow).queryByText('skills/systematic-debugging/SKILL.md')).toBeNull()
     expect(
-      within(sourceRow as HTMLElement).queryByText('skills/systematic-debugging/SKILL.md'),
-    ).toBeNull()
-    expect(
-      within(sourceRow as HTMLElement).getByText(
-        'A disciplined debugging loop for bugs and regressions.',
-      ),
+      within(sourceRow).getByText('A disciplined debugging loop for bugs and regressions.'),
     ).toBeDefined()
-    const sourceFileLink = within(sourceRow as HTMLElement).getByRole('link', {
+    const sourceFileLink = within(sourceRow).getByRole('link', {
       name: '在 GitHub 打开 systematic-debugging 的 SKILL.md',
     })
     expect(sourceFileLink.getAttribute('href')).toBe(
       'https://github.com/obra/superpowers/blob/main/skills/systematic-debugging/SKILL.md',
     )
 
-    const localName = document.querySelector('.local-skills-group .skill .sname')
-    const localRow = localName.closest('.skill')
-    expect(localRow).not.toBeNull()
-    const localGroupHead = document.querySelector('.local-skills-group .group-head') as HTMLElement
+    const localRow = screen.getByTestId('local-skill-test-qa-skill')
+    const localGroupHead = screen.getByTestId('skill-group-head-local')
     expect(within(localGroupHead).getByText('assets/skills')).toBeDefined()
-    expect(within(localRow as HTMLElement).getByText('ref')).toBeDefined()
-    expect((localRow as HTMLElement).querySelector('.skill-source-path')?.textContent?.trim()).toBe(
+    expect(within(localRow).getByText('ref')).toBeDefined()
+    expect(screen.getByTestId('local-skill-path-test-qa-skill').textContent?.trim()).toBe(
       'test-qa-skill',
     )
-    expect(within(localRow as HTMLElement).queryByText('assets/skills/test-qa-skill')).toBeNull()
-    expect(
-      within(localRow as HTMLElement).queryByText('assets/skills/test-qa-skill/SKILL.md'),
-    ).toBeNull()
-    expect(within(localRow as HTMLElement).queryByText('本地路径')).toBeNull()
-    expect(within(localRow as HTMLElement).queryByText('projected')).toBeNull()
+    expect(within(localRow).queryByText('assets/skills/test-qa-skill')).toBeNull()
+    expect(within(localRow).queryByText('assets/skills/test-qa-skill/SKILL.md')).toBeNull()
+    expect(within(localRow).queryByText('本地路径')).toBeNull()
+    expect(within(localRow).queryByText('projected')).toBeNull()
 
-    expect(within(localRow as HTMLElement).queryByText('OC')).toBeNull()
-    expect(within(localRow as HTMLElement).getByText('路径不存在')).toBeDefined()
-    expect(
-      within(localRow as HTMLElement).queryByRole('button', { name: 'test-qa-skill' }),
-    ).toBeNull()
+    expect(within(localRow).queryByText('OC')).toBeNull()
+    expect(within(localRow).getByText('路径不存在')).toBeDefined()
+    expect(within(localRow).queryByRole('button', { name: 'test-qa-skill' })).toBeNull()
 
-    const frontendRow = screen.getByRole('button', { name: 'frontend-design' }).closest('.skill')
-    expect(frontendRow).not.toBeNull()
+    const frontendRow = screen.getByTestId('local-skill-frontend-design')
+    expect(screen.getByTestId('local-skill-path-frontend-design').textContent?.trim()).toBe(
+      'frontend-design',
+    )
+    expect(within(frontendRow).queryByText('assets/skills/frontend-design')).toBeNull()
     expect(
-      (frontendRow as HTMLElement).querySelector('.skill-source-path')?.textContent?.trim(),
-    ).toBe('frontend-design')
-    expect(
-      within(frontendRow as HTMLElement).queryByText('assets/skills/frontend-design'),
-    ).toBeNull()
-    expect(
-      within(frontendRow as HTMLElement).getByText('Design guidance for distinctive front-end UI.'),
+      within(frontendRow).getByText('Design guidance for distinctive front-end UI.'),
     ).toBeDefined()
     expect(
-      within(frontendRow as HTMLElement).queryByRole('button', {
+      within(frontendRow).queryByRole('button', {
         name: '打开 frontend-design 的文件夹',
       }),
     ).toBeNull()
-    fireEvent.click(within(frontendRow as HTMLElement).getByRole('button', { name: 'CX' }))
+    fireEvent.click(within(frontendRow).getByRole('button', { name: 'CX' }))
     await waitFor(() =>
       expect(api.updateLocalSkillTargets).toHaveBeenCalledWith({
         repo: '/tmp/skills-layout',
@@ -631,9 +616,7 @@ describe('Skills view', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '折叠 superpowers' }))
     expect(screen.queryByText('systematic-debugging')).toBeNull()
-    expect(document.querySelector('.local-skills-group .skill .sname')?.textContent).toBe(
-      'test-qa-skill',
-    )
+    expect(screen.getByTestId('local-skill-test-qa-skill')).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: '全部收起' }))
     expect(screen.getByRole('button', { name: '全部展开' })).toBeDefined()
@@ -649,9 +632,8 @@ describe('Skills view', () => {
     )
 
     fireEvent.click(await screen.findByRole('button', { name: '全部展开' }))
-    const frontendRow = screen.getByRole('button', { name: 'frontend-design' }).closest('.skill')
-    expect(frontendRow).not.toBeNull()
-    fireEvent.click(within(frontendRow as HTMLElement).getByRole('button', { name: 'CX' }))
+    const frontendRow = screen.getByTestId('local-skill-frontend-design')
+    fireEvent.click(within(frontendRow).getByRole('button', { name: 'CX' }))
 
     await waitFor(() =>
       expect(api.updateLocalSkillTargets).toHaveBeenCalledWith({
@@ -943,9 +925,7 @@ describe('Skill source updates', () => {
       />,
     )
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'frontend-design' }).closest('.skill') as HTMLElement,
-    )
+    fireEvent.click(screen.getByTestId('local-skill-frontend-design'))
 
     expect(onOpenDetail).toHaveBeenCalledWith({
       skillId: 'frontend-design',
@@ -1111,9 +1091,9 @@ describe('Skill source updates', () => {
       />,
     )
 
-    const names = Array.from(document.querySelectorAll('.skill .sname')).map((el) =>
-      el.textContent?.trim(),
-    )
+    const names = screen
+      .getAllByTestId(/^source-skill-(?!path-)/)
+      .map((row) => row.getAttribute('data-testid')?.replace('source-skill-', ''))
     expect(names).toEqual(['brainstorming', 'executing-plans', 'writing-plans'])
   })
 
@@ -1150,11 +1130,11 @@ describe('Skill source updates', () => {
     )
 
     const expandLocal = screen.getByRole('button', { name: '展开 local skills' })
-    fireEvent.click(expandLocal.closest('.group-head') as HTMLElement)
+    fireEvent.click(screen.getByTestId('skill-group-head-local'))
     expect(onToggleGroup).toHaveBeenLastCalledWith('local')
 
     const expand = screen.getByRole('button', { name: '展开 superpowers' })
-    fireEvent.click(expand.closest('.group-head') as HTMLElement)
+    fireEvent.click(screen.getByTestId('skill-group-head-superpowers'))
     expect(onToggleGroup).toHaveBeenCalledTimes(2)
 
     fireEvent.click(screen.getByRole('link'))

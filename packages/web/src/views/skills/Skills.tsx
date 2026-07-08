@@ -13,6 +13,7 @@ import SkillDetailEditor from './SkillDetailEditor'
 import EditSourceModal from './EditSourceModal'
 import AddSkillModal from './AddSkillModal'
 import type { SkillDetail } from './types'
+import styles from './Skills.module.css'
 
 export default function Skills({ repoPath }: { repoPath: string }) {
   const { error, setError } = useViewError()
@@ -58,14 +59,14 @@ export default function Skills({ repoPath }: { repoPath: string }) {
 
   return (
     <div>
-      <div className="head">
+      <div className="page-head">
         <div>
           <div className="page-title">Skills</div>
           <div className="page-sub">
             {totalSkills} skills · {sourceCount} sources · {localCount} local
           </div>
         </div>
-        <div className="skills-head-actions">
+        <div className={styles['skills-head-actions']}>
           {groupKeys.length > 0 && (
             <Button variant="secondary" size="sm" onClick={toggleAllGroups}>
               {allCollapsed ? (
@@ -83,7 +84,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
           <Button
             variant="secondary"
             size="sm"
-            className="project-button"
+            className={styles['project-button']}
             onClick={() => void operations.project('skills')}
             disabled={operations.pending.project('skills')}
           >

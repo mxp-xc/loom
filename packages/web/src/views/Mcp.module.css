@@ -1,0 +1,134 @@
+/* MCP */
+.mlist {
+  border-right: 1px solid var(--border);
+  overflow: auto;
+  padding: 14px 0;
+}
+.mcp {
+  padding: 10px 16px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.mcp:hover {
+  background: var(--accent);
+}
+.mcp.sel {
+  background: linear-gradient(90deg, var(--accent), transparent);
+  border-left-color: var(--signal);
+}
+.mcp-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mcp .mid {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+.mcp.sel .mid {
+  color: var(--bright);
+}
+.mcp .mtype {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: var(--radius);
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--info);
+}
+.mcp .mtype.remote {
+  background: rgba(139, 92, 246, 0.14);
+  color: var(--oc);
+}
+.mcp .mcnt {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  margin-left: auto;
+}
+.mcp-bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+}
+.mcp-bottom .mcmd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  margin-right: auto;
+}
+.mcp-editor {
+  display: grid;
+  gap: 14px;
+  max-width: 680px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.mcp-field {
+  display: grid;
+  gap: 6px;
+}
+.mcp-record-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mcp-json {
+  min-height: 96px;
+  padding: 10px 12px;
+  resize: vertical;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font:
+    12px/1.6 'JetBrains Mono',
+    monospace;
+}
+.mcp-kv-list {
+  display: grid;
+  gap: 6px;
+}
+.mcp-kv-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 6px;
+}
+
+/* big toggle */
+.tg {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  transition: all var(--dur) var(--ease);
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+}
+.tg.on {
+  background: var(--c);
+  color: #fff;
+  border-color: var(--c);
+}
+.tg.off {
+  background: transparent;
+  color: var(--c);
+  border-color: color-mix(in srgb, var(--c) 45%, transparent);
+  opacity: 0.45;
+}
+.tg:hover {
+  transform: scale(1.05);
+  border-color: var(--c);
+}

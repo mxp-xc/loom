@@ -1,0 +1,271 @@
+.conflict-editor-shell {
+  margin-top: 18px;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+.conflict-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.conflict-editor-header strong {
+  font:
+    600 12px 'JetBrains Mono',
+    monospace;
+}
+
+.conflict-editor-file-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.conflict-editor-file-actions :global(.loom-button) {
+  height: 27px !important;
+  padding-inline: 9px !important;
+  font-size: 11px;
+}
+
+.conflict-editor-count {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.conflict-three-way {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  height: 390px;
+}
+
+.conflict-pane {
+  min-width: 0;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+.conflict-pane:last-child {
+  border-right: 0;
+}
+
+.conflict-pane.is-result {
+  background: color-mix(in srgb, var(--card) 65%, var(--bg));
+}
+
+.conflict-pane-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  padding: 0 11px;
+  color: var(--muted);
+  font:
+    10px 'JetBrains Mono',
+    monospace;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+}
+
+.conflict-pane-label span:last-child {
+  color: var(--warn);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.conflict-pane-editor {
+  height: 356px;
+}
+
+.conflict-editor-shell :global(.cm-line.merge-change) {
+  border-inline-start: 2px solid transparent;
+}
+
+.conflict-editor-shell :global(.cm-line.merge-change-stable) {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  border-inline-start-color: color-mix(in srgb, var(--primary) 72%, transparent);
+}
+
+.conflict-editor-shell :global(.cm-line.merge-change-conflict) {
+  background: color-mix(in srgb, var(--danger, #dc2626) 14%, transparent);
+  border-inline-start-color: color-mix(in srgb, var(--danger, #dc2626) 72%, transparent);
+}
+
+.conflict-editor-shell :global(.cm-line.merge-change-applied) {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border-inline-start-color: color-mix(in srgb, var(--primary) 72%, transparent);
+}
+
+.conflict-editor-shell :global(.cm-line.merge-change-ignored) {
+  color: color-mix(in srgb, var(--text) 55%, var(--muted));
+  background: color-mix(in srgb, var(--muted) 9%, transparent);
+  border-inline-start-color: color-mix(in srgb, var(--muted) 60%, transparent);
+}
+
+.conflict-editor-shell :global(.cm-activeLine:not(.merge-change)) {
+  background: transparent !important;
+}
+
+.conflict-editor-shell :global(.cm-activeLineGutter) {
+  background: transparent !important;
+}
+
+.conflict-editor-shell :global(.cm-lineNumbers) {
+  min-width: 42px;
+}
+
+.conflict-editor-shell :global(.cm-lineNumbers .cm-gutterElement) {
+  padding: 0 5px;
+}
+
+.conflict-editor-shell :global(.merge-action-gutter) {
+  min-width: 52px;
+}
+
+.conflict-editor-shell :global(.merge-action-gutter .cm-gutterElement) {
+  padding: 0 5px;
+}
+
+.conflict-editor-shell :global(.merge-line-number-action) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+}
+
+.conflict-editor-shell :global(.merge-block-actions) {
+  display: inline-flex;
+  gap: 1px;
+  padding: 1px;
+  vertical-align: middle;
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--danger, #dc2626) 55%, var(--border));
+  border-radius: 5px;
+}
+
+.conflict-editor-shell :global(.merge-block-action) {
+  width: 18px;
+  height: 18px;
+  color: var(--text);
+  font:
+    600 11px 'JetBrains Mono',
+    monospace;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+}
+
+.conflict-editor-shell :global(.merge-block-action:hover) {
+  background: var(--accent);
+}
+
+.conflict-editor-shell :global(.merge-block-action:disabled) {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.conflict-editor-shell :global(.merge-block-action:disabled:hover) {
+  background: transparent;
+}
+
+.conflict-editor-shell :global(.merge-block-action:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.conflict-editor-shell :global(.merge-block-actions.is-applied) {
+  border-color: var(--primary);
+  opacity: 0.72;
+}
+
+.conflict-editor-shell :global(.merge-block-actions.is-ignored) {
+  opacity: 0.38;
+}
+
+.conflict-editor-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.conflict-binary {
+  padding: 16px;
+}
+
+.conflict-binary p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.conflict-binary > div {
+  display: flex;
+  gap: 8px;
+}
+
+.conflict-mobile-tabs {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .conflict-editor-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .conflict-editor-file-actions {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .conflict-editor-count {
+    margin-left: auto;
+  }
+
+  .conflict-mobile-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .conflict-mobile-tabs button {
+    padding: 5px 9px;
+    color: var(--muted);
+    font:
+      10px 'JetBrains Mono',
+      monospace;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius);
+  }
+
+  .conflict-mobile-tabs button[data-active='true'] {
+    color: var(--text);
+    background: var(--accent);
+  }
+
+  .conflict-three-way {
+    display: block;
+    height: 390px;
+  }
+
+  .conflict-pane {
+    display: none;
+    height: 390px;
+    border-right: 0;
+  }
+
+  .conflict-pane[data-mobile-active='true'] {
+    display: block;
+  }
+}

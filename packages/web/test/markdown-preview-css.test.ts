@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
-const cssPath = new URL('../src/index.css', import.meta.url)
+const cssPath = new URL('../src/styles/shared/markdown-preview.css', import.meta.url)
 
 async function readIndexCss(): Promise<string> {
   return await readFile(cssPath, 'utf8')

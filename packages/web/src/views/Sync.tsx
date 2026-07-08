@@ -6,6 +6,7 @@ import { IconButton } from '@/components/ui/IconButton'
 import Modal from '@/components/Modal'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
+import styles from './Sync.module.css'
 
 const ConflictEditor = lazy(() => import('./sync/ConflictEditor'))
 
@@ -191,7 +192,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
 
   return (
     <div>
-      <div className="head">
+      <div className="page-head">
         <div className="page-title">Sync</div>
       </div>
 
@@ -211,7 +212,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
           </p>
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
             <input
-              className="mock-input"
+              className={styles['mock-input']}
               style={{ flex: 1 }}
               value={remoteInput}
               onChange={(event) => setRemoteInput(event.target.value)}
@@ -238,15 +239,15 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         </div>
       )}
 
-      <div className="syncbar" style={{ marginTop: 12 }}>
-        <span className="msg">
+      <div className={styles.syncbar} style={{ marginTop: 12 }}>
+        <span className={styles.msg}>
           {conflicts.length
             ? `Git 检测到 ${totalConflictCount} 个冲突文件，当前显示第 ${currentConflictNumber}/${totalConflictCount} 个，保存后继续下一个`
             : pull?.clean
               ? '合并成功，无冲突'
               : '点击拉取并按 Git 规则合并远程变更'}
         </span>
-        <span className="acts">
+        <span className={styles.acts}>
           <IconButton
             label="拉取"
             tooltip={busy === 'pull' ? '拉取中…' : '拉取'}

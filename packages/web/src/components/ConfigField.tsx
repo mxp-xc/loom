@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import { AGENTS, agentShort } from '@/lib/agents'
+import { AGENTS, agentColor, agentShort } from '@/lib/agents'
 import { IconButton } from '@/components/ui/IconButton'
 import { Check, Eraser, X } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import styles from './ConfigField.module.css'
 
 export type ConfigLevel = 'effective' | 'repo' | 'local'
 
@@ -175,8 +177,6 @@ export function ConfigField({
   const canEdit = !isDisabled
   const editing = draft !== undefined
   const editValue = draft ?? ''
-  const ctrlDisabledCls = isDisabled ? ' cfg-ctrl-disabled' : ''
-  const inheritedCls = isInherited ? ' cfg-ctrl-inherited' : ''
 
   const save = async (v: unknown) => {
     if (level === 'effective') return
@@ -232,29 +232,35 @@ export function ConfigField({
   }
 
   return (
-    <div className="cfg-field">
-      <div className="cfg-field-row">
-        <span className={'sdot2 ' + ds} title={dotTitle(ds)} onClick={dotClick} />
-        <span className="cfg-field-label">
+    <div className={styles['cfg-field']} data-level={level}>
+      <div className={styles['cfg-field-row']}>
+        <span className={cn(styles.sdot2, styles[ds])} title={dotTitle(ds)} onClick={dotClick} />
+        <span className={styles['cfg-field-label']}>
           {field.label}
           {help && (
-            <span className="help-ico">
-              ?<span className="help-tip">{help}</span>
+            <span className={styles['help-ico']}>
+              ?<span className={styles['help-tip']}>{help}</span>
             </span>
           )}
         </span>
-        <div className={'cfg-field-ctrl' + ctrlDisabledCls}>
+        <div className={cn(styles['cfg-field-ctrl'], isDisabled && styles['cfg-ctrl-disabled'])}>
           {field.control === 'select' && (
-            <div className={'cfg-select' + ctrlDisabledCls + inheritedCls}>
-              {(value as string) || '— 未设置'} <span className="caret">▼</span>
+            <div
+              className={cn(
+                styles['cfg-select'],
+                isDisabled && styles['cfg-ctrl-disabled'],
+                isInherited && styles['cfg-ctrl-inherited'],
+              )}
+            >
+              {(value as string) || '— 未设置'} <span className={styles.caret}>▼</span>
             </div>
           )}
           {field.control === 'segmented' && (
-            <div className={'cfg-seg' + ctrlDisabledCls}>
+            <div className={cn(styles['cfg-seg'], isDisabled && styles['cfg-ctrl-disabled'])}>
               {(field.options ?? []).map((opt) => (
                 <div
                   key={opt}
-                  className={'cfg-seg-opt' + (value === opt ? ' on' : '')}
+                  className={cn(styles['cfg-seg-opt'], value === opt && styles.on)}
                   onClick={() => onControlClick(opt)}
                 >
                   {opt}
@@ -264,21 +270,25 @@ export function ConfigField({
           )}
           {field.control === 'toggle' && (
             <div
-              className={'cfg-toggle' + (value === true ? ' on' : '') + ctrlDisabledCls}
+              className={cn(
+                styles['cfg-toggle'],
+                value === true && styles.on,
+                isDisabled && styles['cfg-ctrl-disabled'],
+              )}
               onClick={() => onControlClick(!value)}
             />
           )}
           {field.control === 'chips' && (
-            <div className={'cfg-chips' + ctrlDisabledCls}>
+            <div className={cn('target-chips', isDisabled && styles['cfg-ctrl-disabled'])}>
               {AGENTS.map((agent) => {
                 const on = Array.isArray(value) && (value as string[]).includes(agent)
-                const da = agent === 'claude-code' ? 'cc' : agent === 'codex' ? 'cx' : 'oc'
                 return (
                   <button
                     type="button"
                     key={agent}
-                    className={'achip ' + (on ? 'on' : 'off')}
-                    data-a={da}
+                    className="target-chip"
+                    style={{ ['--c' as string]: agentColor[agent] }}
+                    data-state={on ? 'on' : 'off'}
                     aria-pressed={on}
                     disabled={isDisabled || saving}
                     onClick={() => toggleChip(agent)}
@@ -293,12 +303,12 @@ export function ConfigField({
             (editing ? (
               <>
                 <input
-                  className="cfg-input with-unit"
+                  className={cn(styles['cfg-input'], styles['with-unit'])}
                   value={editValue}
                   onChange={(e) => onDraftChange(field.key, e.target.value)}
                   autoFocus
                 />
-                <span className="cfg-unit">{field.unit}</span>
+                <span className={styles['cfg-unit']}>{field.unit}</span>
                 <IconButton
                   label={`保存 ${field.label}`}
                   tooltip={saving ? '保存中…' : '保存'}
@@ -323,13 +333,17 @@ export function ConfigField({
             ) : (
               <>
                 <span
-                  className={'cfg-input with-unit' + inheritedCls}
+                  className={cn(
+                    styles['cfg-input'],
+                    styles['with-unit'],
+                    isInherited && styles['cfg-ctrl-inherited'],
+                  )}
                   style={{ border: 'none', cursor: canEdit ? 'pointer' : 'default' }}
                   onClick={canEdit ? startEdit : undefined}
                 >
                   {value != null ? String(value) : '—'}
                 </span>
-                <span className="cfg-unit">{field.unit}</span>
+                <span className={styles['cfg-unit']}>{field.unit}</span>
                 {canEdit && value != null && (
                   <IconButton
                     label={`清空 ${field.label}`}
@@ -347,7 +361,7 @@ export function ConfigField({
             (editing ? (
               <>
                 <input
-                  className="cfg-input"
+                  className={styles['cfg-input']}
                   value={editValue}
                   onChange={(e) => onDraftChange(field.key, e.target.value)}
                   autoFocus
@@ -376,7 +390,7 @@ export function ConfigField({
             ) : (
               <>
                 <span
-                  className={'cfg-input' + inheritedCls}
+                  className={cn(styles['cfg-input'], isInherited && styles['cfg-ctrl-inherited'])}
                   style={{
                     border: 'none',
                     cursor: canEdit ? 'pointer' : 'default',

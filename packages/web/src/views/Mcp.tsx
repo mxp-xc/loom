@@ -14,6 +14,8 @@ import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
 import { agentColor, agentShort, type AgentId } from '@/lib/agents'
 import { inputStyle } from '@/lib/styles'
+import { cn } from '@/lib/utils'
+import styles from './Mcp.module.css'
 
 const MCP_TYPES: McpType[] = ['stdio', 'sse', 'http']
 
@@ -211,8 +213,8 @@ function RecordField({
     mode === 'file' ? `切换 ${name} 为 key value 编辑` : `切换 ${name} 为 env file 编辑`
 
   return (
-    <div className="mcp-field" style={fieldStyle(marginBottom)}>
-      <div className="mcp-record-head">
+    <div className={styles['mcp-field']} style={fieldStyle(marginBottom)}>
+      <div className={styles['mcp-record-head']}>
         <span className="label">{name}</span>
         <Button
           type="button"
@@ -228,15 +230,15 @@ function RecordField({
       {mode === 'file' ? (
         <textarea
           aria-label={`${name} file`}
-          className="mcp-json"
+          className={styles['mcp-json']}
           value={value}
           onChange={(event) => onTextChange(event.target.value)}
           placeholder={name === 'env' ? 'KEY=value' : 'Header-Name=value'}
         />
       ) : (
-        <div className="mcp-kv-list">
+        <div className={styles['mcp-kv-list']}>
           {rows.map((row, index) => (
-            <div className="mcp-kv-row" key={row.id}>
+            <div className={styles['mcp-kv-row']} key={row.id}>
               <input
                 aria-label={`${name} key ${index + 1}`}
                 value={row.key}
@@ -349,7 +351,7 @@ function McpServerModal({
         </div>
       )}
 
-      <label className="mcp-field" style={fieldStyle()}>
+      <label className={styles['mcp-field']} style={fieldStyle()}>
         <span className="label">id</span>
         <input
           data-autofocus
@@ -361,7 +363,7 @@ function McpServerModal({
         />
       </label>
 
-      <div className="mcp-field" style={fieldStyle()}>
+      <div className={styles['mcp-field']} style={fieldStyle()}>
         <span className="label">type</span>
         <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
           {MCP_TYPES.map((type) => (
@@ -389,7 +391,7 @@ function McpServerModal({
 
       {form.type === 'stdio' ? (
         <>
-          <label className="mcp-field" style={fieldStyle()}>
+          <label className={styles['mcp-field']} style={fieldStyle()}>
             <span className="label">command</span>
             <input
               value={form.command}
@@ -398,7 +400,7 @@ function McpServerModal({
               style={inputStyle}
             />
           </label>
-          <label className="mcp-field" style={fieldStyle(18)}>
+          <label className={styles['mcp-field']} style={fieldStyle(18)}>
             <span className="label">args（空格分隔）</span>
             <input
               value={form.args}
@@ -409,7 +411,7 @@ function McpServerModal({
           </label>
         </>
       ) : (
-        <label className="mcp-field" style={fieldStyle(18)}>
+        <label className={styles['mcp-field']} style={fieldStyle(18)}>
           <span className="label">url</span>
           <input
             value={form.url}
@@ -493,7 +495,7 @@ function McpTargetsBar({
       >
         批量设置 · 应用于全部 MCP servers
       </span>
-      <span className="cfg-chips" style={{ display: 'flex', gap: 7 }}>
+      <span className="target-chips" style={{ display: 'flex', gap: 7 }}>
         {agents.map((agent) => {
           const count = servers.filter((server) => (server.targets ?? []).includes(agent)).length
           const state = count === 0 ? 'off' : count === servers.length ? 'on' : 'mixed'
@@ -509,8 +511,9 @@ function McpTargetsBar({
             <button
               key={agent}
               type="button"
-              className={`achip ${state}`}
+              className="target-chip"
               style={{ '--c': agentColor[agent] } as CSSProperties}
+              data-state={state}
               aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
               aria-label={`${agentShort[agent]}：${stateText}`}
               data-tooltip={`${agentShort[agent]}：${tooltip}`}
@@ -519,7 +522,7 @@ function McpTargetsBar({
             >
               {agentShort[agent]}
               {state === 'mixed' && (
-                <span className="achip-count">
+                <span className="target-chip-count">
                   {count}/{servers.length}
                 </span>
               )}
@@ -634,7 +637,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
 
   return (
     <div>
-      <div className="head">
+      <div className="page-head">
         <div>
           <div className="page-title">MCP Servers</div>
           <div className="page-sub">{servers.length} servers</div>
@@ -705,26 +708,26 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           background: 'var(--card)',
         }}
       >
-        <div className="mlist" style={{ borderRight: '1px solid var(--border)' }}>
+        <div className={styles.mlist} style={{ borderRight: '1px solid var(--border)' }}>
           {servers.map((server) => {
             const serverAgents = server.targets ?? []
             const isRemote = server.type === 'sse' || server.type === 'http'
             return (
               <div
                 key={server.id}
-                className={'mcp' + (selected === server.id ? ' sel' : '')}
+                className={cn(styles.mcp, selected === server.id && styles.sel)}
                 onClick={() => setSelected(server.id)}
               >
-                <div className="mcp-top">
-                  <span className="mid">{server.id}</span>
-                  <span className={'mtype' + (isRemote ? ' remote' : '')}>{server.type}</span>
-                  <span className="mcnt">
+                <div className={styles['mcp-top']}>
+                  <span className={styles.mid}>{server.id}</span>
+                  <span className={cn(styles.mtype, isRemote && styles.remote)}>{server.type}</span>
+                  <span className={styles.mcnt}>
                     {serverAgents.filter((agent) => visibleAgents.includes(agent)).length}/
                     {visibleAgents.length}
                   </span>
                 </div>
-                <div className="mcp-bottom">
-                  <span className="mcmd">
+                <div className={styles['mcp-bottom']}>
+                  <span className={styles.mcmd}>
                     {server.type === 'stdio'
                       ? `${server.command} ${server.args?.join(' ') ?? ''}`
                       : server.url}
@@ -733,7 +736,10 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                     <button
                       type="button"
                       key={agent}
-                      className={'tg ' + (serverAgents.includes(agent) ? 'on' : 'off')}
+                      className={cn(
+                        styles.tg,
+                        serverAgents.includes(agent) ? styles.on : styles.off,
+                      )}
                       style={
                         {
                           '--c': agentColor[agent],
@@ -763,7 +769,9 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                 <span className="page-title" style={{ fontSize: 16 }}>
                   {selectedServer.id}
                 </span>
-                <span className={'mtype' + (selectedServer.type !== 'stdio' ? ' remote' : '')}>
+                <span
+                  className={cn(styles.mtype, selectedServer.type !== 'stdio' && styles.remote)}
+                >
                   {selectedServer.type}
                 </span>
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>

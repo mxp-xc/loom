@@ -10,6 +10,7 @@ import type {
   VarsResolution,
 } from '../../lib/vars'
 import StringValueEditor from './StringValueEditor'
+import styles from './Vars.module.css'
 
 const JsonValueEditor = lazy(() => import('./JsonValueEditor'))
 
@@ -331,7 +332,7 @@ export default function VariableEditor({
           </p>
         )}
       </div>
-      <section className="vars-preview" aria-label="解析预览">
+      <section className={styles['vars-preview']} aria-label="解析预览">
         <span>解析预览</span>
         <pre>{preview || '—'}</pre>
       </section>

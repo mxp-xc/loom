@@ -3,7 +3,9 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ApiError, api } from '@/lib/api'
 import { agentShort, agentColor, type AgentId } from '@/lib/agents'
+import { cn } from '@/lib/utils'
 import type { VarsDiagnostic } from '@/lib/vars'
+import styles from './MemoryEditor.module.css'
 
 type View = 'edit' | 'preview' | 'resolved'
 
@@ -22,7 +24,7 @@ function highlight(text: string): string {
   const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   return esc.replace(
     /\\\$\{[^}]*\}|\$\{[A-Za-z_][A-Za-z0-9_.-]*\}/g,
-    (m) => `<span class="${m[0] === '\\' ? 'ph-esc' : 'ph-var'}">${m}</span>`,
+    (m) => `<span class="${m[0] === '\\' ? styles['ph-esc'] : styles['ph-var']}">${m}</span>`,
   )
 }
 
@@ -104,33 +106,31 @@ export default function MemoryEditor({ repo, name, content, onSave, targets }: P
   const tab = (v: View, label: string) => (
     <button
       type="button"
-      className={'cfg-seg-opt' + (view === v ? ' on' : '')}
+      className={cn(styles['cfg-seg-opt'], view === v && styles.on)}
       onClick={() => setView(v)}
     >
       {label}
     </button>
   )
 
-  const agentKey = (a: AgentId) => (a === 'claude-code' ? 'cc' : a === 'codex' ? 'cx' : 'oc')
-
   return (
     <div>
-      <div className="mem-toolbar">
-        <div className="cfg-seg">
+      <div className={styles['mem-toolbar']}>
+        <div className={styles['cfg-seg']}>
           {tab('edit', '编辑')}
           {tab('preview', '预览')}
           {tab('resolved', '解析预览')}
         </div>
         {view === 'resolved' && (
-          <div className="mem-preview-targets">
+          <div className={styles['mem-preview-targets']}>
             <span className="label">预览为</span>
-            <div className="cfg-chips">
+            <div className="target-chips">
               {targets.map((a) => (
                 <button
                   key={a}
                   type="button"
-                  className={'achip' + (agent === a ? ' on' : ' off')}
-                  data-a={agentKey(a)}
+                  className="target-chip"
+                  data-state={agent === a ? 'on' : 'off'}
                   style={{ ['--c' as string]: agentColor[a] }}
                   onClick={() => setAgent(a)}
                 >
@@ -141,23 +141,28 @@ export default function MemoryEditor({ repo, name, content, onSave, targets }: P
           </div>
         )}
         {view === 'edit' && dirty && (
-          <button type="button" className="mem-save" onClick={handleSave} disabled={saving}>
+          <button
+            type="button"
+            className={styles['mem-save']}
+            onClick={handleSave}
+            disabled={saving}
+          >
             {saving ? '保存中…' : '保存'}
           </button>
         )}
       </div>
 
       {view === 'edit' && (
-        <div className="mem-edit-wrap">
+        <div className={styles['mem-edit-wrap']}>
           <pre
             ref={overlayRef}
             aria-hidden
-            className="mem-overlay"
+            className={styles['mem-overlay']}
             dangerouslySetInnerHTML={{ __html: highlight(edit) + '\n' }}
           />
           <textarea
             ref={taRef}
-            className="mem-textarea"
+            className={styles['mem-textarea']}
             value={edit}
             onChange={(e) => {
               setEdit(e.target.value)
@@ -170,16 +175,16 @@ export default function MemoryEditor({ repo, name, content, onSave, targets }: P
       )}
 
       {view === 'preview' && (
-        <div className="md-preview mem-pane">
+        <div className={cn('md-preview', styles['mem-pane'])}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{edit}</ReactMarkdown>
         </div>
       )}
 
       {view === 'resolved' && (
-        <div className="mem-pane">
-          {resolveErr && <div className="mem-err">{resolveErr}</div>}
+        <div className={styles['mem-pane']}>
+          {resolveErr && <div className={styles['mem-err']}>{resolveErr}</div>}
           {diagnostics.length > 0 && (
-            <div className="mem-err" role="alert" aria-label="解析诊断">
+            <div className={styles['mem-err']} role="alert" aria-label="解析诊断">
               <ul>
                 {diagnostics.map((diagnostic, index) => (
                   <li key={index}>{diagnosticText(diagnostic)}</li>

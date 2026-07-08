@@ -50,7 +50,7 @@ export default function GlobalTargetsBar({ manifest, operations }: Props) {
       >
         批量设置 · 应用于全部 skills
       </span>
-      <span className="cfg-chips" style={{ display: 'flex', gap: 7 }}>
+      <span className="target-chips" style={{ display: 'flex', gap: 7 }}>
         {agents.map((agent) => {
           const count = skills.filter((item) =>
             (item.kind === 'source' ? item.member.targets : item.skill.targets)?.includes(agent),
@@ -62,8 +62,9 @@ export default function GlobalTargetsBar({ manifest, operations }: Props) {
             <button
               key={agent}
               type="button"
-              className={`achip ${state}`}
+              className="target-chip"
               style={{ ['--c' as string]: agentColor[agent] }}
+              data-state={state}
               aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
               aria-label={`${agentShort[agent]}：${state === 'on' ? '全部已选择' : state === 'mixed' ? '部分已选择' : '全部未选择'}`}
               data-tooltip={`${agentShort[agent]}：${tooltip}`}
@@ -72,7 +73,7 @@ export default function GlobalTargetsBar({ manifest, operations }: Props) {
             >
               {agentShort[agent]}
               {state === 'mixed' && (
-                <span className="achip-count">
+                <span className="target-chip-count">
                   {count}/{skills.length}
                 </span>
               )}

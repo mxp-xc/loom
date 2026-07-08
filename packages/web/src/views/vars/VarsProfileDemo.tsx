@@ -14,7 +14,8 @@ import {
 import { Button } from '../../components/ui/button'
 import { IconButton } from '../../components/ui/IconButton'
 import { AGENTS, agentColor, agentShort, type AgentId } from '../../lib/agents'
-import './vars-profile-demo.css'
+import { cn } from '@/lib/utils'
+import styles from './VarsProfileDemo.module.css'
 
 type ProfileKind = 'builtin' | 'base' | 'local' | 'custom'
 type Profile = {
@@ -236,11 +237,13 @@ function AgentChips({
   label?: string
 }) {
   return (
-    <div className="cfg-chips vars-lab-agent-chips" aria-label={label}>
+    <div className={cn('target-chips', styles['vars-lab-agent-chips'])} aria-label={label}>
       {includeDefault && (
         <button
           type="button"
-          className={'achip' + (activeAgent === 'default' ? ' on' : ' off')}
+          className="target-chip"
+          data-agent="default"
+          data-state={activeAgent === 'default' ? 'on' : 'off'}
           data-a="df"
           style={{ ['--c' as string]: 'var(--primary)' }}
           onClick={() => onChange('default')}
@@ -252,7 +255,8 @@ function AgentChips({
         <button
           key={agent}
           type="button"
-          className={'achip' + (activeAgent === agent ? ' on' : ' off')}
+          className="target-chip"
+          data-state={activeAgent === agent ? 'on' : 'off'}
           data-a={shortAgentId(agent)}
           style={{ ['--c' as string]: agentColor[agent] }}
           onClick={() => onChange(agent)}
@@ -268,15 +272,15 @@ function EntrySlots({ slots }: { slots: Slot[] }) {
   const configuredAgentSlots = AGENTS.filter((agent) => slots.includes(agent))
 
   return (
-    <div className="vars-lab-slots" aria-label="已配置槽位">
+    <div className={styles['vars-lab-slots']} aria-label="已配置槽位">
       {configuredAgentSlots.length ? (
         configuredAgentSlots.map((slot) => (
-          <span className="vars-lab-slot on" key={slot}>
+          <span className={cn(styles['vars-lab-slot'], styles['on'])} key={slot}>
             {slotLabel(slot)}
           </span>
         ))
       ) : (
-        <span className="vars-lab-slot-empty">—</span>
+        <span className={styles['vars-lab-slot-empty']}>—</span>
       )}
     </div>
   )
@@ -284,8 +288,8 @@ function EntrySlots({ slots }: { slots: Slot[] }) {
 
 function KeyCell({ entry }: { entry: { key: string; type: string; format?: string } }) {
   return (
-    <span className="vars-lab-key-cell">
-      <span className="vars-lab-key">{entry.key}</span>
+    <span className={styles['vars-lab-key-cell']}>
+      <span className={styles['vars-lab-key']}>{entry.key}</span>
       <TypeBadges type={entry.type} format={entry.format} />
     </span>
   )
@@ -299,16 +303,23 @@ function BaseKeyPicker({
   onChange: (key: string) => void
 }) {
   return (
-    <div className="vars-lab-key-picker" role="listbox" aria-label="从 Base registry 选择 key">
-      <label className="vars-lab-key-filter">
+    <div
+      className={styles['vars-lab-key-picker']}
+      role="listbox"
+      aria-label="从 Base registry 选择 key"
+    >
+      <label className={styles['vars-lab-key-filter']}>
         <Search size={13} />
         <input placeholder="搜索 key / format" />
       </label>
-      <div className="vars-lab-key-options">
+      <div className={styles['vars-lab-key-options']}>
         {baseKeyOptions.map((option) => (
           <button
             type="button"
-            className={'vars-lab-key-option' + (option.key === selectedKey ? ' on' : '')}
+            className={cn(
+              styles['vars-lab-key-option'],
+              option.key === selectedKey && styles['on'],
+            )}
             key={option.key}
             role="option"
             aria-selected={option.key === selectedKey}
@@ -328,9 +339,9 @@ function BaseKeyPicker({
 
 function TypeBadges({ type, format }: { type: string; format?: string }) {
   return (
-    <span className="vars-lab-type-stack">
-      <span className="vars-lab-type-main">{type}</span>
-      {format && <span className="vars-lab-format">{format}</span>}
+    <span className={styles['vars-lab-type-stack']}>
+      <span className={styles['vars-lab-type-main']}>{type}</span>
+      {format && <span className={styles['vars-lab-format']}>{format}</span>}
     </span>
   )
 }
@@ -338,13 +349,13 @@ function TypeBadges({ type, format }: { type: string; format?: string }) {
 function ProfileActions({ profile }: { profile: Profile }) {
   if (profile.locked) {
     return (
-      <span className="vars-lab-profile-lock" aria-label="锁定">
+      <span className={styles['vars-lab-profile-lock']} aria-label="锁定">
         <Lock size={13} />
       </span>
     )
   }
   return (
-    <div className="vars-lab-profile-actions">
+    <div className={styles['vars-lab-profile-actions']}>
       <IconButton label={'重命名 ' + profile.name} tooltip="重命名 profile">
         <Pencil size={14} />
       </IconButton>
@@ -378,14 +389,14 @@ function VarsProfileDemo() {
   }, [activeProfile.kind, entries, showAvailable])
 
   return (
-    <div className="vars-lab-page">
-      <header className="vars-lab-topbar">
+    <div className={styles['vars-lab-page']}>
+      <header className={styles['vars-lab-topbar']}>
         <div>
-          <div className="vars-lab-eyebrow">vars ui lab</div>
+          <div className={styles['vars-lab-eyebrow']}>vars ui lab</div>
           <h1>按 Profile 管理 Variables</h1>
           <p>静态演示页。用于讨论 UI,不会读取或写入真实 vars 文件。</p>
         </div>
-        <div className="vars-lab-tabs" role="tablist" aria-label="Vars 视图">
+        <div className={styles['vars-lab-tabs']} role="tablist" aria-label="Vars 视图">
           <Button
             type="button"
             variant={view === 'definitions' ? 'primary' : 'secondary'}
@@ -405,22 +416,25 @@ function VarsProfileDemo() {
         </div>
       </header>
 
-      <div className="vars-lab-shell">
-        <aside className="vars-lab-profiles" aria-label="Profiles">
-          <div className="vars-lab-pane-head">
+      <div className={styles['vars-lab-shell']}>
+        <aside className={styles['vars-lab-profiles']} aria-label="Profiles">
+          <div className={styles['vars-lab-pane-head']}>
             <div>
-              <div className="vars-lab-eyebrow">profiles</div>
+              <div className={styles['vars-lab-eyebrow']}>profiles</div>
               <h2>配置范围</h2>
             </div>
             <IconButton label="新建 profile" tooltip="新建 profile" tone="success">
               <Plus size={15} />
             </IconButton>
           </div>
-          <div className="vars-lab-profile-list">
+          <div className={styles['vars-lab-profile-list']}>
             {profiles.map((profile) => (
               <button
                 type="button"
-                className={'vars-lab-profile' + (profile.id === activeProfile.id ? ' on' : '')}
+                className={cn(
+                  styles['vars-lab-profile'],
+                  profile.id === activeProfile.id && styles['on'],
+                )}
                 key={profile.id}
                 onClick={() => setActiveProfileId(profile.id)}
               >
@@ -428,16 +442,18 @@ function VarsProfileDemo() {
                   <strong>{profile.name}</strong>
                   <small>{profile.description}</small>
                 </span>
-                <span className="vars-lab-profile-meta">
-                  <span className="vars-lab-count">{profile.configuredCount}</span>
-                  <span className={'vars-lab-kind ' + profile.kind}>{profileBadge(profile)}</span>
+                <span className={styles['vars-lab-profile-meta']}>
+                  <span className={styles['vars-lab-count']}>{profile.configuredCount}</span>
+                  <span className={cn(styles['vars-lab-kind'], styles[profile.kind])}>
+                    {profileBadge(profile)}
+                  </span>
                 </span>
               </button>
             ))}
           </div>
-          <section className="vars-lab-profile-card">
-            <div className="vars-lab-eyebrow">profile 操作</div>
-            <div className="vars-lab-profile-card-row">
+          <section className={styles['vars-lab-profile-card']}>
+            <div className={styles['vars-lab-eyebrow']}>profile 操作</div>
+            <div className={styles['vars-lab-profile-card-row']}>
               <strong>{activeProfile.name}</strong>
               <ProfileActions profile={activeProfile} />
             </div>
@@ -450,10 +466,10 @@ function VarsProfileDemo() {
         </aside>
 
         {view === 'definitions' ? (
-          <main className="vars-lab-main" aria-label="Profile definitions demo">
-            <section className="vars-lab-section-head">
+          <main className={styles['vars-lab-main']} aria-label="Profile definitions demo">
+            <section className={styles['vars-lab-section-head']}>
               <div>
-                <div className="vars-lab-eyebrow">当前 profile</div>
+                <div className={styles['vars-lab-eyebrow']}>当前 profile</div>
                 <h2>{activeProfile.name}</h2>
                 <p>
                   {activeProfile.kind === 'base'
@@ -465,8 +481,8 @@ function VarsProfileDemo() {
               </div>
             </section>
 
-            <div className="vars-lab-toolbar">
-              <label className="vars-lab-search">
+            <div className={styles['vars-lab-toolbar']}>
+              <label className={styles['vars-lab-search']}>
                 <Search size={14} />
                 <input placeholder="搜索当前列表" />
               </label>
@@ -489,8 +505,11 @@ function VarsProfileDemo() {
               )}
             </div>
 
-            <section className="vars-lab-table" aria-label={activeProfile.name + ' 变量列表'}>
-              <div className="vars-lab-table-row head">
+            <section
+              className={styles['vars-lab-table']}
+              aria-label={activeProfile.name + ' 变量列表'}
+            >
+              <div className={cn(styles['vars-lab-table-row'], styles['head'])}>
                 <span>key</span>
                 <span>当前值</span>
                 <span>Agent 专属</span>
@@ -498,17 +517,18 @@ function VarsProfileDemo() {
               </div>
               {visibleEntries.map((entry) => (
                 <div
-                  className={
-                    'vars-lab-table-row' + (entry.state === 'available' ? ' available' : '')
-                  }
+                  className={cn(
+                    styles['vars-lab-table-row'],
+                    entry.state === 'available' && styles['available'],
+                  )}
                   key={entry.key + entry.state}
                 >
                   <KeyCell entry={entry} />
-                  <span className="vars-lab-value">
+                  <span className={styles['vars-lab-value']}>
                     {entry.state === 'available' ? '未配置' : entry.value}
                   </span>
                   <EntrySlots slots={entry.slots} />
-                  <span className="vars-lab-row-actions">
+                  <span className={styles['vars-lab-row-actions']}>
                     {entry.state === 'readonly' ? (
                       <IconButton label={'查看 ' + entry.key} tooltip="查看详情">
                         <Braces size={14} />
@@ -547,7 +567,7 @@ function VarsProfileDemo() {
                 </div>
               ))}
               {!visibleEntries.length && (
-                <div className="vars-lab-empty">
+                <div className={styles['vars-lab-empty']}>
                   <strong>{activeProfile.name} 还没有配置变量</strong>
                   <span>使用“新建配置”从 Base registry 选择一个 key。</span>
                 </div>
@@ -555,14 +575,14 @@ function VarsProfileDemo() {
             </section>
           </main>
         ) : (
-          <main className="vars-lab-main" aria-label="Resolved vars demo">
-            <section className="vars-lab-section-head">
+          <main className={styles['vars-lab-main']} aria-label="Resolved vars demo">
+            <section className={styles['vars-lab-section-head']}>
               <div>
-                <div className="vars-lab-eyebrow">最终结果</div>
+                <div className={styles['vars-lab-eyebrow']}>最终结果</div>
                 <h2>当前 agent 的最终变量</h2>
                 <p>只读预览。编辑时跳回对应 profile。</p>
               </div>
-              <div className="vars-lab-agent-switch">
+              <div className={styles['vars-lab-agent-switch']}>
                 <span>查看 agent</span>
                 <AgentChips
                   activeAgent={activeAgent}
@@ -571,19 +591,22 @@ function VarsProfileDemo() {
                 />
               </div>
             </section>
-            <section className="vars-lab-table resolved" aria-label="解析结果">
-              <div className="vars-lab-table-row head">
+            <section
+              className={cn(styles['vars-lab-table'], styles['resolved'])}
+              aria-label="解析结果"
+            >
+              <div className={cn(styles['vars-lab-table-row'], styles['head'])}>
                 <span>key</span>
                 <span>最终值</span>
                 <span>来源</span>
                 <span>操作</span>
               </div>
               {resolvedEntries.map((entry) => (
-                <div className="vars-lab-table-row" key={entry.key}>
+                <div className={styles['vars-lab-table-row']} key={entry.key}>
                   <KeyCell entry={entry} />
-                  <span className="vars-lab-value">{entry.value}</span>
-                  <span className="vars-lab-source">{entry.source}</span>
-                  <span className="vars-lab-row-actions">
+                  <span className={styles['vars-lab-value']}>{entry.value}</span>
+                  <span className={styles['vars-lab-source']}>{entry.source}</span>
+                  <span className={styles['vars-lab-row-actions']}>
                     <IconButton
                       label={'查看 ' + entry.key + ' trace'}
                       tooltip="查看 trace"
@@ -603,24 +626,26 @@ function VarsProfileDemo() {
       </div>
 
       {modal && (
-        <div className="vars-lab-modal-backdrop" role="presentation">
+        <div className={styles['vars-lab-modal-backdrop']} role="presentation">
           <section
-            className="vars-lab-modal"
+            className={styles['vars-lab-modal']}
             role="dialog"
             aria-modal="true"
             aria-label={modal === 'edit' ? '编辑变量' : '新建配置'}
           >
-            <header className="vars-lab-modal-head">
+            <header className={styles['vars-lab-modal-head']}>
               <div>
-                <div className="vars-lab-eyebrow">{modal === 'edit' ? '编辑配置' : '新建配置'}</div>
+                <div className={styles['vars-lab-eyebrow']}>
+                  {modal === 'edit' ? '编辑配置' : '新建配置'}
+                </div>
                 <h2>
                   {modal === 'edit'
                     ? 'agent_name · ' + activeProfile.name
                     : '新建 ' + activeProfile.name + ' 配置'}
                 </h2>
               </div>
-              <div className="vars-lab-modal-head-actions">
-                <div className="vars-lab-agent-switch">
+              <div className={styles['vars-lab-modal-head-actions']}>
+                <div className={styles['vars-lab-agent-switch']}>
                   <span>配置槽位</span>
                   <AgentChips
                     activeAgent={modalSlot}
@@ -634,22 +659,25 @@ function VarsProfileDemo() {
                 </IconButton>
               </div>
             </header>
-            <div className="vars-lab-modal-body">
+            <div className={styles['vars-lab-modal-body']}>
               <div
-                className={'vars-lab-editor-column' + (modal === 'add' ? ' has-target-key' : '')}
+                className={cn(
+                  styles['vars-lab-editor-column'],
+                  modal === 'add' && styles['has-target-key'],
+                )}
               >
                 {modal === 'add' && (
-                  <section className="vars-lab-card">
-                    <div className="vars-lab-eyebrow">目标 key</div>
-                    <div className="vars-lab-field">
+                  <section className={styles['vars-lab-card']}>
+                    <div className={styles['vars-lab-eyebrow']}>目标 key</div>
+                    <div className={styles['vars-lab-field']}>
                       <span>从 Base registry 选择</span>
                       <BaseKeyPicker selectedKey={selectedBaseKey} onChange={setSelectedBaseKey} />
                     </div>
                   </section>
                 )}
-                <section className="vars-lab-card vars-lab-editor-card">
-                  <div className="vars-lab-eyebrow">配置值</div>
-                  <div className="vars-lab-editor-tabs">
+                <section className={cn(styles['vars-lab-card'], styles['vars-lab-editor-card'])}>
+                  <div className={styles['vars-lab-eyebrow']}>配置值</div>
+                  <div className={styles['vars-lab-editor-tabs']}>
                     <Button
                       type="button"
                       size="xs"
@@ -676,7 +704,9 @@ function VarsProfileDemo() {
                     </Button>
                   </div>
                   {previewMode === 'edit' ? (
-                    <label className="vars-lab-field vars-lab-editor-field">
+                    <label
+                      className={cn(styles['vars-lab-field'], styles['vars-lab-editor-field'])}
+                    >
                       <span>
                         {modalSlot === 'default'
                           ? activeProfile.name + ' · default'
@@ -693,13 +723,13 @@ function VarsProfileDemo() {
                       />
                     </label>
                   ) : previewMode === 'raw' ? (
-                    <pre className="vars-lab-preview vars-lab-preview-raw">
+                    <pre className={cn(styles['vars-lab-preview'], styles['vars-lab-preview-raw'])}>
                       {modal === 'edit'
                         ? 'Local Codex agent\n\n- 支持多行 markdown\n- 编辑区内部滚动\n- 预览区不撑高弹窗'
                         : '当前槽位还没有输入内容。'}
                     </pre>
                   ) : (
-                    <div className="md-preview vars-lab-preview">
+                    <div className={cn('md-preview', styles['vars-lab-preview'])}>
                       <h3>Local Codex agent</h3>
                       <ul>
                         <li>支持多行 markdown</li>
@@ -710,10 +740,10 @@ function VarsProfileDemo() {
                   )}
                 </section>
               </div>
-              <aside className="vars-lab-inspector-column">
-                <section className="vars-lab-card">
-                  <div className="vars-lab-eyebrow">元信息</div>
-                  <dl className="vars-lab-meta">
+              <aside className={styles['vars-lab-inspector-column']}>
+                <section className={styles['vars-lab-card']}>
+                  <div className={styles['vars-lab-eyebrow']}>元信息</div>
+                  <dl className={styles['vars-lab-meta']}>
                     <div>
                       <dt>profile</dt>
                       <dd>{activeProfile.name}</dd>
@@ -734,14 +764,14 @@ function VarsProfileDemo() {
                     </div>
                   </dl>
                 </section>
-                <section className="vars-lab-card">
-                  <div className="vars-lab-eyebrow">trace</div>
-                  <div className="vars-lab-trace">
-                    <div className="vars-lab-trace-row">
+                <section className={styles['vars-lab-card']}>
+                  <div className={styles['vars-lab-eyebrow']}>trace</div>
+                  <div className={styles['vars-lab-trace']}>
+                    <div className={styles['vars-lab-trace-row']}>
                       <span>Base</span>
                       <span>default</span>
                     </div>
-                    <div className="vars-lab-trace-row on">
+                    <div className={cn(styles['vars-lab-trace-row'], styles['on'])}>
                       <span>Local</span>
                       <span>CX</span>
                     </div>
@@ -749,7 +779,7 @@ function VarsProfileDemo() {
                 </section>
               </aside>
             </div>
-            <footer className="vars-lab-modal-footer">
+            <footer className={styles['vars-lab-modal-footer']}>
               <Button type="button" variant="secondary" onClick={() => setModal(null)}>
                 取消
               </Button>

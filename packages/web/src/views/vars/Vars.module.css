@@ -42,8 +42,7 @@
   text-transform: uppercase;
 }
 
-.vars-tabs,
-.cfg-chips {
+.vars-tabs {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -69,26 +68,6 @@
 .vars-tabs button.on {
   background: var(--accent);
   color: var(--bright);
-}
-
-.achip {
-  display: inline-grid;
-  min-width: 34px;
-  height: 30px;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--c) 28%, var(--border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--c) 7%, var(--card));
-  color: var(--muted);
-  font:
-    700 11px 'JetBrains Mono',
-    monospace;
-}
-
-.achip.on {
-  background: color-mix(in srgb, var(--c) 16%, var(--card));
-  color: var(--bright);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 26%, transparent);
 }
 
 .vars-shell {
@@ -633,10 +612,6 @@
   white-space: nowrap;
 }
 
-.achip[data-a='df'] {
-  min-width: 58px;
-}
-
 .vars-editor-column,
 .vars-inspector-column {
   display: grid;
@@ -835,8 +810,8 @@
   white-space: pre-wrap;
 }
 
-.md-preview p,
-.md-preview h3 {
+.vars-preview p,
+.vars-preview h3 {
   margin: 0 0 8px;
 }
 

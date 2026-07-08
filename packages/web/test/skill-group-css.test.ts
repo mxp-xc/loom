@@ -1,10 +1,14 @@
 import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
-const cssPath = new URL('../src/index.css', import.meta.url)
+const skillSourceCssPath = new URL(
+  '../src/views/skills/SkillSourceList.module.css',
+  import.meta.url,
+)
+const targetChipsCssPath = new URL('../src/styles/shared/target-chips.css', import.meta.url)
 
-async function readIndexCss(): Promise<string> {
-  return await readFile(cssPath, 'utf8')
+async function readCss(path: URL): Promise<string> {
+  return await readFile(path, 'utf8')
 }
 
 function ruleBody(css: string, selector: string): string {
@@ -31,7 +35,7 @@ function ruleBodyContaining(css: string, selector: string): string {
 
 describe('skill group header CSS', () => {
   it('does not animate an expanding header border from the text color', async () => {
-    const css = await readIndexCss()
+    const css = await readCss(skillSourceCssPath)
     const groupHead = ruleBody(css, '.group-head')
     const collapsedGroupHead = ruleBody(css, ".group-head[data-expanded='false']")
 
@@ -41,9 +45,11 @@ describe('skill group header CSS', () => {
   })
 
   it('centers compact skill badges and target chips', async () => {
-    const css = await readIndexCss()
-    const chip = ruleBody(css, '.chip')
-    const compactBadge = ruleBodyContaining(css, '.ref-badge')
+    const skillSourceCss = await readCss(skillSourceCssPath)
+    const targetChipsCss = await readCss(targetChipsCssPath)
+    const chip = ruleBody(skillSourceCss, '.chip')
+    const compactBadge = ruleBodyContaining(skillSourceCss, '.ref-badge')
+    const targetChip = ruleBody(targetChipsCss, '.target-chip')
 
     expect(chip).toMatch(/font-size\s*:\s*10px\b/)
     expect(chip).toMatch(/font-weight\s*:\s*400\b/)
@@ -55,5 +61,9 @@ describe('skill group header CSS', () => {
     expect(compactBadge).toMatch(/font-weight\s*:\s*400\b/)
     expect(compactBadge).toMatch(/line-height\s*:\s*15px\b/)
     expect(compactBadge).toMatch(/padding\s*:\s*1px 6px\b/)
+    expect(targetChip).toMatch(/display\s*:\s*inline-flex\b/)
+    expect(targetChip).toMatch(/align-items\s*:\s*center\b/)
+    expect(targetChip).toMatch(/justify-content\s*:\s*center\b/)
+    expect(targetChip).toMatch(/font-size\s*:\s*11px\b/)
   })
 })

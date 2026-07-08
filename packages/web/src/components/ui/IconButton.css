@@ -1,0 +1,63 @@
+.icon-button {
+  position: relative;
+  flex-shrink: 0;
+  gap: 0;
+  aspect-ratio: 1;
+  color: var(--m2);
+}
+.icon-button:hover:not(:disabled) {
+  color: var(--bright);
+}
+.icon-button[data-tone='danger'] {
+  color: var(--error);
+}
+.icon-button[data-tone='warning'] {
+  color: var(--warn);
+}
+.icon-button[data-tone='success'] {
+  color: var(--signal);
+}
+
+.icon-button[data-tone='danger']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 9%, transparent);
+}
+.icon-button[data-tone='warning']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warn) 11%, transparent);
+}
+.icon-button[data-tone='success']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--signal) 9%, transparent);
+}
+.icon-button::after {
+  display: none;
+}
+.icon-button-floating-tooltip {
+  position: fixed;
+  z-index: 2000;
+  max-width: min(220px, calc(100vw - 16px));
+  padding: 4px 7px;
+  overflow: hidden;
+  color: var(--bright);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  box-shadow: var(--shadow-popover);
+  transform: translate(-50%, -100%);
+  animation: icon-tooltip-in 0.12s var(--ease);
+}
+
+@keyframes icon-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% + 3px));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%);
+  }
+}

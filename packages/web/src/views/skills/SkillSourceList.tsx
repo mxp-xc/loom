@@ -9,6 +9,7 @@ import {
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
+import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
   ChevronDown,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react'
 import { sortSkillMembers, type SkillDetail } from './types'
 import type { ManifestOperations, SourceUpdateState } from '@/hooks/useManifestOperations'
+import styles from './SkillSourceList.module.css'
 
 interface Props {
   manifest: Manifest
@@ -44,7 +46,7 @@ const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
   <button
     type="button"
     key={agent}
-    className={'chip ' + (active ? 'active' : 'inactive')}
+    className={cn(styles.chip, active ? styles.active : styles.inactive)}
     style={{ ['--c' as string]: agentColor[agent] }}
     onClick={onClick}
     aria-pressed={active}
@@ -193,7 +195,7 @@ export default function SkillSourceList({
 
   return (
     <>
-      <div className="skill-groups">
+      <div className={styles['skill-groups']}>
         {/* Remote sources */}
         {manifest.skills.sources.map((src) => {
           const repoId = sourceIdentity(src).repoId
@@ -201,36 +203,42 @@ export default function SkillSourceList({
           const isExpanded = expandedGroups.has(key)
           const sourceUpdate = updates[src.url]
           return (
-            <div key={key} className="group">
+            <div key={key} className={styles.group}>
               <div
-                className="group-head"
+                className={styles['group-head']}
+                data-testid={`skill-group-head-${repoId}`}
                 style={{ position: 'relative' }}
                 data-expanded={isExpanded}
                 onClick={() => onToggleGroup(key)}
               >
                 <button
                   type="button"
-                  className="gname"
+                  className={styles.gname}
                   aria-expanded={isExpanded}
                   aria-label={`${isExpanded ? '折叠' : '展开'} ${repoId}`}
                 >
                   <ChevronDown size={14} style={chevronStyle(!isExpanded)} />
                   {repoId}
                 </button>
-                <span className={'source-type-badge ' + (src.type === 'tag' ? 'tag' : 'branch')}>
+                <span
+                  className={cn(
+                    styles['source-type-badge'],
+                    src.type === 'tag' ? styles.tag : styles.branch,
+                  )}
+                >
                   {src.type ?? 'branch'}
                 </span>
                 <a
                   href={src.url.replace(/\.git$/, '')}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="gurl"
+                  className={styles.gurl}
                   title={src.url}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {src.url}
                 </a>
-                <span className="gref">@ {src.ref}</span>
+                <span className={styles.gref}>@ {src.ref}</span>
                 {sourceUpdate && (
                   <span
                     style={{
@@ -243,10 +251,10 @@ export default function SkillSourceList({
                     {sourceUpdate === 'repair' ? 'repair' : sourceUpdate.label}
                   </span>
                 )}
-                <span className="gacts" onClick={(e) => e.stopPropagation()}>
+                <span className={styles.gacts} onClick={(e) => e.stopPropagation()}>
                   {visibleAgents.length > 0 && (
                     <span
-                      className="cfg-chips source-target-chips"
+                      className={cn('target-chips', styles['source-target-chips'])}
                       aria-label={`${repoId} 批量投影`}
                     >
                       {visibleAgents.map((agent) => {
@@ -263,8 +271,9 @@ export default function SkillSourceList({
                           <button
                             key={agent}
                             type="button"
-                            className={`achip source-target-chip ${state}`}
+                            className={cn('target-chip', styles['source-target-chip'])}
                             style={{ ['--c' as string]: agentColor[agent] }}
+                            data-state={state}
                             aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
                             aria-label={`${repoId} ${agentShort[agent]}：${tooltip}`}
                             data-tooltip={`${repoId} ${agentShort[agent]}：${tooltip}`}
@@ -273,7 +282,7 @@ export default function SkillSourceList({
                           >
                             {agentShort[agent]}
                             {state === 'mixed' && (
-                              <span className="achip-count">
+                              <span className="target-chip-count">
                                 {count}/{total}
                               </span>
                             )}
@@ -282,7 +291,9 @@ export default function SkillSourceList({
                       })}
                     </span>
                   )}
-                  {visibleAgents.length > 0 && <span className="source-actions-divider" />}
+                  {visibleAgents.length > 0 && (
+                    <span className={styles['source-actions-divider']} />
+                  )}
                   <IconButton
                     label={`检查更新 source ${repoId}`}
                     tooltip={operations.pending.source.check(src) ? '检查中…' : '检查更新'}
@@ -346,7 +357,8 @@ export default function SkillSourceList({
                   return (
                     <div
                       key={m.name}
-                      className="skill"
+                      className={styles.skill}
+                      data-testid={`source-skill-${m.name}`}
                       onClick={() =>
                         onOpenDetail({
                           skillId: formatSourceMemberSkillId(src, m.name, manifest.config),
@@ -355,10 +367,12 @@ export default function SkillSourceList({
                         })
                       }
                     >
-                      <span className={'sdot ' + (isEnabled ? 'green' : 'dim')} />
-                      <span className="skill-main">
-                        <span className="skill-name-line">
-                          <span className={'sname clickable' + (isEnabled ? '' : ' dim')}>
+                      <span className={cn(styles.sdot, isEnabled ? styles.green : styles.dim)} />
+                      <span className={styles['skill-main']}>
+                        <span className={styles['skill-name-line']}>
+                          <span
+                            className={cn(styles.sname, styles.clickable, !isEnabled && styles.dim)}
+                          >
                             {m.name}
                           </span>
                           {githubFileUrl && (
@@ -366,7 +380,7 @@ export default function SkillSourceList({
                               href={githubFileUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="skill-source-link"
+                              className={styles['skill-source-link']}
                               aria-label={`在 GitHub 打开 ${m.name} 的 SKILL.md`}
                               title={githubFileUrl}
                               onClick={(event) => event.stopPropagation()}
@@ -374,34 +388,40 @@ export default function SkillSourceList({
                               <ExternalLink className="h-3 w-3" />
                             </a>
                           )}
-                          <span className="skill-source-path" title={relativePath}>
+                          <span
+                            className={styles['skill-source-path']}
+                            data-testid={`source-skill-path-${m.name}`}
+                            title={relativePath}
+                          >
                             {displayPath}
                           </span>
                         </span>
                         {m.description && (
-                          <span className="skill-description" title={m.description}>
+                          <span className={styles['skill-description']} title={m.description}>
                             {m.description}
                           </span>
                         )}
                       </span>
-                      <span className="chips" onClick={(e) => e.stopPropagation()}>
+                      <span className={styles.chips} onClick={(e) => e.stopPropagation()}>
                         {visibleAgents.map((a) =>
                           renderChip(a, isEnabled && mTargets.includes(a), () =>
                             handleChipToggle(src.url, m.name, a, mTargets),
                           ),
                         )}
                       </span>
-                      {!isEnabled && <span className="disabled-label">disabled</span>}
+                      {!isEnabled && <span className={styles['disabled-label']}>disabled</span>}
                     </div>
                   )
                 })}
               {isExpanded && !src.members?.length && (
-                <div className="skill">
-                  <span className="sdot green" />
-                  <span className="sname" style={{ color: 'var(--muted)' }}>
+                <div className={styles.skill}>
+                  <span className={cn(styles.sdot, styles.green)} />
+                  <span className={styles.sname} style={{ color: 'var(--muted)' }}>
                     未发现 members
                   </span>
-                  <span className="chips">{visibleAgents.map((a) => renderChip(a, false))}</span>
+                  <span className={styles.chips}>
+                    {visibleAgents.map((a) => renderChip(a, false))}
+                  </span>
                 </div>
               )}
             </div>
@@ -410,22 +430,26 @@ export default function SkillSourceList({
 
         {/* Local skills */}
         {localCount > 0 && (
-          <div className="group local-skills-group">
+          <div className={cn(styles.group, styles['local-skills-group'])}>
             <div
-              className="group-head"
+              className={styles['group-head']}
+              data-testid="skill-group-head-local"
               data-expanded={expandedGroups.has('local')}
               onClick={() => onToggleGroup('local')}
             >
               <button
                 type="button"
-                className="gname"
+                className={styles.gname}
                 aria-expanded={expandedGroups.has('local')}
                 aria-label={`${expandedGroups.has('local') ? '折叠' : '展开'} local skills`}
               >
                 <ChevronDown size={14} style={chevronStyle(!expandedGroups.has('local'))} />
-                local skills <span className="local-tag">local</span>
+                local skills <span className={styles['local-tag']}>local</span>
               </button>
-              <span className="skill-source-path local-skills-root-path" title="assets/skills">
+              <span
+                className={cn(styles['skill-source-path'], styles['local-skills-root-path'])}
+                title="assets/skills"
+              >
                 assets/skills
               </span>
             </div>
@@ -440,18 +464,26 @@ export default function SkillSourceList({
                 return (
                   <div
                     key={s.id}
-                    className={'skill' + (missing ? ' skill-missing' : ' skill-clickable')}
+                    className={cn(
+                      styles.skill,
+                      missing ? styles['skill-missing'] : styles['skill-clickable'],
+                    )}
+                    data-testid={`local-skill-${s.id}`}
                     onClick={missing ? undefined : openLocalDetail}
                   >
-                    <span className={'sdot ' + (missing ? 'yellow' : 'green')} />
-                    <span className="skill-main">
-                      <span className="skill-name-line">
+                    <span className={cn(styles.sdot, missing ? styles.yellow : styles.green)} />
+                    <span className={styles['skill-main']}>
+                      <span className={styles['skill-name-line']}>
                         {missing ? (
-                          <span className="sname dim">{s.id}</span>
+                          <span className={cn(styles.sname, styles.dim)}>{s.id}</span>
                         ) : (
                           <button
                             type="button"
-                            className="sname clickable skill-name-button"
+                            className={cn(
+                              styles.sname,
+                              styles.clickable,
+                              styles['skill-name-button'],
+                            )}
                             onClick={(event) => {
                               event.stopPropagation()
                               openLocalDetail()
@@ -460,30 +492,34 @@ export default function SkillSourceList({
                             {s.id}
                           </button>
                         )}
-                        <span className="skill-source-path" title={filePath}>
+                        <span
+                          className={styles['skill-source-path']}
+                          data-testid={`local-skill-path-${s.id}`}
+                          title={filePath}
+                        >
                           {displayPath}
                         </span>
-                        {s.path && <span className="ref-badge">ref</span>}
+                        {s.path && <span className={styles['ref-badge']}>ref</span>}
                         {missing && (
-                          <span className="missing-ref-badge" role="status">
+                          <span className={styles['missing-ref-badge']} role="status">
                             <AlertTriangle size={12} /> 路径不存在
                           </span>
                         )}
                       </span>
                       {s.description && (
-                        <span className="skill-description" title={s.description}>
+                        <span className={styles['skill-description']} title={s.description}>
                           {s.description}
                         </span>
                       )}
                     </span>
-                    <span className="chips" onClick={(e) => e.stopPropagation()}>
+                    <span className={styles.chips} onClick={(e) => e.stopPropagation()}>
                       {visibleAgents.map((a) =>
                         renderChip(a, lTargets.includes(a), () =>
                           handleLocalChipToggle(s.id, a, lTargets),
                         ),
                       )}
                     </span>
-                    <span className="skill-actions" onClick={(e) => e.stopPropagation()}>
+                    <span className={styles['skill-actions']} onClick={(e) => e.stopPropagation()}>
                       <IconButton
                         label={`删除 local skill ${s.id}`}
                         tooltip="删除"
@@ -500,20 +536,20 @@ export default function SkillSourceList({
         )}
       </div>
 
-      <div className="legend">
+      <div className={styles.legend}>
         {visibleAgents.map((agent) => (
-          <div className="lg" key={agent}>
-            <span className="sw" style={{ background: agentColor[agent] }} />
+          <div className={styles.lg} key={agent}>
+            <span className={styles.sw} style={{ background: agentColor[agent] }} />
             {agentShort[agent]}{' '}
             {agent === 'claude-code' ? 'Claude Code' : agent === 'codex' ? 'Codex' : 'OpenCode'}
           </div>
         ))}
-        <div className="lg">
-          <span className="sw" style={{ background: 'var(--warn)' }} />
+        <div className={styles.lg}>
+          <span className={styles.sw} style={{ background: 'var(--warn)' }} />
           有更新
         </div>
       </div>
-      <div className="hint">
+      <div className={styles.hint}>
         source 级操作(更新 ref / scan / 删除)在分组头右侧;发现安装新 source 走右上 + Add source
       </div>
 
@@ -526,20 +562,20 @@ export default function SkillSourceList({
         width={420}
         busy={deleteBusy}
       >
-        <div className="danger-confirm">
-          <div className="danger-confirm-icon" aria-hidden="true">
+        <div className={styles['danger-confirm']}>
+          <div className={styles['danger-confirm-icon']} aria-hidden="true">
             <AlertTriangle size={18} />
           </div>
-          <div className="danger-confirm-copy">
-            <p className="danger-confirm-title">
+          <div className={styles['danger-confirm-copy']}>
+            <p className={styles['danger-confirm-title']}>
               确认删除 <strong>{deleteTarget?.label}</strong>？
             </p>
-            <p className="danger-confirm-body">
+            <p className={styles['danger-confirm-body']}>
               此操作会移除当前配置里的引用，无法在界面中撤销。删除前请确认没有其他 target 依赖它。
             </p>
           </div>
         </div>
-        <div className="danger-confirm-actions">
+        <div className={styles['danger-confirm-actions']}>
           <Button
             variant="secondary"
             size="sm"

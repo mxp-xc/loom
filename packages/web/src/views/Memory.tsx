@@ -8,6 +8,8 @@ import { IconButton } from '@/components/ui/IconButton'
 import { useToast } from '@/hooks/useToast'
 import { useManifest } from '@/hooks/useManifest'
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import styles from './Memory.module.css'
 
 interface Props {
   repoPath: string
@@ -141,12 +143,10 @@ export default function Memory({ repoPath }: Props) {
     showToast('已保存')
   }
 
-  const agentKey = (a: AgentId) => (a === 'claude-code' ? 'cc' : a === 'codex' ? 'cx' : 'oc')
-
   return (
-    <div className="mem-layout">
-      <aside className="mem-list">
-        <div className="mem-list-head">
+    <div className={styles['mem-layout']}>
+      <aside className={styles['mem-list']}>
+        <div className={styles['mem-list-head']}>
           <span className="label">memories</span>
           <IconButton
             label="新建 memory"
@@ -159,15 +159,15 @@ export default function Memory({ repoPath }: Props) {
             <Plus className="h-3.5 w-3.5" />
           </IconButton>
         </div>
-        <div className="mem-global-targets">
+        <div className={styles['mem-global-targets']} data-testid="memory-targets">
           <span className="label">投影目标</span>
-          <div className="cfg-chips">
+          <div className="target-chips">
             {targets.map((a) => (
               <button
                 key={a}
                 type="button"
-                className={'achip ' + (targets.includes(a) ? 'on' : 'off')}
-                data-a={agentKey(a)}
+                className="target-chip"
+                data-state={targets.includes(a) ? 'on' : 'off'}
                 style={{ ['--c' as string]: agentColor[a] }}
                 aria-pressed={targets.includes(a)}
                 data-tooltip={`${agentShort[a]} 投影目标`}
@@ -177,13 +177,13 @@ export default function Memory({ repoPath }: Props) {
             ))}
           </div>
         </div>
-        <div className="mem-list-scroll">
-          {loading && <div className="mem-empty">加载中…</div>}
+        <div className={styles['mem-list-scroll']}>
+          {loading && <div className={styles['mem-empty']}>加载中…</div>}
           {!loading && memories.length === 0 && (
-            <div className="mem-empty">
+            <div className={styles['mem-empty']}>
               无 memory
               <br />
-              <span className="add-link" onClick={() => setCreating(true)}>
+              <span className={styles['add-link']} onClick={() => setCreating(true)}>
                 点此创建第一份
               </span>
             </div>
@@ -193,12 +193,13 @@ export default function Memory({ repoPath }: Props) {
             return (
               <div
                 key={m.name}
-                className={'mem-item' + (selected === m.name ? ' sel' : '')}
+                className={cn(styles['mem-item'], selected === m.name && styles.sel)}
+                data-testid={`memory-row-${m.name}`}
                 onClick={() => select(m.name)}
               >
                 <button
                   type="button"
-                  className={'mem-active-dot' + (isActive ? '' : ' dim')}
+                  className={cn(styles['mem-active-dot'], !isActive && styles.dim)}
                   aria-label={isActive ? `取消激活 memory ${m.name}` : `激活 memory ${m.name}`}
                   aria-pressed={isActive}
                   data-state={isActive ? 'active' : 'inactive'}
@@ -209,8 +210,8 @@ export default function Memory({ repoPath }: Props) {
                     activate(isActive ? null : m.name)
                   }}
                 />
-                <span className="mem-name">{m.name}</span>
-                <span className="mem-actions" onClick={(e) => e.stopPropagation()}>
+                <span className={styles['mem-name']}>{m.name}</span>
+                <span className={styles['mem-actions']} onClick={(e) => e.stopPropagation()}>
                   <IconButton
                     label={`重命名 memory ${m.name}`}
                     tooltip="重命名"
@@ -236,11 +237,11 @@ export default function Memory({ repoPath }: Props) {
         </div>
       </aside>
 
-      <main className="mem-main">
+      <main className={styles['mem-main']}>
         {selected ? (
           <>
-            <div className="mem-detail-head">
-              <span className="mem-detail-name">{selected}</span>
+            <div className={styles['mem-detail-head']}>
+              <span className={styles['mem-detail-name']}>{selected}</span>
               <IconButton
                 label="投影 memory"
                 tooltip={projecting ? '投影中…' : '投影'}
@@ -251,7 +252,7 @@ export default function Memory({ repoPath }: Props) {
                 <RefreshCw className="h-3.5 w-3.5" />
               </IconButton>
             </div>
-            <div className="mem-detail-body">
+            <div className={styles['mem-detail-body']}>
               <MemoryEditor
                 repo={repoPath}
                 name={selected}
@@ -262,14 +263,14 @@ export default function Memory({ repoPath }: Props) {
             </div>
           </>
         ) : (
-          <div className="mem-placeholder">选择或新建一份 memory 开始</div>
+          <div className={styles['mem-placeholder']}>选择或新建一份 memory 开始</div>
         )}
       </main>
 
       <Modal open={creating} onClose={() => setCreating(false)} title="新建 memory" width={360}>
         <input
           autoFocus
-          className="mem-new-input"
+          className={styles['mem-new-input']}
           value={draftName}
           onChange={(e) => setDraftName(e.target.value)}
           placeholder="name (如 v1, v2, default)"
@@ -295,7 +296,7 @@ export default function Memory({ repoPath }: Props) {
       >
         <input
           autoFocus
-          className="mem-new-input"
+          className={styles['mem-new-input']}
           value={draftName}
           onChange={(e) => setDraftName(e.target.value)}
           onKeyDown={(e) => {

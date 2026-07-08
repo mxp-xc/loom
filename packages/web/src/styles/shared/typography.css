@@ -1,0 +1,10 @@
+/* divider rows */
+.divide-y > :not(:last-child) {
+  border-bottom: 1px solid var(--border);
+}
+.label {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  color: var(--muted);
+}

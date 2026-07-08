@@ -1,0 +1,117 @@
+.target-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.target-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 10px;
+  border: 1px solid;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+
+.target-chip[data-state='on'] {
+  color: #fff;
+  background: var(--c);
+  border-color: transparent;
+}
+
+.target-chip[data-state='off'] {
+  color: var(--c);
+  background: transparent;
+  border-color: color-mix(in srgb, var(--c) 45%, transparent);
+  opacity: 0.45;
+}
+
+.target-chip[data-state='mixed'] {
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 10%, transparent);
+  border-color: var(--c);
+}
+
+.target-chip-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 12px;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+.target-chip[data-state='off']:hover {
+  opacity: 0.8;
+}
+
+.target-chip[data-tooltip] {
+  position: relative;
+}
+
+.target-chip[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: auto;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  z-index: 1000;
+  max-width: 220px;
+  padding: 4px 7px;
+  overflow: hidden;
+  color: var(--bright);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  box-shadow: var(--shadow-popover);
+  transform: translate(-50%, 3px);
+  transition:
+    opacity 0.12s var(--ease),
+    transform 0.12s var(--ease),
+    visibility 0.12s var(--ease);
+}
+
+.target-chip[data-tooltip]:hover::after,
+.target-chip[data-tooltip]:focus-visible::after {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (max-width: 760px) {
+  .global-targets-bar {
+    grid-template-columns: 12px minmax(0, 1fr) max-content 32px !important;
+    gap: 8px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .target-chip[data-tooltip]::after {
+    transition: none;
+    transform: translate(-50%, 0);
+  }
+
+  .target-chip[data-tooltip]:hover::after,
+  .target-chip[data-tooltip]:focus-visible::after {
+    transform: translate(-50%, 0);
+  }
+}

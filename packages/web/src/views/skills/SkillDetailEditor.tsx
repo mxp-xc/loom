@@ -6,7 +6,9 @@ import MarkdownPreview from '@/components/MarkdownPreview'
 import { Copy, Check } from 'lucide-react'
 import { IconButton } from '@/components/ui/IconButton'
 import { AGENTS, agentShort, agentColor, agentSkillPath, type AgentId } from '@/lib/agents'
+import { cn } from '@/lib/utils'
 import type { SkillDetail } from './types'
+import styles from './SkillDetailEditor.module.css'
 
 interface Props {
   repoPath: string
@@ -18,7 +20,7 @@ interface Props {
 const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
   <span
     key={agent}
-    className={'chip ' + (active ? 'active' : 'inactive')}
+    className={cn(styles.chip, active ? styles.active : styles.inactive)}
     style={{ ['--c' as string]: agentColor[agent] }}
     onClick={onClick}
   >
@@ -196,20 +198,23 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
             >
               <div className="label">SKILL.md</div>
             </div>
-            <div className="skill-detail-content-frame" data-testid="skill-detail-content-frame">
+            <div
+              className={styles['skill-detail-content-frame']}
+              data-testid="skill-detail-content-frame"
+            >
               {showSkillLoading && (
                 <>
-                  <div className="skill-detail-preview-tabs" aria-hidden="true">
-                    <span className="on">预览</span>
+                  <div className={styles['skill-detail-preview-tabs']} aria-hidden="true">
+                    <span className={styles.on}>预览</span>
                     <span>原文</span>
                   </div>
-                  <div className="skill-detail-loading-panel" role="status">
+                  <div className={styles['skill-detail-loading-panel']} role="status">
                     {skillLoading ? '加载 SKILL.md…' : '准备加载 SKILL.md…'}
                   </div>
                 </>
               )}
               {skillError && (
-                <div className="skill-detail-error" role="alert">
+                <div className={styles['skill-detail-error']} role="alert">
                   {skillError}
                 </div>
               )}

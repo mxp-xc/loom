@@ -1,0 +1,131 @@
+/* ===== memory editor ===== */
+.mem-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.cfg-seg {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.cfg-seg-opt {
+  padding: 5px 14px;
+  color: var(--muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+
+.cfg-seg-opt.on {
+  color: var(--primary-fg);
+  font-weight: 600;
+  background: var(--primary);
+}
+
+.mem-toolbar :global(.target-chips) {
+  margin-left: auto;
+}
+.mem-save {
+  margin-left: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--primary-fg);
+  border: none;
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.mem-save:hover:not(:disabled) {
+  box-shadow: 0 0 12px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+.mem-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mem-edit-wrap {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  overflow: hidden;
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.mem-edit-wrap:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.mem-overlay,
+.mem-textarea {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 2;
+  border: 0;
+}
+.mem-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: var(--text);
+  overflow: auto;
+  background: var(--card);
+}
+.mem-textarea {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 440px;
+  background: transparent;
+  color: transparent;
+  resize: vertical;
+  outline: none;
+  caret-color: var(--primary);
+}
+.ph-var {
+  background: var(--accent);
+  color: var(--primary);
+  border-radius: 2px;
+  padding: 1px 3px;
+  font-weight: 500;
+}
+.ph-esc {
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  color: var(--muted);
+  border-radius: 2px;
+  padding: 1px 3px;
+  opacity: 0.75;
+}
+.mem-pane {
+  min-height: 440px;
+  padding: 16px 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: auto;
+}
+.mem-err {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
+  border-radius: var(--radius);
+}

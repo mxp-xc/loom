@@ -3,6 +3,8 @@ import { api } from '@/lib/api'
 import { ConfigField, FIELD_SCHEMA, type ConfigLevel } from '@/components/ConfigField'
 import { useViewError } from '@/hooks/useViewError'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
+import { cn } from '@/lib/utils'
+import styles from './Settings.module.css'
 
 type Config = Record<string, unknown>
 
@@ -157,11 +159,11 @@ export default function Settings({ repoPath }: { repoPath: string }) {
       </div>
 
       {/* Category tabs */}
-      <div className="cfg-cat-tabs">
+      <div className={styles['cfg-cat-tabs']}>
         {CATEGORY_TABS.map((tab) => (
           <div
             key={tab.id}
-            className={'cfg-cat-tab' + (catTab === tab.id ? ' on' : '')}
+            className={cn(styles['cfg-cat-tab'], catTab === tab.id && styles.on)}
             onClick={() => handleSetCatTab(tab.id)}
           >
             {tab.label}
@@ -170,36 +172,36 @@ export default function Settings({ repoPath }: { repoPath: string }) {
       </div>
 
       {/* Level switch */}
-      <div className="cfg-lvl-bar">
-        <span className="cfg-lvl-label">view</span>
-        <div className="cfg-lvl-sw">
+      <div className={styles['cfg-lvl-bar']}>
+        <span className={styles['cfg-lvl-label']}>view</span>
+        <div className={styles['cfg-lvl-sw']}>
           {(['effective', 'repo', 'local'] as ConfigLevel[]).map((l) => (
             <div
               key={l}
-              className={'cfg-lvl-opt' + (level === l ? ' on' : '')}
+              className={cn(styles['cfg-lvl-opt'], level === l && styles.on)}
               data-l={l === 'effective' ? 'merged' : l}
               onClick={() => handleSetLevel(l)}
             >
-              <span className="dotc" />
+              <span className={styles.dotc} />
               {l === 'effective' ? '最终结果' : l === 'repo' ? '仓库级' : '本地级'}
             </div>
           ))}
         </div>
-        <span className="cfg-lvl-hint">{LEVEL_HINTS[level]}</span>
+        <span className={styles['cfg-lvl-hint']}>{LEVEL_HINTS[level]}</span>
       </div>
 
       {/* Group cards */}
-      <div className="cfg-lvl-pane" data-l={level === 'effective' ? 'merged' : level}>
+      <div className={styles['cfg-lvl-pane']} data-l={level === 'effective' ? 'merged' : level}>
         {activeCat.groups.map((gName) => {
           const gFields = fieldsInTab.filter((f) => f.group === gName)
           if (!gFields.length) return null
           return (
-            <div key={gName} className="cfg-group">
-              <div className="cfg-group-head">
-                <span className="cfg-group-title">{gName}</span>
-                <span className="cfg-group-desc">{groupDesc}</span>
+            <div key={gName} className={styles['cfg-group']}>
+              <div className={styles['cfg-group-head']}>
+                <span className={styles['cfg-group-title']}>{gName}</span>
+                <span className={styles['cfg-group-desc']}>{groupDesc}</span>
               </div>
-              <div className="cfg-group-body">
+              <div className={styles['cfg-group-body']}>
                 {gFields.map((field) => (
                   <ConfigField
                     key={field.key}
