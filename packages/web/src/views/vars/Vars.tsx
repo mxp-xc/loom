@@ -1,5 +1,5 @@
 import { RefreshCw, Search } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '@/hooks/useToast'
 import { AGENTS, agentColor, agentShort } from '../../lib/agents'
 import { cn } from '@/lib/utils'
@@ -13,9 +13,23 @@ import styles from './Vars.module.css'
 
 type VarsView = 'definitions' | 'resolved'
 
+const profileIds: VarsProfileId[] = ['builtin', 'base', 'local']
+
+function readStoredProfileId(repoPath: string): VarsProfileId {
+  try {
+    const stored = localStorage.getItem(`loom.vars.activeProfileId:${repoPath}`)
+    return profileIds.includes(stored as VarsProfileId) ? (stored as VarsProfileId) : 'base'
+  } catch (err) {
+    console.error({ err }, 'Failed to read vars active profile')
+    return 'base'
+  }
+}
+
 export default function Vars({ repoPath }: { repoPath: string }) {
   const vars = useProfileVars(repoPath)
-  const [activeProfileId, setActiveProfileId] = useState<VarsProfileId>('local')
+  const [activeProfileId, setActiveProfileIdState] = useState<VarsProfileId>(() =>
+    readStoredProfileId(repoPath),
+  )
   const [view, setView] = useState<VarsView>('definitions')
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState<VarsModalState | null>(null)
@@ -23,18 +37,34 @@ export default function Vars({ repoPath }: { repoPath: string }) {
 
   const state = vars.state
 
+  const setActiveProfileId = useCallback(
+    (profileId: VarsProfileId) => {
+      setActiveProfileIdState(profileId)
+      try {
+        localStorage.setItem(`loom.vars.activeProfileId:${repoPath}`, profileId)
+      } catch (err) {
+        console.error({ err }, 'Failed to store vars active profile')
+      }
+    },
+    [repoPath],
+  )
+
   useEffect(() => {
     if (!state) return
     if (!state.profiles.some((profile) => profile.id === activeProfileId)) {
-      setActiveProfileId(state.profiles[0]?.id ?? 'local')
+      setActiveProfileId(
+        state.profiles.some((profile) => profile.id === 'base')
+          ? 'base'
+          : (state.profiles[0]?.id ?? 'base'),
+      )
     }
-  }, [activeProfileId, state])
+  }, [activeProfileId, setActiveProfileId, state])
 
   const activeProfile = useMemo(() => {
     if (!state) return null
     return (
       state.profiles.find((profile) => profile.id === activeProfileId) ??
-      state.profiles.find((profile) => profile.id === 'local') ??
+      state.profiles.find((profile) => profile.id === 'base') ??
       state.profiles[0] ??
       null
     )

@@ -1,4 +1,4 @@
-import { Lock, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { VarsProfileId, VarsProfileSummary } from './profile-model'
 import styles from './Vars.module.css'
@@ -14,9 +14,6 @@ export default function VarsProfileList({
   activeProfileId,
   onSelect,
 }: VarsProfileListProps) {
-  const activeProfile =
-    profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0] ?? null
-
   return (
     <aside className={styles['vars-profiles']} aria-label="Profiles">
       <div className={styles['vars-pane-head']}>
@@ -57,45 +54,6 @@ export default function VarsProfileList({
           </button>
         ))}
       </div>
-
-      {activeProfile && (
-        <section className={styles['vars-profile-card']} aria-label="profile 操作">
-          <div>
-            <div className={styles['vars-eyebrow']}>profile 操作</div>
-            <h3>{activeProfile.name}</h3>
-            <p>{activeProfile.description}</p>
-          </div>
-          <div className={styles['vars-profile-actions']}>
-            {activeProfile.locked ? (
-              <span className={styles['vars-lock-state']}>
-                <Lock size={13} />
-                locked
-              </span>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className={styles['vars-icon-button']}
-                  aria-label="重命名当前 profile"
-                  title="重命名"
-                  disabled
-                >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  type="button"
-                  className={styles['vars-icon-button']}
-                  aria-label="删除当前 profile"
-                  title="删除"
-                  disabled
-                >
-                  <Trash2 size={14} />
-                </button>
-              </>
-            )}
-          </div>
-        </section>
-      )}
     </aside>
   )
 }

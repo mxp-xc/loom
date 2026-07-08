@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import { AGENTS, agentColor, agentShort, type AgentId } from '../../lib/agents'
 import { cn } from '@/lib/utils'
-import type { VarsLayerRef, VarsMatrixResponse } from '../../lib/vars'
+import type { StringFormat, VarEntryInput, VarsLayerRef, VarsMatrixResponse } from '../../lib/vars'
 import type { VarsDiagnostic } from '../../lib/vars'
 import type { VarsProfileEntry, VarsProfileSummary } from './profile-model'
 import { entryValuePreview, parseOverrideDraft, parseVarDraft } from './profile-model'
@@ -33,6 +33,22 @@ type VarsConfigModalProps = {
 }
 
 const slotOptions: Slot[] = ['default', ...AGENTS]
+const varTypeOptions: Array<VarEntryInput['type']> = [
+  'string',
+  'number',
+  'boolean',
+  'json',
+  'secret',
+]
+const stringFormatOptions: StringFormat[] = [
+  'plain',
+  'markdown',
+  'json',
+  'yaml',
+  'toml',
+  'shell',
+  'path',
+]
 
 function slotLabel(slot: Slot) {
   return slot === 'default' ? 'default' : agentShort[slot]
@@ -155,10 +171,13 @@ export default function VarsConfigModal({
   const isReadonly = modal.kind === 'view' || profile.id === 'builtin'
   const initialKey = modal.entry?.key ?? baseEntries[0]?.key ?? ''
   const [selectedKey, setSelectedKey] = useState(initialKey)
+  const isNewBaseDefinition = profile.id === 'base' && modal.kind === 'add'
   const selectedEntry = useMemo(
     () =>
-      profile.id === 'base' && modal.kind !== 'add'
-        ? modal.entry
+      profile.id === 'base'
+        ? modal.kind === 'add'
+          ? undefined
+          : modal.entry
         : (baseEntries.find((entry) => entry.key === selectedKey) ?? modal.entry ?? baseEntries[0]),
     [baseEntries, modal.entry, modal.kind, profile.id, selectedKey],
   )
@@ -174,18 +193,34 @@ export default function VarsConfigModal({
       : '',
   )
   const [baseKeyDraft, setBaseKeyDraft] = useState('')
+  const [baseTypeDraft, setBaseTypeDraft] = useState<VarEntryInput['type']>('string')
+  const [baseFormatDraft, setBaseFormatDraft] = useState<StringFormat>('plain')
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.stopPropagation()
+      onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
 
   useEffect(() => {
     if (!selectedEntry) return
     setDraft(valueForSlot(activeMatrix, matricesByAgent, profile.id, selectedEntry.key, slot))
   }, [activeMatrix, matricesByAgent, profile.id, selectedEntry, slot])
 
-  const key =
-    profile.id === 'base' && modal.kind === 'add' ? baseKeyDraft.trim() : (selectedEntry?.key ?? '')
+  const key = isNewBaseDefinition ? baseKeyDraft.trim() : (selectedEntry?.key ?? '')
   const dialogLabel =
     modal.kind === 'view' ? '查看配置' : modal.kind === 'edit' ? '编辑配置' : '新建配置'
-  const type = selectedEntry?.type ?? 'string'
-  const format = selectedEntry?.format
+  const type = isNewBaseDefinition ? baseTypeDraft : (selectedEntry?.type ?? 'string')
+  const format =
+    isNewBaseDefinition && baseTypeDraft === 'string'
+      ? baseFormatDraft === 'plain'
+        ? undefined
+        : baseFormatDraft
+      : selectedEntry?.format
   const resolvedValue =
     activeMatrix.resolution.ok && key
       ? entryValuePreview(activeMatrix.resolution.values[key])
@@ -197,7 +232,8 @@ export default function VarsConfigModal({
   const diagnostics = selectedEntry?.diagnostics ?? []
 
   const save = async () => {
-    if (!key || !selectedEntry) return
+    if (!key) return
+    if (!selectedEntry && !(isNewBaseDefinition && slot === 'default')) return
     setPending(true)
     try {
       if (profile.id === 'base' && slot === 'default') {
@@ -255,6 +291,8 @@ export default function VarsConfigModal({
   const canClear =
     modal.kind === 'edit' &&
     ((profile.id === 'base' && slot !== 'default') || profile.id === 'local')
+  const canSave =
+    Boolean(key) && Boolean(selectedEntry || (isNewBaseDefinition && slot === 'default'))
   const showPicker = modal.kind === 'add' && profile.id !== 'base'
 
   return (
@@ -269,6 +307,50 @@ export default function VarsConfigModal({
           <div>
             <div className={styles['vars-eyebrow']}>{dialogLabel}</div>
             <h2>{modal.kind === 'add' ? profile.name + ' · 新建配置' : key}</h2>
+            {isNewBaseDefinition && (
+              <div className={styles['vars-modal-definition-bar']}>
+                <label className={styles['vars-field']}>
+                  <span>key</span>
+                  <input
+                    value={baseKeyDraft}
+                    onChange={(event) => setBaseKeyDraft(event.target.value)}
+                    placeholder="输入新变量 key"
+                  />
+                </label>
+                <label className={styles['vars-field']}>
+                  <span>类型</span>
+                  <select
+                    value={baseTypeDraft}
+                    onChange={(event) => {
+                      const nextType = event.target.value as VarEntryInput['type']
+                      setBaseTypeDraft(nextType)
+                      if (nextType !== 'string') setBaseFormatDraft('plain')
+                    }}
+                  >
+                    {varTypeOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {baseTypeDraft === 'string' && (
+                  <label className={styles['vars-field']}>
+                    <span>格式</span>
+                    <select
+                      value={baseFormatDraft}
+                      onChange={(event) => setBaseFormatDraft(event.target.value as StringFormat)}
+                    >
+                      {stringFormatOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+            )}
           </div>
           <div className={styles['vars-modal-head-actions']}>
             {!isReadonly && (
@@ -317,19 +399,6 @@ export default function VarsConfigModal({
                 />
               </section>
             )}
-            {profile.id === 'base' && modal.kind === 'add' && (
-              <section className={styles['vars-editor-card']}>
-                <label className={styles['vars-field']}>
-                  <span>key</span>
-                  <input
-                    value={baseKeyDraft}
-                    onChange={(event) => setBaseKeyDraft(event.target.value)}
-                    placeholder="输入新变量 key"
-                  />
-                </label>
-              </section>
-            )}
-
             <section className={cn(styles['vars-editor-card'], styles['vars-modal-editor-card'])}>
               <div className={styles['vars-eyebrow']}>配置值</div>
               <div className={styles['vars-editor-tabs']}>
@@ -444,7 +513,12 @@ export default function VarsConfigModal({
             </button>
           )}
           {!isReadonly && (
-            <button type="button" className={styles['vars-primary-action']} onClick={save}>
+            <button
+              type="button"
+              className={styles['vars-primary-action']}
+              disabled={!canSave}
+              onClick={save}
+            >
               <CheckCircle2 size={14} />
               保存
             </button>

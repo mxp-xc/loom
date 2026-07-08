@@ -94,6 +94,7 @@ const matrix = (agent = 'codex') => ({
 describe('Vars view', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => matrix(agent))
     vi.mocked(api.vars.setBaseKey).mockResolvedValue({ ok: true })
     vi.mocked(api.vars.setOverride).mockResolvedValue({ ok: true })
@@ -107,14 +108,37 @@ describe('Vars view', () => {
     expect(screen.getByRole('button', { name: '配置管理' })).toBeDefined()
     expect(screen.getByRole('button', { name: '最终结果' })).toBeDefined()
     expect(screen.getByText('runtime')).toBeDefined()
-    expect(screen.getByText('locked')).toBeDefined()
+    expect(screen.getAllByText('locked').length).toBeGreaterThan(0)
     expect(screen.getByText('local')).toBeDefined()
+    expect(screen.getByRole('button', { name: /Base/ }).getAttribute('aria-current')).toBe('true')
     expect(screen.getByText('agent_name')).toBeDefined()
-    expect(screen.getByText('Local Codex agent')).toBeDefined()
+    expect(screen.getByText('Agent')).toBeDefined()
+  })
+
+  it('defaults to Base when no profile was previously selected', async () => {
+    render(<Vars repoPath="/repo" />)
+
+    const baseProfile = await screen.findByRole('button', { name: /Base/ })
+
+    expect(baseProfile.getAttribute('aria-current')).toBe('true')
+    expect(screen.getByRole('heading', { level: 2, name: 'Base' })).toBeDefined()
+  })
+
+  it('restores the last selected profile for the repo', async () => {
+    const { unmount } = render(<Vars repoPath="/repo" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Local/ }))
+
+    unmount()
+    render(<Vars repoPath="/repo" />)
+
+    const localProfile = await screen.findByRole('button', { name: /Local/ })
+    expect(localProfile.getAttribute('aria-current')).toBe('true')
+    expect(screen.getByRole('heading', { level: 2, name: 'Local' })).toBeDefined()
   })
 
   it('renders type beside key and hides default from agent-specific slots', async () => {
     render(<Vars repoPath="/repo" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Local/ }))
     await screen.findByText('agent_name')
 
     const row = screen.getByRole('row', { name: /agent_name/ })
@@ -174,6 +198,7 @@ describe('Vars view', () => {
 
   it('opens edit modal and saves a local agent config', async () => {
     render(<Vars repoPath="/repo" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Local/ }))
     await screen.findByText('agent_name')
 
     fireEvent.click(screen.getByRole('button', { name: '编辑 agent_name' }))
@@ -217,6 +242,7 @@ describe('Vars view', () => {
     })
 
     render(<Vars repoPath="/repo" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Local/ }))
     await screen.findByText('agent_name')
 
     fireEvent.click(screen.getByRole('button', { name: '编辑 agent_name' }))
@@ -243,7 +269,7 @@ describe('Vars view', () => {
 
   it('opens new local config with searchable Base key picker', async () => {
     render(<Vars repoPath="/repo" />)
-    await screen.findByRole('button', { name: /Local/ })
+    fireEvent.click(await screen.findByRole('button', { name: /Local/ }))
 
     fireEvent.click(screen.getByRole('button', { name: '显示可配置项' }))
     fireEvent.click(screen.getByRole('button', { name: '新建 memory.context 配置' }))
@@ -251,6 +277,29 @@ describe('Vars view', () => {
     expect(await screen.findByRole('dialog', { name: '新建配置' })).toBeDefined()
     expect(screen.getByPlaceholderText('搜索 key / format')).toBeDefined()
     expect(screen.getByRole('option', { name: /memory\.context/ })).toBeDefined()
+  })
+
+  it('creates a new Base key with a selectable type', async () => {
+    render(<Vars repoPath="/repo" />)
+    await screen.findByRole('button', { name: /Base/ })
+
+    fireEvent.click(screen.getByRole('button', { name: /Base/ }))
+    fireEvent.click(screen.getByRole('button', { name: '新建变量' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '新建配置' })
+    fireEvent.change(within(dialog).getByLabelText('key'), { target: { value: 'max_items' } })
+    fireEvent.change(within(dialog).getByLabelText('类型'), { target: { value: 'number' } })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /配置值/ }), {
+      target: { value: '42' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() =>
+      expect(api.vars.setBaseKey).toHaveBeenCalledWith('/repo', 'max_items', {
+        type: 'number',
+        value: 42,
+      }),
+    )
   })
 
   it('keeps the new profile entry disabled until custom profiles are implemented', async () => {
@@ -264,6 +313,14 @@ describe('Vars view', () => {
     expect(screen.queryByRole('dialog', { name: '新建配置' })).toBeNull()
   })
 
+  it('does not render a separate profile action card', async () => {
+    render(<Vars repoPath="/repo" />)
+    await screen.findByRole('button', { name: /Base/ })
+
+    expect(screen.queryByLabelText('profile 操作')).toBeNull()
+    expect(screen.queryByText('profile 操作')).toBeNull()
+  })
+
   it('switches edit, raw preview, and resolved preview mutually', async () => {
     render(<Vars repoPath="/repo" />)
     await screen.findByText('agent_name')
@@ -275,6 +332,18 @@ describe('Vars view', () => {
     expect(screen.queryByRole('textbox', { name: /配置值/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     expect(screen.getByRole('textbox', { name: /配置值/ })).toBeDefined()
+  })
+
+  it('closes the config modal with Escape', async () => {
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('agent_name')
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 agent_name' }))
+    expect(await screen.findByRole('dialog', { name: '编辑配置' })).toBeDefined()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑配置' })).toBeNull())
   })
 
   it('does not show override or restore inheritance copy', async () => {
