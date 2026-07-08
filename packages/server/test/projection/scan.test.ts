@@ -32,7 +32,10 @@ afterEach(async () => {
 describe('scanSourceMembers', () => {
   it('finds SKILL.md, member name = parent dir, excludes .git/node_modules/.cache', async () => {
     await mkdir(join(root, 'skills', 'brainstorming'), { recursive: true })
-    await writeFile(join(root, 'skills', 'brainstorming', 'SKILL.md'), 'x')
+    await writeFile(
+      join(root, 'skills', 'brainstorming', 'SKILL.md'),
+      '---\ndescription: Debug systematically\n---\nbody',
+    )
     await mkdir(join(root, '.git', 'foo'), { recursive: true })
     await writeFile(join(root, '.git', 'foo', 'SKILL.md'), 'x')
     await mkdir(join(root, 'node_modules', 'bar'), { recursive: true })
@@ -43,6 +46,8 @@ describe('scanSourceMembers', () => {
     })
     expect(members.map((m) => m.name)).toEqual(['brainstorming'])
     expect(members[0].path).toBe(join(root, 'skills', 'brainstorming'))
+    expect(members[0].relativePath).toBe('skills/brainstorming/SKILL.md')
+    expect(members[0].description).toBe('Debug systematically')
   })
 
   it('ignores custom scan matches outside the supported skills/<name> layout', async () => {
@@ -56,6 +61,49 @@ describe('scanSourceMembers', () => {
     })
 
     expect(members).toEqual([])
+  })
+
+  it('enriches configured source members with runtime path and description metadata', async () => {
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - url: github:obra/superpowers',
+        '    ref: v1',
+        '    members:',
+        '      - name: brainstorming',
+        '        targets:',
+        '          - codex',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    await mkdir(join(root, 'remote-cache', 'superpowers', 'skills', 'brainstorming'), {
+      recursive: true,
+    })
+    await writeFile(
+      join(root, 'remote-cache', 'superpowers', 'skills', 'brainstorming', 'SKILL.md'),
+      '---\ndescription: Runtime source metadata\n---\nbody',
+    )
+
+    const manifest = await loadProjectionManifest(
+      {
+        fs: new NodeFileSystem(),
+        git: {} as never,
+        proc: {} as never,
+        home: root,
+      },
+      root,
+    )
+
+    expect(manifest.skills.sources[0].members).toEqual([
+      {
+        name: 'brainstorming',
+        targets: ['codex'],
+        path: 'skills/brainstorming/SKILL.md',
+        description: 'Runtime source metadata',
+      },
+    ])
   })
 })
 
@@ -82,9 +130,15 @@ describe('loadProjectionManifest', () => {
       'x',
     )
     await mkdir(join(root, 'assets', 'skills', 'ref-skill'), { recursive: true })
-    await writeFile(join(root, 'assets', 'skills', 'ref-skill', 'SKILL.md'), 'x')
+    await writeFile(
+      join(root, 'assets', 'skills', 'ref-skill', 'SKILL.md'),
+      '---\ndescription: Referenced local skill\n---\nbody',
+    )
     await mkdir(join(root, 'assets', 'skills', 'auto-local'), { recursive: true })
-    await writeFile(join(root, 'assets', 'skills', 'auto-local', 'SKILL.md'), 'x')
+    await writeFile(
+      join(root, 'assets', 'skills', 'auto-local', 'SKILL.md'),
+      '---\ndescription: Built-in local skill\n---\nbody',
+    )
 
     const manifest = await loadProjectionManifest(
       {
@@ -96,13 +150,21 @@ describe('loadProjectionManifest', () => {
       root,
     )
 
-    expect(manifest.skills.sources[0].members).toEqual([{ name: 'brainstorming', targets: [] }])
+    expect(manifest.skills.sources[0].members).toEqual([
+      { name: 'brainstorming', targets: [], path: 'skills/brainstorming/SKILL.md' },
+    ])
     expect(manifest.skills.skills).toContainEqual({
       id: 'ref-skill',
       path: './assets/skills/ref-skill',
       available: true,
+      skillFilePath: 'assets/skills/ref-skill/SKILL.md',
+      description: 'Referenced local skill',
     })
-    expect(manifest.skills.skills).toContainEqual({ id: 'auto-local' })
+    expect(manifest.skills.skills).toContainEqual({
+      id: 'auto-local',
+      skillFilePath: 'assets/skills/auto-local/SKILL.md',
+      description: 'Built-in local skill',
+    })
     expect(manifest.config.skill_naming).toBe('hyphen')
   })
 

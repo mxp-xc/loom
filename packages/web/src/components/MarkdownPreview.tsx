@@ -11,6 +11,69 @@ interface MarkdownPreviewProps {
   onSave?: (content: string) => Promise<void>
 }
 
+interface FrontmatterField {
+  key: string
+  value: string
+}
+
+const unquoteFrontmatterValue = (value: string) => {
+  const trimmed = value.trim()
+  if (trimmed.length < 2) return trimmed
+  const quote = trimmed[0]
+  if ((quote === '"' || quote === "'") && trimmed[trimmed.length - 1] === quote) {
+    return trimmed.slice(1, -1)
+  }
+  return trimmed
+}
+
+const parseFrontmatter = (value: string): { fields: FrontmatterField[]; body: string } => {
+  const normalized = value.replace(/^\uFEFF/, '')
+  if (!normalized.startsWith('---\n') && !normalized.startsWith('---\r\n')) {
+    return { fields: [], body: value }
+  }
+
+  const lines = normalized.split(/\r?\n/)
+  const closingIndex = lines.findIndex((line, index) => index > 0 && line.trim() === '---')
+  if (closingIndex < 0) return { fields: [], body: value }
+
+  const fields = lines
+    .slice(1, closingIndex)
+    .map((line) => {
+      const match = line.match(/^([A-Za-z0-9_.-]+):\s*(.*)$/)
+      if (!match) return null
+      return {
+        key: match[1],
+        value: unquoteFrontmatterValue(match[2]),
+      }
+    })
+    .filter((field): field is FrontmatterField => !!field && field.value.length > 0)
+
+  return {
+    fields,
+    body: lines
+      .slice(closingIndex + 1)
+      .join('\n')
+      .trimStart(),
+  }
+}
+
+function FrontmatterFormatter({ fields }: { fields: FrontmatterField[] }) {
+  if (!fields.length) return null
+  return (
+    <section className="md-frontmatter" aria-label="SKILL.md metadata">
+      <div className="md-frontmatter-eyebrow">metadata</div>
+      <dl className="md-frontmatter-grid">
+        {fields.map((field) => (
+          <div className="md-frontmatter-row" key={field.key}>
+            <dt>{field.key}</dt>
+            <dd>{field.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
 export default function MarkdownPreview({
   content,
   editable = false,
@@ -63,6 +126,7 @@ export default function MarkdownPreview({
   }
 
   const sourceLabel = editable ? '编辑' : '原文'
+  const { fields: frontmatterFields, body: markdownBody } = parseFrontmatter(content)
 
   const buttons = (
     <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
@@ -178,8 +242,9 @@ export default function MarkdownPreview({
           color: 'var(--text)',
         }}
       >
+        <FrontmatterFormatter fields={frontmatterFields} />
         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-          {content}
+          {markdownBody}
         </ReactMarkdown>
       </div>
     </div>

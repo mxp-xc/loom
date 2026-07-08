@@ -7,6 +7,10 @@ export interface SkillMemberOverride {
   name: string
   enabled?: boolean
   targets?: AgentId[]
+  /** Runtime-only source SKILL.md path relative to the source repository root. */
+  path?: string
+  /** Runtime-only source SKILL.md frontmatter description. */
+  description?: string
 }
 
 export interface SkillSource {
@@ -24,6 +28,10 @@ export interface LocalSkill {
   targets?: AgentId[]
   /** Runtime-only status added to manifest responses for referenced skills. */
   available?: boolean
+  /** Runtime-only local SKILL.md path relative to the repo root when possible. */
+  skillFilePath?: string
+  /** Runtime-only local SKILL.md frontmatter description. */
+  description?: string
 }
 
 export interface SkillsManifest {

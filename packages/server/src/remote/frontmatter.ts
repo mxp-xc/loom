@@ -15,9 +15,15 @@ export function parseSkillMeta(
 ): SkillMeta | null {
   const { data } = matter(content)
   if (!NAME_REGEX.test(dirName)) return null
+  const description =
+    typeof data.description === 'string'
+      ? data.description
+      : typeof data.desc === 'string'
+        ? data.desc
+        : ''
   return {
     name: dirName,
-    description: (data.description as string) ?? '',
+    description,
     path: skillPath,
   }
 }

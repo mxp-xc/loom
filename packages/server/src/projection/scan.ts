@@ -1,8 +1,10 @@
 import { glob } from 'tinyglobby'
 import { join, dirname, basename } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import type { IFileSystem } from '../ports/fs.js'
 import type { SkillSource, LocalSkill } from '@loom/core'
 import { logger } from '../lib/logger.js'
+import { parseSkillMeta } from '../remote/frontmatter.js'
 
 const DEFAULT_IGNORE = ['**/.git/**', '**/node_modules/**', '**/.cache/**']
 const scanLogger = logger.child('projection.scan')
@@ -10,6 +12,8 @@ const scanLogger = logger.child('projection.scan')
 export interface ScannedMember {
   name: string
   path: string
+  relativePath?: string
+  description?: string
 }
 
 export async function scanSourceMembers(
@@ -28,7 +32,25 @@ export async function scanSourceMembers(
       })
       continue
     }
-    members.push({ name: memberName, path: join(repoPath, dirname(match)) })
+    const skillPath = join(repoPath, match)
+    const skillDir = join(repoPath, dirname(match))
+    let description = ''
+    try {
+      const content = await readFile(skillPath, 'utf8')
+      description = parseSkillMeta(content, memberName, skillDir)?.description ?? ''
+    } catch (err) {
+      scanLogger.error('failed to read source skill metadata', {
+        err,
+        url: src.url,
+        path: skillPath,
+      })
+    }
+    members.push({
+      name: memberName,
+      path: skillDir,
+      relativePath: match.replace(/\\/g, '/'),
+      description,
+    })
   }
   return members.sort((a, b) => a.name.localeCompare(b.name))
 }

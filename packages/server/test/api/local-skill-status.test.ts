@@ -7,6 +7,7 @@ describe('local skill availability', () => {
   it('marks refs by checking their SKILL.md file', async () => {
     const fs = {
       exists: vi.fn(async (path: string) => path === '/repo/valid/SKILL.md'),
+      readFile: vi.fn(async () => '---\ndescription: Valid local skill\n---\nbody'),
     }
     const skills = [
       { id: 'valid', path: './valid' },
@@ -17,10 +18,28 @@ describe('local skill availability', () => {
     await annotateLocalSkillAvailability(fs as never, '/repo', skills)
 
     expect(skills).toEqual([
-      { id: 'valid', path: './valid', available: true },
+      {
+        id: 'valid',
+        path: './valid',
+        available: true,
+        skillFilePath: 'valid/SKILL.md',
+        description: 'Valid local skill',
+      },
       { id: 'missing', path: './missing', available: false },
       { id: 'builtin' },
     ])
+  })
+
+  it('accepts desc frontmatter as a local skill description alias', async () => {
+    const fs = {
+      exists: vi.fn(async (path: string) => path === '/repo/alias/SKILL.md'),
+      readFile: vi.fn(async () => '---\ndesc: Alias local skill\n---\nbody'),
+    }
+    const skills = [{ id: 'alias', path: './alias' }]
+
+    await annotateLocalSkillAvailability(fs as never, '/repo', skills)
+
+    expect(skills[0]).toMatchObject({ description: 'Alias local skill' })
   })
 })
 

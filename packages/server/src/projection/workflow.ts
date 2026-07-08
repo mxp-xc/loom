@@ -1,4 +1,4 @@
-import { isAbsolute, join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import {
   buildManifest,
   loadRepoManifest,
@@ -22,7 +22,8 @@ import { readLocalConfig, readRepoFiles } from '../api/repo-config.js'
 import { executeProjection, type ProjectionResult, type ProjectionScope } from './executor.js'
 import { resolveAgentAwareVars } from '../vars/agent-aware.js'
 import { createProjectionDeps } from './deps.js'
-import { mergeLocalSkills, scanSourceMembers } from './scan.js'
+import { mergeLocalSkills, scanSourceMembers, type ScannedMember } from './scan.js'
+import { parseSkillMeta } from '../remote/frontmatter.js'
 
 const workflowLogger = logger.child('projection.workflow')
 const DEFAULT_AGENTS: AgentId[] = ['claude-code', 'codex', 'opencode']
@@ -88,16 +89,29 @@ export async function loadProjectionManifest(
 }
 
 export async function annotateLocalSkillAvailability(
-  fs: Pick<IFileSystem, 'exists'>,
+  fs: Pick<IFileSystem, 'exists' | 'readFile'>,
   repoPath: string,
   skills: LocalSkill[],
 ): Promise<void> {
   await Promise.all(
     skills.map(async (skill) => {
-      if (!skill.path) return
-      skill.available = await fs.exists(
-        appendPath(resolveSkillDir(skill.path, repoPath), 'SKILL.md'),
-      )
+      const skillDir = resolveLocalSkillDir(skill, repoPath)
+      const skillFile = appendPath(skillDir, 'SKILL.md')
+      const available = await fs.exists(skillFile)
+      if (skill.path) skill.available = available
+      if (!available) return
+      skill.skillFilePath = localSkillFilePath(skill, repoPath, skillFile)
+      try {
+        const content = await fs.readFile(skillFile)
+        const description = parseSkillMeta(content, skill.id, skillDir)?.description
+        if (description) skill.description = description
+      } catch (err) {
+        workflowLogger.error('local skill metadata read failed', {
+          err,
+          skillId: skill.id,
+          path: skillFile,
+        })
+      }
     }),
   )
 }
@@ -135,18 +149,55 @@ async function ensureSourceMembers(
         continue
       }
     }
-    if (hasConfiguredMembers) continue
     if (!(await deps.fs.exists(cacheDir))) continue
     try {
       const scanned = await scanSourceMembers(cacheDir, source)
+      if (hasConfiguredMembers) {
+        const metadataByName = new Map(scanned.map((member) => [member.name, member]))
+        source.members = (source.members ?? []).map((member) => ({
+          ...member,
+          ...sourceMemberMetadata(metadataByName.get(member.name)),
+        }))
+        continue
+      }
       if (scanned.length > 0) {
         const targets = (source as SkillSource & { targets?: AgentId[] }).targets ?? []
-        source.members = scanned.map((member) => ({ name: member.name, targets }))
+        source.members = scanned.map((member) => ({
+          name: member.name,
+          targets,
+          ...sourceMemberMetadata(member),
+        }))
       }
     } catch (err) {
       workflowLogger.error('source member scan failed', { err, url: source.url, repoId })
     }
   }
+}
+
+function sourceMemberMetadata(
+  member: ScannedMember | undefined,
+): Partial<NonNullable<SkillSource['members']>[number]> {
+  if (!member) return {}
+  return {
+    ...(member.relativePath ? { path: member.relativePath } : {}),
+    ...(member.description ? { description: member.description } : {}),
+  }
+}
+
+function resolveLocalSkillDir(skill: LocalSkill, repoPath: string): string {
+  return skill.path
+    ? resolveSkillDir(skill.path, repoPath)
+    : appendPath(repoPath, appendPath('assets/skills', skill.id))
+}
+
+function localSkillFilePath(skill: LocalSkill, repoPath: string, skillFile: string): string {
+  if (!skill.path) return appendPath(appendPath('assets/skills', skill.id), 'SKILL.md')
+  if (isAbsolute(skill.path)) {
+    const rel = relative(repoPath, skillFile).replace(/\\/g, '/')
+    if (rel && !rel.startsWith('..') && !isAbsolute(rel)) return rel
+    return skillFile.replace(/\\/g, '/')
+  }
+  return appendPath(skill.path.replace(/^\.([/\\])/, ''), 'SKILL.md').replace(/\\/g, '/')
 }
 
 function resolveSkillDir(localPath: string, repoPath: string): string {

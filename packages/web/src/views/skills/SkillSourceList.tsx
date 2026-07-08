@@ -9,7 +9,15 @@ import {
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
-import { AlertTriangle, ChevronDown, RefreshCw, Pencil, Trash2, ScanLine } from 'lucide-react'
+import {
+  AlertTriangle,
+  ChevronDown,
+  ExternalLink,
+  RefreshCw,
+  Pencil,
+  Trash2,
+  ScanLine,
+} from 'lucide-react'
 import { sortSkillMembers, type SkillDetail } from './types'
 import type { ManifestOperations, SourceUpdateState } from '@/hooks/useManifestOperations'
 
@@ -51,6 +59,60 @@ function sourceTargetState(src: SkillSource, agent: AgentId) {
   const count = members.filter((member) => (member.targets ?? []).includes(agent)).length
   const state = count === 0 ? 'off' : count === members.length ? 'on' : 'mixed'
   return { count, total: members.length, state }
+}
+
+type SourceSkillMember = NonNullable<SkillSource['members']>[number]
+type LocalSkillItem = Manifest['skills']['skills'][number]
+
+function sourceSkillRelativePath(member: SourceSkillMember): string {
+  const rawPath = member.path?.replace(/\\/g, '/')
+  if (!rawPath) return `skills/${member.name}/SKILL.md`
+  const skillsPathIndex = rawPath.lastIndexOf('/skills/')
+  const relativePath =
+    skillsPathIndex >= 0 ? rawPath.slice(skillsPathIndex + 1) : rawPath.replace(/^\/+/, '')
+  return relativePath.endsWith('/SKILL.md')
+    ? relativePath
+    : relativePath.replace(/\/+$/, '') + '/SKILL.md'
+}
+
+function githubRepositoryUrl(sourceUrl: string): string | null {
+  const withoutGitSuffix = sourceUrl.replace(/\.git$/, '')
+  if (withoutGitSuffix.startsWith('github:')) {
+    return 'https://github.com/' + withoutGitSuffix.slice('github:'.length).replace(/^\/+/, '')
+  }
+  if (withoutGitSuffix.startsWith('git@github.com:')) {
+    return 'https://github.com/' + withoutGitSuffix.slice('git@github.com:'.length)
+  }
+  const match = withoutGitSuffix.match(/^https?:\/\/github\.com\/([^/]+\/[^/#?]+)/)
+  return match ? 'https://github.com/' + match[1] : null
+}
+
+function encodePathSegmented(value: string): string {
+  return value.split('/').map(encodeURIComponent).join('/')
+}
+
+function githubSourceFileUrl(sourceUrl: string, ref: string, relativePath: string): string | null {
+  const repoUrl = githubRepositoryUrl(sourceUrl)
+  if (!repoUrl) return null
+  return `${repoUrl}/blob/${encodePathSegmented(ref)}/${encodePathSegmented(relativePath)}`
+}
+
+function localSkillFilePath(skill: LocalSkillItem): string {
+  if (skill.skillFilePath) return skill.skillFilePath
+  const rawPath = skill.path?.replace(/\\/g, '/') ?? `assets/skills/${skill.id}`
+  const relativePath = rawPath.replace(/^\.\/+/, '').replace(/\/+$/, '')
+  return relativePath.endsWith('/SKILL.md') ? relativePath : relativePath + '/SKILL.md'
+}
+
+function skillFolderDisplayPath(skillFilePath: string): string {
+  return skillFilePath.replace(/\\/g, '/').replace(/\/SKILL\.md$/, '')
+}
+
+function localSkillDisplayPath(skillFilePath: string): string {
+  const folderPath = skillFolderDisplayPath(skillFilePath).replace(/^\.\/+/, '')
+  return folderPath.startsWith('assets/skills/')
+    ? folderPath.slice('assets/skills/'.length)
+    : folderPath
 }
 
 export default function SkillSourceList({
@@ -304,6 +366,9 @@ export default function SkillSourceList({
                 sortSkillMembers(src.members ?? []).map((m) => {
                   const isEnabled = m.enabled !== false
                   const mTargets = (m.targets ?? []) as AgentId[]
+                  const relativePath = sourceSkillRelativePath(m)
+                  const displayPath = skillFolderDisplayPath(relativePath)
+                  const githubFileUrl = githubSourceFileUrl(src.url, src.ref, relativePath)
                   return (
                     <div
                       key={m.name}
@@ -317,8 +382,33 @@ export default function SkillSourceList({
                       }
                     >
                       <span className={'sdot ' + (isEnabled ? 'green' : 'dim')} />
-                      <span className={'sname clickable' + (isEnabled ? '' : ' dim')}>
-                        {m.name}
+                      <span className="skill-main">
+                        <span className="skill-name-line">
+                          <span className={'sname clickable' + (isEnabled ? '' : ' dim')}>
+                            {m.name}
+                          </span>
+                          {githubFileUrl && (
+                            <a
+                              href={githubFileUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="skill-source-link"
+                              aria-label={`在 GitHub 打开 ${m.name} 的 SKILL.md`}
+                              title={githubFileUrl}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
+                          <span className="skill-source-path" title={relativePath}>
+                            {displayPath}
+                          </span>
+                        </span>
+                        {m.description && (
+                          <span className="skill-description" title={m.description}>
+                            {m.description}
+                          </span>
+                        )}
                       </span>
                       <span className="chips" onClick={(e) => e.stopPropagation()}>
                         {visibleAgents.map((a) =>
@@ -361,20 +451,23 @@ export default function SkillSourceList({
                 <ChevronDown size={14} style={chevronStyle(!expandedGroups.has('local'))} />
                 local skills <span className="local-tag">local</span>
               </button>
+              <span className="skill-source-path local-skills-root-path" title="assets/skills">
+                assets/skills
+              </span>
             </div>
             {expandedGroups.has('local') &&
               manifest.skills.skills.map((s) => {
                 const lTargets = (s.targets ?? []) as AgentId[]
                 const missing = Boolean(s.path && s.available === false)
+                const filePath = localSkillFilePath(s)
+                const displayPath = localSkillDisplayPath(filePath)
+                const openLocalDetail = () =>
+                  onOpenDetail({ skillId: s.id, path: s.path, targets: lTargets })
                 return (
                   <div
                     key={s.id}
                     className={'skill' + (missing ? ' skill-missing' : ' skill-clickable')}
-                    onClick={
-                      missing
-                        ? undefined
-                        : () => onOpenDetail({ skillId: s.id, path: s.path, targets: lTargets })
-                    }
+                    onClick={missing ? undefined : openLocalDetail}
                   >
                     <span className={'sdot ' + (missing ? 'yellow' : 'green')} />
                     <span className="skill-main">
@@ -387,12 +480,15 @@ export default function SkillSourceList({
                             className="sname clickable skill-name-button"
                             onClick={(event) => {
                               event.stopPropagation()
-                              onOpenDetail({ skillId: s.id, path: s.path, targets: lTargets })
+                              openLocalDetail()
                             }}
                           >
                             {s.id}
                           </button>
                         )}
+                        <span className="skill-source-path" title={filePath}>
+                          {displayPath}
+                        </span>
                         {s.path && <span className="ref-badge">ref</span>}
                         {missing && (
                           <span className="missing-ref-badge" role="status">
@@ -400,10 +496,9 @@ export default function SkillSourceList({
                           </span>
                         )}
                       </span>
-                      {s.path && (
-                        <span className="skill-local-path">
-                          <span className="skill-local-path-label">本地路径</span>
-                          <span>{s.path}</span>
+                      {s.description && (
+                        <span className="skill-description" title={s.description}>
+                          {s.description}
                         </span>
                       )}
                     </span>

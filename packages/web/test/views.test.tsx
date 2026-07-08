@@ -7,6 +7,7 @@ import { api } from '../src/lib/api'
 import ToastHost from '../src/components/ToastHost'
 import Skills from '../src/views/skills/Skills'
 import SkillSourceList from '../src/views/skills/SkillSourceList'
+import SkillDetailEditor from '../src/views/skills/SkillDetailEditor'
 import AddSkillModal from '../src/views/skills/AddSkillModal'
 import EditSourceModal from '../src/views/skills/EditSourceModal'
 import MemberScanModal from '../src/views/skills/MemberScanModal'
@@ -57,6 +58,7 @@ vi.mock('../src/lib/api', () => ({
     getSkillContent: vi.fn(async () => ({ ok: true, content: '# Skill' })),
     deleteSource: vi.fn(async () => ({ ok: true })),
     deleteLocalSkill: vi.fn(async () => ({ ok: true })),
+    saveSkillContent: vi.fn(async () => ({ ok: true })),
     addMcpServer: vi.fn(async () => ({ ok: true })),
     updateMcpServer: vi.fn(async () => ({ ok: true })),
     updateMcpTargets: vi.fn(async () => ({ ok: true })),
@@ -103,6 +105,8 @@ vi.mock('../src/lib/api', () => ({
                     members: [
                       {
                         name: 'systematic-debugging',
+                        description: 'A disciplined debugging loop for bugs and regressions.',
+                        path: 'skills/systematic-debugging/SKILL.md',
                         targets: ['claude-code', 'codex', 'opencode'],
                       },
                     ],
@@ -117,6 +121,8 @@ vi.mock('../src/lib/api', () => ({
                   },
                   {
                     id: 'frontend-design',
+                    description: 'Design guidance for distinctive front-end UI.',
+                    skillFilePath: 'assets/skills/frontend-design/SKILL.md',
                     targets: [],
                   },
                 ],
@@ -551,12 +557,38 @@ describe('Skills view', () => {
     expect(screen.getByRole('button', { name: '全部收起' })).toBeDefined()
     expect(screen.getByText('systematic-debugging')).toBeDefined()
 
-    const localName = screen.getByText('test-qa-skill')
+    const sourceRow = screen.getByText('systematic-debugging').closest('.skill')
+    expect(sourceRow).not.toBeNull()
+    expect(within(sourceRow as HTMLElement).getByText('skills/systematic-debugging')).toBeDefined()
+    expect(
+      within(sourceRow as HTMLElement).queryByText('skills/systematic-debugging/SKILL.md'),
+    ).toBeNull()
+    expect(
+      within(sourceRow as HTMLElement).getByText(
+        'A disciplined debugging loop for bugs and regressions.',
+      ),
+    ).toBeDefined()
+    const sourceFileLink = within(sourceRow as HTMLElement).getByRole('link', {
+      name: '在 GitHub 打开 systematic-debugging 的 SKILL.md',
+    })
+    expect(sourceFileLink.getAttribute('href')).toBe(
+      'https://github.com/obra/superpowers/blob/main/skills/systematic-debugging/SKILL.md',
+    )
+
+    const localName = document.querySelector('.local-skills-group .skill .sname')
     const localRow = localName.closest('.skill')
     expect(localRow).not.toBeNull()
+    const localGroupHead = document.querySelector('.local-skills-group .group-head') as HTMLElement
+    expect(within(localGroupHead).getByText('assets/skills')).toBeDefined()
     expect(within(localRow as HTMLElement).getByText('ref')).toBeDefined()
-    expect(within(localRow as HTMLElement).getByText('本地路径')).toBeDefined()
-    expect(within(localRow as HTMLElement).getByText('./assets/skills/test-qa-skill')).toBeDefined()
+    expect((localRow as HTMLElement).querySelector('.skill-source-path')?.textContent?.trim()).toBe(
+      'test-qa-skill',
+    )
+    expect(within(localRow as HTMLElement).queryByText('assets/skills/test-qa-skill')).toBeNull()
+    expect(
+      within(localRow as HTMLElement).queryByText('assets/skills/test-qa-skill/SKILL.md'),
+    ).toBeNull()
+    expect(within(localRow as HTMLElement).queryByText('本地路径')).toBeNull()
     expect(within(localRow as HTMLElement).queryByText('projected')).toBeNull()
 
     expect(within(localRow as HTMLElement).queryByText('OC')).toBeNull()
@@ -565,8 +597,22 @@ describe('Skills view', () => {
       within(localRow as HTMLElement).queryByRole('button', { name: 'test-qa-skill' }),
     ).toBeNull()
 
-    const frontendRow = screen.getByText('frontend-design').closest('.skill')
+    const frontendRow = screen.getByRole('button', { name: 'frontend-design' }).closest('.skill')
     expect(frontendRow).not.toBeNull()
+    expect(
+      (frontendRow as HTMLElement).querySelector('.skill-source-path')?.textContent?.trim(),
+    ).toBe('frontend-design')
+    expect(
+      within(frontendRow as HTMLElement).queryByText('assets/skills/frontend-design'),
+    ).toBeNull()
+    expect(
+      within(frontendRow as HTMLElement).getByText('Design guidance for distinctive front-end UI.'),
+    ).toBeDefined()
+    expect(
+      within(frontendRow as HTMLElement).queryByRole('button', {
+        name: '打开 frontend-design 的文件夹',
+      }),
+    ).toBeNull()
     fireEvent.click(within(frontendRow as HTMLElement).getByRole('button', { name: 'CX' }))
     await waitFor(() =>
       expect(api.updateLocalSkillTargets).toHaveBeenCalledWith({
@@ -578,7 +624,9 @@ describe('Skills view', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '折叠 superpowers' }))
     expect(screen.queryByText('systematic-debugging')).toBeNull()
-    expect(screen.getByText('test-qa-skill')).toBeDefined()
+    expect(document.querySelector('.local-skills-group .skill .sname')?.textContent).toBe(
+      'test-qa-skill',
+    )
 
     fireEvent.click(screen.getByRole('button', { name: '全部收起' }))
     expect(screen.getByRole('button', { name: '全部展开' })).toBeDefined()
@@ -594,7 +642,7 @@ describe('Skills view', () => {
     )
 
     fireEvent.click(await screen.findByRole('button', { name: '全部展开' }))
-    const frontendRow = screen.getByText('frontend-design').closest('.skill')
+    const frontendRow = screen.getByRole('button', { name: 'frontend-design' }).closest('.skill')
     expect(frontendRow).not.toBeNull()
     fireEvent.click(within(frontendRow as HTMLElement).getByRole('button', { name: 'CX' }))
 
@@ -888,13 +936,97 @@ describe('Skill source updates', () => {
       />,
     )
 
-    fireEvent.click(screen.getByText('frontend-design').closest('.skill') as HTMLElement)
+    fireEvent.click(
+      screen.getByRole('button', { name: 'frontend-design' }).closest('.skill') as HTMLElement,
+    )
 
     expect(onOpenDetail).toHaveBeenCalledWith({
       skillId: 'frontend-design',
       path: undefined,
       targets: ['codex'],
     })
+  })
+
+  it('copies the SKILL.md preview content from the detail modal', async () => {
+    const content =
+      '---\nname: test-qa-skill\ndescription: Preview description\n---\n# test-qa-skill\nBody'
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+    vi.mocked(api.getSkillContent).mockResolvedValueOnce({ ok: true, content })
+    const showToast = vi.fn()
+
+    render(
+      <SkillDetailEditor
+        repoPath="/tmp/skills-layout"
+        detail={{
+          skillId: 'test-qa-skill',
+          path: './assets/skills/test-qa-skill',
+          targets: ['codex'],
+        }}
+        showToast={showToast}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = screen.getByRole('dialog', { name: 'test-qa-skill' })
+    await within(dialog).findByText('test-qa-skill')
+    expect(within(dialog).queryByText(/name: test-qa-skill/)).toBeNull()
+    expect(within(dialog).queryByText(/description: Preview description/)).toBeNull()
+    expect(within(dialog).getByText('name')).toBeDefined()
+    expect(within(dialog).getByText('Preview description')).toBeDefined()
+    fireEvent.click(within(dialog).getByRole('button', { name: '复制 SKILL.md' }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(content))
+    expect(showToast).toHaveBeenCalledWith('已复制 SKILL.md')
+  })
+
+  it('refreshes the manifest after saving local SKILL.md content', async () => {
+    const original = '---\nname: frontend-design\ndescription: Old description\n---\n# Skill'
+    const updated = '---\nname: frontend-design\ndescription: Updated description\n---\n# Skill'
+    vi.mocked(api.getSkillContent).mockResolvedValueOnce({ ok: true, content: original })
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: {
+        sources: [],
+        skills: [{ id: 'frontend-design', description: 'Updated description' }],
+      },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex'] },
+      errors: [],
+    } as never)
+    const showToast = vi.fn()
+
+    render(
+      <SkillDetailEditor
+        repoPath="/tmp/skill-save-refresh"
+        detail={{
+          skillId: 'frontend-design',
+          path: './assets/skills/frontend-design',
+          targets: ['codex'],
+        }}
+        showToast={showToast}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = screen.getByRole('dialog', { name: 'frontend-design' })
+    fireEvent.click(await within(dialog).findByRole('button', { name: '编辑' }))
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: updated } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() =>
+      expect(api.saveSkillContent).toHaveBeenCalledWith({
+        repo: '/tmp/skill-save-refresh',
+        skillId: 'frontend-design',
+        localPath: './assets/skills/frontend-design',
+        content: updated,
+      }),
+    )
+    await waitFor(() => expect(api.getManifest).toHaveBeenCalledWith('/tmp/skill-save-refresh'))
+    expect(showToast).toHaveBeenCalledWith('已保存')
   })
 
   it('opens source member detail with the configured source member skill id', () => {

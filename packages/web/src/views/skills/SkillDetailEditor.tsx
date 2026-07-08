@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { refreshManifest } from '@/hooks/useManifest'
 import Modal from '@/components/Modal'
 import MarkdownPreview from '@/components/MarkdownPreview'
 import { Copy, Check } from 'lucide-react'
@@ -31,18 +32,21 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
   const [skillLoading, setSkillLoading] = useState(false)
   const [skillError, setSkillError] = useState<string | null>(null)
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
+  const [copiedSkillContent, setCopiedSkillContent] = useState(false)
 
   useEffect(() => {
     if (!detail) {
       setSkillContent(null)
       setSkillError(null)
       setSkillLoading(false)
+      setCopiedSkillContent(false)
       return
     }
     let active = true
     setSkillLoading(true)
     setSkillError(null)
     setSkillContent(null)
+    setCopiedSkillContent(false)
     api
       .getSkillContent(repoPath, detail.skillId, detail.source, detail.path)
       .then((res) => {
@@ -69,6 +73,18 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
       await navigator.clipboard.writeText(p)
       setCopiedPath(p)
       setTimeout(() => setCopiedPath(null), 1500)
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+
+  const copySkillContent = async () => {
+    if (!navigator.clipboard || !skillContent) return
+    try {
+      await navigator.clipboard.writeText(skillContent)
+      setCopiedSkillContent(true)
+      showToast('已复制 SKILL.md')
+      setTimeout(() => setCopiedSkillContent(false), 1500)
     } catch {
       /* clipboard unavailable */
     }
@@ -170,7 +186,30 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
             </div>
           </div>
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-            <div className="label">SKILL.md</div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}
+            >
+              <div className="label">SKILL.md</div>
+              {skillContent && (
+                <IconButton
+                  label={copiedSkillContent ? '已复制 SKILL.md' : '复制 SKILL.md'}
+                  tooltip={copiedSkillContent ? '已复制' : '复制'}
+                  tone={copiedSkillContent ? 'success' : 'default'}
+                  onClick={() => void copySkillContent()}
+                >
+                  {copiedSkillContent ? (
+                    <Check className="h-3 w-3" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                </IconButton>
+              )}
+            </div>
             <div className="skill-detail-content-frame" data-testid="skill-detail-content-frame">
               {showSkillLoading && (
                 <>
@@ -201,6 +240,14 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
                         content: newContent,
                       })
                       setSkillContent(newContent)
+                      try {
+                        await refreshManifest(repoPath)
+                      } catch (e) {
+                        showToast(
+                          '已保存，但刷新列表失败：' + (e instanceof Error ? e.message : String(e)),
+                        )
+                        return
+                      }
                       showToast('已保存')
                     } catch (e) {
                       showToast(e instanceof Error ? e.message : String(e))
