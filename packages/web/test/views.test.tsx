@@ -4,10 +4,12 @@ import { useState, type ReactNode } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { api } from '../src/lib/api'
+import ToastHost from '../src/components/ToastHost'
 import Skills from '../src/views/skills/Skills'
 import SkillSourceList from '../src/views/skills/SkillSourceList'
 import AddSkillModal from '../src/views/skills/AddSkillModal'
 import EditSourceModal from '../src/views/skills/EditSourceModal'
+import MemberScanModal from '../src/views/skills/MemberScanModal'
 import Sync from '../src/views/Sync'
 import Mcp from '../src/views/Mcp'
 import Memory from '../src/views/Memory'
@@ -40,6 +42,8 @@ vi.mock('../src/lib/api', () => ({
     getConfig: vi.fn(async () => ({ effective: {}, repo: {}, local: {} })),
     putConfig: vi.fn(async () => ({ ok: true })),
     scanLocalSkills: vi.fn(async () => ({ ok: true, skills: [] })),
+    importLocalSkills: vi.fn(async () => ({ ok: true, count: 1 })),
+    writeLocalSkills: vi.fn(async () => ({ ok: true, count: 1 })),
     scanSource: vi.fn(async () => ({ ok: true, members: [] })),
     getSourceRefs: vi.fn(async () => ({ ok: true, branches: [], tags: [] })),
     refreshSource: vi.fn(async () => ({ ok: true, members: [] })),
@@ -203,6 +207,18 @@ function EditSourceSwitchHarness() {
         onSaved={() => setSource(null)}
       />
     </>
+  )
+}
+
+function MemberScanModalHarness({ source, repoPath }: { source: any; repoPath: string }) {
+  const operations = useManifestOperations(repoPath)
+  return (
+    <MemberScanModal
+      source={source}
+      operations={operations}
+      onClose={vi.fn()}
+      onConfirm={vi.fn()}
+    />
   )
 }
 
@@ -409,6 +425,29 @@ describe('Memory view', () => {
         name: null,
       }),
     )
+  })
+
+  it('shows Memory feedback through the app-level toast host', async () => {
+    vi.mocked(api.getMemory).mockResolvedValue({
+      memories: [{ name: 'v1' }],
+      active: 'v1',
+      activeContent: '# v1',
+    } as never)
+    vi.mocked(api.project).mockResolvedValueOnce({ ok: true } as never)
+
+    render(
+      <>
+        <ToastHost />
+        <Memory repoPath="/tmp/memory-feedback" />
+      </>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '投影 memory' }))
+
+    await waitFor(() =>
+      expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/memory-feedback', scope: 'memory' }),
+    )
+    expect(await screen.findByText('投影完成')).toBeDefined()
   })
 })
 
@@ -631,6 +670,64 @@ describe('Add Skill modal', () => {
     await waitFor(() =>
       expect(api.scanLocalSkills).toHaveBeenCalledWith('~/.agents/skills', '/tmp/r'),
     )
+  })
+
+  it('filters local skill scan results through the shared selectable list', async () => {
+    vi.mocked(api.scanLocalSkills).mockResolvedValueOnce({
+      ok: true,
+      skills: [
+        { name: 'alpha-skill', path: '/skills/alpha/SKILL.md' },
+        { name: 'beta-skill', path: '/skills/beta/SKILL.md' },
+      ],
+    } as never)
+
+    render(<AddSkillModal open repoPath="/tmp/add-local-filter" onClose={vi.fn()} />)
+
+    await screen.findByText('alpha-skill')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'alpha-skill' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索 skill…' }), {
+      target: { value: 'beta' },
+    })
+
+    expect(screen.queryByText('alpha-skill')).toBeNull()
+    expect(screen.getByText('beta-skill')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '添加 Local Skill' }))
+
+    await waitFor(() =>
+      expect(api.importLocalSkills).toHaveBeenCalledWith({
+        repo: '/tmp/add-local-filter',
+        skills: [{ name: 'beta-skill', path: '/skills/beta/SKILL.md' }],
+        mode: 'ref',
+      }),
+    )
+  })
+
+  it('keeps installed source members disabled in Add Source scan results', async () => {
+    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
+      ok: true,
+      branches: ['main'],
+      tags: [],
+    } as never)
+    vi.mocked(api.scanSource).mockResolvedValueOnce({
+      ok: true,
+      members: [
+        { name: 'fresh', description: '', path: 'fresh/SKILL.md', installed: false },
+        { name: 'installed', description: '', path: 'installed/SKILL.md', installed: true },
+      ],
+    } as never)
+
+    render(<AddSkillModal open repoPath="/tmp/add-source-disabled" onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    fireEvent.change(screen.getByPlaceholderText('https://github.com/org/repo'), {
+      target: { value: 'https://example.test/source.git' },
+    })
+    fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
+    fireEvent.click(screen.getByRole('button', { name: 'Scan' }))
+
+    await screen.findByText('fresh')
+    const installed = screen.getByRole('checkbox', { name: 'installed' })
+    expect((installed as HTMLInputElement).disabled).toBe(true)
   })
 
   it('keeps the source modal open when members fail after source creation', async () => {
@@ -1013,6 +1110,68 @@ describe('Skill source updates', () => {
     expect(within(dialog).getByText('已选 0 / 2')).toBeDefined()
   })
 
+  it('keeps hidden selected source members while filtering Edit Source members', async () => {
+    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
+      ok: true,
+      branches: ['main'],
+      tags: [],
+    } as never)
+    vi.mocked(api.scanSource).mockResolvedValueOnce({
+      ok: true,
+      members: [
+        { name: 'alpha', path: 'alpha/SKILL.md', installed: false },
+        { name: 'beta', path: 'beta/SKILL.md', installed: false },
+      ],
+    } as never)
+
+    render(<EditSourceSwitchHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+
+    fireEvent.change(within(dialog).getByRole('searchbox', { name: '搜索 skill…' }), {
+      target: { value: 'alpha' },
+    })
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'alpha' }))
+    fireEvent.change(within(dialog).getByRole('searchbox', { name: '搜索 skill…' }), {
+      target: { value: 'beta' },
+    })
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'beta' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: /保存/ }))
+
+    await waitFor(() =>
+      expect(api.setSourceMembers).toHaveBeenCalledWith({
+        repo: '/tmp/edit-switch',
+        url: 'https://example.test/alpha.git',
+        members: ['alpha', 'beta'],
+      }),
+    )
+  })
+
+  it('selects and clears all scanned members in MemberScanModal through the shared list', async () => {
+    const source = {
+      url: 'https://example.test/source.git',
+      ref: 'main',
+      members: [{ name: 'alpha', targets: ['codex'] }],
+    } as any
+    vi.mocked(api.refreshSource).mockResolvedValueOnce({
+      ok: true,
+      members: [
+        { name: 'alpha', path: 'alpha/SKILL.md' },
+        { name: 'beta', path: 'beta/SKILL.md' },
+      ],
+    } as never)
+
+    render(<MemberScanModalHarness source={source} repoPath="/tmp/member-scan-shared-list" />)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Scan · source' })
+    expect(within(dialog).getByText('已选 1 / 2')).toBeDefined()
+    fireEvent.click(within(dialog).getByRole('button', { name: '全选' }))
+    expect(within(dialog).getByText('已选 2 / 2')).toBeDefined()
+    fireEvent.click(within(dialog).getByRole('button', { name: '全不选' }))
+    expect(within(dialog).getByText('已选 0 / 2')).toBeDefined()
+  })
+
   it('does not show stale Edit Source errors after switching source', async () => {
     let rejectAlphaRefs!: (error: Error) => void
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -1033,10 +1192,13 @@ describe('Skill source updates', () => {
     try {
       render(<EditSourceSwitchHarness />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
+      const openAlpha = screen.getByRole('button', { name: 'open alpha' })
+      const openBeta = screen.getByRole('button', { name: 'open beta' })
+
+      fireEvent.click(openAlpha)
       expect(await screen.findByRole('dialog', { name: /Edit Source/ })).toBeDefined()
 
-      fireEvent.click(screen.getByRole('button', { name: 'open beta' }))
+      fireEvent.click(openBeta)
       await waitFor(() =>
         expect(api.getSourceRefs).toHaveBeenCalledWith('https://example.test/beta.git'),
       )

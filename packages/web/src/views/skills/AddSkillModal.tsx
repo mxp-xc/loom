@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
+import { SelectableList, type SelectableListItem } from '@/components/ui/selectable-list'
 import { inputStyle } from '@/lib/styles'
-import { Search, FolderInput, RefreshCw } from 'lucide-react'
+import { FolderInput, RefreshCw } from 'lucide-react'
 import { Segmented } from './Segmented'
 import type { ScanMember, LocalScanResult } from './types'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
@@ -37,51 +38,11 @@ const listBox: React.CSSProperties = {
   marginBottom: 14,
 }
 
-const rowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  padding: '7px 10px',
-  borderBottom: '1px solid var(--border)',
-}
-
 const placeholderStyle: React.CSSProperties = {
   padding: '12px 10px',
   fontSize: 12,
   color: 'var(--muted)',
   fontFamily: mono,
-}
-
-function SearchInput({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string
-  onChange: (v: string) => void
-  placeholder: string
-}) {
-  return (
-    <div style={{ position: 'relative', marginBottom: 8 }}>
-      <Search
-        size={13}
-        style={{
-          position: 'absolute',
-          left: 9,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          color: 'var(--muted)',
-          pointerEvents: 'none',
-        }}
-      />
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        style={{ ...inputStyle, paddingLeft: 28, marginBottom: 0 }}
-      />
-    </div>
-  )
 }
 
 export default function AddSkillModal({ open, repoPath, onClose }: Props) {
@@ -97,7 +58,6 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
   const [localScanning, setLocalScanning] = useState(false)
   const [localSkills, setLocalSkills] = useState<LocalScanResult[]>([])
   const [localSelected, setLocalSelected] = useState<Set<string>>(new Set())
-  const [localSearch, setLocalSearch] = useState('')
   // When true, the listed skills came from an external folder picked via the
   // directory chooser (webkitdirectory). These have no server-side path, so
   // import ships their file contents to /skills/local/write. When false, the
@@ -121,7 +81,6 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
   const [srcScanned, setSrcScanned] = useState(false)
   const [srcMembers, setSrcMembers] = useState<ScanMember[]>([])
   const [srcSelected, setSrcSelected] = useState<Set<string>>(new Set())
-  const [srcSearch, setSrcSearch] = useState('')
 
   const scanLocal = useCallback(
     async (dir: string) => {
@@ -211,7 +170,6 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     setAddBusy(false)
     setAddTab('local')
     setLocalPath(DEFAULT_LOCAL_DIR)
-    setLocalSearch('')
     setLocalSkills([])
     setLocalSelected(new Set())
     setPickedExternal(false)
@@ -223,7 +181,6 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     setSrcTags([])
     setSrcMembers([])
     setSrcSelected(new Set())
-    setSrcSearch('')
     setSrcScanned(false)
     void scanLocal(DEFAULT_LOCAL_DIR)
   }, [open, scanLocal])
@@ -319,13 +276,20 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     }
   }
 
-  const filteredLocal = localSkills.filter((s) =>
-    s.name.toLowerCase().includes(localSearch.trim().toLowerCase()),
-  )
+  const localListItems: SelectableListItem[] = localSkills.map((skill) => ({
+    id: skill.name,
+    label: skill.name,
+    searchText: skill.name,
+    meta: 'SKILL.md',
+  }))
   const refOptions = srcType === 'tag' ? srcTags : srcBranches
-  const filteredSrc = srcMembers.filter((s) =>
-    s.name.toLowerCase().includes(srcSearch.trim().toLowerCase()),
-  )
+  const sourceListItems: SelectableListItem[] = srcMembers.map((member) => ({
+    id: member.name,
+    label: member.name,
+    searchText: member.name,
+    disabled: member.installed,
+    meta: member.installed ? '已安装' : undefined,
+  }))
 
   return (
     <Modal open={open} onClose={onClose} title="Add Skill" width={600}>
@@ -401,43 +365,22 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
             </div>
           </div>
 
-          {localSkills.length > 0 && (
-            <SearchInput value={localSearch} onChange={setLocalSearch} placeholder="搜索 skill…" />
-          )}
-
-          <div className="add-skill-results" style={listBox}>
-            {localScanning ? (
+          {localScanning ? (
+            <div className="add-skill-results" style={listBox}>
               <div style={placeholderStyle}>扫描中…</div>
-            ) : localSkills.length === 0 ? (
-              <div style={placeholderStyle}>未发现 SKILL.md</div>
-            ) : filteredLocal.length === 0 ? (
-              <div style={placeholderStyle}>无匹配</div>
-            ) : (
-              filteredLocal.map((s) => {
-                const checked = localSelected.has(s.name)
-                return (
-                  <label key={s.path} style={{ ...rowStyle, cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => {
-                        setLocalSelected((prev) => {
-                          const n = new Set(prev)
-                          if (e.target.checked) n.add(s.name)
-                          else n.delete(s.name)
-                          return n
-                        })
-                      }}
-                    />
-                    <span style={{ flex: 1, fontFamily: mono, fontSize: 12 }}>{s.name}</span>
-                    <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: mono }}>
-                      SKILL.md
-                    </span>
-                  </label>
-                )
-              })
-            )}
-          </div>
+            </div>
+          ) : (
+            <SelectableList
+              ariaLabel="Local Skill"
+              items={localListItems}
+              selectedIds={localSelected}
+              onSelectedIdsChange={setLocalSelected}
+              searchPlaceholder="搜索 skill…"
+              showSearch={localSkills.length > 0}
+              emptyMessage="未发现 SKILL.md"
+              noMatchesMessage="无匹配"
+            />
+          )}
 
           <div className="add-skill-footer">
             <span className="add-skill-selection">已选择 {localSelected.size} 项</span>
@@ -512,54 +455,25 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
             {srcScanning ? '扫描中…' : 'Scan'}
           </Button>
 
-          {srcMembers.length > 0 && (
-            <SearchInput value={srcSearch} onChange={setSrcSearch} placeholder="搜索 skill…" />
-          )}
-
           {(srcScanning || srcScanned) && (
-            <div style={listBox}>
+            <>
               {srcScanning ? (
-                <div style={placeholderStyle}>扫描中…</div>
-              ) : srcMembers.length === 0 ? (
-                <div style={placeholderStyle}>未发现 SKILL.md</div>
-              ) : filteredSrc.length === 0 ? (
-                <div style={placeholderStyle}>无匹配</div>
+                <div style={listBox}>
+                  <div style={placeholderStyle}>扫描中…</div>
+                </div>
               ) : (
-                filteredSrc.map((m) => {
-                  const checked = srcSelected.has(m.name)
-                  return (
-                    <label
-                      key={m.path}
-                      style={{
-                        ...rowStyle,
-                        cursor: m.installed ? 'default' : 'pointer',
-                        opacity: m.installed ? 0.5 : 1,
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={m.installed}
-                        onChange={(e) => {
-                          setSrcSelected((prev) => {
-                            const n = new Set(prev)
-                            if (e.target.checked) n.add(m.name)
-                            else n.delete(m.name)
-                            return n
-                          })
-                        }}
-                      />
-                      <span style={{ flex: 1, fontFamily: mono, fontSize: 12 }}>{m.name}</span>
-                      {m.installed && (
-                        <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: mono }}>
-                          已安装
-                        </span>
-                      )}
-                    </label>
-                  )
-                })
+                <SelectableList
+                  ariaLabel="Source members"
+                  items={sourceListItems}
+                  selectedIds={srcSelected}
+                  onSelectedIdsChange={setSrcSelected}
+                  searchPlaceholder="搜索 skill…"
+                  showSearch={srcMembers.length > 0}
+                  emptyMessage="未发现 SKILL.md"
+                  noMatchesMessage="无匹配"
+                />
               )}
-            </div>
+            </>
           )}
 
           <Button

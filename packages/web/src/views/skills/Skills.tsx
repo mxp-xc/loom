@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import Toast from '@/components/Toast'
 import { Button } from '@/components/ui/button'
 import { ChevronsDownUp, ChevronsUpDown, Plus, RefreshCw } from 'lucide-react'
 import { useManifest } from '@/hooks/useManifest'
@@ -21,7 +20,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
     onError: setError,
     onSuccess: () => setError(null),
   })
-  const { toast, showToast, dismiss } = useToast()
+  const { showToast } = useToast()
   const operations = useManifestOperations(repoPath, {
     onError: setError,
     onSuccess: () => setError(null),
@@ -124,8 +123,6 @@ export default function Skills({ repoPath }: { repoPath: string }) {
           {error}
         </div>
       )}
-      {toast && <Toast message={toast} onClose={dismiss} />}
-
       {!manifest && !error && <div style={{ color: 'var(--muted)', marginTop: 20 }}>加载中…</div>}
 
       {sourceCount === 0 && localCount === 0 && manifest && (

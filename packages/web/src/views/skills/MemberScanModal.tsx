@@ -4,6 +4,7 @@ import Modal from '@/components/Modal'
 import { sourceIdentity, type SkillSource } from '@loom/core'
 import { sortSkillMembers, type RefreshMember } from './types'
 import type { ManifestOperations } from '@/hooks/useManifestOperations'
+import { SelectableList, type SelectableListItem } from '@/components/ui/selectable-list'
 
 interface Props {
   source: SkillSource | null
@@ -64,6 +65,11 @@ export default function MemberScanModal({ source, operations, onClose, onConfirm
   }
 
   const open = !!source && !scanning
+  const listItems: SelectableListItem[] = members.map((member) => ({
+    id: member.name,
+    label: member.name,
+    searchText: member.name,
+  }))
 
   return (
     <Modal
@@ -87,84 +93,15 @@ export default function MemberScanModal({ source, operations, onClose, onConfirm
           >
             发现 {members.length} 个 member,勾选要启用的
           </div>
-          {members.length > 0 && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                marginBottom: 8,
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: 11,
-              }}
-            >
-              <button
-                onClick={() => {
-                  const all = selected.size === members.length
-                  setSelected(all ? new Set() : new Set(members.map((m) => m.name)))
-                }}
-                style={{
-                  background: 'none',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius)',
-                  padding: '2px 8px',
-                  color: 'var(--muted)',
-                  cursor: 'pointer',
-                }}
-              >
-                {selected.size === members.length ? '全不选' : '全选'}
-              </button>
-              <span style={{ color: 'var(--muted)' }}>
-                已选 {selected.size} / {members.length}
-              </span>
-            </div>
-          )}
-          {members.length === 0 ? (
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>未发现任何 SKILL.md</div>
-          ) : (
-            <div
-              style={{
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius)',
-                maxHeight: 280,
-                overflow: 'auto',
-                marginBottom: 14,
-              }}
-            >
-              {members.map((m) => {
-                const checked = selected.has(m.name)
-                return (
-                  <label
-                    key={m.name}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '7px 10px',
-                      borderBottom: '1px solid var(--border)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => {
-                        setSelected((prev) => {
-                          const n = new Set(prev)
-                          if (e.target.checked) n.add(m.name)
-                          else n.delete(m.name)
-                          return n
-                        })
-                      }}
-                    />
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
-                      {m.name}
-                    </span>
-                  </label>
-                )
-              })}
-            </div>
-          )}
+          <SelectableList
+            ariaLabel={'Scan · ' + (source ? sourceIdentity(source).repoId : '')}
+            items={listItems}
+            selectedIds={selected}
+            onSelectedIdsChange={setSelected}
+            showSearch={false}
+            showSelectionActions
+            emptyMessage="未发现任何 SKILL.md"
+          />
           <div style={{ display: 'flex', gap: 8 }}>
             <Button
               variant="primary"

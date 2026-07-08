@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, vi } from 'vitest'
+import ToastHost from '../src/components/ToastHost'
+import { dismissToast } from '../src/hooks/useToast'
 import Sync from '../src/views/Sync'
 
 const api = vi.hoisted(() => ({
@@ -20,9 +22,19 @@ vi.mock('../src/views/sync/ConflictEditor', () => ({
   default: () => <div>冲突编辑器</div>,
 }))
 
+function renderSync() {
+  render(
+    <>
+      <ToastHost />
+      <Sync repoPath="/repo" />
+    </>,
+  )
+}
+
 describe('Sync force operations', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    dismissToast()
     api.getSyncRemote.mockResolvedValue({ remoteUrl: 'https://example.com/repo.git' })
     api.getSyncSession.mockResolvedValue({ ok: true, active: false })
     api.syncForcePush.mockResolvedValue({ ok: true })
@@ -30,7 +42,7 @@ describe('Sync force operations', () => {
   })
 
   it('requires confirmation before force-pushing', async () => {
-    render(<Sync repoPath="/repo" />)
+    renderSync()
     await screen.findByText('https://example.com/repo.git')
 
     fireEvent.click(screen.getByRole('button', { name: '强制推送' }))
@@ -51,7 +63,7 @@ describe('Sync force operations', () => {
   })
 
   it('requires confirmation before force-pulling', async () => {
-    render(<Sync repoPath="/repo" />)
+    renderSync()
     await screen.findByText('https://example.com/repo.git')
 
     fireEvent.click(screen.getByRole('button', { name: '强制拉取' }))
@@ -89,7 +101,7 @@ describe('Sync force operations', () => {
       ],
     })
 
-    render(<Sync repoPath="/repo" />)
+    renderSync()
     await screen.findByText(/Git 检测到 1 个冲突文件/)
 
     expect(screen.getByRole('button', { name: '强制拉取' }).hasAttribute('disabled')).toBe(true)

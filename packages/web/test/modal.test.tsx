@@ -69,6 +69,20 @@ describe('Modal', () => {
     expect(document.activeElement).toBe(last)
   })
 
+  it('preserves Radix background hiding while open', async () => {
+    const { container } = render(<Controlled />)
+    const opener = screen.getByRole('button', { name: '打开' })
+
+    fireEvent.click(opener)
+
+    const input = screen.getByRole('textbox', { name: '名称' })
+    await waitFor(() => expect(document.activeElement).toBe(input))
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+
+    expect(container.getAttribute('aria-hidden')).toBe('true')
+    expect(container.getAttribute('data-aria-hidden')).toBe('true')
+  })
+
   it('keeps focus on the dialog when it has no focusable descendants', async () => {
     render(
       <Modal open onClose={() => undefined} title="提示">
@@ -127,5 +141,41 @@ describe('Modal', () => {
     fireEvent.click(screen.getByRole('button', { name: '切换忙碌' }))
     fireEvent.click(dialog.parentElement!)
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('blocks Escape and disables the close button while busy', () => {
+    const onClose = vi.fn()
+    render(<BusyControlled onClose={onClose} />)
+
+    const dialog = screen.getByRole('dialog', { name: '处理中' })
+    const close = screen.getByRole('button', { name: '关闭' })
+
+    fireEvent.click(screen.getByRole('button', { name: '切换忙碌' }))
+
+    expect(dialog.getAttribute('aria-busy')).toBe('true')
+    expect((close as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: '处理中' })).toBeDefined()
+  })
+
+  it('closes from the backdrop when not busy and restores opener focus', async () => {
+    const close = vi.fn()
+    render(<Controlled onClose={close} />)
+
+    const opener = screen.getByRole('button', { name: '打开' })
+    opener.focus()
+    fireEvent.click(opener)
+
+    const input = screen.getByRole('textbox', { name: '名称' })
+    await waitFor(() => expect(document.activeElement).toBe(input))
+
+    const dialog = screen.getByRole('dialog', { name: '编辑环境' })
+    fireEvent.click(dialog.parentElement!)
+
+    expect(close).toHaveBeenCalledOnce()
+    expect(document.activeElement).toBe(opener)
   })
 })

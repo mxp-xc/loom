@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { inputStyle } from '@/lib/styles'
-import { Search } from 'lucide-react'
 import { Segmented } from './Segmented'
 import { sourceIdentity, type SkillSource } from '@loom/core'
 import { sortSkillMembers, type ScanMember } from './types'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
+import { SelectableList, type SelectableListItem } from '@/components/ui/selectable-list'
 
 interface Props {
   repoPath: string
@@ -29,29 +29,6 @@ const errBox: React.CSSProperties = {
   background: 'var(--card)',
 }
 
-const listBox: React.CSSProperties = {
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius)',
-  maxHeight: 240,
-  overflow: 'auto',
-  marginBottom: 14,
-}
-
-const rowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  padding: '7px 10px',
-  borderBottom: '1px solid var(--border)',
-}
-
-const placeholderStyle: React.CSSProperties = {
-  padding: '12px 10px',
-  fontSize: 12,
-  color: 'var(--muted)',
-  fontFamily: mono,
-}
-
 export default function EditSourceModal({ repoPath, source, showToast, onClose, onSaved }: Props) {
   const [type, setType] = useState<'branch' | 'tag'>('branch')
   const [ref, setRef] = useState('')
@@ -61,7 +38,6 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
   const [scanning, setScanning] = useState(false)
   const [members, setMembers] = useState<ScanMember[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [search, setSearch] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const operations = useManifestOperations(repoPath, { onError: setError, onToast: showToast })
@@ -86,7 +62,6 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
     const existing = new Set((source.members ?? []).map((m) => m.name))
     setType(initType)
     setRef(source.ref ?? '')
-    setSearch('')
     setError(null)
     setMembers([])
     setBranches([])
@@ -162,7 +137,13 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
 
   const repoId = sourceIdentity(source).repoId
   const refOptions = type === 'tag' ? tags : branches
-  const filtered = members.filter((m) => m.name.toLowerCase().includes(search.trim().toLowerCase()))
+  const listItems: SelectableListItem[] = members.map((member) => ({
+    id: member.name,
+    label: member.name,
+    searchText: member.name,
+    disabled: member.installed,
+    meta: member.installed ? '已安装' : undefined,
+  }))
 
   return (
     <Modal
@@ -215,97 +196,21 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
         </div>
       </div>
 
-      {members.length > 0 && (
-        <div style={{ position: 'relative', marginBottom: 8 }}>
-          <Search
-            size={13}
-            style={{
-              position: 'absolute',
-              left: 9,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: 'var(--muted)',
-              pointerEvents: 'none',
-            }}
-          />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索 skill…"
-            style={{ ...inputStyle, paddingLeft: 28, marginBottom: 0 }}
-          />
-        </div>
+      {scanning ? (
+        <div className="selectable-list-empty">扫描中…</div>
+      ) : (
+        <SelectableList
+          ariaLabel={'Edit Source · ' + repoId}
+          items={listItems}
+          selectedIds={selected}
+          onSelectedIdsChange={setSelected}
+          searchPlaceholder="搜索 skill…"
+          showSearch={members.length > 0}
+          showSelectionActions={members.length > 0}
+          emptyMessage="未发现 SKILL.md"
+          noMatchesMessage="无匹配"
+        />
       )}
-
-      {members.length > 0 && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            marginBottom: 8,
-            fontFamily: mono,
-            fontSize: 11,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              const all = selected.size === members.length
-              setSelected(all ? new Set() : new Set(members.map((m) => m.name)))
-            }}
-            style={{
-              background: 'none',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius)',
-              padding: '2px 8px',
-              color: 'var(--muted)',
-              cursor: 'pointer',
-            }}
-          >
-            {selected.size === members.length ? '全不选' : '全选'}
-          </button>
-          <span style={{ color: 'var(--muted)' }}>
-            已选 {selected.size} / {members.length}
-          </span>
-        </div>
-      )}
-
-      <div style={listBox}>
-        {scanning ? (
-          <div style={placeholderStyle}>扫描中…</div>
-        ) : members.length === 0 ? (
-          <div style={placeholderStyle}>未发现 SKILL.md</div>
-        ) : filtered.length === 0 ? (
-          <div style={placeholderStyle}>无匹配</div>
-        ) : (
-          filtered.map((m) => {
-            const checked = selected.has(m.name)
-            return (
-              <label key={m.path} style={{ ...rowStyle, cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={(e) => {
-                    setSelected((prev) => {
-                      const n = new Set(prev)
-                      if (e.target.checked) n.add(m.name)
-                      else n.delete(m.name)
-                      return n
-                    })
-                  }}
-                />
-                <span style={{ flex: 1, fontFamily: mono, fontSize: 12 }}>{m.name}</span>
-                {m.installed && (
-                  <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: mono }}>
-                    已安装
-                  </span>
-                )}
-              </label>
-            )
-          })
-        )}
-      </div>
 
       <div style={{ display: 'flex', gap: 8 }}>
         <Button variant="primary" onClick={handleSave} disabled={saving} style={{ flex: 1 }}>

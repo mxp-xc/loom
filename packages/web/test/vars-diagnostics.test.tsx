@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import ToastHost from '../src/components/ToastHost'
+import { dismissToast } from '../src/hooks/useToast'
 import Vars from '../src/views/vars/Vars'
 import { ApiError, api } from '../src/lib/api'
 
@@ -62,9 +64,19 @@ function matrix() {
   }
 }
 
+function renderVars() {
+  render(
+    <>
+      <ToastHost />
+      <Vars repoPath="/repo" />
+    </>,
+  )
+}
+
 describe('Vars diagnostics actions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    dismissToast()
     vi.mocked(api.vars.getMatrix).mockResolvedValue(matrix())
     vi.mocked(api.vars.setBaseKey).mockResolvedValue({ ok: true })
     vi.mocked(api.vars.setOverride).mockResolvedValue({ ok: true })
@@ -72,7 +84,7 @@ describe('Vars diagnostics actions', () => {
   })
 
   it('shows resolver diagnostics with key, reference, and path context', async () => {
-    render(<Vars repoPath="/repo" />)
+    renderVars()
 
     fireEvent.click(await screen.findByRole('button', { name: /Base/ }))
     await screen.findByText('CLIENT')
@@ -88,7 +100,7 @@ describe('Vars diagnostics actions', () => {
   })
 
   it('keeps trace rail visible for diagnosed keys', async () => {
-    render(<Vars repoPath="/repo" />)
+    renderVars()
 
     fireEvent.click(await screen.findByRole('button', { name: /Base/ }))
     await screen.findByText('CLIENT')
@@ -118,7 +130,7 @@ describe('Vars diagnostics actions', () => {
     )
 
     try {
-      render(<Vars repoPath="/repo" />)
+      renderVars()
       const alert = await screen.findByRole('alert')
       expect(alert.textContent).toContain('变量加载失败')
       expect(alert.textContent).toContain('变量解析失败')
@@ -135,7 +147,7 @@ describe('Vars diagnostics actions', () => {
       new ApiError('覆盖值类型与 base 定义不匹配', 422, 'override_type_mismatch'),
     )
     try {
-      render(<Vars repoPath="/repo" />)
+      renderVars()
       fireEvent.click(await screen.findByRole('button', { name: /Base/ }))
       await screen.findByText('CLIENT')
       fireEvent.click(screen.getByRole('button', { name: '编辑 CLIENT' }))

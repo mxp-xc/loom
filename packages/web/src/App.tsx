@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { api } from './lib/api'
+import ToastHost from './components/ToastHost'
 import Skills from './views/skills/Skills'
 import Mcp from './views/Mcp'
 import Memory from './views/Memory'
@@ -194,5 +195,10 @@ export default function App() {
     )
   if (!repoPath) return null
 
-  return <Shell repoPath={repoPath} activeRepo={activeRepo} />
+  return (
+    <>
+      <Shell repoPath={repoPath} activeRepo={activeRepo} />
+      <ToastHost />
+    </>
+  )
 }

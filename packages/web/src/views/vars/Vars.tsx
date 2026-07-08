@@ -1,6 +1,6 @@
 import { RefreshCw, Search } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import Toast from '../../components/Toast'
+import { useToast } from '@/hooks/useToast'
 import { AGENTS, agentColor, agentShort } from '../../lib/agents'
 import type { VarsProfileId, VarsProfileEntry } from './profile-model'
 import { useProfileVars } from './useProfileVars'
@@ -18,7 +18,7 @@ export default function Vars({ repoPath }: { repoPath: string }) {
   const [view, setView] = useState<VarsView>('definitions')
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState<VarsModalState | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
+  const { showToast } = useToast()
 
   const state = vars.state
 
@@ -177,11 +177,9 @@ export default function Vars({ repoPath }: { repoPath: string }) {
           setPending={vars.setPending}
           onClose={() => setModal(null)}
           onSaved={vars.reload}
-          onError={setToast}
+          onError={showToast}
         />
       )}
-
-      {toast && <Toast message={toast} onClose={() => setToast(null)} />}
     </div>
   )
 }

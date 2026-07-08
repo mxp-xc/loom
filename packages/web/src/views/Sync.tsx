@@ -4,7 +4,6 @@ import { api, type GitConflictFile, type SyncPullResponse } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
 import Modal from '@/components/Modal'
-import Toast from '@/components/Toast'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
 
@@ -26,7 +25,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
   )
   const [confirming, setConfirming] = useState<'force-pull' | 'force-push' | null>(null)
   const { error, setError } = useViewError()
-  const { toast, showToast, dismiss } = useToast()
+  const { showToast } = useToast()
   const totalConflictCount = conflicts.length ? (pull?.conflicts.length ?? conflicts.length) : 0
   const currentConflictNumber =
     conflicts.length && totalConflictCount
@@ -360,7 +359,6 @@ export default function Sync({ repoPath }: { repoPath: string }) {
           </div>
         </div>
       </Modal>
-      {toast && <Toast message={toast} onClose={dismiss} />}
     </div>
   )
 }

@@ -2,7 +2,6 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { type McpServer, type McpType } from '@loom/core'
 import { Check, Copy, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import Modal from '@/components/Modal'
-import Toast from '@/components/Toast'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
 import { useManifest } from '@/hooks/useManifest'
@@ -538,7 +537,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     onError: setError,
     onSuccess: () => setError(null),
   })
-  const { toast, showToast, dismiss } = useToast()
+  const { showToast } = useToast()
   const operations = useManifestOperations(repoPath, {
     onError: setError,
     onSuccess: () => setError(null),
@@ -933,7 +932,6 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           </Button>
         </div>
       </Modal>
-      {toast && <Toast message={toast} onClose={dismiss} />}
     </div>
   )
 }

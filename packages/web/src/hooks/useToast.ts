@@ -1,10 +1,39 @@
-import { useState, useCallback } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 
-// Toast state + helper. Auto-dismiss is handled by the <Toast> component itself
-// (its onClose timer), so showToast only sets the message; dismiss clears it.
+type Listener = () => void
+
+let currentToast: string | null = null
+const listeners = new Set<Listener>()
+
+function emit() {
+  for (const listener of listeners) listener()
+}
+
+function subscribe(listener: Listener) {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+function getSnapshot() {
+  return currentToast
+}
+
+export function showToast(message: string) {
+  currentToast = message
+  emit()
+}
+
+export function dismissToast() {
+  currentToast = null
+  emit()
+}
+
 export function useToast() {
-  const [toast, setToast] = useState<string | null>(null)
-  const showToast = useCallback((msg: string) => setToast(msg), [])
-  const dismiss = useCallback(() => setToast(null), [])
-  return { toast, showToast, dismiss }
+  const toast = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const show = useCallback((message: string) => showToast(message), [])
+  const dismiss = useCallback(() => dismissToast(), [])
+
+  return { toast, showToast: show, dismiss }
 }
