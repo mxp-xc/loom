@@ -10,8 +10,47 @@ import type {
   AgentAwareVarsResolution,
   VarOverride,
 } from './vars'
+import type { AgentId, McpServer } from '@loom/core'
 
 const base = '/api'
+
+export interface McpImportDiagnostic {
+  code: string
+  message: string
+  field?: string
+}
+
+export interface McpImportSourceResult {
+  agent: AgentId
+  path?: string
+  status: 'ready' | 'missing_file' | 'parse_failed'
+  diagnostics: McpImportDiagnostic[]
+}
+
+export interface McpImportItem {
+  key: string
+  id: string
+  finalId: string
+  server?: McpServer
+  sourceAgents: AgentId[]
+  targets: AgentId[]
+  status: 'ready' | 'renamed' | 'disabled' | 'unchanged'
+  selectedByDefault: boolean
+  ignoredFields: string[]
+  renameReason?: 'source_conflict' | 'existing_conflict' | 'suffix_conflict'
+  diagnostics: McpImportDiagnostic[]
+}
+
+export interface McpImportScanResponse {
+  ok: true
+  items: McpImportItem[]
+  sources: McpImportSourceResult[]
+  existing: { count: number }
+}
+
+export type McpImportApplyResponse =
+  | { ok: true; imported: number; renamed: number; ignoredFields: number; entries: McpServer[] }
+  | { ok: false; error: 'stale_import_preview'; message: string }
 
 export class ApiError extends Error {
   constructor(
@@ -289,6 +328,10 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }).then(json),
+  scanMcpImports: (body: { repo: string; sources?: AgentId[] }) =>
+    post('/mcp/import/scan', body).then(json) as Promise<McpImportScanResponse>,
+  applyMcpImports: (body: { repo: string; sources?: AgentId[]; keys: string[] }) =>
+    post('/mcp/import/apply', body).then(json) as Promise<McpImportApplyResponse>,
   deleteSource: (body: { repo: string; url: string }) =>
     fetch(`${base}/sources`, {
       method: 'DELETE',

@@ -94,28 +94,50 @@
 }
 
 .globalTargets {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  min-width: 0;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius-card) + 4px);
-  background: var(--card);
-  box-shadow: var(--shadow-card);
+  gap: 8px;
+  justify-content: space-between;
 }
 
-.globalTargets strong {
-  display: block;
-  margin-top: 3px;
-  color: var(--bright);
+.globalTargetsLabel {
+  flex: 0 0 auto;
+  color: var(--muted);
   font:
-    600 12px 'JetBrains Mono',
+    700 10px/1 'JetBrains Mono',
     monospace;
+  letter-spacing: 0.14em;
 }
 
 .globalTargets :global(.target-chips) {
+  margin-left: auto;
+  gap: 4px;
   justify-content: flex-end;
+}
+
+.globalTargets :global(.target-chip) {
+  min-height: 32px;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: var(--radius);
+}
+
+.globalTargets :global(.target-chip-count) {
+  height: 12px;
+  font-size: 9px;
+}
+
+.globalTargets :global(.target-chip[data-tooltip])::after {
+  right: 0;
+  left: auto;
+  transform: translateY(3px);
+}
+
+.globalTargets :global(.target-chip[data-tooltip]:hover)::after,
+.globalTargets :global(.target-chip[data-tooltip]:focus-visible)::after {
+  transform: translateY(0);
 }
 
 .workbench {
@@ -145,10 +167,8 @@
 }
 
 .inventoryTop {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  gap: 10px;
   padding: 14px 14px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   background:
@@ -156,10 +176,12 @@
     var(--card);
 }
 
-.inventoryTop h2 {
-  font:
-    600 13px/1.25 'JetBrains Mono',
-    monospace;
+.inventoryHeading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .inventoryActions,
@@ -173,8 +195,8 @@
 
 .inventoryActions {
   flex: 0 0 auto;
-  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 6px;
 }
 
 .inventoryActions :global(button) {
@@ -182,18 +204,35 @@
 }
 
 .inventoryActionPrimary,
+.inventoryActionImport,
 .inventoryActionProject {
-  gap: 6px !important;
-  min-height: 30px !important;
-  padding-inline: 10px !important;
-  font-size: 11px !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
   box-shadow: none !important;
 }
 
+.inventoryActionPrimary:hover,
+.inventoryActionImport:hover,
+.inventoryActionProject:hover {
+  transform: none !important;
+}
+
+.inventoryActionImport {
+  color: var(--info) !important;
+  border-color: color-mix(in srgb, var(--info) 34%, var(--border)) !important;
+  background: color-mix(in srgb, var(--info) 10%, var(--card)) !important;
+}
+
+.inventoryActionPrimary {
+  color: var(--cc) !important;
+  border-color: color-mix(in srgb, var(--cc) 36%, var(--border)) !important;
+  background: color-mix(in srgb, var(--cc) 10%, var(--card)) !important;
+}
+
 .inventoryActionProject {
-  color: var(--primary) !important;
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border)) !important;
-  background: color-mix(in srgb, var(--primary) 8%, var(--card)) !important;
+  color: var(--oc) !important;
+  border-color: color-mix(in srgb, var(--oc) 36%, var(--border)) !important;
+  background: color-mix(in srgb, var(--oc) 11%, var(--card)) !important;
 }
 
 .searchBox {

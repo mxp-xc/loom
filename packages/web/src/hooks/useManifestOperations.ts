@@ -106,6 +106,8 @@ const pendingKey = {
   deleteMcpServer: (id: string) => 'mcp:delete:' + id,
   mcpTarget: (id: string) => 'mcp:target:' + id,
   allMcpTargets: (agent: AgentId) => 'mcp:all-targets:' + agent,
+  scanMcpImports: () => 'mcp:import:scan',
+  applyMcpImports: () => 'mcp:import:apply',
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -819,6 +821,28 @@ export function useManifestOperations(
     [repoPath, run],
   )
 
+  const scanMcpImports = useCallback(
+    (sources: AgentId[] = AGENTS) =>
+      run(pendingKey.scanMcpImports(), () => api.scanMcpImports({ repo: repoPath, sources }), {
+        reload: false,
+        failureMessage: '扫描 MCP 配置失败',
+      }),
+    [repoPath, run],
+  )
+
+  const applyMcpImports = useCallback(
+    (keys: string[], sources: AgentId[] = AGENTS) =>
+      run(
+        pendingKey.applyMcpImports(),
+        () => api.applyMcpImports({ repo: repoPath, sources, keys }),
+        {
+          failureMessage: '导入 MCP Server 失败',
+          successMessage: '已导入到 desired state',
+        },
+      ),
+    [repoPath, run],
+  )
+
   const pendingStatus = useMemo(
     () => ({
       project: (scope: ProjectScope) => pending.has(pendingKey.project(scope)),
@@ -838,6 +862,8 @@ export function useManifestOperations(
       },
       mcp: {
         allTargets: (agent: AgentId) => pending.has(pendingKey.allMcpTargets(agent)),
+        importScan: pending.has(pendingKey.scanMcpImports()),
+        importApply: pending.has(pendingKey.applyMcpImports()),
       },
     }),
     [pending],
@@ -867,6 +893,8 @@ export function useManifestOperations(
       addMcpServer,
       updateMcpServer,
       deleteMcpServer,
+      scanMcpImports,
+      applyMcpImports,
       toggleMcpTarget,
       setAllMcpTargets,
     }),
@@ -893,6 +921,8 @@ export function useManifestOperations(
       addMcpServer,
       updateMcpServer,
       deleteMcpServer,
+      scanMcpImports,
+      applyMcpImports,
       toggleMcpTarget,
       setAllMcpTargets,
     ],

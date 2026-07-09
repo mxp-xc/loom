@@ -89,6 +89,38 @@ Tests:
 - packages/web/test/mcp-preview.test.ts
 - packages/web/test/mcp-view.test.tsx
 
+## R-MCP-006 MCP import 是显式 desired-state 写入
+
+Status: active
+Applies to: MCP import, MCP UI, MCP API
+
+Rule:
+从 CC/CX/OC 原生配置导入 MCP server 必须由用户显式触发并确认。导入只写入 Loom 的 mcp.yaml desired state，不修改 agent-native 配置，也不自动运行 projection。
+
+Implications:
+
+- 导入预览展示来源 agent、最终 id、targets、改名和 ignored fields。
+- 导入后 targets 按来源生成；同一 server 从多个来源导入时合并 targets。
+- 同名同定义只合并 targets；同名不同定义自动改名，保留现有 desired entry。
+- 导入成功后仍由用户点击 Project changes 才投影到 agent-native 文件。
+
+Safety:
+
+- 不从磁盘现状静默推断 desired state；只有确认导入的条目会写入 mcp.yaml。
+- 不覆盖现有不同定义的 desired entry。
+- 不修改 CC/CX/OC 原生 MCP 配置文件。
+
+Examples:
+
+- 从 CX 导入 browser 后，mcp.yaml 中该 server 带 targets: ['codex']。
+- mcp.yaml 已有不同定义的 browser 时，从 CX 导入的条目写为 browser-cx。
+
+Tests:
+
+- packages/server/test/mcp/importer.test.ts
+- packages/server/test/api/mcp-import-routes.test.ts
+- packages/web/test/mcp-view.test.tsx
+
 ## R-MCP-004 MCP 变量引用可检查 trace
 
 Status: active

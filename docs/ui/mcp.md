@@ -16,6 +16,8 @@ MCP 页面用于管理仓库级 MCP server、target 应用和显式 Project chan
 
 Inventory 顶部的 Add server 与 Project changes 靠近 server 列表主操作区。全局 target chips 表示“应用到全部 server”，row target chips 表示单个 server 的 desired targets。
 
+Import 按钮与 Add server、Project changes 同属 inventory 主操作区。点击后打开导入 dialog，扫描 CC/CX/OC 原生 MCP 配置并展示候选项。Dialog 需要显示来源、最终 id、targets、改名状态、ignored fields 和 disabled 原因；默认选中可导入项，不选 unchanged 项，disabled 项不可选。确认导入只刷新 desired state，不自动运行 Project changes。
+
 Target chip 使用 CC/CX/OC 短标签与品牌色状态区分：
 
 - off：低对比边框与 muted 文本。

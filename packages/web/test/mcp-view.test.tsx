@@ -11,6 +11,59 @@ vi.mock('../src/lib/api', () => ({
     updateMcpServer: vi.fn(async () => ({ ok: true })),
     updateMcpTargets: vi.fn(async () => ({ ok: true })),
     deleteMcpServer: vi.fn(async () => ({ ok: true })),
+    scanMcpImports: vi.fn(async () => ({
+      ok: true,
+      sources: [
+        { agent: 'claude-code', status: 'ready', diagnostics: [] },
+        { agent: 'codex', status: 'ready', diagnostics: [] },
+        { agent: 'opencode', status: 'missing_file', diagnostics: [] },
+      ],
+      items: [
+        {
+          key: 'ready-key',
+          id: 'browser',
+          finalId: 'browser',
+          server: { id: 'browser', type: 'stdio', command: 'npx' },
+          sourceAgents: ['claude-code'],
+          targets: ['claude-code'],
+          status: 'ready',
+          selectedByDefault: true,
+          ignoredFields: [],
+          diagnostics: [],
+        },
+        {
+          key: 'renamed-key',
+          id: 'browser',
+          finalId: 'browser-cx',
+          server: { id: 'browser-cx', type: 'http', url: 'https://codex.example/mcp' },
+          sourceAgents: ['codex'],
+          targets: ['codex'],
+          status: 'renamed',
+          selectedByDefault: true,
+          ignoredFields: ['mcp_servers.browser.description'],
+          diagnostics: [],
+        },
+        {
+          key: 'disabled-key',
+          id: 'broken',
+          finalId: 'broken',
+          sourceAgents: ['claude-code'],
+          targets: ['claude-code'],
+          status: 'disabled',
+          selectedByDefault: false,
+          ignoredFields: [],
+          diagnostics: [{ code: 'missing_command', message: 'stdio MCP server 缺少 command' }],
+        },
+      ],
+      existing: { count: 2 },
+    })),
+    applyMcpImports: vi.fn(async () => ({
+      ok: true,
+      imported: 2,
+      renamed: 1,
+      ignoredFields: 1,
+      entries: [],
+    })),
     getManifest: vi.fn(async () => ({
       skills: { sources: [], skills: [] },
       mcp: [
@@ -78,15 +131,34 @@ beforeEach(() => {
 })
 
 describe('MCP workbench view', () => {
-  it('renders global target controls as a page-level bar without projecting', async () => {
+  it('keeps global targets and icon-only actions inside inventory', async () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
-    const globalTargets = await screen.findByRole('region', { name: '全局 MCP targets' })
-    const workbench = screen.getByRole('region', { name: 'MCP workbench' })
+    const workbench = await screen.findByRole('region', { name: 'MCP workbench' })
+    const inventory = within(workbench).getByRole('complementary', { name: 'MCP inventory' })
 
+    expect(within(inventory).queryByText(/configured/)).toBeNull()
     expect(
-      Boolean(globalTargets.compareDocumentPosition(workbench) & Node.DOCUMENT_POSITION_FOLLOWING),
+      inventory.contains(within(inventory).getByRole('region', { name: '全局 MCP targets' })),
     ).toBe(true)
+    expect(within(inventory).queryByText('全部 servers')).toBeNull()
+
+    const toolbar = within(inventory).getByRole('toolbar', { name: 'MCP inventory actions' })
+    expect(within(toolbar).getByRole('button', { name: 'Add server' }).textContent?.trim()).toBe('')
+    expect(within(toolbar).getByRole('button', { name: 'Import MCP' }).textContent?.trim()).toBe('')
+    expect(
+      within(toolbar).getByRole('button', { name: 'Project changes' }).textContent?.trim(),
+    ).toBe('')
+  })
+
+  it('renders global target controls inside inventory without projecting', async () => {
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+
+    const workbench = screen.getByRole('region', { name: 'MCP workbench' })
+    const inventory = within(workbench).getByRole('complementary', { name: 'MCP inventory' })
+    const globalTargets = within(inventory).getByRole('region', { name: '全局 MCP targets' })
+
+    expect(inventory.contains(globalTargets)).toBe(true)
 
     fireEvent.click(
       within(globalTargets).getByRole('button', { name: '全部 MCP servers 应用到 OC' }),
@@ -163,5 +235,50 @@ describe('MCP workbench view', () => {
     expect(within(dialog).getByText('Base')).toBeDefined()
     expect(within(dialog).getByText('Local / OpenCode')).toBeDefined()
     expect(within(dialog).queryByText(/MCP env|vars\./)).toBeNull()
+  })
+
+  it('imports native MCP entries through a preview dialog without projecting', async () => {
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Import MCP' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Import MCP servers' })
+    expect(api.scanMcpImports).toHaveBeenCalledWith({
+      repo: '/tmp/mcp-view',
+      sources: ['claude-code', 'codex', 'opencode'],
+    })
+    expect(within(dialog).getByText('browser-cx')).toBeDefined()
+    expect(within(dialog).getByText('mcp_servers.browser.description')).toBeDefined()
+    expect(within(dialog).getByText('stdio MCP server 缺少 command')).toBeDefined()
+    expect(
+      within(dialog).getByRole<HTMLInputElement>('checkbox', { name: '导入 broken' }).disabled,
+    ).toBe(true)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm import' }))
+
+    await waitFor(() =>
+      expect(api.applyMcpImports).toHaveBeenCalledWith({
+        repo: '/tmp/mcp-view',
+        sources: ['claude-code', 'codex', 'opencode'],
+        keys: ['ready-key', 'renamed-key'],
+      }),
+    )
+    expect(api.project).not.toHaveBeenCalled()
+  })
+
+  it('shows stale import preview errors without closing the dialog', async () => {
+    vi.mocked(api.applyMcpImports).mockResolvedValueOnce({
+      ok: false,
+      error: 'stale_import_preview',
+      message: '导入预览已过期，请重新扫描',
+    } as never)
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Import MCP' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Import MCP servers' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm import' }))
+
+    expect(await within(dialog).findByText('导入预览已过期，请重新扫描')).toBeDefined()
+    expect(screen.getByRole('dialog', { name: 'Import MCP servers' })).toBeDefined()
   })
 })

@@ -10,6 +10,7 @@ import { createRemoteRoutes } from './routes/remote.js'
 import { createConfigRoutes } from './routes/config.js'
 import { createSkillsYamlRoutes } from './routes/skills-yaml.js'
 import { createMcpYamlRoutes } from './routes/mcp-yaml.js'
+import { createMcpImportRoutes } from './routes/mcp-import.js'
 import { createMemoryRoutes } from './routes/memory.js'
 import { SyncSessionManager } from '../sync/session-manager.js'
 import { logger } from '../lib/logger.js'
@@ -65,6 +66,7 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
   app.route('/', createConfigRoutes(deps))
   app.route('/', createSkillsYamlRoutes(deps))
   app.route('/', createMcpYamlRoutes(deps))
+  app.route('/', createMcpImportRoutes(deps))
   app.route('/', createMemoryRoutes(deps))
   app.route('/', createVarsRoutes(deps))
   return app

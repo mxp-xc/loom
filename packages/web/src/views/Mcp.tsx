@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { McpServer, McpType } from '@loom/core'
-import { Check, Copy, Edit3, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
+import { Check, Copy, Download, Edit3, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import MonacoTextEditor from '@/components/monaco/MonacoTextEditor'
 import { registerVarsCompletionProvider } from '@/components/monaco/varsCompletion'
 import { Button } from '@/components/ui/button'
@@ -28,6 +28,7 @@ import {
   formatMcpTraceLayer,
   getMcpVariableTokens,
 } from './mcp/mcp-preview'
+import McpImportDialog from './mcp/McpImportDialog'
 import { useMcpPreviewVars } from './mcp/useMcpPreviewVars'
 import styles from './Mcp.module.css'
 
@@ -1031,10 +1032,7 @@ function GlobalTargetsBar({
   if (servers.length === 0) return null
   return (
     <section className={styles.globalTargets} role="region" aria-label="全局 MCP targets">
-      <div>
-        <div className={styles.cardKicker}>SETTINGS.JSON TARGETS</div>
-        <strong>批量设置 · 应用于全部 MCP servers</strong>
-      </div>
+      <span className={styles.globalTargetsLabel}>TARGETS</span>
       <div className="target-chips">
         {visibleAgents.map((agent) => {
           const count = servers.filter((server) => (server.targets ?? []).includes(agent)).length
@@ -1075,6 +1073,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   const [editorError, setEditorError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<McpServer | null>(null)
   const [inspectedVar, setInspectedVar] = useState<string | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
   const [copied, setCopied] = useState(false)
 
   const servers = manifest?.mcp ?? []
@@ -1195,42 +1194,58 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           {error && <b>{error}</b>}
         </div>
       </section>
-      <GlobalTargetsBar servers={servers} visibleAgents={visibleAgents} operations={operations} />
       <section className={styles.workbench} role="region" aria-label="MCP workbench">
-        <aside className={styles.inventory}>
+        <aside className={styles.inventory} aria-label="MCP inventory">
           <div className={styles.inventoryTop}>
-            <div>
+            <div className={styles.inventoryHeading}>
               <div className={styles.kicker}>INVENTORY</div>
-              <h2>{servers.length} configured</h2>
-            </div>
-            <div className={styles.inventoryActions}>
-              <Button
-                type="button"
-                variant="primary"
-                size="sm"
-                aria-label="Add server"
-                className={styles.inventoryActionPrimary}
-                onClick={() => {
-                  setEditorError(null)
-                  setEditorMode('create')
-                }}
+              <div
+                className={styles.inventoryActions}
+                role="toolbar"
+                aria-label="MCP inventory actions"
               >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Add server</span>
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                aria-label="Project changes"
-                className={styles.inventoryActionProject}
-                onClick={() => void operations.project('mcp')}
-                disabled={operations.pending.project('mcp')}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                <span>投影</span>
-              </Button>
+                <IconButton
+                  label="Add server"
+                  tooltip="Add server"
+                  variant="secondary"
+                  size="sm"
+                  className={styles.inventoryActionPrimary}
+                  onClick={() => {
+                    setEditorError(null)
+                    setEditorMode('create')
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </IconButton>
+                <IconButton
+                  label="Import MCP"
+                  tooltip="Import"
+                  variant="secondary"
+                  size="sm"
+                  className={styles.inventoryActionImport}
+                  onClick={() => setImportOpen(true)}
+                  disabled={operations.pending.mcp.importScan || operations.pending.mcp.importApply}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </IconButton>
+                <IconButton
+                  label="Project changes"
+                  tooltip="投影"
+                  variant="secondary"
+                  size="sm"
+                  className={styles.inventoryActionProject}
+                  onClick={() => void operations.project('mcp')}
+                  disabled={operations.pending.project('mcp')}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </IconButton>
+              </div>
             </div>
+            <GlobalTargetsBar
+              servers={servers}
+              visibleAgents={visibleAgents}
+              operations={operations}
+            />
           </div>
           <label className={styles.searchBox}>
             <Search className="h-3.5 w-3.5" />
@@ -1339,6 +1354,11 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
             )}
           </div>
         </aside>
+        <McpImportDialog
+          open={importOpen}
+          operations={operations}
+          onClose={() => setImportOpen(false)}
+        />
         <main className={styles.detail}>
           {editorMode ? (
             <McpEditor
