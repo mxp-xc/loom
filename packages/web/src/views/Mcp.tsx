@@ -763,119 +763,187 @@ function McpEditor({
     previewTarget,
     matrix,
   )
+  const transportLabel =
+    form.type === 'stdio' ? 'local process' : form.type === 'sse' ? 'event stream' : 'remote http'
   const setField = <K extends keyof McpServerFormState>(key: K, value: McpServerFormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }))
   return (
-    <div className={styles.detailScroll}>
+    <div className={styles.editorShell}>
       <section className={styles.editorHero}>
         <div>
           <div className={styles.cardKicker}>
             {mode === 'edit' ? 'EDIT SERVER' : 'CREATE SERVER'}
           </div>
           <h2>{mode === 'edit' ? '编辑 MCP server' : '新增 MCP server'}</h2>
-          <p>保存 server 定义；target 应用和 Project changes 在左侧列表显式完成。</p>
+          <p>编辑 server 定义本身；是否应用到各 agent，回到列表里单独控制。</p>
+          <div className={styles.editorHeroMeta}>
+            <span>{transportLabel}</span>
+            <span>{mode === 'create' ? 'unprojected by default' : 'definition only'}</span>
+            <span>draft only</span>
+          </div>
         </div>
         <TypeBadge type={form.type} large />
         <PreviewTargetSwitch value={previewTarget} agents={AGENTS} onChange={onPreviewTarget} />
       </section>
       {error && <div className={styles.formError}>{error}</div>}
-      <section className={styles.editorCard}>
-        <label>
-          <span>server id</span>
-          <input
-            aria-label="server id"
-            value={form.id}
-            disabled={mode === 'edit'}
-            onChange={(event) => setField('id', event.target.value)}
-            placeholder="new-browser-tools"
-          />
-        </label>
-        <div className={styles.typeGrid}>
-          {MCP_TYPES.map((type) => (
-            <button
-              key={type}
-              type="button"
-              data-active={form.type === type}
-              onClick={() => setField('type', type)}
-            >
-              {type}
-            </button>
-          ))}
-        </div>
-        {form.type === 'stdio' ? (
-          <>
+      <div className={styles.editorFormStack}>
+        <section className={styles.editorCard}>
+          <div className={styles.editorCardHead}>
+            <div>
+              <div className={styles.cardKicker}>IDENTITY</div>
+              <strong>命名与说明</strong>
+            </div>
+            <small>不会写入 header/env</small>
+          </div>
+          <div className={styles.editorFields}>
             <label>
-              <span>command</span>
+              <span>server id</span>
               <input
-                aria-label="command"
-                value={form.command}
-                onChange={(event) => setField('command', event.target.value)}
-                placeholder="npx"
+                aria-label="server id"
+                value={form.id}
+                disabled={mode === 'edit'}
+                onChange={(event) => setField('id', event.target.value)}
+                placeholder="new-browser-tools"
               />
+              <small>保存后作为各 agent 配置里的 key。</small>
             </label>
-            <label>
-              <span>args</span>
-              <input
-                aria-label="args"
-                value={form.args}
-                onChange={(event) => setField('args', event.target.value)}
-                placeholder="-y @modelcontextprotocol/server-filesystem"
-              />
-            </label>
-          </>
-        ) : (
-          <label>
-            <span>url</span>
-            <input
-              aria-label="url"
-              value={form.url}
-              onChange={(event) => setField('url', event.target.value)}
-              placeholder="https://example.test/sse"
-            />
-          </label>
-        )}
-        <RecordField
-          name="env"
-          mode={envMode}
-          value={form.env}
-          rows={envRows}
-          setMode={setEnvMode}
-          onTextChange={(value) => setField('env', value)}
-          onRowsChange={setEnvRows}
-          varsKeys={varsKeys}
-        />
-        {form.type !== 'stdio' && (
+          </div>
+        </section>
+
+        <section className={styles.editorCard}>
+          <div className={styles.editorCardHead}>
+            <div>
+              <div className={styles.cardKicker}>CONNECTION</div>
+              <strong>Transport 与入口</strong>
+            </div>
+          </div>
+          <div className={styles.editorTransport}>
+            {MCP_TYPES.map((type) => (
+              <button
+                key={type}
+                type="button"
+                data-active={form.type === type}
+                aria-pressed={form.type === type}
+                onClick={() => setField('type', type)}
+              >
+                <span>{type}</span>
+                <small>
+                  {type === 'stdio'
+                    ? 'local process'
+                    : type === 'sse'
+                      ? 'event stream'
+                      : 'remote http'}
+                </small>
+              </button>
+            ))}
+          </div>
+          <div className={styles.editorFields}>
+            {form.type === 'stdio' ? (
+              <>
+                <label>
+                  <span>command</span>
+                  <input
+                    aria-label="command"
+                    value={form.command}
+                    onChange={(event) => setField('command', event.target.value)}
+                    placeholder="npx"
+                  />
+                </label>
+                <label>
+                  <span>args</span>
+                  <input
+                    aria-label="args"
+                    value={form.args}
+                    onChange={(event) => setField('args', event.target.value)}
+                    placeholder="-y @modelcontextprotocol/server-filesystem"
+                  />
+                </label>
+              </>
+            ) : (
+              <label>
+                <span>url</span>
+                <input
+                  aria-label="url"
+                  value={form.url}
+                  onChange={(event) => setField('url', event.target.value)}
+                  placeholder="https://example.test/sse"
+                />
+              </label>
+            )}
+          </div>
+        </section>
+
+        <section className={styles.editorCard}>
+          <div className={styles.editorCardHead}>
+            <div>
+              <div className={styles.cardKicker}>VARIABLES</div>
+              <strong>{form.type === 'stdio' ? 'Env 变量' : 'Env 与 headers'}</strong>
+            </div>
+            <small>{form.type === 'stdio' ? 'stdio 不显示 headers' : 'remote auth 单独成行'}</small>
+          </div>
           <RecordField
-            name="headers"
-            mode={headersMode}
-            value={form.headers}
-            rows={headersRows}
-            setMode={setHeadersMode}
-            onTextChange={(value) => setField('headers', value)}
-            onRowsChange={setHeadersRows}
+            name="env"
+            mode={envMode}
+            value={form.env}
+            rows={envRows}
+            setMode={setEnvMode}
+            onTextChange={(value) => setField('env', value)}
+            onRowsChange={setEnvRows}
             varsKeys={varsKeys}
           />
-        )}
+          {form.type !== 'stdio' && (
+            <RecordField
+              name="headers"
+              mode={headersMode}
+              value={form.headers}
+              rows={headersRows}
+              setMode={setHeadersMode}
+              onTextChange={(value) => setField('headers', value)}
+              onRowsChange={setHeadersRows}
+              varsKeys={varsKeys}
+            />
+          )}
+        </section>
+
+        <section className={`${styles.previewCard} ${styles.editorCard}`}>
+          <div className={styles.previewHead}>
+            <div>
+              <div className={styles.cardKicker}>WRITE PREVIEW</div>
+              <p>
+                {agentName[previewTarget]} · {settings.path}
+              </p>
+            </div>
+          </div>
+          <pre>{settings.text}</pre>
+        </section>
+      </div>
+      <footer className={styles.editorActionbar}>
+        <div>
+          <strong>{mode === 'create' ? 'Create as draft' : 'Save draft changes'}</strong>
+          <span>
+            {mode === 'create'
+              ? '新增后默认不应用到任何 target。'
+              : '只保存 server 定义，不改变 target 应用状态。'}
+          </span>
+        </div>
         <div className={styles.editorActions}>
-          <Button type="button" variant="ghost" onClick={onCancel}>
+          <Button type="button" variant="ghost" className={styles.editorCancel} onClick={onCancel}>
+            <X className="h-3.5 w-3.5" />
             Cancel
           </Button>
-          <Button type="button" variant="primary" onClick={() => onSubmit(form)} disabled={busy}>
-            {busy ? 'Saving…' : 'Save server'}
+          <Button
+            type="button"
+            variant="primary"
+            aria-label="Save server"
+            className={styles.editorSave}
+            onClick={() => onSubmit(form)}
+            disabled={busy}
+          >
+            <Check className="h-3.5 w-3.5" />
+            {busy ? 'Saving…' : mode === 'create' ? 'Create draft' : 'Save draft'}
           </Button>
         </div>
-      </section>
-      <section className={styles.previewCard}>
-        <div className={styles.previewHead}>
-          <div>
-            <div className={styles.cardKicker}>WRITE PREVIEW</div>
-            <p>
-              {agentName[previewTarget]} · {settings.path}
-            </p>
-          </div>
-        </div>
-        <pre>{settings.text}</pre>
-      </section>
+      </footer>
     </div>
   )
 }
