@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll } from 'vitest'
-import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NodeGit } from '../../src/platform/node/git'
@@ -7,9 +7,9 @@ import { NodeFileSystem } from '../../src/platform/node/fs'
 import { checkUpdates, performUpdate } from '../../src/remote/update'
 import type { SkillSource } from '@loom/core'
 import type { ScannedMember } from '../../src/projection/scan'
-import { testGit } from '../helpers/git'
+import { createBareRepo } from '../helpers/git'
 
-describe('checkUpdates', () => {
+describe.concurrent('checkUpdates', () => {
   it('hasUpdate when remote tag commit != pinned_commit', async () => {
     const mockGit = { lsRemote: async () => ({ tags: { 'v5.1.4': 'bbb' }, head: 'bbb' }) } as any
     const sources: SkillSource[] = [{ url: 'github:x/y', ref: 'v5.1.4', pinned_commit: 'aaa' }]
@@ -26,31 +26,27 @@ describe('checkUpdates', () => {
   })
 })
 
-describe('performUpdate', () => {
+describe.concurrent('performUpdate', () => {
   let bare: string
   beforeAll(async () => {
-    bare = await mkdtemp(join(tmpdir(), 'updbare-'))
-    await testGit().raw(['init', '--bare', '-b', 'main', bare])
-    const w = await mkdtemp(join(tmpdir(), 'updw-'))
-    const g = testGit(w)
-    await g.raw(['init', '-b', 'main'])
-    await mkdir(join(w, 'skills', 'brainstorming'), { recursive: true })
-    await writeFile(
-      join(w, 'skills', 'brainstorming', 'SKILL.md'),
-      '---\nname: brainstorming\n---\nv1\n',
-    )
-    await g.add('.')
-    await g.commit('v1')
-    await g.addTag('v1.0.0')
-    await rm(join(w, 'skills', 'brainstorming', 'SKILL.md'))
-    await mkdir(join(w, 'skills', 'tdd'), { recursive: true })
-    await writeFile(join(w, 'skills', 'tdd', 'SKILL.md'), '---\nname: tdd\n---\nv2\n')
-    await g.add('.')
-    await g.commit('v2')
-    await g.addTag('v2.0.0')
-    await g.addRemote('origin', bare)
-    await g.push('origin', 'HEAD:main')
-    await g.pushTags('origin')
+    bare = await createBareRepo([
+      {
+        message: 'v1',
+        files: { 'skills/brainstorming/SKILL.md': '---\nname: brainstorming\n---\nv1\n' },
+        tags: ['v1.0.0'],
+      },
+      {
+        message: 'v2',
+        files: {
+          'skills/brainstorming/SKILL.md': null,
+          'skills/tdd/SKILL.md': '---\nname: tdd\n---\nv2\n',
+        },
+        tags: ['v2.0.0'],
+      },
+    ])
+  })
+  afterAll(async () => {
+    await rm(bare, { recursive: true, force: true })
   })
 
   it('fetch + checkout new ref + detect orphan members', async () => {

@@ -4,29 +4,22 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { simpleGit } from 'simple-git'
 import { NodeGit } from '../../../src/platform/node/git'
-import { testGit } from '../../helpers/git'
+import { createBareRepo, testGit } from '../../helpers/git'
 
 async function makeBareWithCommit(): Promise<string> {
-  const bare = await mkdtemp(join(tmpdir(), 'bare-'))
-  await testGit().raw(['init', '--bare', '-b', 'main', bare])
-  const work = await mkdtemp(join(tmpdir(), 'work-'))
-  const wg = testGit(work)
-  await wg.raw(['init', '-b', 'main'])
-  await writeFile(join(work, 'a.txt'), 'x')
-  await wg.add('.')
-  await wg.commit('init')
-  await wg.addRemote('origin', bare)
-  await wg.push('origin', 'HEAD:main')
-  await wg.addTag('v1.0.0')
-  await wg.pushTags('origin')
-  return bare
+  return createBareRepo([{ message: 'init', files: { 'a.txt': 'x' }, tags: ['v1.0.0'] }])
 }
 
 describe('NodeGit', () => {
   let bare: string
+  let readOnlyRepo: string
   const created: string[] = []
   beforeAll(async () => {
     bare = await makeBareWithCommit()
+    created.push(bare)
+    readOnlyRepo = await mkdtemp(join(tmpdir(), 'readonly-'))
+    created.push(readOnlyRepo)
+    await new NodeGit().clone(bare, readOnlyRepo, false)
   })
   afterAll(async () => {
     await Promise.all(created.map((p) => rm(p, { recursive: true, force: true })))
@@ -114,42 +107,24 @@ describe('NodeGit', () => {
     const res = await git.forcePush(dest)
 
     expect(res).toEqual({ ok: true })
-    const verifierPath = await mkdtemp(join(tmpdir(), 'forcepush-verify-'))
-    created.push(verifierPath)
-    await testGit(verifierPath).clone(bare, '.')
-    expect(await simpleGit(verifierPath).raw(['ls-tree', '-r', '--name-only', 'HEAD'])).toContain(
-      'local.txt',
-    )
-    expect(
-      await simpleGit(verifierPath).raw(['ls-tree', '-r', '--name-only', 'HEAD']),
-    ).not.toContain('remote.txt')
+    const files = await testGit().raw(['--git-dir', bare, 'ls-tree', '-r', '--name-only', 'HEAD'])
+    expect(files).toContain('local.txt')
+    expect(files).not.toContain('remote.txt')
   })
 
   describe('show/revParseHead/lsTree', () => {
     it('show reads file content at ref', async () => {
-      const dest = await mkdtemp(join(tmpdir(), 'show-'))
-      created.push(dest)
-      await new NodeGit().clone(bare, dest, false)
-      expect(await new NodeGit().show(dest, 'HEAD', 'a.txt')).toContain('x')
+      expect(await new NodeGit().show(readOnlyRepo, 'HEAD', 'a.txt')).toContain('x')
     })
     it('revParseHead returns HEAD hash', async () => {
-      const dest = await mkdtemp(join(tmpdir(), 'rev-'))
-      created.push(dest)
-      await new NodeGit().clone(bare, dest, false)
-      expect(await new NodeGit().revParseHead(dest)).toMatch(/^[0-9a-f]{7,40}$/)
+      expect(await new NodeGit().revParseHead(readOnlyRepo)).toMatch(/^[0-9a-f]{7,40}$/)
     })
     it('lsTree lists files under dir', async () => {
-      const dest = await mkdtemp(join(tmpdir(), 'lstree-'))
-      created.push(dest)
-      await new NodeGit().clone(bare, dest, false)
-      const files = await new NodeGit().lsTree(dest, 'HEAD', '.')
+      const files = await new NodeGit().lsTree(readOnlyRepo, 'HEAD', '.')
       expect(files).toContain('a.txt')
     })
     it('lsTree returns [] for nonexistent dir', async () => {
-      const dest = await mkdtemp(join(tmpdir(), 'lstree-none-'))
-      created.push(dest)
-      await new NodeGit().clone(bare, dest, false)
-      expect(await new NodeGit().lsTree(dest, 'HEAD', 'nonexistent/')).toEqual([])
+      expect(await new NodeGit().lsTree(readOnlyRepo, 'HEAD', 'nonexistent/')).toEqual([])
     })
   })
 })

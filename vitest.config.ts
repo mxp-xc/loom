@@ -12,10 +12,8 @@ export default defineConfig({
     coverage: { include: ['packages/*/src/**'] },
     testTimeout: 30000,
     globals: true,
-    maxConcurrency: 16,
+    maxConcurrency: 8,
     poolOptions: { threads: { maxThreads: 4 } },
-    environmentOptions: { jsdom: { url: 'http://localhost/' } },
     exclude: ['**/node_modules/**', '**/.claude/worktrees/**', '**/.worktrees/**'],
-    setupFiles: ['./packages/web/test/setup.ts'],
   },
 })

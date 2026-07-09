@@ -1,31 +1,25 @@
-import { describe, it, expect, beforeAll } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NodeGit } from '../../src/platform/node/git'
 import { NodeFileSystem } from '../../src/platform/node/fs'
 import { installSkill } from '../../src/remote/install'
-import { testGit } from '../helpers/git'
+import { createBareRepo } from '../helpers/git'
 
-describe('installSkill', () => {
+describe.concurrent('installSkill', () => {
   let bare: string
   beforeAll(async () => {
-    bare = await mkdtemp(join(tmpdir(), 'instbare-'))
-    await testGit().raw(['init', '--bare', '-b', 'main', bare])
-    const w = await mkdtemp(join(tmpdir(), 'instw-'))
-    const g = testGit(w)
-    await g.raw(['init', '-b', 'main'])
-    await mkdir(join(w, 'skills', 'brainstorming'), { recursive: true })
-    await writeFile(
-      join(w, 'skills', 'brainstorming', 'SKILL.md'),
-      '---\nname: brainstorming\n---\n',
-    )
-    await g.add('.')
-    await g.commit('init')
-    await g.addTag('v1.0.0')
-    await g.addRemote('origin', bare)
-    await g.push('origin', 'HEAD:main')
-    await g.pushTags('origin')
+    bare = await createBareRepo([
+      {
+        message: 'init',
+        files: { 'skills/brainstorming/SKILL.md': '---\nname: brainstorming\n---\n' },
+        tags: ['v1.0.0'],
+      },
+    ])
+  })
+  afterAll(async () => {
+    await rm(bare, { recursive: true, force: true })
   })
 
   it('clones + checks out ref + returns pinned_commit (HEAD hash)', async () => {

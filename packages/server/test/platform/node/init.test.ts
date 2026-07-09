@@ -16,12 +16,23 @@ afterEach(async () => {
 })
 
 describe('initLoom', () => {
-  it('creates ~/.loom skeleton with default repo (git repo + .gitignore)', async () => {
+  it('creates the default ~/.loom skeleton', async () => {
     const fs = new NodeFileSystem(),
       git = new NodeGit()
     await initLoom(home, fs, git)
     expect(await fs.exists(join(home, '.loom', 'config.yaml'))).toBe(true)
+    expect(await fs.readFile(join(home, '.loom', 'config.yaml'))).toContain('active_repo: default')
+
+    const repoConfig = await fs.readFile(join(home, '.loom', 'repos', 'default', 'config.yaml'))
+    expect(repoConfig).toContain('profile: local')
+    expect(repoConfig).toContain('targets:')
+    expect(repoConfig).toContain('projection:')
+
     expect(await fs.exists(join(home, '.loom', 'repos', 'default', 'skills.yaml'))).toBe(true)
+    const skills = await fs.readFile(join(home, '.loom', 'repos', 'default', 'skills.yaml'))
+    expect(skills).toContain('sources: []')
+    expect(skills).toContain('skills: []')
+
     expect(await fs.exists(join(home, '.loom', 'repos', 'default', 'mcp.yaml'))).toBe(true)
     expect(await fs.exists(join(home, '.loom', 'repos', 'default', 'vars', 'base.yaml'))).toBe(true)
     expect(await fs.exists(join(home, '.loom', 'repos', 'default', 'vars', 'default.yaml'))).toBe(
@@ -29,29 +40,6 @@ describe('initLoom', () => {
     )
     expect(await fs.exists(join(home, '.loom', 'repos', 'default', '.gitignore'))).toBe(true)
     expect(await simpleGit(join(home, '.loom', 'repos', 'default')).checkIsRepo()).toBe(true)
-  })
-  it('local config.yaml defaults active_repo=default', async () => {
-    const fs = new NodeFileSystem(),
-      git = new NodeGit()
-    await initLoom(home, fs, git)
-    expect(await fs.readFile(join(home, '.loom', 'config.yaml'))).toContain('active_repo: default')
-  })
-  it('repo config.yaml has profile:local + targets + projection', async () => {
-    const fs = new NodeFileSystem(),
-      git = new NodeGit()
-    await initLoom(home, fs, git)
-    const c = await fs.readFile(join(home, '.loom', 'repos', 'default', 'config.yaml'))
-    expect(c).toContain('profile: local')
-    expect(c).toContain('targets:')
-    expect(c).toContain('projection:')
-  })
-  it('skills.yaml is valid empty (sources: [], skills: [])', async () => {
-    const fs = new NodeFileSystem(),
-      git = new NodeGit()
-    await initLoom(home, fs, git)
-    const s = await fs.readFile(join(home, '.loom', 'repos', 'default', 'skills.yaml'))
-    expect(s).toContain('sources: []')
-    expect(s).toContain('skills: []')
   })
   it('idempotent: running twice does not overwrite existing config or skills', async () => {
     const fs = new NodeFileSystem(),

@@ -37,6 +37,16 @@ describe.concurrent('SyncSessionManager', () => {
     const restored = await new SyncSessionManager({ home }).getSession(repo)
     expect(restored?.sessionId).toBe(pulled.sessionId)
     expect(restored?.conflicts).toHaveLength(1)
+    await expect(manager.forcePull(repo)).rejects.toMatchObject({
+      code: 'active_session_exists',
+      message: '请先解决或放弃当前同步会话',
+    })
+
+    await manager.abort(pulled.sessionId!)
+
+    expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: local\n')
+    expect(await manager.getSession(repo)).toBeNull()
+    expect(await simpleGit(repo).raw(['diff', '--name-only', '--diff-filter=U'])).toBe('')
   })
 
   it('applies a resolved merge only after every conflict is saved', async () => {
@@ -83,18 +93,6 @@ describe.concurrent('SyncSessionManager', () => {
     expect(saved.clean).toBe(false)
     expect(saved.remaining[0].path).toBe('skills.yaml')
     expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: newest local\n')
-    expect(await simpleGit(repo).raw(['diff', '--name-only', '--diff-filter=U'])).toBe('')
-  })
-
-  it('aborts by deleting only the isolated session', async () => {
-    const { home, repo } = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
-    const manager = new SyncSessionManager({ home })
-    const pulled = await manager.pull(repo)
-
-    await manager.abort(pulled.sessionId!)
-
-    expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: local\n')
-    expect(await manager.getSession(repo)).toBeNull()
     expect(await simpleGit(repo).raw(['diff', '--name-only', '--diff-filter=U'])).toBe('')
   })
 
@@ -165,18 +163,9 @@ describe.concurrent('SyncSessionManager', () => {
     expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: local\n')
   })
 
-  it('forcePull overwrites tracked local changes with the remote version', async () => {
+  it('forcePull resets to the remote version and removes local-only files', async () => {
     const { home, repo } = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
     await writeFile(join(repo, 'skills.yaml'), 'value: unsaved local edit\n')
-
-    const result = await new SyncSessionManager({ home }).forcePull(repo)
-
-    expect(result).toEqual({ clean: true, conflicts: [] })
-    expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: remote\n')
-  })
-
-  it('forcePull discards local-only commits and deletes untracked files and directories', async () => {
-    const { home, repo } = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
     await mkdir(join(repo, 'scratch'), { recursive: true })
     await writeFile(join(repo, 'scratch', 'note.txt'), 'temporary\n')
     await writeFile(join(repo, 'loose.txt'), 'temporary\n')
@@ -191,17 +180,6 @@ describe.concurrent('SyncSessionManager', () => {
     })
     await expect(readFile(join(repo, 'loose.txt'), 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',
-    })
-  })
-
-  it('forcePull refuses to discard an active conflict session', async () => {
-    const { home, repo } = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
-    const manager = new SyncSessionManager({ home })
-    await manager.pull(repo)
-
-    await expect(manager.forcePull(repo)).rejects.toMatchObject({
-      code: 'active_session_exists',
-      message: '请先解决或放弃当前同步会话',
     })
   })
 })

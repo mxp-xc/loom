@@ -37,7 +37,9 @@ const C =
 describe.concurrent('syncPull', () => {
   it('keeps native Git conflict state for competing line edits', async () => {
     const repo = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
-    const result = await syncPull(repo, new NodeGit(), new NodeFileSystem())
+    const git = new NodeGit()
+    const fs = new NodeFileSystem()
+    const result = await syncPull(repo, git, fs)
 
     expect(result.clean).toBe(false)
     expect(result.conflicts).toHaveLength(1)
@@ -49,9 +51,22 @@ describe.concurrent('syncPull', () => {
     })
     expect(result.conflicts[0].result).toContain('<<<<<<< HEAD')
 
-    const resumed = await syncPull(repo, new NodeGit(), new NodeFileSystem())
+    const resumed = await syncPull(repo, git, fs)
     expect(resumed.clean).toBe(false)
     expect(resumed.conflicts.map((conflict) => conflict.path)).toEqual(['skills.yaml'])
+
+    await expect(saveConflict(repo, git, fs, 'skills.yaml', '<<<<<<< HEAD\n')).rejects.toThrow(
+      '仍包含未解决的冲突标记',
+    )
+
+    const saved = await saveConflict(repo, git, fs, 'skills.yaml', 'value: chosen\n')
+    expect(saved).toEqual({ clean: true, remaining: [] })
+    expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: chosen\n')
+
+    const parents = (await simpleGit(repo).raw(['rev-list', '--parents', '-n', '1', 'HEAD']))
+      .trim()
+      .split(' ')
+    expect(parents).toHaveLength(3)
   })
 
   it('no conflict: Git auto-merges changes on separate lines', async () => {
@@ -93,26 +108,6 @@ describe.concurrent('syncPull', () => {
     const res = await syncPull(repo, new NodeGit(), new NodeFileSystem())
     expect(res.clean).toBe(false)
     expect(res.conflicts.some((conflict) => conflict.path.includes('SKILL.md'))).toBe(true)
-  })
-
-  it('saves a resolved file and creates a two-parent merge commit', async () => {
-    const repo = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
-    const git = new NodeGit()
-    const fs = new NodeFileSystem()
-    await syncPull(repo, git, fs)
-
-    await expect(saveConflict(repo, git, fs, 'skills.yaml', '<<<<<<< HEAD\n')).rejects.toThrow(
-      '仍包含未解决的冲突标记',
-    )
-
-    const saved = await saveConflict(repo, git, fs, 'skills.yaml', 'value: chosen\n')
-    expect(saved).toEqual({ clean: true, remaining: [] })
-    expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: chosen\n')
-
-    const parents = (await simpleGit(repo).raw(['rev-list', '--parents', '-n', '1', 'HEAD']))
-      .trim()
-      .split(' ')
-    expect(parents).toHaveLength(3)
   })
 
   it('aborts an in-progress conflict merge', async () => {
