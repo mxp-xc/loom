@@ -69,6 +69,23 @@ vi.mock('../src/lib/api', () => ({
     renameMemory: vi.fn(async () => ({ ok: true })),
     deleteMemory: vi.fn(async () => ({ ok: true })),
     saveMemoryContent: vi.fn(async () => ({ ok: true })),
+    vars: {
+      getMatrix: vi.fn(async () => ({
+        ok: true,
+        agent: 'codex',
+        builtinKeys: [],
+        userKeys: [],
+        snapshot: { base: {}, baseAgent: {}, local: {}, localAgent: {} },
+        resolution: {
+          ok: true,
+          values: {},
+          sources: {},
+          overrideChains: {},
+          dependencies: {},
+          diagnostics: [],
+        },
+      })),
+    },
     getManifest: vi.fn(async (repoPath: string) =>
       repoPath === '/tmp/mcp-layout'
         ? {
@@ -446,24 +463,33 @@ describe('Memory view', () => {
     const projectButton = screen.getByRole('button', { name: '投影 memory' })
     expect(railHeader.contains(projectButton)).toBe(true)
 
-    expect(screen.getByRole('tab', { name: '预览' }).getAttribute('aria-selected')).toBe('true')
+    expect(railHeader.textContent).not.toContain('2 份')
+    expect(screen.getByRole('tab', { name: '所见编辑' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      '预览',
-      '编辑',
+      '所见编辑',
+      '源码',
       '解析预览',
     ])
     expect(screen.queryByText('Markdown')).toBeNull()
-    expect(screen.getByRole('heading', { name: 'Active memory' })).toBeDefined()
+    expect(screen.getByRole('textbox', { name: 'Memory 内容' })).toBeDefined()
   })
 
-  it('keeps projection target chips informational instead of editing global Settings targets', async () => {
-    vi.mocked(api.getManifest).mockResolvedValueOnce({
-      skills: { sources: [], skills: [] },
-      mcp: [],
-      vars: { default: {}, active: {} },
-      config: { targets: ['codex', 'opencode'] },
-      errors: [],
-    } as never)
+  it('toggles Memory projection targets and reconciles projection immediately', async () => {
+    vi.mocked(api.getManifest)
+      .mockResolvedValueOnce({
+        skills: { sources: [], skills: [] },
+        mcp: [],
+        vars: { default: {}, active: {} },
+        config: { targets: ['codex', 'opencode'] },
+        errors: [],
+      } as never)
+      .mockResolvedValueOnce({
+        skills: { sources: [], skills: [] },
+        mcp: [],
+        vars: { default: {}, active: {} },
+        config: { targets: ['codex'] },
+        errors: [],
+      } as never)
     vi.mocked(api.getMemory).mockResolvedValueOnce({
       memories: [{ name: 'v1' }],
       active: 'v1',
@@ -477,8 +503,22 @@ describe('Memory view', () => {
     expect(panel.contains(targetsPanel)).toBe(true)
     fireEvent.click(within(panel).getByRole('button', { name: 'OC' }))
 
-    expect(api.putConfig).not.toHaveBeenCalled()
-    expect(within(panel).getByRole('button', { name: 'OC' })).toBeDefined()
+    await waitFor(() =>
+      expect(api.putConfig).toHaveBeenCalledWith({
+        repo: '/tmp/memory-targets',
+        level: 'repo',
+        field: 'targets',
+        value: ['codex'],
+      }),
+    )
+    await waitFor(() =>
+      expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/memory-targets', scope: 'memory' }),
+    )
+    await waitFor(() =>
+      expect(within(panel).getByRole('button', { name: 'OC' }).getAttribute('data-state')).toBe(
+        'off',
+      ),
+    )
   })
 
   it('uses the active status dot as the only memory activation control', async () => {

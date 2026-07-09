@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
-import { agentShort, agentColor, type AgentId } from '@/lib/agents'
+import { AGENTS, agentShort, agentColor, type AgentId } from '@/lib/agents'
 import MemoryEditor from '@/components/MemoryEditor'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
 import { useToast } from '@/hooks/useToast'
-import { useManifest } from '@/hooks/useManifest'
+import { refreshManifest, useManifest } from '@/hooks/useManifest'
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import styles from './Memory.module.css'
@@ -27,6 +27,7 @@ export default function Memory({ repoPath }: Props) {
   const [draftName, setDraftName] = useState('')
   const [projecting, setProjecting] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [updatingTarget, setUpdatingTarget] = useState<AgentId | null>(null)
   const { showToast } = useToast()
   const { manifest } = useManifest(repoPath)
   const targets = manifest?.config?.targets ?? []
@@ -42,6 +43,7 @@ export default function Memory({ repoPath }: Props) {
         setSelectedContent(res.activeContent)
       }
     } catch (e) {
+      console.error({ err: e }, 'Failed to load memory list')
       showToast(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
@@ -63,7 +65,8 @@ export default function Memory({ repoPath }: Props) {
         `/api/memory?repo=${encodeURIComponent(repoPath)}&name=${encodeURIComponent(name)}`,
       ).then((r) => r.json())
       setSelectedContent(res.content ?? '')
-    } catch {
+    } catch (e) {
+      console.error({ err: e }, 'Failed to select memory')
       setSelectedContent('')
     }
   }
@@ -73,11 +76,60 @@ export default function Memory({ repoPath }: Props) {
     try {
       const res = (await api.project({ repo: repoPath, scope: 'memory' })) as any
       if (res.ok) showToast('投影完成')
-      else showToast(res.message || '投影失败')
+      else {
+        console.error({ err: res }, 'Memory projection returned failure')
+        showToast(res.message || '投影失败')
+      }
     } catch (e) {
+      console.error({ err: e }, 'Failed to project memory')
       showToast(e instanceof Error ? e.message : String(e))
     } finally {
       setProjecting(false)
+    }
+  }
+
+  const toggleProjectionTarget = async (agent: AgentId) => {
+    const nextTargets = targets.includes(agent)
+      ? targets.filter((item) => item !== agent)
+      : [...targets, agent]
+    let saved = false
+    setUpdatingTarget(agent)
+    try {
+      const savedConfig = (await api.putConfig({
+        repo: repoPath,
+        level: 'repo',
+        field: 'targets',
+        value: nextTargets,
+      })) as { ok?: boolean; message?: string; error?: string }
+      if (savedConfig.ok === false) {
+        throw new Error(savedConfig.message ?? savedConfig.error ?? '保存配置失败')
+      }
+      saved = true
+      const projected = (await api.project({ repo: repoPath, scope: 'memory' })) as {
+        ok?: boolean
+        message?: string
+        error?: string
+      }
+      if (projected.ok === false) {
+        throw new Error(projected.message ?? projected.error ?? '投影失败')
+      }
+      await refreshManifest(repoPath)
+      showToast('投影目标已更新')
+    } catch (e) {
+      console.error({ err: e }, 'Failed to update memory projection targets')
+      if (saved) {
+        try {
+          await refreshManifest(repoPath)
+        } catch (refreshError) {
+          console.error(
+            { err: refreshError },
+            'Failed to refresh manifest after memory target update failure',
+          )
+        }
+      }
+      showToast(e instanceof Error ? e.message : String(e))
+    } finally {
+      setUpdatingTarget(null)
     }
   }
 
@@ -92,6 +144,7 @@ export default function Memory({ repoPath }: Props) {
       await select(n)
       showToast('已创建')
     } catch (e) {
+      console.error({ err: e }, 'Failed to create memory')
       showToast(e instanceof Error ? e.message : String(e))
     }
   }
@@ -107,6 +160,7 @@ export default function Memory({ repoPath }: Props) {
       await select(n)
       showToast('已重命名')
     } catch (e) {
+      console.error({ err: e }, 'Failed to rename memory')
       showToast(e instanceof Error ? e.message : String(e))
     }
   }
@@ -122,6 +176,7 @@ export default function Memory({ repoPath }: Props) {
       setDeleting(null)
       showToast('已删除')
     } catch (e) {
+      console.error({ err: e }, 'Failed to delete memory')
       showToast(e instanceof Error ? e.message : String(e))
     }
   }
@@ -132,6 +187,7 @@ export default function Memory({ repoPath }: Props) {
       await load()
       showToast(name ? `已激活 ${name}` : '已取消激活')
     } catch (e) {
+      console.error({ err: e }, 'Failed to set active memory')
       showToast(e instanceof Error ? e.message : String(e))
     }
   }
@@ -153,7 +209,6 @@ export default function Memory({ repoPath }: Props) {
         <div className={styles['mem-list-head']} data-testid="memory-rail-header">
           <div>
             <span className="label">memories</span>
-            <strong>{memories.length} 份</strong>
           </div>
           <div className={styles['mem-list-actions']}>
             <IconButton
@@ -179,19 +234,31 @@ export default function Memory({ repoPath }: Props) {
         <div className={styles['mem-global-targets']} data-testid="memory-targets">
           <span className="label">投影目标</span>
           <div className="target-chips">
-            {targets.map((a) => (
-              <button
-                key={a}
-                type="button"
-                className="target-chip"
-                data-state={targets.includes(a) ? 'on' : 'off'}
-                style={{ ['--c' as string]: agentColor[a] }}
-                aria-pressed={targets.includes(a)}
-                data-tooltip={`${agentShort[a]} 投影目标`}
-              >
-                {agentShort[a]}
-              </button>
-            ))}
+            {AGENTS.map((a) => {
+              const activeTarget = targets.includes(a)
+              const busy = updatingTarget === a
+              return (
+                <button
+                  key={a}
+                  type="button"
+                  className="target-chip"
+                  data-state={activeTarget ? 'on' : 'off'}
+                  style={{ ['--c' as string]: agentColor[a] }}
+                  aria-pressed={activeTarget}
+                  data-tooltip={
+                    busy
+                      ? '更新中…'
+                      : activeTarget
+                        ? `${agentShort[a]} 点击取消投影目标`
+                        : `${agentShort[a]} 点击添加投影目标`
+                  }
+                  disabled={!!updatingTarget || projecting}
+                  onClick={() => void toggleProjectionTarget(a)}
+                >
+                  {agentShort[a]}
+                </button>
+              )
+            })}
           </div>
         </div>
         <div className={styles['mem-list-scroll']}>

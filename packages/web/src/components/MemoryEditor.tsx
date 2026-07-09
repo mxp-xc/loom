@@ -1,13 +1,16 @@
-import { useState, useRef, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import rehypeHighlight from 'rehype-highlight'
 import { ApiError, api } from '@/lib/api'
 import { agentShort, agentColor, type AgentId } from '@/lib/agents'
 import { cn } from '@/lib/utils'
 import type { VarsDiagnostic } from '@/lib/vars'
+import MemoryRichMarkdownEditor from './MemoryRichMarkdownEditor'
+import MemorySourceMarkdownEditor from './MemorySourceMarkdownEditor'
 import styles from './MemoryEditor.module.css'
 
-type View = 'edit' | 'preview' | 'resolved'
+type View = 'compose' | 'source' | 'resolved'
 
 interface Props {
   repo: string
@@ -16,26 +19,22 @@ interface Props {
   onSave: (content: string) => Promise<void>
   targets: AgentId[]
   contextLabel?: string
-}
-
-// Highlight ${VAR} and \${...} escapes for the overlay layer.
-// HTML-escape first, then a single alternation pass so ph-esc wins over ph-var
-// (a separate second replace would re-match inside the ph-esc span and double-wrap).
-function highlight(text: string): string {
-  const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  return esc.replace(
-    /\\\$\{[^}]*\}|\$\{[A-Za-z_][A-Za-z0-9_.-]*\}/g,
-    (m) => `<span class="${m[0] === '\\' ? styles['ph-esc'] : styles['ph-var']}">${m}</span>`,
-  )
+  enableRichVarsCompletion?: boolean
 }
 
 function diagnosticText(diagnostic: VarsDiagnostic): string {
   const details = [
-    diagnostic.key ? `key=${diagnostic.key}` : null,
-    diagnostic.referencedKey ? `ref=${diagnostic.referencedKey}` : null,
-    diagnostic.path?.length ? `path=${diagnostic.path.join(' → ')}` : null,
+    diagnostic.key ? 'key=' + diagnostic.key : null,
+    diagnostic.referencedKey ? 'ref=' + diagnostic.referencedKey : null,
+    diagnostic.path?.length ? 'path=' + diagnostic.path.join(' → ') : null,
   ].filter(Boolean)
-  return `[${diagnostic.code}] ${diagnostic.message}${details.length ? ` · ${details.join(' · ')}` : ''}`
+  return (
+    '[' +
+    diagnostic.code +
+    '] ' +
+    diagnostic.message +
+    (details.length ? ' · ' + details.join(' · ') : '')
+  )
 }
 
 export default function MemoryEditor({
@@ -45,8 +44,12 @@ export default function MemoryEditor({
   onSave,
   targets,
   contextLabel,
+  enableRichVarsCompletion = true,
 }: Props) {
-  const [view, setView] = useState<View>('preview')
+  // Rich editing and rich variable completion are intentionally parked for now.
+  // Keep the adapter code in place so the feature can be re-enabled after the UX is stable.
+  const richEditingEnabled = false
+  const [view, setView] = useState<View>('compose')
   const [edit, setEdit] = useState(content)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -54,8 +57,10 @@ export default function MemoryEditor({
   const [resolved, setResolved] = useState('')
   const [resolveErr, setResolveErr] = useState<string | null>(null)
   const [diagnostics, setDiagnostics] = useState<VarsDiagnostic[]>([])
-  const taRef = useRef<HTMLTextAreaElement>(null)
-  const overlayRef = useRef<HTMLPreElement>(null)
+  const [varKeyState, setVarKeyState] = useState<{ cacheKey: string; keys: string[] }>({
+    cacheKey: '',
+    keys: [],
+  })
 
   useEffect(() => {
     setEdit(content)
@@ -66,12 +71,29 @@ export default function MemoryEditor({
     if (targets.length && !targets.includes(agent)) setAgent(targets[0])
   }, [targets, agent])
 
-  const onScroll = () => {
-    if (taRef.current && overlayRef.current) {
-      overlayRef.current.scrollTop = taRef.current.scrollTop
-      overlayRef.current.scrollLeft = taRef.current.scrollLeft
+  const completionCacheKey = repo + '\0' + agent
+  const varKeys = varKeyState.cacheKey === completionCacheKey ? varKeyState.keys : []
+
+  useEffect(() => {
+    if (varKeyState.cacheKey === completionCacheKey) return
+    let active = true
+    api.vars
+      .getMatrix(repo, agent)
+      .then((res) => {
+        if (!active) return
+        setVarKeyState({
+          cacheKey: completionCacheKey,
+          keys: [...new Set([...(res.userKeys ?? []), ...(res.builtinKeys ?? [])])].sort(),
+        })
+      })
+      .catch((err: unknown) => {
+        console.error({ err }, 'Failed to load memory variable suggestions')
+        if (active) setVarKeyState({ cacheKey: completionCacheKey, keys: [] })
+      })
+    return () => {
+      active = false
     }
-  }
+  }, [agent, completionCacheKey, repo, varKeyState.cacheKey])
 
   useEffect(() => {
     if (view !== 'resolved') return
@@ -86,12 +108,14 @@ export default function MemoryEditor({
         setDiagnostics(res.diagnostics ?? res.resolution?.diagnostics ?? [])
         if (res.rendered !== undefined) setResolved(res.rendered)
         else {
+          console.error({ err: res }, 'Memory preview returned failure')
           setResolved('')
           setResolveErr(res.message ?? res.error ?? '解析失败')
         }
       })
       .catch((e: unknown) => {
         if (!active) return
+        console.error({ err: e }, 'Failed to preview memory')
         setResolved('')
         setDiagnostics(e instanceof ApiError ? (e.diagnostics ?? []) : [])
         setResolveErr(e instanceof Error ? e.message : String(e))
@@ -100,6 +124,11 @@ export default function MemoryEditor({
       active = false
     }
   }, [view, agent, edit, repo])
+
+  const updateEdit = (next: string) => {
+    setEdit(next)
+    setDirty(true)
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -110,6 +139,24 @@ export default function MemoryEditor({
       setSaving(false)
     }
   }
+
+  const editor = useMemo(() => {
+    if (view === 'compose') {
+      return (
+        <MemoryRichMarkdownEditor
+          value={edit}
+          onChange={updateEdit}
+          varsKeys={varKeys}
+          readOnly={!richEditingEnabled}
+          enableVarsCompletion={richEditingEnabled && enableRichVarsCompletion}
+        />
+      )
+    }
+    if (view === 'source') {
+      return <MemorySourceMarkdownEditor value={edit} onChange={updateEdit} varsKeys={varKeys} />
+    }
+    return null
+  }, [edit, enableRichVarsCompletion, varKeys, view])
 
   const tab = (v: View, label: string) => (
     <button
@@ -132,8 +179,8 @@ export default function MemoryEditor({
           </div>
         )}
         <div className={styles['cfg-seg']} role="tablist" aria-label="Memory 视图">
-          {tab('preview', '预览')}
-          {tab('edit', '编辑')}
+          {tab('compose', '所见编辑')}
+          {tab('source', '源码')}
           {tab('resolved', '解析预览')}
         </div>
         {view === 'resolved' && (
@@ -155,7 +202,7 @@ export default function MemoryEditor({
             </div>
           </div>
         )}
-        {view === 'edit' && dirty && (
+        {view !== 'resolved' && dirty && (
           <button
             type="button"
             className={styles['mem-save']}
@@ -167,33 +214,7 @@ export default function MemoryEditor({
         )}
       </div>
 
-      {view === 'edit' && (
-        <div className={styles['mem-edit-wrap']}>
-          <pre
-            ref={overlayRef}
-            aria-hidden
-            className={styles['mem-overlay']}
-            dangerouslySetInnerHTML={{ __html: highlight(edit) + '\n' }}
-          />
-          <textarea
-            ref={taRef}
-            className={styles['mem-textarea']}
-            value={edit}
-            onChange={(e) => {
-              setEdit(e.target.value)
-              setDirty(true)
-            }}
-            onScroll={onScroll}
-            spellCheck={false}
-          />
-        </div>
-      )}
-
-      {view === 'preview' && (
-        <div className={cn('md-preview', styles['mem-pane'])}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{edit}</ReactMarkdown>
-        </div>
-      )}
+      {editor}
 
       {view === 'resolved' && (
         <div className={styles['mem-pane']}>
@@ -207,8 +228,10 @@ export default function MemoryEditor({
               </ul>
             </div>
           )}
-          <div className="md-preview">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{resolved}</ReactMarkdown>
+          <div className={cn('md-preview', styles['mem-rendered-preview'])}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+              {resolved}
+            </ReactMarkdown>
           </div>
         </div>
       )}

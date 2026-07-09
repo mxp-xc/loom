@@ -106,9 +106,16 @@
     border-color var(--dur) var(--ease),
     box-shadow var(--dur) var(--ease);
 }
+.mem-compose-wrap {
+  background: var(--card);
+}
 .mem-edit-wrap:focus-within {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.mem-rich-readonly:focus-within {
+  border-color: var(--border);
+  box-shadow: none;
 }
 .mem-overlay,
 .mem-textarea {
@@ -129,6 +136,7 @@
   color: var(--text);
   overflow: auto;
   background: var(--card);
+  z-index: 0;
 }
 .mem-textarea {
   position: relative;
@@ -141,6 +149,167 @@
   resize: none;
   outline: none;
   caret-color: var(--primary);
+  z-index: 1;
+}
+.mem-rendered-editor,
+.mem-rendered-preview {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 18px 22px;
+  color: var(--text);
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  background: transparent;
+}
+.mem-rendered-editor {
+  display: block;
+  height: 100%;
+  max-height: 100%;
+  overflow: auto;
+  outline: none;
+  caret-color: var(--primary);
+}
+.mem-rendered-preview {
+  min-height: 100%;
+}
+.mem-rendered-editor:empty::before {
+  content: '直接输入 Memory 内容…';
+  color: var(--muted);
+  pointer-events: none;
+}
+.mem-rich-readonly .mem-rendered-editor {
+  cursor: default;
+  caret-color: transparent;
+}
+.mem-rich-readonly .mem-rendered-editor:empty::before {
+  content: '暂无 Memory 内容。';
+}
+.mem-rendered-editor [data-token='var'] {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 20%, transparent);
+}
+.mem-rendered-editor [data-token='markdown-comment'] {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9em;
+}
+.mem-rendered-editor :global(code > [class*='_code_']) {
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  background: transparent;
+  border-radius: inherit;
+}
+.mem-rendered-editor::highlight(memory-var) {
+  color: var(--primary);
+  background-color: color-mix(in srgb, var(--primary) 14%, transparent);
+}
+.mem-rendered-editor::highlight(memory-markdown-comment) {
+  color: color-mix(in srgb, var(--muted) 76%, var(--primary));
+  background-color: color-mix(in srgb, var(--muted) 12%, transparent);
+  font-style: italic;
+}
+.mem-mdx-root {
+  background: transparent;
+}
+.mem-edit-wrap > .mem-mdx-root {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+.mem-mdx-root :global(.mdxeditor-root-contenteditable) {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.mem-mdx-root :global(.mdxeditor-root-contenteditable > div) {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+.mem-mdx-root :global(.mdxeditor-popup-container) {
+  z-index: 20;
+}
+.mem-mdx-root :global([class*='_tableEditor_']) {
+  width: 100%;
+  height: auto !important;
+  margin: 8px 0;
+  table-layout: auto !important;
+  border-spacing: 0;
+  border-collapse: collapse;
+}
+.mem-mdx-root :global([class*='_tableEditor_'] > colgroup > col:first-child),
+.mem-mdx-root :global([class*='_tableEditor_'] > colgroup > col:last-child) {
+  width: 0 !important;
+}
+.mem-mdx-root :global([class*='_tableEditor_'] > tbody > tr > [data-tool-cell='true']),
+.mem-mdx-root :global([class*='_tableEditor_'] > tbody > tr > [class*='_toolCell_']) {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  visibility: hidden;
+  border: 0 !important;
+}
+.mem-mdx-root :global([class*='_tableEditor_'] > tbody > tr > [data-tool-cell='true'][rowspan]) {
+  display: none !important;
+}
+.mem-mdx-root
+  :global(
+    [class*='_tableEditor_']
+      > tbody
+      > tr
+      > td:not([data-tool-cell='true']):not([class*='_toolCell_'])
+  ),
+.mem-mdx-root
+  :global(
+    [class*='_tableEditor_']
+      > tbody
+      > tr
+      > th:not([data-tool-cell='true']):not([class*='_toolCell_'])
+  ) {
+  padding: 6px 10px !important;
+  font-size: 12px;
+  text-align: left;
+  border: 1px solid var(--border) !important;
+}
+.mem-mdx-root
+  :global(
+    [class*='_tableEditor_']
+      > tbody
+      > tr
+      > th:not([data-tool-cell='true']):not([class*='_toolCell_'])
+  ) {
+  color: var(--bright);
+  font-weight: 600;
+  background: var(--accent);
+}
+.mem-mdx-root :global([class*='_tableEditor_'] > thead),
+.mem-mdx-root :global([class*='_tableEditor_'] > tfoot),
+.mem-mdx-root :global([class*='_tableEditor_'] [class*='_tableColumnEditorTrigger_']),
+.mem-mdx-root :global([class*='_tableEditor_'] [class*='_tableRowEditorTrigger_']),
+.mem-mdx-root :global([class*='_tableEditor_'] [class*='_tableToolsColumn_']),
+.mem-mdx-root :global([class*='_tableEditor_'] [class*='_tableColumnEditorToolbar_']),
+.mem-mdx-root :global([class*='_tableEditor_'] [class*='_addColumnButton_']),
+.mem-mdx-root :global([class*='_tableEditor_'] [class*='_addRowButton_']) {
+  display: none !important;
+}
+.mem-source-editor {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 .ph-var {
   background: var(--accent);
@@ -156,14 +325,61 @@
   padding: 1px 3px;
   opacity: 0.75;
 }
+.md-comment {
+  color: color-mix(in srgb, var(--muted) 76%, var(--primary));
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--muted) 20%, transparent);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-style: italic;
+}
+.mem-completions {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  left: 16px;
+  z-index: 3;
+  display: grid;
+  gap: 4px;
+  max-height: min(220px, 42%);
+  padding: 6px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--card) 96%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+  border-radius: var(--radius);
+  box-shadow: 0 14px 34px color-mix(in srgb, #000 16%, transparent);
+}
+.mem-completions button {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 8px;
+  color: var(--text);
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mem-completions button:hover,
+.mem-completions button[aria-selected='true'] {
+  color: var(--primary);
+  background: var(--accent);
+}
+.mem-completions strong {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+}
 .mem-pane {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 16px 18px;
+  padding: 0;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   overflow: auto;
+}
+.mem-pane > .mem-err {
+  margin: 14px 18px 0;
 }
 .mem-err {
   margin-bottom: 10px;

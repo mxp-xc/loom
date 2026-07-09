@@ -7,6 +7,7 @@ import type {
   VarsMutationResponse,
   VarsMatrixResponse,
   VarsResolution,
+  AgentAwareVarsResolution,
   VarOverride,
 } from './vars'
 
@@ -385,6 +386,8 @@ export const api = {
   previewMemory: (body: { repo: string; content: string; agent: string }) =>
     post('/memory/preview', body).then(json) as Promise<{
       rendered?: string
+      diagnostics?: VarsDiagnostic[]
+      resolution?: Extract<AgentAwareVarsResolution, { ok: true }>
       error?: string
       message?: string
     }>,

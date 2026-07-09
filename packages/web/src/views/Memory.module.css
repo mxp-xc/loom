@@ -57,10 +57,6 @@
   border-radius: var(--radius);
 }
 
-.mem-global-targets :global(.target-chip) {
-  cursor: default;
-}
-
 .mem-list-scroll {
   display: flex;
   flex: 1;
