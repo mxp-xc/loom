@@ -37,8 +37,8 @@ import {
 
 const SIDEBAR_WIDTH_KEY = 'loom-sidebar-width'
 const SIDEBAR_COLLAPSED_KEY = 'loom-sidebar-collapsed'
-const DEFAULT_SIDEBAR_WIDTH = 208
 const MIN_SIDEBAR_WIDTH = 176
+const DEFAULT_SIDEBAR_WIDTH = MIN_SIDEBAR_WIDTH
 const MAX_SIDEBAR_WIDTH = 360
 const COLLAPSED_SIDEBAR_WIDTH = 64
 
