@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
 import { cn } from '@/lib/utils'
+import './data-table.css'
 import {
   Table,
   TableBody,
@@ -17,6 +18,9 @@ export type DataTableColumn<TData> = {
   className?: string
   headerClassName?: string
   cellClassName?: string
+  size?: number
+  minSize?: number
+  maxSize?: number
 }
 
 type DataTableProps<TData> = {
@@ -42,12 +46,16 @@ export function DataTable<TData>({
   emptyMessage = '没有数据。',
   emptyClassName,
 }: DataTableProps<TData>) {
+  const [columnSizing, setColumnSizing] = React.useState<Record<string, number>>({})
   const columnDefs = React.useMemo<Array<ColumnDef<TData>>>(
     () =>
       columns.map((column) => ({
         id: column.id,
         header: () => column.header,
         cell: ({ row }) => column.cell(row.original),
+        size: column.size,
+        minSize: column.minSize ?? 72,
+        maxSize: column.maxSize,
         meta: column,
       })),
     [columns],
@@ -56,27 +64,63 @@ export function DataTable<TData>({
   const table = useReactTable({
     data: rows,
     columns: columnDefs,
+    columnResizeMode: 'onChange',
+    enableColumnResizing: true,
+    state: { columnSizing },
+    onColumnSizingChange: setColumnSizing,
     getCoreRowModel: getCoreRowModel(),
     getRowId,
   })
+  const hasMeasuredWidth = columns.some(
+    (column) => column.size !== undefined || columnSizing[column.id] !== undefined,
+  )
+  const tableMinWidth = hasMeasuredWidth ? table.getCenterTotalSize() : undefined
 
   return (
     <section className={cn('data-table-shell', className)} aria-label={ariaLabel}>
-      <Table className={cn('data-table', tableClassName)} aria-label={ariaLabel}>
+      <Table
+        className={cn('data-table', tableClassName)}
+        aria-label={ariaLabel}
+        style={tableMinWidth === undefined ? undefined : { minWidth: tableMinWidth }}
+      >
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
             <TableRow key={headerGroup.id}>
               {headerGroup.headers.map((header) => {
                 const meta = header.column.columnDef.meta as DataTableColumn<TData> | undefined
+                const headerLabel =
+                  typeof meta?.header === 'string' ? meta.header : (meta?.id ?? header.id)
+                const width =
+                  meta && (meta.size !== undefined || columnSizing[meta.id] !== undefined)
+                    ? header.getSize()
+                    : undefined
                 return (
                   <TableHead
                     key={header.id}
                     scope="col"
                     className={cn(meta?.className, meta?.headerClassName)}
+                    style={width === undefined ? undefined : { width }}
                   >
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())}
+                    <span className="data-table-head-content">
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
+                    </span>
+                    {header.column.getCanResize() && (
+                      <span
+                        role="separator"
+                        aria-label={'调整 ' + headerLabel + ' 列宽'}
+                        aria-orientation="vertical"
+                        tabIndex={0}
+                        className={cn(
+                          'data-table-resizer',
+                          header.column.getIsResizing() && 'is-resizing',
+                        )}
+                        onMouseDown={header.getResizeHandler()}
+                        onTouchStart={header.getResizeHandler()}
+                        onDoubleClick={() => header.column.resetSize()}
+                      />
+                    )}
                   </TableHead>
                 )
               })}
@@ -98,8 +142,16 @@ export function DataTable<TData>({
               <TableRow key={row.id} className={rowClassName?.(row.original)} aria-label={row.id}>
                 {row.getVisibleCells().map((cell) => {
                   const meta = cell.column.columnDef.meta as DataTableColumn<TData> | undefined
+                  const width =
+                    meta && (meta.size !== undefined || columnSizing[meta.id] !== undefined)
+                      ? cell.column.getSize()
+                      : undefined
                   return (
-                    <TableCell key={cell.id} className={cn(meta?.className, meta?.cellClassName)}>
+                    <TableCell
+                      key={cell.id}
+                      className={cn(meta?.className, meta?.cellClassName)}
+                      style={width === undefined ? undefined : { width }}
+                    >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   )

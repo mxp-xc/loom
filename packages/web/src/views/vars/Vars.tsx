@@ -1,7 +1,7 @@
 import { RefreshCw, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '@/hooks/useToast'
-import { AGENTS, agentColor, agentShort } from '../../lib/agents'
+import { agentColor, agentShort } from '../../lib/agents'
 import { cn } from '@/lib/utils'
 import type { VarsProfileId } from './profile-model'
 import { useProfileVars } from './useProfileVars'
@@ -118,19 +118,38 @@ export default function Vars({ repoPath }: { repoPath: string }) {
             最终结果
           </button>
         </div>
-        <div className="target-chips" aria-label="目标 agent">
-          {AGENTS.map((agent) => (
-            <button
-              key={agent}
-              type="button"
-              className="target-chip"
-              data-state={vars.activeAgent === agent ? 'on' : 'off'}
-              style={{ ['--c' as string]: agentColor[agent] }}
-              onClick={() => vars.setActiveAgent(agent)}
-            >
-              {agentShort[agent]}
-            </button>
-          ))}
+        <div className={styles['vars-agent-view']}>
+          <span className={styles['vars-agent-label']}>查看范围</span>
+          <button
+            type="button"
+            className="target-chip"
+            data-agent="default"
+            data-state={vars.viewScope === 'default' ? 'on' : 'off'}
+            style={{ ['--c' as string]: 'var(--primary)' }}
+            onClick={() => {
+              vars.setActiveAgent(vars.defaultAgent)
+              vars.setViewScope('default')
+            }}
+          >
+            default
+          </button>
+          <div className="target-chips" aria-label="目标 agent">
+            {vars.configuredTargets.map((agent) => (
+              <button
+                key={agent}
+                type="button"
+                className="target-chip"
+                data-state={vars.viewScope === agent ? 'on' : 'off'}
+                style={{ ['--c' as string]: agentColor[agent] }}
+                onClick={() => {
+                  vars.setActiveAgent(agent)
+                  vars.setViewScope(agent)
+                }}
+              >
+                {agentShort[agent]}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -189,11 +208,7 @@ export default function Vars({ repoPath }: { repoPath: string }) {
           </main>
         </div>
       ) : (
-        <VarsResolvedView
-          rows={state.resolvedRows}
-          activeAgent={vars.activeAgent}
-          onAgentChange={vars.setActiveAgent}
-        />
+        <VarsResolvedView rows={state.resolvedRows} />
       )}
 
       {modal && (
@@ -202,8 +217,8 @@ export default function Vars({ repoPath }: { repoPath: string }) {
           modal={modal}
           profile={activeProfile}
           baseEntries={state.profiles.find((profile) => profile.id === 'base')?.entries ?? []}
-          activeAgent={vars.activeAgent}
-          activeMatrix={state.activeMatrix}
+          viewScope={vars.viewScope}
+          definitionMatrix={state.definitionMatrix}
           matricesByAgent={vars.matricesByAgent!}
           setPending={vars.setPending}
           onClose={() => setModal(null)}

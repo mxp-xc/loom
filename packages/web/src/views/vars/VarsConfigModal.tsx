@@ -23,8 +23,8 @@ type VarsConfigModalProps = {
   modal: VarsModalState
   profile: VarsProfileSummary
   baseEntries: VarsProfileEntry[]
-  activeAgent: AgentId
-  activeMatrix: VarsMatrixResponse
+  viewScope: 'default' | AgentId
+  definitionMatrix: VarsMatrixResponse
   matricesByAgent: Record<AgentId, VarsMatrixResponse>
   onClose: () => void
   onSaved: () => Promise<void>
@@ -55,13 +55,13 @@ function slotLabel(slot: Slot) {
 }
 
 function valueForSlot(
-  activeMatrix: VarsMatrixResponse,
+  definitionMatrix: VarsMatrixResponse,
   matricesByAgent: Record<AgentId, VarsMatrixResponse>,
   profileId: VarsProfileSummary['id'],
   key: string,
   slot: Slot,
 ): string {
-  const matrix = slot === 'default' ? activeMatrix : (matricesByAgent[slot] ?? activeMatrix)
+  const matrix = slot === 'default' ? definitionMatrix : (matricesByAgent[slot] ?? definitionMatrix)
   if (profileId === 'base' && slot === 'default')
     return entryValuePreview(matrix.snapshot.base[key])
   if (profileId === 'base' && slot !== 'default')
@@ -72,6 +72,22 @@ function valueForSlot(
     return entryValuePreview(matrix.snapshot.localAgent[key])
   if (matrix.resolution.ok) return entryValuePreview(matrix.resolution.values[key])
   return ''
+}
+
+function renderWithResolvedVars(value: string, matrix: VarsMatrixResponse): string {
+  if (!value || !matrix.resolution.ok) return value
+  const tokenOpen = '$' + '{'
+  const escapedToken = String.fromCharCode(0) + 'DOLLAR_BRACE' + String.fromCharCode(0)
+  return value
+    .replaceAll('\\' + tokenOpen, escapedToken)
+    .replace(/\$\{([^}]+)\}/g, (full, raw: string) => {
+      const [key, ...defaultParts] = raw.split(':')
+      if (defaultParts.length > 0 || !/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key)) return full
+      const entry = matrix.resolution.ok ? matrix.resolution.values[key] : undefined
+      if (!entry || entry.type === 'json') return full
+      return String(entry.value)
+    })
+    .replaceAll(escapedToken, tokenOpen)
 }
 
 function traceLabel(ref: VarsLayerRef) {
@@ -160,8 +176,8 @@ export default function VarsConfigModal({
   modal,
   profile,
   baseEntries,
-  activeAgent,
-  activeMatrix,
+  viewScope,
+  definitionMatrix,
   matricesByAgent,
   onClose,
   onSaved,
@@ -182,14 +198,14 @@ export default function VarsConfigModal({
     [baseEntries, modal.entry, modal.kind, profile.id, selectedKey],
   )
   const initialSlot: Slot =
-    modal.kind !== 'add' && profile.id === 'local' && modal.entry.agentSlots.includes(activeAgent)
-      ? activeAgent
+    modal.kind !== 'add' && viewScope !== 'default' && modal.entry.agentSlots.includes(viewScope)
+      ? viewScope
       : 'default'
   const [slot, setSlot] = useState<Slot>(initialSlot)
   const [previewMode, setPreviewMode] = useState<PreviewMode>('edit')
   const [draft, setDraft] = useState(() =>
     selectedEntry
-      ? valueForSlot(activeMatrix, matricesByAgent, profile.id, selectedEntry.key, initialSlot)
+      ? valueForSlot(definitionMatrix, matricesByAgent, profile.id, selectedEntry.key, initialSlot)
       : '',
   )
   const [baseKeyDraft, setBaseKeyDraft] = useState('')
@@ -208,8 +224,8 @@ export default function VarsConfigModal({
 
   useEffect(() => {
     if (!selectedEntry) return
-    setDraft(valueForSlot(activeMatrix, matricesByAgent, profile.id, selectedEntry.key, slot))
-  }, [activeMatrix, matricesByAgent, profile.id, selectedEntry, slot])
+    setDraft(valueForSlot(definitionMatrix, matricesByAgent, profile.id, selectedEntry.key, slot))
+  }, [definitionMatrix, matricesByAgent, profile.id, selectedEntry, slot])
 
   const key = isNewBaseDefinition ? baseKeyDraft.trim() : (selectedEntry?.key ?? '')
   const dialogLabel =
@@ -221,14 +237,17 @@ export default function VarsConfigModal({
         ? undefined
         : baseFormatDraft
       : selectedEntry?.format
-  const resolvedValue =
-    activeMatrix.resolution.ok && key
-      ? entryValuePreview(activeMatrix.resolution.values[key])
-      : draft
+  const previewMatrix =
+    slot === 'default' ? definitionMatrix : (matricesByAgent[slot] ?? definitionMatrix)
+  const resolvedRawValue =
+    previewMatrix.resolution.ok && key
+      ? entryValuePreview(previewMatrix.resolution.values[key])
+      : ''
+  const resolvedValue = renderWithResolvedVars(draft || resolvedRawValue, previewMatrix)
   const trace =
-    activeMatrix.resolution.ok && key ? (activeMatrix.resolution.overrideChains[key] ?? []) : []
+    previewMatrix.resolution.ok && key ? (previewMatrix.resolution.overrideChains[key] ?? []) : []
   const dependencies =
-    activeMatrix.resolution.ok && key ? (activeMatrix.resolution.dependencies[key] ?? []) : []
+    previewMatrix.resolution.ok && key ? (previewMatrix.resolution.dependencies[key] ?? []) : []
   const diagnostics = selectedEntry?.diagnostics ?? []
 
   const save = async () => {
@@ -431,7 +450,7 @@ export default function VarsConfigModal({
                   {draft || '当前槽位还没有输入内容。'}
                 </pre>
               ) : format === 'markdown' ? (
-                <MarkdownPreview value={draft || resolvedValue} />
+                <MarkdownPreview value={resolvedValue || draft} />
               ) : (
                 <pre className={cn(styles['vars-preview'], styles['vars-preview-raw'])}>
                   {resolvedValue || '当前没有解析结果。'}

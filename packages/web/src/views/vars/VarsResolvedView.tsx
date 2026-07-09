@@ -2,15 +2,11 @@ import { useMemo } from 'react'
 import { Eye } from 'lucide-react'
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
 import { IconButton } from '@/components/ui/IconButton'
-import { AGENTS, agentColor, agentShort } from '../../lib/agents'
-import type { AgentId } from '../../lib/agents'
 import type { VarsResolvedRow } from './profile-model'
 import styles from './Vars.module.css'
 
 type VarsResolvedViewProps = {
   rows: VarsResolvedRow[]
-  activeAgent: AgentId
-  onAgentChange: (agent: AgentId) => void
 }
 
 function KeyCell({ row }: { row: VarsResolvedRow }) {
@@ -25,11 +21,7 @@ function KeyCell({ row }: { row: VarsResolvedRow }) {
   )
 }
 
-export default function VarsResolvedView({
-  rows,
-  activeAgent,
-  onAgentChange,
-}: VarsResolvedViewProps) {
+export default function VarsResolvedView({ rows }: VarsResolvedViewProps) {
   const columns = useMemo<Array<DataTableColumn<VarsResolvedRow>>>(
     () => [
       {
@@ -37,6 +29,8 @@ export default function VarsResolvedView({
         header: 'key',
         cell: (row) => <KeyCell row={row} />,
         className: styles['vars-col-key'],
+        size: 300,
+        minSize: 180,
       },
       {
         id: 'value',
@@ -44,6 +38,8 @@ export default function VarsResolvedView({
         cell: (row) => row.valuePreview || '未配置',
         className: styles['vars-col-value'],
         cellClassName: styles['vars-value'],
+        size: 520,
+        minSize: 220,
       },
       {
         id: 'source',
@@ -51,6 +47,8 @@ export default function VarsResolvedView({
         cell: (row) => row.sourceLabel,
         className: styles['vars-col-source'],
         cellClassName: styles['vars-source'],
+        size: 160,
+        minSize: 120,
       },
       {
         id: 'actions',
@@ -64,6 +62,8 @@ export default function VarsResolvedView({
         ),
         className: styles['vars-col-actions'],
         cellClassName: styles['vars-actions-cell'],
+        size: 110,
+        minSize: 96,
       },
     ],
     [],
@@ -76,20 +76,6 @@ export default function VarsResolvedView({
           <div className={styles['vars-eyebrow']}>resolved</div>
           <h2>当前 agent 的最终变量</h2>
           <p>只读查看解析后的最终值与来源。</p>
-        </div>
-        <div className="target-chips" aria-label="最终结果 agent">
-          {AGENTS.map((agent) => (
-            <button
-              key={agent}
-              type="button"
-              className="target-chip"
-              data-state={activeAgent === agent ? 'on' : 'off'}
-              style={{ ['--c' as string]: agentColor[agent] }}
-              onClick={() => onAgentChange(agent)}
-            >
-              {agentShort[agent]}
-            </button>
-          ))}
         </div>
       </section>
 

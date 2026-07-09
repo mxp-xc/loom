@@ -11,6 +11,7 @@ vi.mock('../src/lib/api', async (importOriginal) => {
   return {
     ...actual,
     api: {
+      getManifest: vi.fn(),
       vars: {
         getMatrix: vi.fn(),
         setBaseKey: vi.fn(),
@@ -81,6 +82,13 @@ describe('Vars diagnostics actions', () => {
     vi.mocked(api.vars.setBaseKey).mockResolvedValue({ ok: true })
     vi.mocked(api.vars.setOverride).mockResolvedValue({ ok: true })
     vi.mocked(api.vars.clearOverride).mockResolvedValue({ ok: true })
+    vi.mocked(api.getManifest).mockResolvedValue({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex'] },
+      errors: [],
+    } as never)
   })
 
   it('shows resolver diagnostics with key, reference, and path context', async () => {

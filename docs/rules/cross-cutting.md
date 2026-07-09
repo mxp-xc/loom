@@ -15,6 +15,8 @@ Implications:
 - Target chip 显示 manifest 是否选择了对应 agent。
 - 磁盘上的 projection artifact 不会单独让某个 item 显示为已选择。
 - 引用的本地文件缺失时，UI 可以展示 unavailable 或缺失诊断，但不能自动删除 desired entry。
+- Vars 的目标 agent chips 必须来自 Settings targets；default/agent 查看范围独立于“配置管理/最终结果”视图切换，配置管理中的当前值按所选查看范围展示 default 或 agent-specific 值。
+- 需要初始 agent 视角的只读/详情视图（例如 Vars 最终结果）默认使用 Settings 中的首个 target；没有 configured target 时才回退到产品默认 agent。
 
 Safety:
 
@@ -30,6 +32,7 @@ Tests:
 
 - packages/web/test/views.test.tsx
 - packages/server/test/api/local-skill-status.test.ts
+- packages/web/test/vars-view.test.tsx
 
 ## R-CROSS-002 desired-state 编辑后自动 reconcile projection
 
@@ -42,6 +45,7 @@ Rule:
 Implications:
 
 - 单个 target toggle 保存 manifest 后，会投影相关 scope。
+- Memory 页面全局 target chip 保存 repo-level targets 后，会自动运行 memory projection。
 - 批量 target 更新在所有 manifest 更新成功后投影。
 - 保存 source scan members 后，会投影 skills。
 
@@ -53,6 +57,7 @@ Safety:
 Examples:
 
 - 点击某个 skill 的 OC chip，会更新 manifest targets，然后运行 skills projection。
+- 点击 Memory 页面的 OC chip，会更新 repo config targets，然后运行 memory projection。
 - 保存扫描出的 source members，会更新 source members，然后运行 skills projection。
 
 Tests:

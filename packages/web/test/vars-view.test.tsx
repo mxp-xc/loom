@@ -7,6 +7,7 @@ import { api } from '../src/lib/api'
 
 vi.mock('../src/lib/api', () => ({
   api: {
+    getManifest: vi.fn(),
     vars: {
       getMatrix: vi.fn(),
       setBaseKey: vi.fn(),
@@ -20,7 +21,7 @@ const matrix = (agent = 'codex') => ({
   ok: true as const,
   agent,
   builtinKeys: ['LOOM_AGENT', 'LOOM_CONFIG_DIR'],
-  userKeys: ['agent_name', 'json_text', 'memory.context', 'rtk'],
+  userKeys: ['agent_name', 'json_text', 'memory.context', 'rtk_path', 'rtk'],
   snapshot: {
     base: {
       agent_name: { type: 'string' as const, format: 'markdown' as const, value: 'Agent' },
@@ -29,6 +30,11 @@ const matrix = (agent = 'codex') => ({
         type: 'string' as const,
         format: 'markdown' as const,
         value: 'Base memory',
+      },
+      rtk_path: {
+        type: 'string' as const,
+        format: 'markdown' as const,
+        value: '${LOOM_CONFIG_DIR}/RTK.md',
       },
       rtk: { type: 'string' as const, format: 'markdown' as const, value: '# RTK\n\nHello' },
     },
@@ -52,6 +58,11 @@ const matrix = (agent = 'codex') => ({
         format: 'markdown' as const,
         value: 'Base memory',
       },
+      rtk_path: {
+        type: 'string' as const,
+        format: 'markdown' as const,
+        value: '/agent/RTK.md',
+      },
       rtk: { type: 'string' as const, format: 'markdown' as const, value: '# RTK\n\nHello' },
     },
     sources: {
@@ -62,6 +73,7 @@ const matrix = (agent = 'codex') => ({
           ? { locality: 'local' as const, layer: 'agent' as const, agent }
           : { locality: 'synced' as const, layer: 'base' as const },
       rtk: { locality: 'synced' as const, layer: 'base' as const },
+      rtk_path: { locality: 'synced' as const, layer: 'base' as const },
       json_text: { locality: 'synced' as const, layer: 'base' as const },
       'memory.context': { locality: 'synced' as const, layer: 'base' as const },
     },
@@ -76,11 +88,13 @@ const matrix = (agent = 'codex') => ({
             ]
           : [{ locality: 'synced' as const, layer: 'base' as const }],
       rtk: [{ locality: 'synced' as const, layer: 'base' as const }],
+      rtk_path: [{ locality: 'synced' as const, layer: 'base' as const }],
       json_text: [{ locality: 'synced' as const, layer: 'base' as const }],
       'memory.context': [{ locality: 'synced' as const, layer: 'base' as const }],
     },
     dependencies: {
       rtk: [],
+      rtk_path: ['LOOM_CONFIG_DIR'],
       json_text: [],
       'memory.context': [],
       agent_name: [],
@@ -99,6 +113,13 @@ describe('Vars view', () => {
     vi.mocked(api.vars.setBaseKey).mockResolvedValue({ ok: true })
     vi.mocked(api.vars.setOverride).mockResolvedValue({ ok: true })
     vi.mocked(api.vars.clearOverride).mockResolvedValue({ ok: true })
+    vi.mocked(api.getManifest).mockResolvedValue({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex'] },
+      errors: [],
+    } as never)
   })
 
   it('loads Vars in profile-first configuration view', async () => {
@@ -113,6 +134,68 @@ describe('Vars view', () => {
     expect(screen.getByRole('button', { name: /Base/ }).getAttribute('aria-current')).toBe('true')
     expect(screen.getByText('agent_name')).toBeDefined()
     expect(screen.getByText('Agent')).toBeDefined()
+  })
+
+  it('shows default configuration values while listing only Settings targets', async () => {
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('agent_name')
+
+    const defaultScope = screen.getByRole('button', { name: 'default' })
+    expect(defaultScope.getAttribute('data-state')).toBe('on')
+    const targetChips = screen.getByLabelText('目标 agent')
+    expect(within(targetChips).getByRole('button', { name: 'CX' })).toBeDefined()
+    expect(within(targetChips).queryByRole('button', { name: 'CC' })).toBeNull()
+    expect(within(targetChips).queryByRole('button', { name: 'OC' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /Local/ }))
+    await waitFor(() => {
+      const row = screen.getByRole('row', { name: /agent_name/ })
+      expect(row.textContent).toContain('未配置')
+      expect(row.textContent).toContain('CX')
+      expect(row.textContent).not.toContain('Local Codex agent')
+    })
+  })
+
+  it('switches configuration current values by target without leaving the current tab', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex', 'opencode'] },
+      errors: [],
+    } as never)
+    vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => {
+      const response = matrix(agent)
+      if (agent === 'opencode')
+        return {
+          ...response,
+          snapshot: {
+            ...response.snapshot,
+            localAgent: { agent_name: { value: 'Local OC agent' } },
+          },
+        }
+      return response
+    })
+
+    render(<Vars repoPath="/repo" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Local/ }))
+
+    await waitFor(() => {
+      const row = screen.getByRole('row', { name: /agent_name/ })
+      expect(row.textContent).toContain('未配置')
+      expect(row.textContent).toContain('OC')
+    })
+
+    fireEvent.click(within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'OC' }))
+
+    expect(screen.getByRole('button', { name: '配置管理' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    )
+    await waitFor(() => {
+      const row = screen.getByRole('row', { name: /agent_name/ })
+      expect(row.textContent).toContain('Local OC agent')
+      expect(row.textContent).not.toContain('未配置')
+    })
   })
 
   it('defaults to Base when no profile was previously selected', async () => {
@@ -180,14 +263,87 @@ describe('Vars view', () => {
     ).toBe(true)
   })
 
+  it('uses the first Settings target as the initial resolved-result agent', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['claude-code'] },
+      errors: [],
+    } as never)
+
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('agent_name')
+
+    expect(screen.getByRole('button', { name: 'default' }).getAttribute('data-state')).toBe('on')
+    const targetChips = screen.getByLabelText('目标 agent')
+    expect(within(targetChips).getByRole('button', { name: 'CC' })).toBeDefined()
+    expect(within(targetChips).queryByRole('button', { name: 'CX' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '最终结果' }))
+
+    expect(screen.getByRole('button', { name: 'default' }).getAttribute('data-state')).toBe('on')
+    expect(within(targetChips).getByRole('button', { name: 'CC' }).getAttribute('data-state')).toBe(
+      'off',
+    )
+  })
+
+  it('keeps the active tab when changing the view scope chips', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex', 'opencode'] },
+      errors: [],
+    } as never)
+
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('agent_name')
+
+    fireEvent.click(screen.getByRole('button', { name: '最终结果' }))
+    fireEvent.click(screen.getByRole('button', { name: 'default' }))
+    expect(screen.getByRole('button', { name: '最终结果' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    )
+
+    fireEvent.click(within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'OC' }))
+    expect(screen.getByRole('button', { name: '最终结果' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    )
+  })
+
+  it('keeps agent switching in one top-level control on the resolved view', async () => {
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('agent_name')
+
+    fireEvent.click(screen.getByRole('button', { name: '最终结果' }))
+
+    expect(screen.getByLabelText('目标 agent')).toBeDefined()
+    expect(screen.queryByLabelText('最终结果 agent')).toBeNull()
+  })
+
+  it('uses clearer column names and centers the actions column', async () => {
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('agent_name')
+
+    expect(screen.getByRole('columnheader', { name: /^专属/ })).toBeDefined()
+    const actionsHeader = screen.getByRole('columnheader', { name: /^操作/ })
+    expect(actionsHeader.className).toContain('vars-col-actions')
+  })
+
   it('refreshes final resolved values when switching agent', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex', 'claude-code'] },
+      errors: [],
+    } as never)
     render(<Vars repoPath="/repo" />)
     await screen.findByText('agent_name')
     fireEvent.click(screen.getByRole('button', { name: '最终结果' }))
 
-    fireEvent.click(
-      within(screen.getByLabelText('最终结果 agent')).getByRole('button', { name: 'CC' }),
-    )
+    fireEvent.click(within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'CC' }))
 
     const resolvedTable = screen.getByRole('region', { name: '解析结果' })
     const agentNameRow = within(resolvedTable).getByRole('row', { name: /agent_name/ })
@@ -196,10 +352,32 @@ describe('Vars view', () => {
     expect(agentNameRow.textContent).not.toContain('Local Codex agent')
   })
 
+  it('returns final resolved values to the default target when selecting default scope', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex', 'opencode'] },
+      errors: [],
+    } as never)
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('agent_name')
+    fireEvent.click(screen.getByRole('button', { name: '最终结果' }))
+
+    fireEvent.click(within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'OC' }))
+    fireEvent.click(screen.getByRole('button', { name: 'default' }))
+
+    const resolvedTable = screen.getByRole('region', { name: '解析结果' })
+    const agentNameRow = within(resolvedTable).getByRole('row', { name: /agent_name/ })
+    expect(agentNameRow.textContent).toContain('Local Codex agent')
+    expect(agentNameRow.textContent).toContain('local/codex')
+  })
+
   it('opens edit modal and saves a local agent config', async () => {
     render(<Vars repoPath="/repo" />)
     fireEvent.click(await screen.findByRole('button', { name: /Local/ }))
     await screen.findByText('agent_name')
+    fireEvent.click(within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'CX' }))
 
     fireEvent.click(screen.getByRole('button', { name: '编辑 agent_name' }))
 
@@ -332,6 +510,87 @@ describe('Vars view', () => {
     expect(screen.queryByRole('textbox', { name: /配置值/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     expect(screen.getByRole('textbox', { name: /配置值/ })).toBeDefined()
+  })
+
+  it('shows resolved markdown content in resolved preview', async () => {
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('rtk_path')
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 rtk_path' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '解析预览' }))
+
+    expect(within(dialog).getByText('/agent/RTK.md')).toBeDefined()
+    expect(within(dialog).queryByText('${LOOM_CONFIG_DIR}/RTK.md')).toBeNull()
+  })
+
+  it('renders resolved preview from the selected slot matrix when the raw value has references', async () => {
+    vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => {
+      const response = matrix(agent)
+      return {
+        ...response,
+        resolution: {
+          ...response.resolution,
+          values: {
+            ...response.resolution.values,
+            LOOM_CONFIG_DIR: {
+              type: 'string' as const,
+              format: 'path' as const,
+              value: agent === 'claude-code' ? '/cc-config' : '/cx-config',
+            },
+            rtk_path: {
+              type: 'string' as const,
+              format: 'markdown' as const,
+              value: '${LOOM_CONFIG_DIR}/RTK.md',
+            },
+          },
+        },
+      }
+    })
+
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('rtk_path')
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 rtk_path' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
+    fireEvent.click(
+      within(within(dialog).getByLabelText('配置槽位')).getByRole('button', { name: 'CC' }),
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: '解析预览' }))
+
+    expect(within(dialog).getByText('/cc-config/RTK.md')).toBeDefined()
+    expect(within(dialog).queryByText('${LOOM_CONFIG_DIR}/RTK.md')).toBeNull()
+  })
+
+  it('keeps escaped var references literal in resolved preview', async () => {
+    const escapedPath = '\\' + '$' + '{LOOM_CONFIG_DIR}/RTK.md'
+    vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => {
+      const response = matrix(agent)
+      return {
+        ...response,
+        snapshot: {
+          ...response.snapshot,
+          base: {
+            ...response.snapshot.base,
+            rtk_path: {
+              type: 'string' as const,
+              format: 'markdown' as const,
+              value: escapedPath,
+            },
+          },
+        },
+      }
+    })
+
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('rtk_path')
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 rtk_path' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '解析预览' }))
+
+    expect(within(dialog).getByText('$' + '{LOOM_CONFIG_DIR}/RTK.md')).toBeDefined()
+    expect(within(dialog).queryByText(/agent\/RTK\.md/)).toBeNull()
   })
 
   it('closes the config modal with Escape', async () => {

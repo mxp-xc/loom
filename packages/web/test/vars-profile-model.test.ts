@@ -67,6 +67,8 @@ describe('profile vars view model', () => {
     const state = buildVarsProfileState({
       matricesByAgent,
       activeAgent: 'codex',
+      definitionAgent: 'codex',
+      definitionScope: 'default',
       showAvailable: false,
     })
     expect(state.profiles.map((profile) => [profile.id, profile.kindBadge])).toEqual([
@@ -80,6 +82,8 @@ describe('profile vars view model', () => {
     const state = buildVarsProfileState({
       matricesByAgent,
       activeAgent: 'codex',
+      definitionAgent: 'codex',
+      definitionScope: 'default',
       showAvailable: false,
     })
     const local = state.profiles.find((profile) => profile.id === 'local')
@@ -95,6 +99,8 @@ describe('profile vars view model', () => {
     const state = buildVarsProfileState({
       matricesByAgent,
       activeAgent: 'codex',
+      definitionAgent: 'codex',
+      definitionScope: 'default',
       showAvailable: true,
     })
     const local = state.profiles.find((profile) => profile.id === 'local')
@@ -105,11 +111,32 @@ describe('profile vars view model', () => {
     const state = buildVarsProfileState({
       matricesByAgent,
       activeAgent: 'codex',
+      definitionAgent: 'codex',
+      definitionScope: 'default',
       showAvailable: false,
     })
     expect(state.resolvedRows.find((row) => row.key === 'agent_name')).toMatchObject({
       valuePreview: 'Local Codex agent',
       sourceLabel: 'local/codex',
+    })
+  })
+
+  it('shows default local values in profile entries instead of the selected agent override', () => {
+    const state = buildVarsProfileState({
+      matricesByAgent,
+      activeAgent: 'codex',
+      definitionAgent: 'codex',
+      definitionScope: 'default',
+      showAvailable: false,
+    })
+
+    const localAgentName = state.profiles
+      .find((profile) => profile.id === 'local')
+      ?.entries.find((entry) => entry.key === 'agent_name')
+
+    expect(localAgentName).toMatchObject({
+      valuePreview: '',
+      agentSlots: ['codex'],
     })
   })
 

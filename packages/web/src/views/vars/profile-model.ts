@@ -40,15 +40,20 @@ export type VarsResolvedRow = {
   diagnostics: VarsDiagnostic[]
 }
 
+export type VarsViewScope = 'default' | AgentId
+
 export type VarsProfileState = {
   profiles: VarsProfileSummary[]
   resolvedRows: VarsResolvedRow[]
   activeMatrix: VarsMatrixResponse
+  definitionMatrix: VarsMatrixResponse
 }
 
 export type BuildVarsProfileStateInput = {
   matricesByAgent: Record<AgentId, VarsMatrixResponse>
   activeAgent: AgentId
+  definitionAgent: AgentId
+  definitionScope: VarsViewScope
   showAvailable: boolean
 }
 
@@ -139,14 +144,17 @@ function buildBuiltinEntries(activeMatrix: VarsMatrixResponse): VarsProfileEntry
 function buildBaseEntries(
   matricesByAgent: Record<AgentId, VarsMatrixResponse>,
   activeMatrix: VarsMatrixResponse,
+  scope: VarsViewScope,
 ): VarsProfileEntry[] {
   return activeMatrix.userKeys.map((key) => {
     const definition = definitionFor(activeMatrix, key)
+    const value =
+      scope === 'default' ? definition : (activeMatrix.snapshot.baseAgent[key] ?? definition)
     return {
       key,
       type: definition.type,
       format: formatFor(definition),
-      valuePreview: entryValuePreview(definition),
+      valuePreview: entryValuePreview(value),
       state: 'configured',
       agentSlots: agentSlotsFor(matricesByAgent, 'baseAgent', key),
       diagnostics: diagnosticsFor(activeMatrix, key),
@@ -157,6 +165,7 @@ function buildBaseEntries(
 function buildLocalEntries(
   matricesByAgent: Record<AgentId, VarsMatrixResponse>,
   activeMatrix: VarsMatrixResponse,
+  scope: VarsViewScope,
   showAvailable: boolean,
 ): VarsProfileEntry[] {
   const configuredKeys = new Set<string>(Object.keys(activeMatrix.snapshot.local))
@@ -170,7 +179,8 @@ function buildLocalEntries(
     .map((key) => {
       const definition = definitionFor(activeMatrix, key)
       const localValue = activeMatrix.snapshot.local[key]
-      const localAgentValue = activeMatrix.snapshot.localAgent[key]
+      const localAgentValue =
+        scope === 'default' ? undefined : activeMatrix.snapshot.localAgent[key]
       return {
         key,
         type: definition.type,
@@ -221,12 +231,23 @@ function buildResolvedRows(activeMatrix: VarsMatrixResponse): VarsResolvedRow[] 
 
 export function buildVarsProfileState(input: BuildVarsProfileStateInput): VarsProfileState {
   const activeMatrix = input.matricesByAgent[input.activeAgent]
-  const builtinEntries = buildBuiltinEntries(activeMatrix)
-  const baseEntries = buildBaseEntries(input.matricesByAgent, activeMatrix)
-  const localEntries = buildLocalEntries(input.matricesByAgent, activeMatrix, input.showAvailable)
+  const definitionMatrix = input.matricesByAgent[input.definitionAgent] ?? activeMatrix
+  const builtinEntries = buildBuiltinEntries(definitionMatrix)
+  const baseEntries = buildBaseEntries(
+    input.matricesByAgent,
+    definitionMatrix,
+    input.definitionScope,
+  )
+  const localEntries = buildLocalEntries(
+    input.matricesByAgent,
+    definitionMatrix,
+    input.definitionScope,
+    input.showAvailable,
+  )
 
   return {
     activeMatrix,
+    definitionMatrix,
     resolvedRows: buildResolvedRows(activeMatrix),
     profiles: [
       {
