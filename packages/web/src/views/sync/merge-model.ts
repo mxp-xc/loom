@@ -1,6 +1,5 @@
-import { Chunk } from '@codemirror/merge'
-import { Text } from '@codemirror/state'
 import { diff3Merge } from 'node-diff3'
+import { diffTextChanges, diffTextPatches, type TextPatch } from './text-diff.js'
 
 export type BlockSide = 'local' | 'remote'
 export type BlockDecision = 'pending' | 'applied' | 'ignored'
@@ -10,12 +9,6 @@ export interface MergeChange {
   from: number
   to: number
   kind: ChangeKind
-}
-
-export interface TextPatch {
-  from: number
-  to: number
-  text: string
 }
 
 export interface MergeBlock {
@@ -45,7 +38,6 @@ export interface MergeModel {
 
 const splitLines = (text: string) => text.match(/.*(?:\n|$)/g)?.filter(Boolean) ?? []
 const joinLines = (lines: string[]) => lines.join('')
-const textDocument = (text: string) => Text.of(text.split('\n'))
 const visibleEnd = (from: number, text: string) => from + text.replace(/\n$/, '').length
 
 function overlaps(from: number, to: number, otherFrom: number, otherTo: number) {
@@ -55,33 +47,19 @@ function overlaps(from: number, to: number, otherFrom: number, otherTo: number) 
 }
 
 function buildChanges(base: string, side: string, conflicts: Array<[number, number]>) {
-  return Chunk.build(textDocument(base), textDocument(side)).flatMap((chunk) =>
-    chunk.changes.map((change) => {
-      let from = chunk.fromB + change.fromB
-      let to = Math.min(chunk.fromB + change.toB, side.length)
-      if (from < to && side[from] === '\n') from += 1
-      if (from < to && side[to - 1] === '\n') to -= 1
-      return {
-        from,
-        to,
-        kind: conflicts.some(([conflictFrom, conflictTo]) =>
-          overlaps(from, to, conflictFrom, conflictTo),
-        )
-          ? ('conflict' as const)
-          : ('stable' as const),
-      }
-    }),
-  )
+  return diffTextChanges(base, side).map(({ from, to }) => ({
+    from,
+    to,
+    kind: conflicts.some(([conflictFrom, conflictTo]) =>
+      overlaps(from, to, conflictFrom, conflictTo),
+    )
+      ? ('conflict' as const)
+      : ('stable' as const),
+  }))
 }
 
 function buildPatches(base: string, side: string): TextPatch[] {
-  return Chunk.build(textDocument(base), textDocument(side)).flatMap((chunk) =>
-    chunk.changes.map((change) => ({
-      from: chunk.fromA + change.fromA,
-      to: chunk.fromA + change.toA,
-      text: side.slice(chunk.fromB + change.fromB, chunk.fromB + change.toB),
-    })),
-  )
+  return diffTextPatches(base, side)
 }
 
 function patchRangesOverlap(left: TextPatch, right: TextPatch) {

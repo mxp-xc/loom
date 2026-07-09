@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
 import type { McpServer, McpType } from '@loom/core'
 import { Check, Copy, Edit3, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
+import MonacoTextEditor from '@/components/monaco/MonacoTextEditor'
+import { registerVarsCompletionProvider } from '@/components/monaco/varsCompletion'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
 import { useManifest } from '@/hooks/useManifest'
@@ -35,6 +45,20 @@ interface McpServerFormState {
 }
 
 type EditorMode = 'create' | 'edit' | null
+type RecordEditMode = 'file' | 'pairs'
+
+interface RecordRow {
+  id: string
+  key: string
+  value: string
+}
+
+let recordRowId = 0
+
+function newRecordRow(key = '', value = ''): RecordRow {
+  recordRowId += 1
+  return { id: String(recordRowId), key, value }
+}
 
 function emptyMcpForm(): McpServerFormState {
   return {
@@ -52,6 +76,35 @@ function emptyMcpForm(): McpServerFormState {
 function recordToLines(record: Record<string, string> | undefined): string {
   return Object.entries(record ?? {})
     .map(([key, value]) => key + '=' + (value ?? ''))
+    .join('\n')
+}
+
+function rowsFromRecord(record: Record<string, string> | undefined): RecordRow[] {
+  const rows = Object.entries(record ?? {}).map(([key, value]) => newRecordRow(key, value ?? ''))
+  return rows.length > 0 ? rows : [newRecordRow()]
+}
+
+function rowsFromLines(value: string): RecordRow[] {
+  const rows = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+    .map((line) => {
+      const normalized = line.startsWith('export ') ? line.slice(7).trimStart() : line
+      const equalsAt = normalized.indexOf('=')
+      if (equalsAt === -1) return newRecordRow(normalized, '')
+      return newRecordRow(
+        normalized.slice(0, equalsAt).trim(),
+        unquoteRecordValue(normalized.slice(equalsAt + 1).trim()),
+      )
+    })
+  return rows.length > 0 ? rows : [newRecordRow()]
+}
+
+function rowsToLines(rows: RecordRow[]): string {
+  return rows
+    .filter((row) => row.key.trim() || row.value.trim())
+    .map((row) => row.key.trim() + '=' + row.value)
     .join('\n')
 }
 
@@ -280,6 +333,136 @@ function FieldCard({
   )
 }
 
+function RecordField({
+  name,
+  mode,
+  value,
+  rows,
+  setMode,
+  onTextChange,
+  onRowsChange,
+  varsKeys = [],
+}: {
+  name: 'env' | 'headers'
+  mode: RecordEditMode
+  value: string
+  rows: RecordRow[]
+  setMode: (mode: RecordEditMode) => void
+  onTextChange: (value: string) => void
+  onRowsChange: (rows: RecordRow[]) => void
+  varsKeys?: string[]
+}) {
+  const varsKeysRef = useRef(varsKeys)
+
+  useEffect(() => {
+    varsKeysRef.current = varsKeys
+  }, [varsKeys])
+
+  const onEditorMount = useCallback(
+    (_editor: unknown, monaco: unknown) =>
+      registerVarsCompletionProvider(monaco, 'plaintext', () => varsKeysRef.current),
+    [],
+  )
+
+  const syncRows = (nextRows: RecordRow[]) => {
+    onRowsChange(nextRows)
+    onTextChange(rowsToLines(nextRows))
+  }
+
+  const switchMode = () => {
+    if (mode === 'file') {
+      onRowsChange(rowsFromLines(value))
+      setMode('pairs')
+    } else {
+      onTextChange(rowsToLines(rows))
+      setMode('file')
+    }
+  }
+
+  const modeLabel =
+    mode === 'file' ? `切换 ${name} 为 key value 编辑` : `切换 ${name} 为 env file 编辑`
+
+  return (
+    <section className={styles.recordField}>
+      <div className={styles.recordHead}>
+        <span>{name}</span>
+        <Button
+          type="button"
+          variant="secondary"
+          size="xs"
+          aria-label={modeLabel}
+          onClick={switchMode}
+        >
+          {mode === 'file' ? 'key/value' : 'env file'}
+        </Button>
+      </div>
+      {mode === 'file' ? (
+        <MonacoTextEditor
+          key={varsKeys.length > 0 ? name + '-vars' : name + '-plain'}
+          ariaLabel={name + ' file'}
+          height="150px"
+          language="plaintext"
+          value={value}
+          onChange={onTextChange}
+          onEditorMount={varsKeys.length > 0 ? onEditorMount : undefined}
+          options={{
+            lineNumbers: 'off',
+            padding: { top: 10, bottom: 10 },
+          }}
+        />
+      ) : (
+        <div className={styles.kvList}>
+          {rows.map((row, index) => (
+            <div className={styles.kvRow} key={row.id}>
+              <input
+                aria-label={`${name} key ${index + 1}`}
+                value={row.key}
+                onChange={(event) => {
+                  const next = rows.map((item) =>
+                    item.id === row.id ? { ...item, key: event.target.value } : item,
+                  )
+                  syncRows(next)
+                }}
+                placeholder="KEY"
+              />
+              <input
+                aria-label={`${name} value ${index + 1}`}
+                value={row.value}
+                onChange={(event) => {
+                  const next = rows.map((item) =>
+                    item.id === row.id ? { ...item, value: event.target.value } : item,
+                  )
+                  syncRows(next)
+                }}
+                placeholder="value"
+              />
+              <IconButton
+                label={`删除 ${name} 行 ${index + 1}`}
+                tooltip="删除行"
+                tone="danger"
+                onClick={() => {
+                  const next =
+                    rows.length <= 1 ? [newRecordRow()] : rows.filter((item) => item.id !== row.id)
+                  syncRows(next)
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </IconButton>
+            </div>
+          ))}
+          <IconButton
+            label={`新增 ${name} 行`}
+            tooltip="新增行"
+            onClick={() => syncRows([...rows, newRecordRow()])}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </IconButton>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function McpVariableInspector({
   variableKey,
   matrix,
@@ -441,6 +624,7 @@ function McpEditor({
   initial,
   previewTarget,
   matrix,
+  varsKeys,
   busy,
   error,
   onPreviewTarget,
@@ -451,6 +635,7 @@ function McpEditor({
   initial?: McpServer
   previewTarget: AgentId
   matrix: VarsMatrixResponse | undefined
+  varsKeys: string[]
   busy: boolean
   error: string | null
   onPreviewTarget: (agent: AgentId) => void
@@ -458,8 +643,19 @@ function McpEditor({
   onSubmit: (form: McpServerFormState) => void
 }) {
   const [form, setForm] = useState<McpServerFormState>(() => serverToForm(initial))
+  const [envMode, setEnvMode] = useState<RecordEditMode>('file')
+  const [headersMode, setHeadersMode] = useState<RecordEditMode>('file')
+  const [envRows, setEnvRows] = useState<RecordRow[]>(() => rowsFromRecord(initial?.env))
+  const [headersRows, setHeadersRows] = useState<RecordRow[]>(() =>
+    rowsFromRecord(initial?.headers),
+  )
+
   useEffect(() => {
     setForm(mode === 'edit' ? serverToForm(initial) : emptyMcpForm())
+    setEnvMode('file')
+    setHeadersMode('file')
+    setEnvRows(rowsFromRecord(mode === 'edit' ? initial?.env : undefined))
+    setHeadersRows(rowsFromRecord(mode === 'edit' ? initial?.headers : undefined))
   }, [initial?.id, mode])
   const settings = buildMcpSettingsPreview(
     formToDraftServer(form, initial?.id),
@@ -536,25 +732,27 @@ function McpEditor({
             />
           </label>
         )}
-        <label>
-          <span>env</span>
-          <textarea
-            aria-label="env file"
-            value={form.env}
-            onChange={(event) => setField('env', event.target.value)}
-            placeholder="KEY=value"
-          />
-        </label>
+        <RecordField
+          name="env"
+          mode={envMode}
+          value={form.env}
+          rows={envRows}
+          setMode={setEnvMode}
+          onTextChange={(value) => setField('env', value)}
+          onRowsChange={setEnvRows}
+          varsKeys={varsKeys}
+        />
         {form.type !== 'stdio' && (
-          <label>
-            <span>headers</span>
-            <textarea
-              aria-label="headers file"
-              value={form.headers}
-              onChange={(event) => setField('headers', event.target.value)}
-              placeholder="Authorization=Bearer token"
-            />
-          </label>
+          <RecordField
+            name="headers"
+            mode={headersMode}
+            value={form.headers}
+            rows={headersRows}
+            setMode={setHeadersMode}
+            onTextChange={(value) => setField('headers', value)}
+            onRowsChange={setHeadersRows}
+            varsKeys={varsKeys}
+          />
         )}
         <div className={styles.editorActions}>
           <Button type="button" variant="ghost" onClick={onCancel}>
@@ -602,6 +800,18 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     AGENTS.includes(agent),
   )
   const selectedServer = servers.find((server) => server.id === selected)
+  const mcpVarsKeys = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          Object.values(matrices).flatMap((matrix) => [
+            ...(matrix?.userKeys ?? []),
+            ...(matrix?.builtinKeys ?? []),
+          ]),
+        ),
+      ).sort(),
+    [matrices],
+  )
 
   useEffect(() => {
     if (servers.length === 0) {
@@ -831,6 +1041,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
               initial={editorMode === 'edit' ? selectedServer : undefined}
               previewTarget={previewTarget}
               matrix={matrices[previewTarget]}
+              varsKeys={mcpVarsKeys}
               busy={editorBusy}
               error={editorError}
               onPreviewTarget={setPreviewTarget}

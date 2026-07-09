@@ -1,21 +1,29 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { useState, type ReactNode } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { api } from '../src/lib/api'
 import ToastHost from '../src/components/ToastHost'
+import MarkdownPreview from '../src/components/MarkdownPreview'
 import Skills from '../src/views/skills/Skills'
 import SkillSourceList from '../src/views/skills/SkillSourceList'
 import SkillDetailEditor from '../src/views/skills/SkillDetailEditor'
 import AddSkillModal from '../src/views/skills/AddSkillModal'
 import EditSourceModal from '../src/views/skills/EditSourceModal'
 import MemberScanModal from '../src/views/skills/MemberScanModal'
-import SkillDetailEditor from '../src/views/skills/SkillDetailEditor'
 import Sync from '../src/views/Sync'
 import Mcp from '../src/views/Mcp'
 import Memory from '../src/views/Memory'
 import { useManifestOperations } from '../src/hooks/useManifestOperations'
+import { createMonacoEditorMock } from './monaco-test-utils'
+
+const monacoEditorMock = createMonacoEditorMock()
+
+vi.mock('@monaco-editor/react', async () => {
+  const { createMonacoEditorMock } = await import('./monaco-test-utils')
+  return createMonacoEditorMock().module()
+})
 
 if (!Range.prototype.getClientRects) {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList
@@ -26,6 +34,24 @@ const routerFuture = { v7_startTransition: true, v7_relativeSplatPath: true } as
 function TestRouter({ children }: { children: ReactNode }) {
   return <MemoryRouter future={routerFuture}>{children}</MemoryRouter>
 }
+
+function fakeMonacoModel(line: string) {
+  return {
+    getValueInRange(range: {
+      startColumn: number
+      endColumn: number
+      startLineNumber: number
+      endLineNumber: number
+    }) {
+      expect(range.startLineNumber).toBe(range.endLineNumber)
+      return line.slice(range.startColumn - 1, range.endColumn - 1)
+    },
+  }
+}
+
+beforeEach(() => {
+  monacoEditorMock.reset()
+})
 
 vi.mock('../src/lib/api', () => ({
   api: {
@@ -260,6 +286,149 @@ describe('MCP view', () => {
     expect(screen.queryByRole('dialog', { name: /MCP Server/ })).toBeNull()
     expect(screen.getByRole('heading', { name: '新增 MCP server' })).toBeDefined()
     expect(screen.getByLabelText('env file')).toBeDefined()
+    expect(
+      monacoEditorMock.props.some(
+        (props) => props.language === 'plaintext' && props.height === '150px',
+      ),
+    ).toBe(true)
+  })
+
+  it('loads MCP vars and suggests variables inside env files', async () => {
+    vi.mocked(api.vars.getMatrix).mockResolvedValue({
+      ok: true,
+      agent: 'codex',
+      builtinKeys: ['API_URL'],
+      userKeys: ['API_TOKEN'],
+      snapshot: { base: {}, baseAgent: {}, local: {}, localAgent: {} },
+      resolution: {
+        ok: true,
+        values: {},
+        sources: {},
+        overrideChains: {},
+        dependencies: {},
+        diagnostics: [],
+      },
+    } as never)
+
+    render(<Mcp repoPath="/tmp/mcp-layout" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 test-mcp' }))
+    expect(await screen.findByRole('heading', { name: '编辑 MCP server' })).toBeDefined()
+
+    await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledWith('/tmp/mcp-layout', 'codex'))
+    await waitFor(() => expect(monacoEditorMock.providers.length).toBeGreaterThan(0))
+
+    const provider = monacoEditorMock.providers[0] as {
+      provideCompletionItems: (model: unknown, position: unknown) => { suggestions: unknown[] }
+    }
+    const suggestions = provider.provideCompletionItems(fakeMonacoModel('${AP'), {
+      lineNumber: 1,
+      column: 5,
+    }).suggestions
+    expect(suggestions).toContainEqual(expect.objectContaining({ label: 'API_URL' }))
+  })
+
+  it('edits a server in the embedded Monaco file editor', async () => {
+    render(<Mcp repoPath="/tmp/mcp-layout" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 test-mcp' }))
+    expect(await screen.findByRole('heading', { name: '编辑 MCP server' })).toBeDefined()
+
+    const idInput = screen.getByLabelText('server id') as HTMLInputElement
+    expect(idInput.value).toBe('test-mcp')
+    expect(idInput.disabled).toBe(true)
+
+    fireEvent.change(screen.getByLabelText('command'), { target: { value: 'node' } })
+    expect(screen.queryByText('targets')).toBeNull()
+
+    const envEditor = screen.getByRole('textbox', { name: 'env file' })
+    expect(
+      monacoEditorMock.props.some(
+        (props) =>
+          props.language === 'plaintext' && props.height === '150px' && props.value === 'FOO=bar',
+      ),
+    ).toBe(true)
+    fireEvent.change(envEditor, {
+      target: { value: 'FOO=baz' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save server' }))
+
+    await waitFor(() =>
+      expect(api.updateMcpServer).toHaveBeenCalledWith({
+        repo: '/tmp/mcp-layout',
+        id: 'test-mcp',
+        server: expect.objectContaining({
+          id: 'test-mcp',
+          type: 'stdio',
+          command: 'node',
+          args: ['hello'],
+          env: { FOO: 'baz' },
+          targets: ['codex'],
+        }),
+      }),
+    )
+  })
+
+  it('edits remote MCP headers through the embedded Monaco file editor', async () => {
+    render(<Mcp repoPath="/tmp/mcp-layout" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择 remote-mcp' }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 remote-mcp' }))
+    expect(await screen.findByRole('heading', { name: '编辑 MCP server' })).toBeDefined()
+
+    const headersEditor = screen.getByRole('textbox', { name: 'headers file' })
+    expect(
+      monacoEditorMock.props.some(
+        (props) =>
+          props.language === 'plaintext' &&
+          props.height === '150px' &&
+          props.value === 'Authorization=Bearer token',
+      ),
+    ).toBe(true)
+    fireEvent.change(headersEditor, {
+      target: { value: 'Authorization=Bearer ${API_TOKEN}' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save server' }))
+
+    await waitFor(() =>
+      expect(api.updateMcpServer).toHaveBeenCalledWith({
+        repo: '/tmp/mcp-layout',
+        id: 'remote-mcp',
+        server: expect.objectContaining({
+          id: 'remote-mcp',
+          type: 'http',
+          url: 'https://example.test/mcp',
+          headers: { Authorization: 'Bearer ${API_TOKEN}' },
+        }),
+      }),
+    )
+  })
+
+  it('supports MCP env key value rows with add and delete controls', async () => {
+    render(<Mcp repoPath="/tmp/mcp-layout" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 test-mcp' }))
+    expect(await screen.findByRole('heading', { name: '编辑 MCP server' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: '切换 env 为 key value 编辑' }))
+    fireEvent.change(screen.getByLabelText('env key 1'), { target: { value: 'FOO' } })
+    fireEvent.change(screen.getByLabelText('env value 1'), { target: { value: 'baz' } })
+    fireEvent.click(screen.getByRole('button', { name: '新增 env 行' }))
+    fireEvent.change(screen.getByLabelText('env key 2'), { target: { value: 'TOKEN' } })
+    fireEvent.change(screen.getByLabelText('env value 2'), { target: { value: 'abc 123' } })
+    fireEvent.click(screen.getByRole('button', { name: '删除 env 行 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save server' }))
+
+    await waitFor(() =>
+      expect(api.updateMcpServer).toHaveBeenCalledWith({
+        repo: '/tmp/mcp-layout',
+        id: 'test-mcp',
+        server: expect.objectContaining({
+          env: { TOKEN: 'abc 123' },
+          targets: ['codex'],
+        }),
+      }),
+    )
   })
 
   it('validates the embedded create editor locally', async () => {
@@ -1051,7 +1220,14 @@ describe('Skill source updates', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'frontend-design' })
     fireEvent.click(await within(dialog).findByRole('button', { name: '编辑' }))
-    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: updated } })
+    const skillEditor = within(dialog).getByRole('textbox', { name: 'SKILL.md 内容' })
+    expect(
+      monacoEditorMock.props.some(
+        (props) =>
+          props.language === 'markdown' && props.height === 'var(--skill-detail-panel-height)',
+      ),
+    ).toBe(true)
+    fireEvent.change(skillEditor, { target: { value: updated } })
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
 
     await waitFor(() =>
@@ -1064,6 +1240,32 @@ describe('Skill source updates', () => {
     )
     await waitFor(() => expect(api.getManifest).toHaveBeenCalledWith('/tmp/skill-save-refresh'))
     expect(showToast).toHaveBeenCalledWith('已保存')
+  })
+
+  it('logs the full object when editable Markdown save fails', async () => {
+    const err = new Error('save denied')
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    try {
+      render(
+        <MarkdownPreview
+          content="# Frontend design"
+          editable
+          onSave={vi.fn().mockRejectedValue(err)}
+        />,
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+      fireEvent.change(screen.getByRole('textbox', { name: 'SKILL.md 内容' }), {
+        target: { value: '# Changed' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+      expect(await screen.findByText('save denied')).toBeDefined()
+      expect(consoleError).toHaveBeenCalledWith({ err }, 'Failed to save Markdown source')
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it('opens source member detail with the configured source member skill id', () => {
@@ -1551,6 +1753,50 @@ describe('Sync view', () => {
     await waitFor(() => expect(api.abortSyncMerge).toHaveBeenCalledWith('session-1'))
   })
 
+  it('surfaces Monaco decoration failures while keeping the conflict open', async () => {
+    const err = new Error('decorations failed')
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    monacoEditorMock.deltaDecorations.mockImplementation(() => {
+      throw err
+    })
+    vi.mocked(api.getSyncRemote).mockResolvedValueOnce({
+      remoteUrl: 'https://example.test/repo.git',
+    })
+    vi.mocked(api.syncPull).mockResolvedValueOnce({
+      ok: true,
+      clean: false,
+      sessionId: 'session-decoration-error',
+      conflicts: [
+        {
+          path: 'skills.yaml',
+          base: 'value: base\n',
+          ours: 'value: local\n',
+          theirs: 'value: remote\n',
+          result: '<<<<<<< HEAD\nvalue: local\n=======\nvalue: remote\n>>>>>>> FETCH_HEAD\n',
+          binary: false,
+        },
+      ],
+    })
+
+    try {
+      render(
+        <TestRouter>
+          <Sync repoPath="/tmp/r" />
+        </TestRouter>,
+      )
+      fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
+
+      expect((await screen.findByRole('alert')).textContent).toContain('冲突高亮加载失败')
+      expect(screen.getByText('skills.yaml')).toBeDefined()
+      expect(consoleError).toHaveBeenCalledWith(
+        { err },
+        'Failed to update Monaco conflict decorations',
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   it('refines conflicts and applies or ignores each side change', async () => {
     vi.mocked(api.getSyncRemote).mockResolvedValueOnce({
       remoteUrl: 'https://example.test/repo.git',
@@ -1580,7 +1826,15 @@ describe('Sync view', () => {
     fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
 
     expect(await screen.findByText('config.yaml')).toBeDefined()
+    expect(screen.getAllByText('LOCAL').length).toBeGreaterThan(0)
     expect(screen.getAllByText('RESULT').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('REMOTE').length).toBeGreaterThan(0)
+    const localPane = screen.getByRole('textbox', { name: 'Sync LOCAL' }) as HTMLTextAreaElement
+    const resultPane = screen.getByRole('textbox', { name: 'Sync RESULT' }) as HTMLTextAreaElement
+    const remotePane = screen.getByRole('textbox', { name: 'Sync REMOTE' }) as HTMLTextAreaElement
+    expect(localPane.value).toContain('opencode')
+    expect(resultPane.value).toContain('proxy:')
+    expect(remotePane.value).toContain('proxy:')
     expect(screen.getByText('1 个待处理冲突')).toBeDefined()
     expect(document.querySelectorAll('.merge-block-action[aria-label$="应用到结果"]')).toHaveLength(
       2,
@@ -1589,19 +1843,13 @@ describe('Sync view', () => {
     expect(screen.getByRole('button', { name: '保留两者' })).toBeDefined()
     expect(screen.getByRole('button', { name: '保留本地' })).toBeDefined()
     expect(screen.getByRole('button', { name: '保留远程' })).toBeDefined()
-    expect(document.querySelectorAll('.merge-change-conflict').length).toBeGreaterThan(0)
-    expect(document.querySelectorAll('.merge-change-stable').length).toBeGreaterThan(0)
 
     const localApply = document.querySelector(
       '.merge-block-action[aria-label="本地变更 1：应用到结果"]',
     ) as HTMLButtonElement
     expect(localApply).not.toBeNull()
-    expect(localApply.closest('.cm-line')).toBeNull()
-    expect(localApply.closest('.cm-gutters-after')).not.toBeNull()
-    expect(localApply.closest('.merge-action-gutter')).not.toBeNull()
-    expect(localApply.closest('.cm-lineNumbers')).toBeNull()
-    expect(localApply.closest('.cm-gutterElement')).not.toBeNull()
-    const localActionCellText = localApply.closest('.cm-gutterElement')?.textContent ?? ''
+    expect(localApply.closest('.merge-action-rail')).not.toBeNull()
+    const localActionCellText = localApply.closest('.merge-block-actions')?.textContent ?? ''
     expect(localActionCellText).toContain('→')
     expect(localActionCellText).toContain('×')
     expect(localActionCellText.indexOf('×')).toBeLessThan(localActionCellText.indexOf('→'))
@@ -1611,22 +1859,22 @@ describe('Sync view', () => {
       '.merge-block-action[aria-label="远程变更 1：应用到结果"]',
     ) as HTMLButtonElement
     expect(remoteApply).not.toBeNull()
-    expect(remoteApply.closest('.cm-line')).toBeNull()
-    expect(remoteApply.closest('.cm-gutters-before')).not.toBeNull()
-    expect(remoteApply.closest('.merge-action-gutter')).not.toBeNull()
-    expect(remoteApply.closest('.cm-lineNumbers')).toBeNull()
-    const remoteActionCellText = remoteApply.closest('.cm-gutterElement')?.textContent ?? ''
+    expect(remoteApply.closest('.merge-action-rail')).not.toBeNull()
+    const remoteActionCellText = remoteApply.closest('.merge-block-actions')?.textContent ?? ''
     expect(remoteActionCellText).toContain('←')
     expect(remoteActionCellText).toContain('×')
     expect(remoteActionCellText).not.toMatch(/\d/)
-    expect(document.querySelectorAll('.cm-line .merge-block-action')).toHaveLength(0)
+
+    fireEvent.change(resultPane, {
+      target: { value: `# manually edited\n${resultPane.value.replace('profile: local\n', '')}` },
+    })
+    expect(resultPane.value).toMatch(/^# manually edited\ntargets:/)
 
     fireEvent.click(localApply)
-    expect(
-      Array.from(document.querySelectorAll('.merge-change-applied')).some((line) =>
-        line.textContent?.includes('opencode'),
-      ),
-    ).toBe(true)
+    expect(resultPane.value).toMatch(
+      /^# manually edited\ntargets:\n  - claude-code\n  - codex\n  - opencode\nprojection:/,
+    )
+    expect(resultPane.value).toContain('opencode')
     expect(screen.getByText('1 个待处理冲突')).toBeDefined()
 
     const undoLocalApply = document.querySelector(
@@ -1635,17 +1883,14 @@ describe('Sync view', () => {
     expect(undoLocalApply).not.toBeNull()
     expect(undoLocalApply.disabled).toBe(false)
     fireEvent.click(undoLocalApply)
-    expect(
-      Array.from(document.querySelectorAll('.merge-change-conflict')).some((line) =>
-        line.textContent?.includes('opencode'),
-      ),
-    ).toBe(true)
+    expect(resultPane.value).not.toContain('opencode')
     expect(screen.getByText('1 个待处理冲突')).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: '保留远程' }))
-    expect(screen.queryByText('0 个待处理冲突')).toBeDefined()
+    expect(screen.getByText('0 个待处理冲突')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: '保留两者' }))
     expect(screen.getByText('1 个待处理冲突')).toBeDefined()
+    expect(resultPane.value).toContain('proxy:')
 
     fireEvent.click(
       document.querySelector(

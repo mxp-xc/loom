@@ -1,11 +1,22 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import VariableEditor from '../src/views/vars/VariableEditor'
 import JsonValueEditor from '../src/views/vars/JsonValueEditor'
+import VarsMonacoValueEditor, {
+  keysFromVarsResolution,
+} from '../src/views/vars/VarsMonacoValueEditor'
 import type { VarEntryInput, VarsResolution } from '../src/lib/vars'
 import { ApiError } from '../src/lib/api'
 import { StrictMode } from 'react'
+import { createMonacoEditorMock } from './monaco-test-utils'
+
+const monacoEditorMock = createMonacoEditorMock()
+
+vi.mock('@monaco-editor/react', async () => {
+  const { createMonacoEditorMock } = await import('./monaco-test-utils')
+  return createMonacoEditorMock().module()
+})
 
 const resolution: VarsResolution = {
   ok: true,
@@ -40,6 +51,10 @@ function editor(
 afterEach(() => vi.useRealTimers())
 
 describe('variable editors', () => {
+  beforeEach(() => {
+    monacoEditorMock.reset()
+  })
+
   function deferred<T>() {
     let resolve!: (value: T) => void
     let reject!: (reason: unknown) => void
@@ -80,22 +95,89 @@ describe('variable editors', () => {
     expect(order).toEqual(['validate:json', 'save:json'])
   })
 
-  it('shows metadata completions and inserts the keyboard-selected token', () => {
+  function monacoLineModel(line: string) {
+    return {
+      getValueInRange: ({ startColumn, endColumn }: { startColumn: number; endColumn: number }) =>
+        line.slice(startColumn - 1, endColumn - 1),
+    }
+  }
+
+  it('extracts sorted unique keys from current and legacy vars resolutions', () => {
+    expect(keysFromVarsResolution(null)).toEqual([])
+    expect(keysFromVarsResolution({ ok: false })).toEqual([])
+    expect(
+      keysFromVarsResolution({
+        ok: true,
+        values: {
+          PORT: { type: 'number', value: 3000 },
+          API_URL: { type: 'string', value: 'https://example.test' },
+        },
+      } as never),
+    ).toEqual(['API_URL', 'PORT'])
+    expect(
+      keysFromVarsResolution({
+        values: {
+          ZED: { type: 'string', value: 'z' },
+          API_URL: { type: 'string', value: 'https://example.test' },
+        },
+      } as never),
+    ).toEqual(['API_URL', 'ZED'])
+  })
+
+  it('shows Monaco completions and inserts the keyboard-selected token', () => {
     editor()
     const input = screen.getByLabelText('值')
     fireEvent.change(input, { target: { value: '${PO', selectionStart: 4 } })
-    const listbox = screen.getByRole('listbox', { name: '变量引用建议' })
-    expect(within(listbox).getByRole('option').textContent).toContain('PORT')
-    expect(within(listbox).getByRole('option').textContent).toContain('number')
-    expect(within(listbox).getByRole('option').textContent).toContain('base')
+
+    const result = monacoEditorMock.providers
+      .at(-1)
+      .provideCompletionItems(monacoLineModel('${PO'), { lineNumber: 1, column: 5 })
+    expect(result.suggestions[0]).toMatchObject({
+      label: 'PORT',
+      insertText: '${PORT}',
+    })
+
     fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.change(input, { target: { value: result.suggestions[0].insertText } })
     expect((input as HTMLTextAreaElement).value).toBe('${PORT}')
   })
 
-  it('never reveals secret or transitively masked completion values and supports secret toggle', () => {
+  it('uses latest vars keys after the editor rerenders', () => {
+    const view = render(
+      <VarsMonacoValueEditor
+        ariaLabel="配置值"
+        type="string"
+        value=""
+        varsKeys={['OLD_KEY']}
+        onChange={vi.fn()}
+      />,
+    )
+    const provider = monacoEditorMock.providers.at(-1)
+
+    view.rerender(
+      <VarsMonacoValueEditor
+        ariaLabel="配置值"
+        type="string"
+        value=""
+        varsKeys={['NEW_KEY']}
+        onChange={vi.fn()}
+      />,
+    )
+
+    const result = provider.provideCompletionItems(monacoLineModel('${'), {
+      lineNumber: 1,
+      column: 3,
+    })
+    expect(result.suggestions.map((suggestion: { label: string }) => suggestion.label)).toEqual([
+      'NEW_KEY',
+    ])
+  })
+
+  it('keeps secret values on password input without rendering Monaco', () => {
     editor({ type: 'secret', value: 'top-secret' })
     const input = screen.getByLabelText('值') as HTMLInputElement
     expect(input.type).toBe('password')
+    expect(screen.queryByRole('textbox', { name: '值' })).toBeNull()
     const toggle = screen.getByRole('button', { name: '显示密钥' })
     fireEvent.click(toggle)
     expect(input.type).toBe('text')
@@ -103,11 +185,17 @@ describe('variable editors', () => {
 
     fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'string' } })
     fireEvent.change(screen.getByLabelText('值'), { target: { value: '${' } })
-    const suggestions = screen.getByRole('listbox').textContent ?? ''
-    expect(suggestions).toContain('API_TOKEN')
-    expect(suggestions).toContain('MASKED_URL')
-    expect(suggestions).not.toContain('top-secret')
-    expect(suggestions.match(/••••••••/g)?.length).toBeGreaterThanOrEqual(2)
+    const result = monacoEditorMock.providers
+      .at(-1)
+      .provideCompletionItems(monacoLineModel('${'), { lineNumber: 1, column: 3 })
+    expect(result.suggestions.map((suggestion: { label: string }) => suggestion.label)).toEqual([
+      'API_TOKEN',
+      'API_URL',
+      'MASKED_URL',
+      'PORT',
+    ])
+    expect(JSON.stringify(result.suggestions)).not.toContain('top-secret')
+    expect(JSON.stringify(result.suggestions)).not.toContain('••••••••')
   })
 
   it('does not validate or save an untouched masked secret sentinel', () => {
@@ -275,7 +363,7 @@ describe('variable editors', () => {
       vi.fn(() => validation.promise),
     )
     fireEvent.click(screen.getByRole('button', { name: '保存变量' }))
-    expect((screen.getByLabelText('值') as HTMLTextAreaElement).disabled).toBe(true)
+    expect((screen.getByLabelText('值') as HTMLTextAreaElement).readOnly).toBe(true)
     fireEvent.change(screen.getByLabelText('值'), { target: { value: 'new' } })
     validation.resolve({ ok: true, resolution })
     await act(async () => validation.promise)
@@ -289,6 +377,7 @@ describe('variable editors', () => {
     const view = render(
       <JsonValueEditor value={'{"a":1}'} onChange={onChange} error={null} onError={onError} />,
     )
+    expect(screen.getByRole('textbox', { name: 'JSON 值' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: '格式化 JSON' }))
     expect(onChange).toHaveBeenCalledWith('{\n  "a": 1\n}')
     view.rerender(
@@ -302,8 +391,14 @@ describe('variable editors', () => {
     expect(screen.getByRole('alert').textContent).toContain('JSON')
     fireEvent.click(screen.getByRole('button', { name: '格式化 JSON' }))
     expect(onError).toHaveBeenCalledWith(expect.stringContaining('JSON 语法错误'))
-    expect(errorSpy).toHaveBeenCalledWith('JSON format failed', { cause: expect.any(SyntaxError) })
+    expect(errorSpy).toHaveBeenCalledWith({ err: expect.any(SyntaxError) }, 'JSON format failed')
     errorSpy.mockRestore()
+  })
+
+  it('passes json language to Monaco for JSON values', () => {
+    render(<JsonValueEditor value="{}" onChange={vi.fn()} error={null} onError={vi.fn()} />)
+
+    expect(monacoEditorMock.props.at(-1)?.language).toBe('json')
   })
 
   it('blocks invalid JSON before validation or save', async () => {
@@ -312,8 +407,8 @@ describe('variable editors', () => {
     editor({ type: 'string', value: '' }, onSave, validateDraft)
     fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'json' } })
     const jsonInput = screen.getByRole('textbox', { name: 'JSON 值' })
-    fireEvent.input(jsonInput, { target: { textContent: '{broken' } })
-    await waitFor(() => expect(jsonInput.textContent).toContain('{broken'))
+    fireEvent.change(jsonInput, { target: { value: '{broken' } })
+    await waitFor(() => expect((jsonInput as HTMLTextAreaElement).value).toContain('{broken'))
     fireEvent.click(screen.getByRole('button', { name: '保存变量' }))
     expect(await screen.findByRole('alert')).toBeDefined()
     expect(validateDraft).not.toHaveBeenCalled()

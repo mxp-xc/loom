@@ -2,6 +2,7 @@ import { useState, useEffect, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
+import MonacoTextEditor from './monaco/MonacoTextEditor.js'
 
 type ViewMode = 'preview' | 'source'
 
@@ -112,8 +113,9 @@ export default function MarkdownPreview({
       await onSave(editContent)
       setDirty(false)
       setMode('preview')
-    } catch (e) {
-      setSaveErr(e instanceof Error ? e.message : String(e))
+    } catch (err) {
+      console.error({ err }, 'Failed to save Markdown source')
+      setSaveErr(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
     }
@@ -183,26 +185,19 @@ export default function MarkdownPreview({
           {saveErr && (
             <div style={{ marginBottom: 8, fontSize: 11, color: 'var(--error)' }}>{saveErr}</div>
           )}
-          <textarea
+          <MonacoTextEditor
+            ariaLabel="SKILL.md 内容"
+            height="var(--skill-detail-panel-height)"
+            language="markdown"
             value={editContent}
-            onChange={(e) => {
-              setEditContent(e.target.value)
+            onChange={(next) => {
+              setEditContent(next)
               setDirty(true)
             }}
-            style={{
-              width: '100%',
-              minHeight: 320,
-              height: 'var(--skill-detail-panel-height)',
-              padding: 12,
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius)',
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: 12,
-              lineHeight: 1.6,
-              color: 'var(--text)',
-              resize: 'vertical',
-              outline: 'none',
+            options={{
+              lineNumbers: 'on',
+              padding: { top: 12, bottom: 12 },
+              renderWhitespace: 'selection',
             }}
           />
         </div>

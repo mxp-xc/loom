@@ -1,8 +1,5 @@
-import CodeMirror from '@uiw/react-codemirror'
-import { json, jsonParseLinter } from '@codemirror/lang-json'
-import { lintGutter, linter } from '@codemirror/lint'
-import { useState } from 'react'
-import { Button } from '../../components/ui/button'
+import { Button } from '../../components/ui/button.js'
+import VarsMonacoValueEditor from './VarsMonacoValueEditor.js'
 
 interface Props {
   value: string
@@ -13,14 +10,13 @@ interface Props {
 }
 
 export default function JsonValueEditor({ value, onChange, error, onError, disabled }: Props) {
-  const [editorView, setEditorView] = useState<import('@codemirror/view').EditorView | null>(null)
   const format = () => {
     try {
       const next = JSON.stringify(JSON.parse(value), null, 2)
       onChange(next)
       onError(null)
     } catch (cause) {
-      console.error('JSON format failed', { cause })
+      console.error({ err: cause }, 'JSON format failed')
       onError(cause instanceof Error ? `JSON 语法错误：${cause.message}` : 'JSON 语法错误')
     }
   }
@@ -32,32 +28,15 @@ export default function JsonValueEditor({ value, onChange, error, onError, disab
           格式化 JSON
         </Button>
       </div>
-      <CodeMirror
+      <VarsMonacoValueEditor
+        ariaLabel="JSON 值"
+        disabled={disabled}
+        error={error}
+        type="json"
         value={value}
-        editable={!disabled}
-        height="190px"
-        extensions={[json(), linter(jsonParseLinter()), lintGutter()]}
-        basicSetup={{
-          foldGutter: true,
-          bracketMatching: true,
-          closeBrackets: true,
-          autocompletion: true,
-        }}
-        onCreateEditor={(view) => {
-          view.contentDOM.setAttribute('aria-label', 'JSON 值')
-          setEditorView(view)
-        }}
-        onChange={(next) => {
-          onChange(next)
-          if (error) onError(null)
-        }}
+        onChange={onChange}
+        onError={onError}
       />
-      {editorView && <span className="vars-sr-only">{editorView.state.doc.lines} 行</span>}
-      {error && (
-        <p className="vars-field-error" role="alert">
-          {error}
-        </p>
-      )}
     </div>
   )
 }

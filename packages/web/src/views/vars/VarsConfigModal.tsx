@@ -1,12 +1,18 @@
 import { CheckCircle2, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { api } from '../../lib/api'
-import { AGENTS, agentColor, agentShort, type AgentId } from '../../lib/agents'
-import { cn } from '@/lib/utils'
-import type { StringFormat, VarEntryInput, VarsLayerRef, VarsMatrixResponse } from '../../lib/vars'
-import type { VarsDiagnostic } from '../../lib/vars'
-import type { VarsProfileEntry, VarsProfileSummary } from './profile-model'
-import { entryValuePreview, parseOverrideDraft, parseVarDraft } from './profile-model'
+import { api } from '../../lib/api.js'
+import { AGENTS, agentColor, agentShort, type AgentId } from '../../lib/agents.js'
+import { cn } from '@/lib/utils.js'
+import type {
+  StringFormat,
+  VarEntryInput,
+  VarsLayerRef,
+  VarsMatrixResponse,
+} from '../../lib/vars.js'
+import type { VarsDiagnostic } from '../../lib/vars.js'
+import type { VarsProfileEntry, VarsProfileSummary } from './profile-model.js'
+import { entryValuePreview, parseOverrideDraft, parseVarDraft } from './profile-model.js'
+import VarsMonacoValueEditor, { keysFromVarsResolution } from './VarsMonacoValueEditor.js'
 import styles from './Vars.module.css'
 
 type PreviewMode = 'edit' | 'raw' | 'resolved'
@@ -49,6 +55,7 @@ const stringFormatOptions: StringFormat[] = [
   'shell',
   'path',
 ]
+const secretPreviewMask = '••••••••'
 
 function slotLabel(slot: Slot) {
   return slot === 'default' ? 'default' : agentShort[slot]
@@ -171,6 +178,27 @@ function MarkdownPreview({ value }: { value: string }) {
   )
 }
 
+function SecretConfigValueInput({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string
+  disabled: boolean
+  onChange: (value: string) => void
+}) {
+  return (
+    <input
+      aria-label="配置值"
+      autoComplete="off"
+      disabled={disabled}
+      type="password"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  )
+}
+
 export default function VarsConfigModal({
   repoPath,
   modal,
@@ -244,6 +272,18 @@ export default function VarsConfigModal({
       ? entryValuePreview(previewMatrix.resolution.values[key])
       : ''
   const resolvedValue = renderWithResolvedVars(draft || resolvedRawValue, previewMatrix)
+  const rawPreviewValue =
+    type === 'secret'
+      ? draft
+        ? secretPreviewMask
+        : '当前槽位还没有输入内容。'
+      : draft || '当前槽位还没有输入内容。'
+  const resolvedPreviewValue =
+    type === 'secret'
+      ? draft || resolvedRawValue
+        ? secretPreviewMask
+        : '当前没有解析结果。'
+      : resolvedValue || '当前没有解析结果。'
   const trace =
     previewMatrix.resolution.ok && key ? (previewMatrix.resolution.overrideChains[key] ?? []) : []
   const dependencies =
@@ -437,23 +477,33 @@ export default function VarsConfigModal({
                   <span>
                     配置值 · {profile.name} · {slotLabel(slot)}
                   </span>
-                  <textarea
-                    aria-label="配置值"
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    placeholder="输入配置值"
-                    readOnly={isReadonly}
-                  />
+                  {type === 'secret' ? (
+                    <SecretConfigValueInput
+                      disabled={isReadonly}
+                      value={draft}
+                      onChange={setDraft}
+                    />
+                  ) : (
+                    <VarsMonacoValueEditor
+                      ariaLabel="配置值"
+                      disabled={isReadonly}
+                      format={format}
+                      type={type}
+                      value={draft}
+                      varsKeys={keysFromVarsResolution(previewMatrix.resolution)}
+                      onChange={setDraft}
+                    />
+                  )}
                 </label>
               ) : previewMode === 'raw' ? (
                 <pre className={cn(styles['vars-preview'], styles['vars-preview-raw'])}>
-                  {draft || '当前槽位还没有输入内容。'}
+                  {rawPreviewValue}
                 </pre>
               ) : format === 'markdown' ? (
                 <MarkdownPreview value={resolvedValue || draft} />
               ) : (
                 <pre className={cn(styles['vars-preview'], styles['vars-preview-raw'])}>
-                  {resolvedValue || '当前没有解析结果。'}
+                  {resolvedPreviewValue}
                 </pre>
               )}
             </section>

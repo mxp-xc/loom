@@ -4,14 +4,13 @@ import { forwardRef, useImperativeHandle } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import MemoryEditor from '../src/components/MemoryEditor'
 import { ApiError, api } from '../src/lib/api'
+import { createMonacoEditorMock } from './monaco-test-utils'
+
+const monacoEditorMock = createMonacoEditorMock()
 
 const editorMocks = vi.hoisted(() => ({
   richProps: [] as any[],
-  monacoProps: [] as any[],
-  monacoProvider: null as any,
-  monacoDisposeCallbacks: [] as Array<() => void>,
-  monacoSetTheme: vi.fn(),
-  providerDispose: vi.fn(),
+  monacoProviderDispose: vi.fn(),
 }))
 
 function monacoLineModel(line: string) {
@@ -77,60 +76,27 @@ vi.mock('@mdxeditor/editor', () => {
   }
 })
 
-vi.mock('@monaco-editor/react', () => ({
-  default: (props: any) => {
-    editorMocks.monacoProps.push(props)
-    const monaco = {
-      editor: {
-        defineTheme: vi.fn(),
-        setTheme: editorMocks.monacoSetTheme,
-      },
-      languages: {
-        CompletionItemKind: { Variable: 17 },
-        registerCompletionItemProvider: vi.fn((_language: string, provider: any) => {
-          editorMocks.monacoProvider = provider
-          return { dispose: editorMocks.providerDispose }
-        }),
-      },
-      Range: class {
-        startLineNumber: number
-        startColumn: number
-        endLineNumber: number
-        endColumn: number
-        constructor(
-          startLineNumber: number,
-          startColumn: number,
-          endLineNumber: number,
-          endColumn: number,
-        ) {
-          this.startLineNumber = startLineNumber
-          this.startColumn = startColumn
-          this.endLineNumber = endLineNumber
-          this.endColumn = endColumn
-        }
-      },
-    }
-    props.beforeMount?.(monaco)
-    props.onMount?.(
-      {
-        getValue: () => props.value,
-        onDidDispose: (callback: () => void) => {
-          editorMocks.monacoDisposeCallbacks.push(callback)
-          return { dispose: vi.fn() }
+vi.mock('@monaco-editor/react', async () => {
+  const { createMonacoEditorMock } = await import('./monaco-test-utils')
+  const monacoModule = createMonacoEditorMock().module()
+  return {
+    default: (props: any) =>
+      monacoModule.default({
+        ...props,
+        onMount: (editor: any, monaco: any) => {
+          const registerCompletionItemProvider =
+            monaco.languages.registerCompletionItemProvider.bind(monaco.languages)
+          monaco.languages.registerCompletionItemProvider = vi.fn(
+            (language: string, provider: any) => {
+              registerCompletionItemProvider(language, provider)
+              return { dispose: editorMocks.monacoProviderDispose }
+            },
+          )
+          props.onMount?.(editor, monaco)
         },
-      },
-      monaco,
-    )
-    return (
-      <textarea
-        data-testid="memory-source-monaco"
-        aria-label="Memory 内容"
-        value={props.value}
-        onChange={(event) => props.onChange?.(event.currentTarget.value)}
-      />
-    )
-  },
-}))
+      }),
+  }
+})
 
 vi.mock('../src/lib/api', async () => {
   const actual = await vi.importActual<typeof import('../src/lib/api')>('../src/lib/api')
@@ -162,11 +128,7 @@ vi.mock('../src/lib/api', async () => {
 describe('MemoryEditor', () => {
   beforeEach(() => {
     editorMocks.richProps = []
-    editorMocks.monacoProps = []
-    editorMocks.monacoProvider = null
-    editorMocks.monacoDisposeCallbacks = []
-    editorMocks.monacoSetTheme.mockClear()
-    editorMocks.providerDispose.mockClear()
+    monacoEditorMock.reset()
     document.documentElement.setAttribute('data-theme', 'light')
     vi.clearAllMocks()
   })
@@ -200,7 +162,7 @@ describe('MemoryEditor', () => {
     expect(onSave).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('tab', { name: '源码' }))
-    const source = screen.getByTestId('memory-source-monaco') as HTMLTextAreaElement
+    const source = screen.getByRole('textbox', { name: 'Memory 内容' }) as HTMLTextAreaElement
     expect(source.value).toBe(content)
     fireEvent.change(source, { target: { value: '## Source edit' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -220,12 +182,14 @@ describe('MemoryEditor', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: '源码' }))
     await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'codex'))
-    expect(editorMocks.monacoProvider).toBeTruthy()
+    expect(monacoEditorMock.providers.at(-1)).toBeTruthy()
 
-    const result = editorMocks.monacoProvider.provideCompletionItems(monacoLineModel('$' + '{AP'), {
-      lineNumber: 1,
-      column: 5,
-    })
+    const result = monacoEditorMock.providers
+      .at(-1)
+      .provideCompletionItems(monacoLineModel('$' + '{AP'), {
+        lineNumber: 1,
+        column: 5,
+      })
     expect(result.suggestions[0]).toMatchObject({
       label: 'API_URL',
       insertText: '$' + '{API_URL}',
@@ -234,10 +198,9 @@ describe('MemoryEditor', () => {
     expect(result.suggestions[0].range.startColumn).toBe(1)
     expect(result.suggestions[0].range.endColumn).toBe(5)
 
-    const autoClosed = editorMocks.monacoProvider.provideCompletionItems(
-      monacoLineModel('$' + '{AP}'),
-      { lineNumber: 1, column: 5 },
-    )
+    const autoClosed = monacoEditorMock.providers
+      .at(-1)
+      .provideCompletionItems(monacoLineModel('$' + '{AP}'), { lineNumber: 1, column: 5 })
     expect(autoClosed.suggestions[0]).toMatchObject({
       label: 'API_URL',
       insertText: '$' + '{API_URL}',
@@ -246,10 +209,9 @@ describe('MemoryEditor', () => {
     expect(autoClosed.suggestions[0].range.startColumn).toBe(1)
     expect(autoClosed.suggestions[0].range.endColumn).toBe(6)
 
-    expect(editorMocks.monacoDisposeCallbacks.length).toBeGreaterThan(0)
-    editorMocks.providerDispose.mockClear()
-    editorMocks.monacoDisposeCallbacks.at(-1)?.()
-    expect(editorMocks.providerDispose).toHaveBeenCalledTimes(1)
+    expect(monacoEditorMock.disposeCallbacks.length).toBeGreaterThan(0)
+    monacoEditorMock.disposeLast()
+    expect(editorMocks.monacoProviderDispose).toHaveBeenCalledTimes(1)
   })
 
   it('keeps Monaco source editor on the built-in theme that matches the current UI', async () => {
@@ -266,10 +228,14 @@ describe('MemoryEditor', () => {
     )
 
     fireEvent.click(screen.getByRole('tab', { name: '源码' }))
-    await waitFor(() => expect(editorMocks.monacoSetTheme).toHaveBeenCalledWith('vs-dark'))
+    expect(monacoEditorMock.props.at(-1)?.theme).toBe('vs-dark')
 
-    document.documentElement.setAttribute('data-theme', 'light')
-    await waitFor(() => expect(editorMocks.monacoSetTheme).toHaveBeenCalledWith('vs'))
+    await act(async () => {
+      document.documentElement.setAttribute('data-theme', 'light')
+      await Promise.resolve()
+    })
+
+    expect(monacoEditorMock.props.at(-1)?.theme).toBe('vs')
   })
 
   it('keeps rich preview usable with rich variable completion disabled', async () => {
@@ -417,7 +383,7 @@ describe('MemoryEditor', () => {
       expect(await screen.findByText('Rendered once')).toBeTruthy()
 
       fireEvent.click(screen.getByRole('tab', { name: '源码' }))
-      fireEvent.change(screen.getByTestId('memory-source-monaco'), {
+      fireEvent.change(screen.getByRole('textbox', { name: 'Memory 内容' }), {
         target: { value: 'Use ' + '$' + '{missing}' },
       })
       fireEvent.click(screen.getByRole('tab', { name: '解析预览' }))

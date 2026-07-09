@@ -1,22 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
-import { basicSetup, EditorView } from 'codemirror'
-import { EditorState, RangeSetBuilder } from '@codemirror/state'
-import { Decoration, GutterMarker, gutter } from '@codemirror/view'
-import { yaml } from '@codemirror/lang-yaml'
-import { Button } from '@/components/ui/button'
-import type { GitConflictFile } from '@/lib/api'
-import { cn } from '@/lib/utils'
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import MonacoTextEditor from '@/components/monaco/MonacoTextEditor.js'
+import { languageForFile } from '@/components/monaco/languages.js'
+import { Button } from '@/components/ui/button.js'
+import type { GitConflictFile } from '@/lib/api.js'
+import { cn } from '@/lib/utils.js'
 import {
   applyBlockSide,
   buildMergeModel,
   ignoreBlockSide,
   resetBlockSide,
-  type BlockSide,
   type BlockDecision,
-  type MergeChange,
+  type BlockSide,
   type MergeBlock,
+  type MergeChange,
   type MergeModel,
-} from './merge-model'
+} from './merge-model.js'
 import styles from './ConflictEditor.module.css'
 
 interface Props {
@@ -28,103 +26,12 @@ interface Props {
   onAbort: () => void
 }
 
-const editorTheme = EditorView.theme({
-  '&': { height: '100%', backgroundColor: 'var(--bg)', color: 'var(--text)', fontSize: '12px' },
-  '.cm-scroller': { overflow: 'auto' },
-  '.cm-content': { fontFamily: "'JetBrains Mono', monospace", minHeight: '260px' },
-  '.cm-gutters': { backgroundColor: 'var(--card)', color: 'var(--muted)', border: 'none' },
-  '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'var(--accent)' },
-  '&.cm-focused': { outline: 'none' },
-})
-
-function extensions(readOnly = false) {
-  return [
-    basicSetup,
-    yaml(),
-    editorTheme,
-    ...(readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
-  ]
-}
-
 type VisualChangeKind = 'stable' | 'conflict' | 'applied' | 'ignored'
 
-class BlockActionsMarker extends GutterMarker {
-  elementClass = 'merge-action-gutter-cell'
-
-  constructor(
-    private block: MergeBlock,
-    private side: BlockSide,
-    private number: number,
-    private apply: (id: string, side: BlockSide) => void,
-    private ignore: (id: string, side: BlockSide) => void,
-    private reset: (id: string, side: BlockSide) => void,
-  ) {
-    super()
-  }
-
-  eq(other: GutterMarker) {
-    return (
-      other instanceof BlockActionsMarker && other.block === this.block && other.side === this.side
-    )
-  }
-
-  toDOM() {
-    const label = this.side === 'local' ? '本地' : '远程'
-    const state = this.side === 'local' ? this.block.localState : this.block.remoteState
-    const host = document.createElement('span')
-    host.className = 'merge-line-number-action'
-
-    const actions = document.createElement('span')
-    actions.className = `merge-block-actions is-${state}`
-
-    const applyButton = document.createElement('button')
-    applyButton.type = 'button'
-    applyButton.className = 'merge-block-action'
-    applyButton.ariaLabel =
-      state === 'applied'
-        ? `${label}变更 ${this.number}：撤回应用`
-        : `${label}变更 ${this.number}：应用到结果`
-    applyButton.title = applyButton.ariaLabel
-    applyButton.textContent = state === 'applied' ? '↶' : this.side === 'local' ? '→' : '←'
-    applyButton.disabled = state === 'ignored'
-    applyButton.addEventListener('click', (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-      if (state === 'applied') {
-        this.reset(this.block.id, this.side)
-      } else {
-        this.apply(this.block.id, this.side)
-      }
-    })
-
-    const ignoreButton = document.createElement('button')
-    ignoreButton.type = 'button'
-    ignoreButton.className = 'merge-block-action'
-    ignoreButton.ariaLabel =
-      state === 'ignored'
-        ? `${label}变更 ${this.number}：撤回忽略`
-        : `${label}变更 ${this.number}：忽略变更`
-    ignoreButton.title = ignoreButton.ariaLabel
-    ignoreButton.textContent = state === 'ignored' ? '↶' : '×'
-    ignoreButton.disabled = state === 'applied'
-    ignoreButton.addEventListener('click', (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-      if (state === 'ignored') {
-        this.reset(this.block.id, this.side)
-      } else {
-        this.ignore(this.block.id, this.side)
-      }
-    })
-
-    if (this.side === 'local') {
-      actions.append(ignoreButton, applyButton)
-    } else {
-      actions.append(applyButton, ignoreButton)
-    }
-    host.append(actions)
-    return host
-  }
+interface DecorationTarget {
+  editor: any
+  monaco: any
+  ids: string[]
 }
 
 function sideState(block: MergeBlock, side: BlockSide): BlockDecision {
@@ -143,6 +50,76 @@ function overlaps(from: number, to: number, otherFrom: number, otherTo: number) 
   return from < otherTo && otherFrom < to
 }
 
+function commonPrefixLength(left: string, right: string) {
+  const max = Math.min(left.length, right.length)
+  let index = 0
+  while (index < max && left[index] === right[index]) index += 1
+  return index
+}
+
+function commonSuffixLength(left: string, right: string, prefixLength: number) {
+  const max = Math.min(left.length, right.length) - prefixLength
+  let length = 0
+  while (length < max && left[left.length - length - 1] === right[right.length - length - 1]) {
+    length += 1
+  }
+  return length
+}
+
+function resultTextEdit(previous: string, next: string) {
+  const prefixLength = commonPrefixLength(previous, next)
+  const suffixLength = commonSuffixLength(previous, next, prefixLength)
+  return {
+    previousFrom: prefixLength,
+    previousTo: previous.length - suffixLength,
+    nextTo: next.length - suffixLength,
+    delta: next.length - previous.length,
+  }
+}
+
+function mapResultPosition(
+  position: number,
+  edit: ReturnType<typeof resultTextEdit>,
+  assoc: -1 | 1,
+) {
+  if (position < edit.previousFrom || (position === edit.previousFrom && assoc < 0)) {
+    return position
+  }
+  if (position > edit.previousTo || (position === edit.previousTo && assoc > 0)) {
+    return position + edit.delta
+  }
+  return assoc < 0 ? edit.previousFrom : edit.nextTo
+}
+
+function mapResultBlocks(blocks: MergeBlock[], previous: string, next: string) {
+  const edit = resultTextEdit(previous, next)
+  return blocks.map((block) => {
+    const editTouchesBlock = overlaps(
+      edit.previousFrom,
+      edit.previousTo,
+      block.resultFrom,
+      block.resultTo,
+    )
+    return {
+      ...block,
+      resultFrom: mapResultPosition(block.resultFrom, edit, 1),
+      resultTo: mapResultPosition(block.resultTo, edit, -1),
+      ...(editTouchesBlock
+        ? {
+            localState: 'pending' as const,
+            remoteState: 'pending' as const,
+            appliedOrder: [],
+          }
+        : {}),
+    }
+  })
+}
+
+function unresolvedCount(blocks: MergeBlock[]) {
+  return blocks.filter((block) => block.localState === 'pending' || block.remoteState === 'pending')
+    .length
+}
+
 function visualKind(change: MergeChange, blocks: MergeBlock[], side: BlockSide): VisualChangeKind {
   if (change.kind === 'stable') return 'stable'
   const block = blocks.find((candidate) => {
@@ -153,89 +130,179 @@ function visualKind(change: MergeChange, blocks: MergeBlock[], side: BlockSide):
   return state === 'applied' || state === 'ignored' ? state : 'conflict'
 }
 
-function sideDecorations(
-  changes: MergeChange[],
-  blocks: MergeBlock[],
-  side: BlockSide,
-  apply: (id: string, side: BlockSide) => void,
-  ignore: (id: string, side: BlockSide) => void,
+function lineNumberAt(text: string, offset: number) {
+  const boundedOffset = Math.max(0, Math.min(offset, text.length))
+  let line = 1
+  for (let index = 0; index < boundedOffset; index += 1) {
+    if (text[index] === '\n') line += 1
+  }
+  return line
+}
+
+function changeDecorations(
+  text: string,
+  changes: Array<MergeChange & { visualKind: VisualChangeKind }>,
+  monaco: any,
 ) {
-  return EditorView.decorations.compute([], (state) => {
-    const decorations = changes.flatMap((change) => {
-      const kind = visualKind(change, blocks, side)
-      const firstLine = state.doc.lineAt(Math.min(change.from, state.doc.length)).number
-      const lastPosition = change.to > change.from ? change.to : change.from
-      const lastLine = state.doc.lineAt(Math.min(lastPosition, state.doc.length)).number
-      const lines = []
-      for (let lineNumber = firstLine; lineNumber <= lastLine; lineNumber += 1) {
-        lines.push(
-          Decoration.line({ class: `merge-change merge-change-${kind}` }).range(
-            state.doc.line(lineNumber).from,
-          ),
-        )
-      }
-      return lines
-    })
-    return Decoration.set(decorations, true)
+  return changes.flatMap((change) => {
+    const fromLine = lineNumberAt(text, change.from)
+    const lastPosition = change.to > change.from ? change.to : change.from
+    const toLine = lineNumberAt(text, lastPosition)
+    const decorations = []
+    for (let line = fromLine; line <= toLine; line += 1) {
+      decorations.push({
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          isWholeLine: true,
+          className: `merge-change merge-change-${change.visualKind}`,
+          linesDecorationsClassName: `merge-change-${change.visualKind}`,
+        },
+      })
+    }
+    return decorations
   })
 }
 
-function actionGutter(
-  blocks: MergeBlock[],
-  side: BlockSide,
-  apply: (id: string, side: BlockSide) => void,
-  ignore: (id: string, side: BlockSide) => void,
-  reset: (id: string, side: BlockSide) => void,
+function updateDecorations(
+  target: DecorationTarget | null,
+  text: string,
+  changes: Array<MergeChange & { visualKind: VisualChangeKind }>,
+  onError: (message: string) => void,
 ) {
-  return gutter({
-    class: 'merge-action-gutter',
-    side: side === 'local' ? 'after' : 'before',
-    markers: (view) => {
-      const builder = new RangeSetBuilder<GutterMarker>()
-      blocks.forEach((block, index) => {
-        const position = Math.min(
-          side === 'local' ? block.localTo : block.remoteTo,
-          view.state.doc.length,
-        )
-        const line = view.state.doc.lineAt(position)
-        builder.add(
-          line.from,
-          line.from,
-          new BlockActionsMarker(block, side, index + 1, apply, ignore, reset),
-        )
-      })
-      return builder.finish()
-    },
-  })
+  if (!target?.editor?.deltaDecorations || !target.monaco?.Range) return
+  try {
+    target.ids = target.editor.deltaDecorations(
+      target.ids,
+      changeDecorations(text, changes, target.monaco),
+    )
+  } catch (err) {
+    console.error({ err }, 'Failed to update Monaco conflict decorations')
+    onError('冲突高亮加载失败')
+  }
+}
+
+function sideChanges(model: MergeModel, side: BlockSide) {
+  return model.changes[side].map((change) => ({
+    ...change,
+    visualKind: visualKind(change, model.blocks, side),
+  }))
+}
+
+function resultVisualKind(block: MergeBlock): VisualChangeKind {
+  if (block.localState === 'pending' || block.remoteState === 'pending') return 'conflict'
+  if (block.localState === 'applied' || block.remoteState === 'applied') return 'applied'
+  return 'ignored'
+}
+
+function resultChanges(model: MergeModel) {
+  return model.blocks.map((block) => ({
+    from: block.resultFrom,
+    to: block.resultTo,
+    kind: 'conflict' as const,
+    visualKind: resultVisualKind(block),
+  }))
+}
+
+function actionLabel(side: BlockSide) {
+  return side === 'local' ? '本地' : '远程'
+}
+
+function ActionButtons({
+  block,
+  side,
+  number,
+  onApply,
+  onIgnore,
+  onReset,
+}: {
+  block: MergeBlock
+  side: BlockSide
+  number: number
+  onApply: (id: string, side: BlockSide) => void
+  onIgnore: (id: string, side: BlockSide) => void
+  onReset: (id: string, side: BlockSide) => void
+}) {
+  const label = actionLabel(side)
+  const state = sideState(block, side)
+  const applyButton = (
+    <button
+      key="apply"
+      type="button"
+      className="merge-block-action"
+      aria-label={
+        state === 'applied'
+          ? `${label}变更 ${number}：撤回应用`
+          : `${label}变更 ${number}：应用到结果`
+      }
+      title={
+        state === 'applied'
+          ? `${label}变更 ${number}：撤回应用`
+          : `${label}变更 ${number}：应用到结果`
+      }
+      disabled={state === 'ignored'}
+      onClick={() => (state === 'applied' ? onReset(block.id, side) : onApply(block.id, side))}
+    >
+      {state === 'applied' ? '↶' : side === 'local' ? '→' : '←'}
+    </button>
+  )
+  const ignoreButton = (
+    <button
+      key="ignore"
+      type="button"
+      className="merge-block-action"
+      aria-label={
+        state === 'ignored'
+          ? `${label}变更 ${number}：撤回忽略`
+          : `${label}变更 ${number}：忽略变更`
+      }
+      title={
+        state === 'ignored'
+          ? `${label}变更 ${number}：撤回忽略`
+          : `${label}变更 ${number}：忽略变更`
+      }
+      disabled={state === 'applied'}
+      onClick={() => (state === 'ignored' ? onReset(block.id, side) : onIgnore(block.id, side))}
+    >
+      {state === 'ignored' ? '↶' : '×'}
+    </button>
+  )
+
+  return (
+    <span className={`merge-block-actions is-${state}`}>
+      {side === 'local' ? [ignoreButton, applyButton] : [applyButton, ignoreButton]}
+    </span>
+  )
 }
 
 export default function ConflictEditor({ conflict, index, total, saving, onSave, onAbort }: Props) {
-  const localHost = useRef<HTMLDivElement>(null)
-  const resultHost = useRef<HTMLDivElement>(null)
-  const remoteHost = useRef<HTMLDivElement>(null)
-  const resultView = useRef<EditorView | null>(null)
-  const syncingResult = useRef(false)
+  const localEditor = useRef<DecorationTarget | null>(null)
+  const resultEditor = useRef<DecorationTarget | null>(null)
+  const remoteEditor = useRef<DecorationTarget | null>(null)
   const [mobileSide, setMobileSide] = useState<'local' | 'result' | 'remote'>('result')
+  const [decorationError, setDecorationError] = useState<string | null>(null)
   const [model, setModel] = useState<MergeModel>(() =>
     buildMergeModel(conflict.base ?? '', conflict.ours ?? '', conflict.theirs ?? ''),
   )
 
+  const language = useMemo(() => languageForFile(conflict.path, 'yaml'), [conflict.path])
+
   useEffect(() => {
     setModel(buildMergeModel(conflict.base ?? '', conflict.ours ?? '', conflict.theirs ?? ''))
     setMobileSide('result')
+    setDecorationError(null)
   }, [conflict])
 
-  const applySide = (id: string, side: BlockSide) => {
+  const applySide = useCallback((id: string, side: BlockSide) => {
     setModel((current) => applyBlockSide(current, id, side))
-  }
+  }, [])
 
-  const ignoreSide = (id: string, side: BlockSide) => {
+  const ignoreSide = useCallback((id: string, side: BlockSide) => {
     setModel((current) => ignoreBlockSide(current, id, side))
-  }
+  }, [])
 
-  const resetSide = (id: string, side: BlockSide) => {
+  const resetSide = useCallback((id: string, side: BlockSide) => {
     setModel((current) => resetBlockSide(current, id, side))
-  }
+  }, [])
 
   const keepAutomaticMerge = () =>
     setModel(buildMergeModel(conflict.base ?? '', conflict.ours ?? '', conflict.theirs ?? ''))
@@ -258,68 +325,6 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
     })
   }
 
-  useEffect(() => {
-    if (conflict.binary || !localHost.current || !remoteHost.current) return
-    const local = new EditorView({
-      doc: conflict.ours ?? '',
-      parent: localHost.current,
-      extensions: [
-        ...extensions(true),
-        sideDecorations(model.changes.local, model.blocks, 'local', applySide, ignoreSide),
-        actionGutter(model.blocks, 'local', applySide, ignoreSide, resetSide),
-      ],
-    })
-    const remote = new EditorView({
-      doc: conflict.theirs ?? '',
-      parent: remoteHost.current,
-      extensions: [
-        ...extensions(true),
-        sideDecorations(model.changes.remote, model.blocks, 'remote', applySide, ignoreSide),
-        actionGutter(model.blocks, 'remote', applySide, ignoreSide, resetSide),
-      ],
-    })
-    return () => {
-      local.destroy()
-      remote.destroy()
-    }
-  }, [conflict, model.blocks])
-
-  useEffect(() => {
-    if (!resultHost.current || conflict.binary) return
-    const view = new EditorView({
-      doc: model.result,
-      parent: resultHost.current,
-      extensions: [
-        ...extensions(),
-        EditorView.updateListener.of((update) => {
-          if (!update.docChanged || syncingResult.current) return
-          setModel((current) => ({
-            ...current,
-            result: update.state.doc.toString(),
-            blocks: current.blocks.map((block) => ({
-              ...block,
-              resultFrom: update.changes.mapPos(block.resultFrom, 1),
-              resultTo: update.changes.mapPos(block.resultTo, -1),
-            })),
-          }))
-        }),
-      ],
-    })
-    resultView.current = view
-    return () => {
-      resultView.current = null
-      view.destroy()
-    }
-  }, [conflict])
-
-  useEffect(() => {
-    const view = resultView.current
-    if (!view || view.state.doc.toString() === model.result) return
-    syncingResult.current = true
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: model.result } })
-    syncingResult.current = false
-  }, [model.result])
-
   const chooseBinaryFile = (value: string | null) =>
     setModel({
       result: value ?? '',
@@ -327,6 +332,38 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
       changes: { local: [], remote: [] },
       unresolvedCount: 0,
     })
+
+  const mountDecoratedEditor = (
+    targetRef: MutableRefObject<DecorationTarget | null>,
+    text: string,
+    changes: Array<MergeChange & { visualKind: VisualChangeKind }>,
+  ) => {
+    return (editor: any, monaco: any) => {
+      targetRef.current = { editor, monaco, ids: [] }
+      updateDecorations(targetRef.current, text, changes, setDecorationError)
+      return {
+        dispose: () => {
+          if (targetRef.current?.editor === editor) targetRef.current = null
+        },
+      }
+    }
+  }
+
+  useEffect(() => {
+    updateDecorations(
+      localEditor.current,
+      conflict.ours ?? '',
+      sideChanges(model, 'local'),
+      setDecorationError,
+    )
+    updateDecorations(resultEditor.current, model.result, resultChanges(model), setDecorationError)
+    updateDecorations(
+      remoteEditor.current,
+      conflict.theirs ?? '',
+      sideChanges(model, 'remote'),
+      setDecorationError,
+    )
+  }, [conflict.ours, conflict.theirs, model])
 
   return (
     <section className={styles['conflict-editor-shell']}>
@@ -349,6 +386,12 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
           文件 {index + 1}/{total}
         </span>
       </header>
+
+      {decorationError && (
+        <div className={styles['conflict-editor-error']} role="alert">
+          {decorationError}
+        </div>
+      )}
 
       {conflict.binary ? (
         <div className={styles['conflict-binary']}>
@@ -378,7 +421,35 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
           <div className={styles['conflict-three-way']}>
             <div className={styles['conflict-pane']} data-mobile-active={mobileSide === 'local'}>
               <div className={styles['conflict-pane-label']}>LOCAL</div>
-              <div ref={localHost} className={styles['conflict-pane-editor']} />
+              <div className={styles['conflict-pane-body']}>
+                <MonacoTextEditor
+                  className={styles['conflict-pane-editor']}
+                  value={conflict.ours ?? ''}
+                  onChange={() => undefined}
+                  language={language}
+                  ariaLabel="Sync LOCAL"
+                  readOnly
+                  options={{ lineNumbers: 'on' }}
+                  onEditorMount={mountDecoratedEditor(
+                    localEditor,
+                    conflict.ours ?? '',
+                    sideChanges(model, 'local'),
+                  )}
+                />
+                <div className="merge-action-rail" aria-label="本地冲突操作">
+                  {model.blocks.map((block, blockIndex) => (
+                    <ActionButtons
+                      key={block.id}
+                      block={block}
+                      side="local"
+                      number={blockIndex + 1}
+                      onApply={applySide}
+                      onIgnore={ignoreSide}
+                      onReset={resetSide}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
             <div
               className={cn(styles['conflict-pane'], styles['is-result'])}
@@ -388,11 +459,60 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
                 <span>RESULT</span>
                 <span>{model.unresolvedCount} 个待处理冲突</span>
               </div>
-              <div ref={resultHost} className={styles['conflict-pane-editor']} />
+              <MonacoTextEditor
+                className={styles['conflict-pane-editor']}
+                value={model.result}
+                onChange={(result) =>
+                  setModel((current) => {
+                    const blocks = mapResultBlocks(current.blocks, current.result, result)
+                    return {
+                      ...current,
+                      result,
+                      blocks,
+                      unresolvedCount: unresolvedCount(blocks),
+                    }
+                  })
+                }
+                language={language}
+                ariaLabel="Sync RESULT"
+                onEditorMount={mountDecoratedEditor(
+                  resultEditor,
+                  model.result,
+                  resultChanges(model),
+                )}
+              />
             </div>
             <div className={styles['conflict-pane']} data-mobile-active={mobileSide === 'remote'}>
               <div className={styles['conflict-pane-label']}>REMOTE</div>
-              <div ref={remoteHost} className={styles['conflict-pane-editor']} />
+              <div className={styles['conflict-pane-body']}>
+                <div className="merge-action-rail" aria-label="远程冲突操作">
+                  {model.blocks.map((block, blockIndex) => (
+                    <ActionButtons
+                      key={block.id}
+                      block={block}
+                      side="remote"
+                      number={blockIndex + 1}
+                      onApply={applySide}
+                      onIgnore={ignoreSide}
+                      onReset={resetSide}
+                    />
+                  ))}
+                </div>
+                <MonacoTextEditor
+                  className={styles['conflict-pane-editor']}
+                  value={conflict.theirs ?? ''}
+                  onChange={() => undefined}
+                  language={language}
+                  ariaLabel="Sync REMOTE"
+                  readOnly
+                  options={{ lineNumbers: 'on' }}
+                  onEditorMount={mountDecoratedEditor(
+                    remoteEditor,
+                    conflict.theirs ?? '',
+                    sideChanges(model, 'remote'),
+                  )}
+                />
+              </div>
             </div>
           </div>
         </>
@@ -405,9 +525,7 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
         <Button
           size="sm"
           variant="primary"
-          onClick={() =>
-            onSave(conflict.path, resultView.current?.state.doc.toString() ?? model.result)
-          }
+          onClick={() => onSave(conflict.path, model.result)}
           disabled={saving || model.unresolvedCount > 0}
         >
           {saving ? '保存中…' : total > 1 ? '保存并继续' : '保存并完成合并'}

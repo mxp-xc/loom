@@ -4,6 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Vars from '../src/views/vars/Vars'
 import { useProfileVars } from '../src/views/vars/useProfileVars'
 import { api } from '../src/lib/api'
+import { createMonacoEditorMock } from './monaco-test-utils'
+
+const monacoEditorMock = createMonacoEditorMock()
+
+vi.mock('@monaco-editor/react', async () => {
+  const { createMonacoEditorMock } = await import('./monaco-test-utils')
+  return createMonacoEditorMock().module()
+})
 
 vi.mock('../src/lib/api', () => ({
   api: {
@@ -21,11 +29,12 @@ const matrix = (agent = 'codex') => ({
   ok: true as const,
   agent,
   builtinKeys: ['LOOM_AGENT', 'LOOM_CONFIG_DIR'],
-  userKeys: ['agent_name', 'json_text', 'memory.context', 'rtk_path', 'rtk'],
+  userKeys: ['agent_name', 'json_text', 'yaml_text', 'memory.context', 'rtk_path', 'rtk'],
   snapshot: {
     base: {
       agent_name: { type: 'string' as const, format: 'markdown' as const, value: 'Agent' },
       json_text: { type: 'string' as const, format: 'json' as const, value: '{"b":2,"a":1}' },
+      yaml_text: { type: 'string' as const, format: 'yaml' as const, value: 'enabled: true' },
       'memory.context': {
         type: 'string' as const,
         format: 'markdown' as const,
@@ -53,6 +62,7 @@ const matrix = (agent = 'codex') => ({
         value: agent === 'codex' ? 'Local Codex agent' : 'Agent',
       },
       json_text: { type: 'string' as const, format: 'json' as const, value: '{"b":2,"a":1}' },
+      yaml_text: { type: 'string' as const, format: 'yaml' as const, value: 'enabled: true' },
       'memory.context': {
         type: 'string' as const,
         format: 'markdown' as const,
@@ -75,6 +85,7 @@ const matrix = (agent = 'codex') => ({
       rtk: { locality: 'synced' as const, layer: 'base' as const },
       rtk_path: { locality: 'synced' as const, layer: 'base' as const },
       json_text: { locality: 'synced' as const, layer: 'base' as const },
+      yaml_text: { locality: 'synced' as const, layer: 'base' as const },
       'memory.context': { locality: 'synced' as const, layer: 'base' as const },
     },
     overrideChains: {
@@ -90,12 +101,14 @@ const matrix = (agent = 'codex') => ({
       rtk: [{ locality: 'synced' as const, layer: 'base' as const }],
       rtk_path: [{ locality: 'synced' as const, layer: 'base' as const }],
       json_text: [{ locality: 'synced' as const, layer: 'base' as const }],
+      yaml_text: [{ locality: 'synced' as const, layer: 'base' as const }],
       'memory.context': [{ locality: 'synced' as const, layer: 'base' as const }],
     },
     dependencies: {
       rtk: [],
       rtk_path: ['LOOM_CONFIG_DIR'],
       json_text: [],
+      yaml_text: [],
       'memory.context': [],
       agent_name: [],
       LOOM_AGENT: [],
@@ -108,6 +121,7 @@ const matrix = (agent = 'codex') => ({
 describe('Vars view', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    monacoEditorMock.reset()
     localStorage.clear()
     vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => matrix(agent))
     vi.mocked(api.vars.setBaseKey).mockResolvedValue({ ok: true })
@@ -382,8 +396,8 @@ describe('Vars view', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑 agent_name' }))
 
     expect(await screen.findByRole('dialog', { name: '编辑配置' })).toBeDefined()
-    const textarea = screen.getByRole('textbox', { name: /配置值/ })
-    fireEvent.change(textarea, { target: { value: 'Local Codex v2' } })
+    const editor = screen.getByRole('textbox', { name: /配置值/ })
+    fireEvent.change(editor, { target: { value: 'Local Codex v2' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() =>
@@ -395,6 +409,27 @@ describe('Vars view', () => {
         'codex',
       ),
     )
+  })
+
+  it('chooses Monaco language by markdown, json, and yaml config formats', async () => {
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('agent_name')
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 agent_name' }))
+    expect(await screen.findByRole('dialog', { name: '编辑配置' })).toBeDefined()
+    expect(monacoEditorMock.props.at(-1)?.language).toBe('markdown')
+    fireEvent.click(screen.getByRole('button', { name: '关闭弹窗' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑配置' })).toBeNull())
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 json_text' }))
+    expect(await screen.findByRole('dialog', { name: '编辑配置' })).toBeDefined()
+    expect(monacoEditorMock.props.at(-1)?.language).toBe('json')
+    fireEvent.click(screen.getByRole('button', { name: '关闭弹窗' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑配置' })).toBeNull())
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 yaml_text' }))
+    expect(await screen.findByRole('dialog', { name: '编辑配置' })).toBeDefined()
+    expect(monacoEditorMock.props.at(-1)?.language).toBe('yaml')
   })
 
   it('reads and saves a non-active agent slot from that agent matrix', async () => {
@@ -476,6 +511,107 @@ describe('Vars view', () => {
       expect(api.vars.setBaseKey).toHaveBeenCalledWith('/repo', 'max_items', {
         type: 'number',
         value: 42,
+      }),
+    )
+  })
+
+  it('keeps a new Base secret on password input and saves without Monaco', async () => {
+    render(<Vars repoPath="/repo" />)
+    await screen.findByRole('button', { name: /Base/ })
+
+    fireEvent.click(screen.getByRole('button', { name: /Base/ }))
+    fireEvent.click(screen.getByRole('button', { name: '新建变量' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '新建配置' })
+    fireEvent.change(within(dialog).getByLabelText('key'), { target: { value: 'api_secret' } })
+    fireEvent.change(within(dialog).getByLabelText('类型'), { target: { value: 'secret' } })
+    const secretInput = within(dialog).getByLabelText(/配置值/) as HTMLInputElement
+    expect(secretInput.type).toBe('password')
+    expect(within(dialog).queryByRole('textbox', { name: /配置值/ })).toBeNull()
+
+    fireEvent.change(secretInput, { target: { value: 'new-secret' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '原始预览' }))
+    expect(within(dialog).queryByText('new-secret')).toBeNull()
+    expect(within(dialog).getByText('••••••••')).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '解析预览' }))
+    expect(within(dialog).queryByText('new-secret')).toBeNull()
+    expect(within(dialog).getByText('••••••••')).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '编辑' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() =>
+      expect(api.vars.setBaseKey).toHaveBeenCalledWith('/repo', 'api_secret', {
+        type: 'secret',
+        value: 'new-secret',
+      }),
+    )
+  })
+
+  it('keeps an edited secret config on password input and saves without Monaco', async () => {
+    vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => {
+      const response = matrix(agent)
+      return {
+        ...response,
+        userKeys: [...response.userKeys, 'api_secret'],
+        snapshot: {
+          ...response.snapshot,
+          base: {
+            ...response.snapshot.base,
+            api_secret: { type: 'secret' as const, value: 'existing-secret' },
+          },
+        },
+        resolution: {
+          ...response.resolution,
+          values: {
+            ...response.resolution.values,
+            api_secret: { type: 'secret' as const, value: 'existing-secret' },
+          },
+          sources: {
+            ...response.resolution.sources,
+            api_secret: { locality: 'synced' as const, layer: 'base' as const },
+          },
+          overrideChains: {
+            ...response.resolution.overrideChains,
+            api_secret: [{ locality: 'synced' as const, layer: 'base' as const }],
+          },
+          dependencies: {
+            ...response.resolution.dependencies,
+            api_secret: [],
+          },
+        },
+      }
+    })
+
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('api_secret')
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 api_secret' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
+    const secretInput = within(dialog).getByLabelText(/配置值/) as HTMLInputElement
+    expect(secretInput.type).toBe('password')
+    expect(within(dialog).queryByRole('textbox', { name: /配置值/ })).toBeNull()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '原始预览' }))
+    expect(within(dialog).queryByText('existing-secret')).toBeNull()
+    expect(within(dialog).getByText('••••••••')).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '编辑' }))
+    const editedSecretInput = within(dialog).getByLabelText(/配置值/) as HTMLInputElement
+    fireEvent.change(editedSecretInput, { target: { value: 'edited-secret' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '解析预览' }))
+    expect(within(dialog).queryByText('existing-secret')).toBeNull()
+    expect(within(dialog).queryByText('edited-secret')).toBeNull()
+    expect(within(dialog).getByText('••••••••')).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '编辑' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() =>
+      expect(api.vars.setBaseKey).toHaveBeenCalledWith('/repo', 'api_secret', {
+        type: 'secret',
+        value: 'edited-secret',
       }),
     )
   })

@@ -497,7 +497,8 @@
   gap: 7px;
 }
 
-.editorCard label span {
+.editorCard label span,
+.recordHead span {
   color: var(--muted);
   font:
     700 11px/1 'JetBrains Mono',
@@ -505,9 +506,15 @@
 }
 
 .editorCard input,
-.editorCard textarea {
+.editorCard textarea,
+.recordField :global(.monaco-editor),
+.recordField :global(.overflow-guard) {
   width: 100%;
   min-width: 0;
+}
+
+.editorCard input,
+.editorCard textarea {
   border: 1px solid var(--border);
   border-radius: 16px;
   background: var(--bg);
@@ -522,6 +529,30 @@
   font:
     12px/1.6 'JetBrains Mono',
     monospace;
+}
+
+.recordField {
+  display: grid;
+  gap: 8px;
+}
+
+.recordHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.kvList {
+  display: grid;
+  gap: 8px;
+}
+
+.kvRow {
+  display: grid;
+  grid-template-columns: minmax(0, 0.42fr) minmax(0, 0.58fr) auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .typeGrid {
