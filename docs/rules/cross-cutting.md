@@ -40,7 +40,7 @@ Status: active
 Applies to: skills, MCP, memory
 
 Rule:
-用户修改可投影内容的 desired target state 后，Loom 应自动 reconcile projection，不要求用户再手动点击一次 project。
+用户修改 skills 或 memory 的 desired target state 后，Loom 应自动 reconcile projection，不要求用户再手动点击一次 project。MCP 是显式 Project changes 例外，见 R-MCP-002。
 
 Implications:
 
@@ -48,6 +48,7 @@ Implications:
 - Memory 页面全局 target chip 保存 repo-level targets 后，会自动运行 memory projection。
 - 批量 target 更新在所有 manifest 更新成功后投影。
 - 保存 source scan members 后，会投影 skills。
+- MCP target chip 和全局 target chip 只保存 desired target state，不自动投影；MCP projection 由 Project changes 显式触发。
 
 Safety:
 
@@ -59,6 +60,7 @@ Examples:
 - 点击某个 skill 的 OC chip，会更新 manifest targets，然后运行 skills projection。
 - 点击 Memory 页面的 OC chip，会更新 repo config targets，然后运行 memory projection。
 - 保存扫描出的 source members，会更新 source members，然后运行 skills projection。
+- 点击 MCP server 的 CX chip，只更新 manifest targets；用户点击 MCP 页面 Project changes 后才运行 MCP projection。
 
 Tests:
 

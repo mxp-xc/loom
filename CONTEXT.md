@@ -59,3 +59,7 @@ _Avoid_: env vars, settings
 **MCP server**:
 由 Loom 管理并投影到 agent-specific MCP 配置中的 Model Context Protocol server 条目。
 _Avoid_: tool, plugin
+
+**Preview target**:
+只读的 agent 视角，用于预览某项配置在 CC/CX/OC 下的变量解析与写入形态；不改变 desired targets，也不触发 projection。
+_Avoid_: selected target, active projection target

@@ -114,3 +114,31 @@ Examples:
 Tests:
 
 - packages/server/test/projection/mcp-merge.test.ts
+
+## R-PROJECTION-005 MCP projection 按目标 agent 渲染 vars
+
+Status: active
+Applies to: MCP projection, vars
+
+Rule:
+MCP projection 写入某个 agent-native MCP 配置时，必须使用该目标 agent 的 Vars 解析结果渲染 server definition。
+
+Implications:
+
+- 同一个 MCP server 投影到 CC、CX、OC 时，\`\${var}\` 可以解析成不同 agent-specific value。
+- Projection 使用 Base → Base/agent → Local → Local/agent → Runtime 的覆盖语义。
+- Preview target 的展示语义必须与真实 projection 的 per-agent vars 渲染语义一致。
+
+Safety:
+
+- 不能把 UI 当前 preview target 用作所有目标 agent 的投影上下文。
+- 缺失变量或解析错误必须暴露为 projection error 或 preview diagnostic，不能静默写入错误值。
+
+Examples:
+
+- \`\${browsers_path}\` 投影到 Codex 时使用 Codex 的 resolved value，投影到 OpenCode 时使用 OpenCode 的 resolved value。
+
+Tests:
+
+- packages/web/test/mcp-preview.test.ts
+- packages/server/test/projection/mcp-merge.test.ts

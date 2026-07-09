@@ -250,93 +250,30 @@ function MemberScanModalHarness({ source, repoPath }: { source: any; repoPath: s
 }
 
 describe('MCP view', () => {
-  it('edits a server in a modal using the create-style form', async () => {
+  it('renders the workbench and embedded create editor', async () => {
     render(<Mcp repoPath="/tmp/mcp-layout" />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '编辑 MCP Server test-mcp' }))
-    const dialog = await screen.findByRole('dialog', { name: '编辑 MCP Server' })
+    expect(await screen.findByRole('heading', { name: 'MCP Servers' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Project changes' })).toBeDefined()
 
-    const idInput = within(dialog).getByLabelText('id') as HTMLInputElement
-    expect(idInput.value).toBe('test-mcp')
-    expect(idInput.disabled).toBe(true)
-
-    fireEvent.change(within(dialog).getByLabelText('command'), { target: { value: 'node' } })
-    expect(within(dialog).queryByText('targets')).toBeNull()
-    expect(within(dialog).queryByLabelText('env（JSON）')).toBeNull()
-
-    fireEvent.change(within(dialog).getByLabelText('env file'), {
-      target: { value: 'FOO=baz' },
-    })
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存修改' }))
-
-    await waitFor(() =>
-      expect(api.updateMcpServer).toHaveBeenCalledWith({
-        repo: '/tmp/mcp-layout',
-        id: 'test-mcp',
-        server: expect.objectContaining({
-          id: 'test-mcp',
-          type: 'stdio',
-          command: 'node',
-          args: ['hello'],
-          env: { FOO: 'baz' },
-          targets: ['codex'],
-        }),
-      }),
-    )
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add server' }).at(-1)!)
+    expect(screen.queryByRole('dialog', { name: /MCP Server/ })).toBeNull()
+    expect(screen.getByRole('heading', { name: '新增 MCP server' })).toBeDefined()
+    expect(screen.getByLabelText('env file')).toBeDefined()
   })
 
-  it('supports MCP env key value rows with add and delete controls', async () => {
-    render(<Mcp repoPath="/tmp/mcp-layout" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑 MCP Server test-mcp' }))
-    const dialog = await screen.findByRole('dialog', { name: '编辑 MCP Server' })
-
-    fireEvent.click(within(dialog).getByRole('button', { name: '切换 env 为 key value 编辑' }))
-    fireEvent.change(within(dialog).getByLabelText('env key 1'), { target: { value: 'FOO' } })
-    fireEvent.change(within(dialog).getByLabelText('env value 1'), { target: { value: 'baz' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '新增 env 行' }))
-    fireEvent.change(within(dialog).getByLabelText('env key 2'), { target: { value: 'TOKEN' } })
-    fireEvent.change(within(dialog).getByLabelText('env value 2'), { target: { value: 'abc 123' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '删除 env 行 1' }))
-
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存修改' }))
-
-    await waitFor(() =>
-      expect(api.updateMcpServer).toHaveBeenCalledWith({
-        repo: '/tmp/mcp-layout',
-        id: 'test-mcp',
-        server: expect.objectContaining({
-          env: { TOKEN: 'abc 123' },
-          targets: ['codex'],
-        }),
-      }),
-    )
-  })
-
-  it('omits targets from the Add MCP Server modal', async () => {
-    render(<Mcp repoPath="/tmp/mcp-layout" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Add server' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Add MCP Server' })
-
-    expect(within(dialog).queryByText('targets')).toBeNull()
-    expect(within(dialog).queryByLabelText('env（JSON）')).toBeNull()
-    expect(within(dialog).getByLabelText('env file')).toBeDefined()
-  })
-
-  it('shows local validation errors in the Add MCP Server modal', async () => {
+  it('validates the embedded create editor locally', async () => {
     const callsBefore = vi.mocked(api.addMcpServer).mock.calls.length
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     try {
       render(<Mcp repoPath="/tmp/mcp-layout" />)
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Add server' }))
-      const dialog = await screen.findByRole('dialog', { name: 'Add MCP Server' })
+      await screen.findByRole('heading', { name: 'MCP Servers' })
+      fireEvent.click(screen.getAllByRole('button', { name: 'Add server' }).at(-1)!)
+      fireEvent.click(screen.getByRole('button', { name: 'Save server' }))
 
-      fireEvent.click(within(dialog).getByRole('button', { name: '添加 MCP Server' }))
-
-      expect(await within(dialog).findByText('id 不能为空')).toBeDefined()
+      expect(await screen.findByText('id 不能为空')).toBeDefined()
       expect(api.addMcpServer).toHaveBeenCalledTimes(callsBefore)
       expect(consoleError).toHaveBeenCalledWith(
         expect.objectContaining({ err: expect.any(Error) }),
@@ -347,17 +284,13 @@ describe('MCP view', () => {
     }
   })
 
-  it('bulk toggles MCP server targets with mixed state feedback', async () => {
+  it('bulk toggles MCP server targets without projecting', async () => {
     render(<Mcp repoPath="/tmp/mcp-layout" />)
 
-    const codexBulk = await screen.findByRole('button', {
-      name: 'CX：部分 MCP servers 已选择',
-    })
-    expect(codexBulk.getAttribute('data-tooltip')).toBe('CX：部分已选择')
-
-    fireEvent.click(codexBulk)
+    fireEvent.click(await screen.findByRole('button', { name: '全部 MCP servers 应用到 CX' }))
 
     await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(2))
+    expect(api.project).not.toHaveBeenCalled()
     expect(api.updateMcpTargets).toHaveBeenCalledWith({
       repo: '/tmp/mcp-layout',
       id: 'test-mcp',
@@ -382,11 +315,7 @@ describe('MCP view', () => {
 
     render(<Mcp repoPath="/tmp/mcp-layout" />)
 
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'CX：部分 MCP servers 已选择',
-      }),
-    )
+    fireEvent.click(await screen.findByRole('button', { name: '全部 MCP servers 应用到 CX' }))
 
     await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(callsBefore + 1))
     releaseFirst()

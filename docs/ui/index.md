@@ -9,6 +9,7 @@
 - [设计系统](design-system.md) — 色彩、字体、圆角、阴影、动效 token 定义
 - [组件规范](components.md) — 按钮、卡片、toast、chip、modal、tabs、nav 等组件设计规范
 - [Vars 管理](vars.md) — 多环境变量、类型编辑器、解析预览与诊断
+- [MCP Workbench](mcp.md) — MCP server 列表、detail/editor、preview target 与变量信息弹窗
 
 ## 设计语言
 
