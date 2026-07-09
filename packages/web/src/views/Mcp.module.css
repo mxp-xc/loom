@@ -1,24 +1,17 @@
 .page {
   display: grid;
-  gap: 18px;
+  gap: 14px;
+  max-width: 1240px;
   min-width: 0;
 }
 
 .hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 22px 24px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at 12% 0%, rgba(56, 189, 248, 0.14), transparent 28%),
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--card) 94%, transparent),
-      color-mix(in srgb, var(--bg) 88%, transparent)
-    );
-  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: end;
+  padding: 8px 0 16px;
+  border-bottom: 1px solid var(--border);
 }
 
 .hero h1,
@@ -26,9 +19,15 @@
 .detailHero h2,
 .editorHero h2,
 .noSelection h2 {
-  margin: 0;
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
   color: var(--bright);
-  letter-spacing: -0.04em;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+.hero h1 {
+  font-size: clamp(22px, 2.4vw, 28px);
 }
 
 .hero p,
@@ -37,74 +36,127 @@
 .previewCard p,
 .noSelection p,
 .confirmPanel p {
+  max-width: 680px;
   margin: 6px 0 0;
-  color: var(--muted);
+  color: var(--m2);
   font-size: 13px;
+  line-height: 1.6;
 }
 
 .kicker,
 .cardKicker {
+  color: var(--muted);
   font:
     700 10px/1 'JetBrains Mono',
     monospace;
-  color: var(--muted);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .heroMeta {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  font:
-    700 11px/1 'JetBrains Mono',
-    monospace;
-  color: var(--muted);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(88px, max-content));
+  gap: 8px;
+  align-self: end;
 }
 
-.heroMeta span,
-.heroMeta b {
-  padding: 8px 12px;
+.heroMeta span {
+  display: grid;
+  min-height: 56px;
+  gap: 4px;
+  padding: 8px 10px;
+  color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--card) 86%, transparent);
+  border-radius: var(--radius);
+  background: var(--card);
 }
 
 .heroMeta b {
+  padding: 0;
   color: var(--error);
+  border: 0;
+  background: transparent;
+}
+
+.heroMeta span b {
+  color: var(--bright);
+  font:
+    650 15px/1 'JetBrains Mono',
+    monospace;
+}
+
+.heroMeta span small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.globalTargets {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-card) + 4px);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+
+.globalTargets strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--bright);
+  font:
+    600 12px 'JetBrains Mono',
+    monospace;
+}
+
+.globalTargets :global(.target-chips) {
+  justify-content: flex-end;
 }
 
 .workbench {
   display: grid;
-  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
-  min-height: 720px;
-  max-height: min(860px, calc(100vh - 210px));
-  overflow: hidden;
+  grid-template-columns: clamp(278px, 31vw, 360px) minmax(0, 1fr);
+  gap: 16px;
+  height: clamp(590px, calc(100dvh - 230px), 800px);
+  min-height: 0;
+}
+
+.inventory,
+.detail,
+.noSelection {
+  min-width: 0;
+  min-height: 0;
   border: 1px solid var(--border);
-  border-radius: 30px;
-  background: color-mix(in srgb, var(--card) 96%, transparent);
+  border-radius: calc(var(--radius-card) + 4px);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
 }
 
 .inventory {
   display: flex;
+  height: 100%;
   flex-direction: column;
-  min-height: 0;
-  border-right: 1px solid var(--border);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--card) 98%, transparent),
-      color-mix(in srgb, var(--bg) 92%, transparent)
-    ),
-    radial-gradient(circle at 0 0, rgba(16, 185, 129, 0.1), transparent 26%);
+  overflow: hidden;
 }
 
 .inventoryTop {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 20px 20px 14px;
+  gap: 12px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 96%, var(--accent)), var(--card)),
+    var(--card);
+}
+
+.inventoryTop h2 {
+  font:
+    600 13px/1.25 'JetBrains Mono',
+    monospace;
 }
 
 .inventoryActions,
@@ -116,112 +168,96 @@
   gap: 8px;
 }
 
-.globalTargets {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin: 0 18px 14px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  border-radius: 18px;
-  background: color-mix(in srgb, var(--bg) 74%, transparent);
-  color: var(--muted);
-  font-size: 12px;
+.inventoryActions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
-.globalTargets > div,
-.rowTargets {
-  display: flex;
-  gap: 6px;
+.inventoryActionPrimary,
+.inventoryActionProject {
+  gap: 6px !important;
+  min-height: 30px !important;
+  padding-inline: 10px !important;
+  font-size: 11px !important;
+  box-shadow: none !important;
 }
 
-.targetChip {
-  width: 30px;
-  height: 26px;
-  border: 1px solid color-mix(in srgb, var(--c) 42%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--c) 8%, transparent);
-  color: var(--c);
-  font:
-    800 10px/1 'JetBrains Mono',
-    monospace;
-  cursor: pointer;
-  transition:
-    transform var(--dur) var(--ease),
-    background var(--dur) var(--ease),
-    opacity var(--dur) var(--ease);
-}
-
-.targetChip[data-state='on'] {
-  background: var(--c);
-  color: white;
-  border-color: var(--c);
-  box-shadow: 0 8px 18px color-mix(in srgb, var(--c) 24%, transparent);
-}
-
-.targetChip[data-state='mixed'] {
-  background: linear-gradient(135deg, var(--c) 0 50%, transparent 50% 100%);
-  color: white;
-}
-
-.targetChip[data-state='off'] {
-  opacity: 0.48;
-}
-
-.targetChip:hover {
-  opacity: 1;
-  transform: translateY(-1px);
+.inventoryActionProject {
+  color: var(--primary) !important;
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border)) !important;
+  background: color-mix(in srgb, var(--primary) 8%, var(--card)) !important;
 }
 
 .searchBox {
   display: flex;
+  min-height: 38px;
   align-items: center;
   gap: 8px;
-  margin: 0 18px 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--bg);
+  margin: 10px 12px;
+  padding: 0 11px;
   color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.searchBox:focus-within {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent);
 }
 
 .searchBox input {
   width: 100%;
   min-width: 0;
+  color: var(--text);
+  font:
+    12px 'JetBrains Mono',
+    monospace;
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--text);
-  font-size: 13px;
 }
 
 .filterRow {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  padding: 0 18px 16px;
+  padding: 0 12px 12px;
 }
 
 .filterRow button,
 .typeGrid button,
 .previewPill {
+  min-height: 28px;
+  padding: 0 10px;
+  color: var(--muted);
+  cursor: pointer;
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 7px 10px;
-  background: transparent;
-  color: var(--muted);
+  background: var(--card);
   font:
     700 10px/1 'JetBrains Mono',
     monospace;
-  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+.filterRow button:hover,
+.typeGrid button:hover,
+.previewPill:hover {
+  color: var(--text);
+  background: var(--accent);
 }
 
 .filterRow button[data-active='true'],
 .typeGrid button[data-active='true'],
 .previewPill[data-active='true'] {
-  border-color: var(--signal);
-  background: color-mix(in srgb, var(--signal) 14%, transparent);
-  color: var(--bright);
+  color: var(--primary-fg);
+  border-color: var(--primary);
+  background: var(--primary);
 }
 
 .serverList,
@@ -232,74 +268,105 @@
 
 .serverList {
   display: grid;
-  gap: 10px;
-  padding: 0 14px 18px;
+  align-content: start;
+  flex: 1 1 auto;
+  gap: 0;
+  overflow-x: hidden;
+  padding: 6px 10px 14px;
+  scrollbar-gutter: stable;
 }
 
 .serverCard {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 11px 10px 11px 12px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
   border: 1px solid transparent;
-  border-radius: 22px;
-  background: color-mix(in srgb, var(--bg) 64%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--border) 74%, transparent);
+  border-radius: 0;
+  background: transparent;
   transition:
-    border-color var(--dur) var(--ease),
+    transform var(--dur) var(--ease),
     background var(--dur) var(--ease),
-    transform var(--dur) var(--ease);
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
 }
 
-.serverCard[data-selected='true'] {
-  border-color: color-mix(in srgb, var(--signal) 55%, transparent);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--signal) 11%, transparent), transparent 58%),
-    color-mix(in srgb, var(--bg) 78%, transparent);
+.serverCard::before {
+  position: absolute;
+  inset: 12px auto 12px 0;
+  width: 3px;
+  content: '';
+  border-radius: 999px;
+  background: transparent;
 }
 
 .serverCard:hover {
-  transform: translateY(-1px);
-  border-color: var(--border);
+  border-color: transparent;
+  border-bottom-color: color-mix(in srgb, var(--border) 74%, transparent);
+  background: var(--accent);
+}
+
+.serverCard[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow:
+    inset 3px 0 0 var(--primary),
+    inset 0 0 0 1px color-mix(in srgb, var(--primary) 5%, transparent);
+}
+
+.serverCard[data-selected='true']::before {
+  background: var(--signal);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--signal) 52%, transparent);
 }
 
 .serverMain {
   display: grid;
   gap: 7px;
   width: 100%;
-  padding: 14px 14px 8px;
-  border: 0;
-  background: transparent;
+  min-width: 0;
   color: inherit;
   text-align: left;
-  cursor: pointer;
 }
 
-.serverMain span {
+.serverCard:focus-visible,
+.filterRow button:focus-visible,
+.previewPill:focus-visible,
+.typeGrid button:focus-visible,
+.varToken:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.serverTopline,
+.serverFoot {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 8px;
-  min-width: 0;
 }
 
 .serverMain b {
   min-width: 0;
   overflow: hidden;
   color: var(--bright);
+  font:
+    650 12px 'JetBrains Mono',
+    monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.serverMain em {
-  flex-shrink: 0;
-  padding: 3px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--info) 12%, transparent);
-  color: var(--info);
-  font:
-    700 9px/1 'JetBrains Mono',
-    monospace;
-  font-style: normal;
-}
-
 .serverMain small {
   overflow: hidden;
-  color: var(--muted);
+  color: var(--m2);
   font:
     11px/1.5 'JetBrains Mono',
     monospace;
@@ -307,64 +374,234 @@
   white-space: nowrap;
 }
 
-.serverFoot {
-  display: flex;
-  justify-content: space-between;
+.typeBadge,
+.typeBadgeLarge {
+  display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 3px 7px;
+  color: var(--info);
+  border: 1px solid color-mix(in srgb, var(--info) 26%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+  font:
+    700 9px/1 'JetBrains Mono',
+    monospace;
+  text-transform: lowercase;
+}
+
+.typeBadge[data-type='stdio'],
+.typeBadgeLarge[data-type='stdio'] {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 26%, var(--border));
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.typeBadgeLarge {
+  min-height: 28px;
+  padding: 5px 10px;
+  font-size: 10px;
+}
+
+.serverFoot {
+  justify-content: space-between;
   gap: 10px;
-  padding: 0 10px 10px 14px;
+  min-width: 0;
+}
+
+.projectionState {
+  display: inline-flex;
+  min-width: 0;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font:
+    700 11px/1 'JetBrains Mono',
+    monospace;
+}
+
+.projectionState::before {
+  width: 7px;
+  height: 7px;
+  content: '';
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 10px color-mix(in srgb, currentColor 54%, transparent);
+}
+
+.projectionState[data-tone='projected'] {
+  color: var(--primary);
+}
+
+.projectionState[data-tone='partial'] {
+  color: var(--info);
+}
+
+.projectionState[data-tone='draft'] {
+  color: #facc15;
+}
+
+.rowTargets {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.serverCard :global(.target-chip) {
+  min-height: 22px;
+  padding: 3px 7px;
+  font-size: 10px;
+}
+
+.serverCard :global(.target-chip[data-tooltip])::after {
+  display: none;
+}
+
+.rowActions {
+  margin-left: auto;
+  opacity: 0.82;
+  flex-shrink: 0;
+  gap: 4px;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.rowActions :global(.icon-button) {
+  width: 26px !important;
+  min-width: 26px !important;
+  height: 26px !important;
+  color: var(--info);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: none;
+}
+
+.rowActions :global(.icon-button[data-tone='danger']) {
+  color: var(--error);
+}
+
+.rowActions :global(.icon-button:hover),
+.rowActions :global(.icon-button:focus-visible) {
+  transform: none;
+  outline: none;
+}
+
+.rowActions :global(.icon-button:not([data-tone='danger']):hover),
+.rowActions :global(.icon-button:not([data-tone='danger']):focus-visible) {
+  color: var(--bright);
+  border-color: color-mix(in srgb, var(--info) 34%, var(--border));
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+}
+
+.rowActions :global(.icon-button[data-tone='danger']:hover),
+.rowActions :global(.icon-button[data-tone='danger']:focus-visible) {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 34%, var(--border));
+  background: color-mix(in srgb, var(--error) 8%, transparent);
+}
+
+.serverCard:hover .rowActions,
+.serverCard:focus-within .rowActions,
+.serverCard[data-selected='true'] .rowActions {
+  opacity: 1;
 }
 
 .detail {
-  min-width: 0;
-  min-height: 0;
+  overflow: hidden;
 }
 
 .detailScroll {
   display: grid;
   align-content: start;
-  gap: 16px;
+  gap: 14px;
   height: 100%;
-  padding: 22px;
+  padding: 14px;
+  scrollbar-gutter: stable;
 }
 
 .detailHero,
 .editorHero {
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  align-items: flex-start;
-  padding: 18px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  border-radius: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 14px;
+  align-items: start;
+  min-width: 0;
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
   background:
-    radial-gradient(circle at 100% 0, rgba(139, 92, 246, 0.12), transparent 28%),
-    color-mix(in srgb, var(--bg) 76%, transparent);
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 96%, var(--accent)), var(--card)),
+    var(--card);
+}
+
+.editorHero {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.editorHero .previewSwitch {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.detailHero h2,
+.editorHero h2 {
+  font:
+    650 clamp(18px, 3vw, 24px) / 1.12 'JetBrains Mono',
+    monospace;
+}
+
+.detailActions {
+  gap: 4px;
 }
 
 .previewSwitch {
-  display: flex;
+  display: inline-flex;
+  inline-size: 208px;
+  min-width: 0;
+  min-height: 34px;
   align-items: center;
-  gap: 6px;
-  min-width: 222px;
-  padding: 5px;
-  border: 1px solid var(--border);
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 5px 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 12%, var(--border));
   border-radius: 999px;
-  background: color-mix(in srgb, var(--card) 90%, transparent);
+  background: color-mix(in srgb, var(--card) 72%, var(--bg));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bright) 4%, transparent);
 }
 
 .previewSwitch span {
-  padding-left: 8px;
   color: var(--muted);
   font:
     700 10px/1 'JetBrains Mono',
     monospace;
+  white-space: nowrap;
+}
+
+.previewPill {
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 7px;
+  border: 0;
+  background: transparent;
+}
+
+.previewPill[data-active='true'] {
+  color: white;
+  background: var(--c, var(--primary));
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--primary) 18%, transparent);
 }
 
 .detailGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
 }
 
 .fieldCard,
@@ -372,77 +609,167 @@
 .editorCard,
 .variableStrip {
   min-width: 0;
-  padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  border-radius: 24px;
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--card) 74%, var(--bg));
 }
 
-.cardTone {
-  margin-top: 6px;
+.fieldCardHead,
+.previewHead {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fieldCardHead small {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .fieldBody {
-  margin-top: 12px;
+  margin-top: 10px;
+}
+
+.codePreview {
+  display: grid;
+  gap: 9px;
 }
 
 .commandLine,
 .recordRow code,
-.variableValue code,
-.previewCard pre {
+.previewCard pre,
+.variableName,
+.variableMeta dd {
   font:
     12px/1.65 'JetBrains Mono',
     monospace;
 }
 
-.commandLine,
-.recordRow code {
-  color: var(--text);
+.commandLine {
+  max-height: 142px;
+  margin: 0;
+  overflow: auto;
+  padding: 11px 12px;
+  color: var(--bright);
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
+  border: 1px solid color-mix(in srgb, var(--primary) 14%, var(--border));
+  border-radius: var(--radius);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--primary) 5%, transparent), transparent 48%),
+    var(--bg);
+}
+
+.resolvedPreview {
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px dashed color-mix(in srgb, var(--primary) 32%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+.resolvedPreview span {
+  color: var(--muted);
+  font:
+    700 10px/1 'JetBrains Mono',
+    monospace;
+  text-transform: uppercase;
+}
+
+.resolvedPreview code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bright);
+  font:
+    12px 'JetBrains Mono',
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .recordList {
   display: grid;
-  gap: 8px;
+  gap: 0;
 }
 
 .recordRow {
   display: grid;
-  grid-template-columns: minmax(120px, 0.42fr) minmax(0, 1fr);
+  grid-template-columns: minmax(150px, 0.34fr) minmax(0, 1fr);
   gap: 10px;
-  align-items: start;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.recordRow:last-child {
+  border-bottom: 0;
 }
 
 .recordRow span,
 .emptyLine {
-  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bright);
   font:
-    700 11px/1.6 'JetBrains Mono',
+    600 11px/1.6 'JetBrains Mono',
     monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recordRow code {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--m2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recordResolved {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--primary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .varToken {
   display: inline-flex;
+  min-height: 18px;
   align-items: center;
-  margin: 0 2px;
-  padding: 2px 7px;
-  border: 1px solid color-mix(in srgb, var(--signal) 42%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--signal) 12%, transparent);
-  color: var(--bright);
-  font:
-    700 11px/1.4 'JetBrains Mono',
-    monospace;
+  margin: 0 1px;
+  padding: 1px 5px;
+  color: var(--primary);
+  font: inherit;
   cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--primary) 34%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--primary) 11%, transparent);
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+
+.varToken:hover {
+  border-color: color-mix(in srgb, var(--primary) 58%, transparent);
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
+  transform: translateY(-1px);
 }
 
 .variableStrip {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
 .variableStrip > span {
@@ -450,85 +777,154 @@
   font:
     700 10px/1 'JetBrains Mono',
     monospace;
-  text-transform: uppercase;
   letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .previewCard {
   display: grid;
-  gap: 10px;
+  gap: 12px;
+  overflow: hidden;
 }
 
-.previewHead {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+.previewHead p {
+  max-width: 560px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.previewHead strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--bright);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.previewPath {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--c) 22%, var(--border));
+  border-radius: var(--radius);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--c) 10%, transparent), transparent 58%),
+    color-mix(in srgb, var(--bg) 70%, transparent);
+  box-shadow: inset 2px 0 0 var(--c);
+}
+
+.previewPath span {
+  color: var(--bright);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.previewPath code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--m2);
+  font:
+    11px 'JetBrains Mono',
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewPath em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
 }
 
 .previewDiagnostics {
   display: grid;
   gap: 4px;
   padding: 9px 11px;
-  border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
-  border-radius: 16px;
   color: var(--error);
+  border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--error) 8%, transparent);
   font-size: 12px;
 }
 
 .previewCard pre {
-  max-height: 280px;
+  max-height: 300px;
   margin: 0;
   overflow: auto;
   padding: 14px;
-  border: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
-  border-radius: 18px;
-  background: color-mix(in srgb, var(--card) 84%, transparent);
   color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
+  border-radius: var(--radius);
+  background: var(--bg);
 }
 
 .editorCard {
   display: grid;
-  gap: 14px;
+  gap: 16px;
+  padding: 18px;
 }
 
 .editorCard label {
   display: grid;
-  gap: 7px;
+  gap: 8px;
 }
 
 .editorCard label span,
 .recordHead span {
-  color: var(--muted);
-  font:
-    700 11px/1 'JetBrains Mono',
-    monospace;
+  color: var(--bright);
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .editorCard input,
-.editorCard textarea,
-.recordField :global(.monaco-editor),
-.recordField :global(.overflow-guard) {
+.editorCard textarea {
   width: 100%;
   min-width: 0;
-}
-
-.editorCard input,
-.editorCard textarea {
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--bg);
-  color: var(--text);
+  min-height: 44px;
   padding: 10px 12px;
-  outline: none;
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 16px;
+  outline: 0;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bright) 4%, transparent);
+}
+
+.editorCard input:focus,
+.editorCard textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 25%, transparent);
 }
 
 .editorCard textarea {
-  min-height: 96px;
+  min-height: 92px;
   resize: vertical;
   font:
-    12px/1.6 'JetBrains Mono',
+    12px/1.55 'JetBrains Mono',
     monospace;
+}
+
+.typeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+.typeGrid button {
+  display: grid;
+  gap: 2px;
+  min-height: 38px;
+  border-radius: 999px;
 }
 
 .recordField {
@@ -543,6 +939,12 @@
   gap: 10px;
 }
 
+.recordField :global(.monaco-editor),
+.recordField :global(.overflow-guard) {
+  width: 100%;
+  min-width: 0;
+}
+
 .kvList {
   display: grid;
   gap: 8px;
@@ -555,80 +957,120 @@
   align-items: center;
 }
 
-.typeGrid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
 .editorActions {
   justify-content: flex-end;
 }
 
 .formError {
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--error) 50%, transparent);
-  border-radius: 18px;
   color: var(--error);
+  border: 1px solid color-mix(in srgb, var(--error) 50%, transparent);
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--error) 8%, transparent);
 }
 
 .variableOverlay {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 1000;
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(2, 6, 23, 0.48);
-  backdrop-filter: blur(12px);
+  background: color-mix(in srgb, #020617 52%, transparent);
+  isolation: isolate;
+  overscroll-behavior: contain;
 }
 
 .variablePanel,
 .confirmPanel {
-  width: min(680px, 100%);
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at 12% 0, rgba(56, 189, 248, 0.16), transparent 34%), var(--card);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
+  width: min(820px, calc(100vw - 48px));
+  max-height: min(640px, calc(100dvh - 48px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--popover);
+  box-shadow: var(--shadow-popover);
+  animation: dialogIn 160ms var(--ease);
+}
+
+.variablePanel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .variableHead {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 20px 20px 12px;
+  gap: 14px;
+  padding: 16px 18px;
   border-bottom: 1px solid var(--border);
 }
 
 .variableHead h3,
 .confirmPanel h3 {
-  margin: 6px 0 0;
+  margin: 3px 0 0;
   color: var(--bright);
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
 }
 
-.variableHead h3 span {
-  color: var(--signal);
-  font-family: 'JetBrains Mono', monospace;
+.variableHead p {
+  margin: 5px 0 0;
+  color: var(--primary);
+  font:
+    700 12px 'JetBrains Mono',
+    monospace;
+}
+
+.variableHeadActions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.variableHeadActions > span {
+  padding: 3px 8px;
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  font:
+    700 10px 'JetBrains Mono',
+    monospace;
+}
+
+.variableClose {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
 }
 
 .variableBody {
   display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(260px, 0.88fr);
   gap: 14px;
-  padding: 18px 20px 20px;
+  min-height: 0;
+  height: min(360px, calc(100dvh - 172px));
+  overflow: hidden;
+  padding: 18px;
 }
 
-.variableValue,
-.traceCard {
+.variableCard {
   display: grid;
-  gap: 10px;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--bg) 76%, transparent);
+  border-radius: var(--radius-card);
+  background: var(--card);
 }
 
+.variableCard > span,
 .variableValue span,
 .traceCard > span {
   color: var(--muted);
@@ -638,36 +1080,134 @@
   text-transform: uppercase;
 }
 
-.traceCard ol {
+.variableName {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  padding: 9px 11px;
+  color: var(--primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.variableMeta {
   display: grid;
-  gap: 8px;
+  gap: 0;
   margin: 0;
-  padding: 0;
+}
+
+.variableMeta div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.variableMeta div:last-child {
+  border-bottom: 0;
+}
+
+.variableMeta dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.variableMeta dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--bright);
+  line-height: 1.45;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.variableTrace {
+  display: grid;
+  gap: 0;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 2px 0;
   list-style: none;
 }
 
-.traceCard li {
-  display: flex;
-  align-items: center;
+.variableTrace li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
   gap: 10px;
+  padding: 0 0 9px;
 }
 
-.traceCard b {
+.variableTrace li:last-child {
+  padding-bottom: 0;
+}
+
+.variableTrace li:not(:last-child)::before {
+  position: absolute;
+  top: 25px;
+  bottom: 1px;
+  left: 10px;
+  width: 1px;
+  content: '';
+  background: color-mix(in srgb, var(--primary) 24%, var(--border));
+}
+
+.variableTrace b {
   display: grid;
-  place-items: center;
   width: 22px;
   height: 22px;
+  margin-top: 2px;
+  place-items: center;
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 38%, transparent);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--signal) 16%, transparent);
-  color: var(--signal);
+  background: color-mix(in srgb, var(--primary) 12%, var(--bg));
   font:
-    800 11px/1 'JetBrains Mono',
+    700 10px 'JetBrains Mono',
     monospace;
+}
+
+.variableTrace li > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 52%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+}
+
+.variableTrace strong {
+  color: var(--bright);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.variableTrace p {
+  margin: 0;
+  color: var(--m2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.variableFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
 }
 
 .confirmPanel {
   display: grid;
   gap: 12px;
+  max-width: 520px;
   padding: 20px;
 }
 
@@ -680,10 +1220,10 @@
 .noSelection,
 .emptyState {
   display: grid;
+  min-height: 260px;
   place-items: center;
   align-content: center;
   gap: 10px;
-  min-height: 260px;
   color: var(--muted);
   text-align: center;
 }
@@ -696,39 +1236,136 @@
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--success) 46%, transparent);
-  border-radius: 999px;
-  background: var(--card);
   color: var(--success);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.16);
+  border: 1px solid color-mix(in srgb, var(--success) 46%, transparent);
+  border-radius: var(--radius-card);
+  background: var(--popover);
+  box-shadow: var(--shadow-popover);
 }
 
-@media (max-width: 920px) {
-  .hero,
-  .detailHero,
-  .editorHero {
-    flex-direction: column;
+@keyframes dialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
   }
 
-  .workbench {
-    grid-template-columns: 1fr;
-    max-height: none;
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
+}
 
-  .inventory {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .serverList {
-    max-height: 360px;
-  }
-
+@media (max-width: 1040px) {
+  .workbench,
   .detailGrid {
     grid-template-columns: 1fr;
   }
 
-  .recordRow {
+  .workbench {
+    height: auto;
+    min-height: auto;
+  }
+
+  .inventory {
+    max-height: 460px;
+  }
+}
+
+@media (max-width: 760px) {
+  .page {
+    gap: 12px;
+  }
+
+  .hero,
+  .heroMeta,
+  .globalTargets,
+  .detailHero,
+  .editorHero {
     grid-template-columns: 1fr;
+  }
+
+  .globalTargets :global(.target-chips) {
+    justify-content: flex-start;
+  }
+
+  .detailActions {
+    justify-self: start;
+  }
+
+  .previewSwitch {
+    inline-size: min(100%, 282px);
+  }
+
+  .variableOverlay {
+    padding: 12px;
+  }
+
+  .variablePanel {
+    width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .variableBody {
+    height: min(520px, calc(100dvh - 146px));
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .filterRow {
+    flex-direction: column;
+  }
+
+  .filterRow button {
+    min-height: 34px;
+  }
+
+  .recordRow,
+  .kvRow {
+    grid-template-columns: 1fr;
+  }
+
+  .detailScroll {
+    padding: 10px;
+  }
+
+  .detailHero,
+  .editorHero,
+  .fieldCard,
+  .previewCard,
+  .editorCard {
+    padding: 16px;
+  }
+
+  .editorActions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .variableHead,
+  .variableBody {
+    padding: 14px;
+  }
+
+  .variableMeta div {
+    display: grid;
+    gap: 4px;
+  }
+
+  .variableMeta dd {
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .serverCard,
+  .filterRow button,
+  .typeGrid button,
+  .previewPill,
+  .varToken,
+  .variablePanel {
+    transition: none;
+    animation: none;
   }
 }

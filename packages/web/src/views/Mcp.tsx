@@ -32,6 +32,7 @@ import { useMcpPreviewVars } from './mcp/useMcpPreviewVars'
 import styles from './Mcp.module.css'
 
 const MCP_TYPES: McpType[] = ['stdio', 'sse', 'http']
+const MCP_FILTERS = ['all', 'local', 'remote'] as const
 
 interface McpServerFormState {
   id: string
@@ -46,6 +47,7 @@ interface McpServerFormState {
 
 type EditorMode = 'create' | 'edit' | null
 type RecordEditMode = 'file' | 'pairs'
+type McpFilter = (typeof MCP_FILTERS)[number]
 
 interface RecordRow {
   id: string
@@ -197,33 +199,55 @@ function serverSubtitle(server: McpServer): string {
     : (server.url ?? '')
 }
 
+function serverProjectionState(server: McpServer, visibleAgents: AgentId[]) {
+  const active = (server.targets ?? []).filter((agent) => visibleAgents.includes(agent)).length
+  if (active === 0) return { tone: 'draft', label: 'draft' }
+  if (active === visibleAgents.length) return { tone: 'projected', label: 'projected' }
+  return { tone: 'partial', label: 'partial' }
+}
+
 function TargetChip({
   agent,
   active,
   label,
   onClick,
   disabled,
+  count,
 }: {
   agent: AgentId
   active: boolean | 'mixed'
   label: string
   onClick: () => void
   disabled?: boolean
+  count?: number
 }) {
   const state = active === 'mixed' ? 'mixed' : active ? 'on' : 'off'
   return (
     <button
       type="button"
-      className={styles.targetChip}
+      className="target-chip"
       style={{ '--c': agentColor[agent] } as CSSProperties}
       data-state={state}
+      data-tooltip={label}
       aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
       aria-label={label}
-      onClick={onClick}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
       disabled={disabled}
     >
       {agentShort[agent]}
+      {count !== undefined && <span className="target-chip-count">{count}</span>}
     </button>
+  )
+}
+
+function TypeBadge({ type, large }: { type: McpType; large?: boolean }) {
+  return (
+    <span className={large ? styles.typeBadgeLarge : styles.typeBadge} data-type={type}>
+      {type}
+    </span>
   )
 }
 
@@ -255,7 +279,11 @@ function PreviewTargetSwitch({
   )
 }
 
-function renderValueWithTokens(value: string, onInspect: (key: string) => void): ReactNode {
+function renderValueWithTokens(
+  value: string,
+  onInspect: (key: string) => void,
+  labelPrefix = '查看变量 ',
+): ReactNode {
   const tokens = getMcpVariableTokens(value)
   if (tokens.length === 0) return value
   const nodes: ReactNode[] = []
@@ -267,7 +295,7 @@ function renderValueWithTokens(value: string, onInspect: (key: string) => void):
         key={token.key + '-' + token.start}
         type="button"
         className={styles.varToken}
-        aria-label={'查看变量 ' + token.key}
+        aria-label={labelPrefix + token.key}
         onClick={() => onInspect(token.key)}
       >
         {token.token}
@@ -281,10 +309,12 @@ function renderValueWithTokens(value: string, onInspect: (key: string) => void):
 
 function RecordPreview({
   record,
+  resolved,
   empty,
   onInspect,
 }: {
   record: Record<string, string> | undefined
+  resolved?: Record<string, string> | undefined
   empty: string
   onInspect: (key: string) => void
 }) {
@@ -295,7 +325,15 @@ function RecordPreview({
       {entries.map(([key, value]) => (
         <div className={styles.recordRow} key={key}>
           <span>{key}</span>
-          <code>{renderValueWithTokens(value, onInspect)}</code>
+          <code>
+            {renderValueWithTokens(value, onInspect, '查看字段变量 ')}
+            {resolved?.[key] && resolved[key] !== value && (
+              <small className={styles.recordResolved}>
+                <span>解析预览</span>
+                <span>{resolved[key]}</span>
+              </small>
+            )}
+          </code>
         </div>
       ))}
     </div>
@@ -326,8 +364,10 @@ function FieldCard({
 }) {
   return (
     <section className={styles.fieldCard}>
-      <div className={styles.cardKicker}>{title}</div>
-      {tone && <div className={styles.cardTone}>{tone}</div>}
+      <div className={styles.fieldCardHead}>
+        <div className={styles.cardKicker}>{title}</div>
+        {tone && <small>{tone}</small>}
+      </div>
       <div className={styles.fieldBody}>{children}</div>
     </section>
   )
@@ -488,32 +528,67 @@ function McpVariableInspector({
       >
         <header className={styles.variableHead}>
           <div>
-            <div className={styles.cardKicker}>VARIABLE TRACE</div>
-            <h3>
-              变量信息 <span>{'$' + '{' + variableKey + '}'}</span>
-            </h3>
+            <div className={styles.cardKicker}>VARIABLE</div>
+            <h3>变量信息</h3>
+            <p>{'$' + '{' + variableKey + '}'}</p>
           </div>
-          <IconButton label="关闭变量信息" tooltip="关闭" onClick={onClose}>
-            <X className="h-3.5 w-3.5" />
-          </IconButton>
+          <div className={styles.variableHeadActions}>
+            <span>{value?.type ?? 'unknown'}</span>
+            <IconButton
+              label="关闭变量信息"
+              tooltip="关闭"
+              className={styles.variableClose}
+              onClick={onClose}
+            >
+              <X className="h-3.5 w-3.5" />
+            </IconButton>
+          </div>
         </header>
         <div className={styles.variableBody}>
-          <section className={styles.variableValue}>
-            <span>Resolved value</span>
-            <code>{value ? String(value.value) : '未解析'}</code>
+          <section className={styles.variableCard}>
+            <span>definition</span>
+            <code className={styles.variableName}>{'$' + '{' + variableKey + '}'}</code>
+            <dl className={styles.variableMeta}>
+              <div>
+                <dt>resolved value</dt>
+                <dd>{value ? String(value.value) : '未解析'}</dd>
+              </div>
+              <div>
+                <dt>type</dt>
+                <dd>{value?.type ?? 'unknown'}</dd>
+              </div>
+              <div>
+                <dt>source</dt>
+                <dd>{source ? '当前来源 · ' + formatMcpTraceLayer(source) : '未解析'}</dd>
+              </div>
+            </dl>
           </section>
-          <section className={styles.traceCard}>
-            <span>Trace</span>
-            <ol>
+          <section className={styles.variableCard}>
+            <span>resolution trace</span>
+            <ol className={styles.variableTrace}>
               {chain.map((layer: VarsLayerRef, index) => (
                 <li key={layer.locality + layer.layer + index}>
                   <b>{index + 1}</b>
-                  <span>{formatMcpTraceLayer(layer)}</span>
+                  <div>
+                    <strong>{formatMcpTraceLayer(layer)}</strong>
+                    <p>
+                      {layer.locality === 'builtin'
+                        ? '运行时注入的变量值。'
+                        : layer.locality === 'local'
+                          ? '本机配置覆盖或补充。'
+                          : '仓库同步配置提供的基线。'}
+                    </p>
+                  </div>
                 </li>
               ))}
             </ol>
           </section>
         </div>
+        <footer className={styles.variableFooter}>
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </footer>
       </section>
     </div>
   )
@@ -538,7 +613,11 @@ function McpDetail({
 }) {
   const preview = buildResolvedMcpServer(server, previewTarget, matrix)
   const settings = buildMcpSettingsPreview(server, previewTarget, matrix)
-  const commandLine =
+  const rawCommandLine =
+    server.type === 'stdio'
+      ? [server.command, ...(server.args ?? [])].filter(Boolean).join(' ')
+      : (server.url ?? '')
+  const resolvedCommandLine =
     server.type === 'stdio'
       ? [preview.server.command, ...(preview.server.args ?? [])].filter(Boolean).join(' ')
       : (preview.server.url ?? '')
@@ -550,6 +629,7 @@ function McpDetail({
           <h2>{server.id}</h2>
           <p>{server.type === 'stdio' ? 'local process' : 'remote endpoint'}</p>
         </div>
+        <TypeBadge type={server.type} large />
         <div className={styles.detailActions}>
           <PreviewTargetSwitch value={previewTarget} agents={AGENTS} onChange={onPreviewTarget} />
           <IconButton label="Copy server JSON" tooltip="Copy" onClick={onCopy}>
@@ -562,17 +642,31 @@ function McpDetail({
       </section>
       <div className={styles.detailGrid}>
         <FieldCard title="TRANSPORT" tone={server.type}>
-          <code className={styles.commandLine}>
-            {renderValueWithTokens(commandLine, onInspect)}
-          </code>
+          <div className={styles.codePreview}>
+            <pre className={styles.commandLine}>
+              {renderValueWithTokens(rawCommandLine, onInspect, '查看 transport 变量 ')}
+            </pre>
+            {resolvedCommandLine !== rawCommandLine && (
+              <div className={styles.resolvedPreview}>
+                <span>解析预览</span>
+                <code>{resolvedCommandLine}</code>
+              </div>
+            )}
+          </div>
         </FieldCard>
         <FieldCard title="ENV" tone="resolved preview">
-          <RecordPreview record={preview.server.env} empty="未配置 env" onInspect={onInspect} />
+          <RecordPreview
+            record={server.env}
+            resolved={preview.server.env}
+            empty="未配置 env"
+            onInspect={onInspect}
+          />
         </FieldCard>
         {server.type !== 'stdio' && (
           <FieldCard title="HEADERS" tone="remote auth">
             <RecordPreview
-              record={preview.server.headers}
+              record={server.headers}
+              resolved={preview.server.headers}
               empty="未配置 headers"
               onInspect={onInspect}
             />
@@ -599,10 +693,17 @@ function McpDetail({
         <div className={styles.previewHead}>
           <div>
             <div className={styles.cardKicker}>TARGET SETTINGS PREVIEW</div>
-            <p>
-              {agentName[previewTarget]} · {settings.path}
-            </p>
+            <strong>{agentName[previewTarget]} 写入预览</strong>
+            <p>使用当前 target 的变量解析结果，预览 transport、env、headers 和最终配置形态。</p>
           </div>
+        </div>
+        <div
+          className={styles.previewPath}
+          style={{ '--c': agentColor[previewTarget] } as CSSProperties}
+        >
+          <span>{agentName[previewTarget]}</span>
+          <code>{settings.path}</code>
+          <em>{(server.targets ?? []).includes(previewTarget) ? '当前已应用' : '仅预览'}</em>
         </div>
         {settings.diagnostics.length > 0 && (
           <div className={styles.previewDiagnostics}>
@@ -674,6 +775,7 @@ function McpEditor({
           <h2>{mode === 'edit' ? '编辑 MCP server' : '新增 MCP server'}</h2>
           <p>保存 server 定义；target 应用和 Project changes 在左侧列表显式完成。</p>
         </div>
+        <TypeBadge type={form.type} large />
         <PreviewTargetSwitch value={previewTarget} agents={AGENTS} onChange={onPreviewTarget} />
       </section>
       {error && <div className={styles.formError}>{error}</div>}
@@ -764,13 +866,54 @@ function McpEditor({
         </div>
       </section>
       <section className={styles.previewCard}>
-        <div className={styles.cardKicker}>WRITE PREVIEW</div>
-        <p>
-          {agentName[previewTarget]} · {settings.path}
-        </p>
+        <div className={styles.previewHead}>
+          <div>
+            <div className={styles.cardKicker}>WRITE PREVIEW</div>
+            <p>
+              {agentName[previewTarget]} · {settings.path}
+            </p>
+          </div>
+        </div>
         <pre>{settings.text}</pre>
       </section>
     </div>
+  )
+}
+
+function GlobalTargetsBar({
+  servers,
+  visibleAgents,
+  operations,
+}: {
+  servers: McpServer[]
+  visibleAgents: AgentId[]
+  operations: ReturnType<typeof useManifestOperations>
+}) {
+  if (servers.length === 0) return null
+  return (
+    <section className={styles.globalTargets} role="region" aria-label="全局 MCP targets">
+      <div>
+        <div className={styles.cardKicker}>SETTINGS.JSON TARGETS</div>
+        <strong>批量设置 · 应用于全部 MCP servers</strong>
+      </div>
+      <div className="target-chips">
+        {visibleAgents.map((agent) => {
+          const count = servers.filter((server) => (server.targets ?? []).includes(agent)).length
+          const state = count === 0 ? 'off' : count === servers.length ? 'on' : 'mixed'
+          return (
+            <TargetChip
+              key={agent}
+              agent={agent}
+              active={state === 'mixed' ? 'mixed' : state === 'on'}
+              label={'全部 MCP servers 应用到 ' + agentShort[agent]}
+              count={count}
+              onClick={() => void operations.setAllMcpTargets(servers, agent)}
+              disabled={operations.pending.mcp.allTargets(agent)}
+            />
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -786,7 +929,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   const { matrices } = useMcpPreviewVars(repoPath)
   const [selected, setSelected] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<'all' | McpType>('all')
+  const [filter, setFilter] = useState<McpFilter>('all')
   const [previewTarget, setPreviewTarget] = useState<AgentId>('codex')
   const [editorMode, setEditorMode] = useState<EditorMode>(null)
   const [editorBusy, setEditorBusy] = useState(false)
@@ -825,13 +968,22 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     const term = search.trim().toLowerCase()
     return servers.filter(
       (server) =>
-        (filter === 'all' || server.type === filter) &&
+        (filter === 'all' ||
+          (filter === 'local' && server.type === 'stdio') ||
+          (filter === 'remote' && server.type !== 'stdio')) &&
         (!term ||
           (server.id + ' ' + server.type + ' ' + serverSubtitle(server))
             .toLowerCase()
             .includes(term)),
     )
   }, [filter, search, servers])
+  const remoteCount = servers.filter((server) => server.type !== 'stdio').length
+  const fullyProjected = servers.filter(
+    (server) =>
+      visibleAgents.length > 0 &&
+      visibleAgents.every((agent) => (server.targets ?? []).includes(agent)),
+  ).length
+  const targetLinks = servers.reduce((sum, server) => sum + (server.targets ?? []).length, 0)
 
   const submitServer = async (form: McpServerFormState) => {
     setEditorBusy(true)
@@ -883,64 +1035,64 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         <div>
           <div className={styles.kicker}>MCP WORKBENCH</div>
           <h1>MCP Servers</h1>
-          <p>定义、target 应用与 Project changes 分开处理；preview target 只影响变量解析预览。</p>
+          <p>管理本地 stdio 与远程 SSE/HTTP server，并把它们清晰投影到各个 agent。</p>
         </div>
         <div className={styles.heroMeta}>
-          <span>{servers.length} configured</span>
+          <span>
+            <b>{servers.length}</b>
+            servers
+            <small>{remoteCount} remote</small>
+          </span>
+          <span>
+            <b>{fullyProjected}</b>
+            fully projected
+            <small>all targets enabled</small>
+          </span>
+          <span>
+            <b>{targetLinks}</b>
+            target links
+            <small>agent projections</small>
+          </span>
           {error && <b>{error}</b>}
         </div>
       </section>
-      <section className={styles.workbench}>
+      <GlobalTargetsBar servers={servers} visibleAgents={visibleAgents} operations={operations} />
+      <section className={styles.workbench} role="region" aria-label="MCP workbench">
         <aside className={styles.inventory}>
           <div className={styles.inventoryTop}>
             <div>
               <div className={styles.kicker}>INVENTORY</div>
-              <h2>MCP server 列表</h2>
+              <h2>{servers.length} configured</h2>
             </div>
             <div className={styles.inventoryActions}>
-              <IconButton
-                label="Add server"
-                tooltip="Add server"
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                aria-label="Add server"
+                className={styles.inventoryActionPrimary}
                 onClick={() => {
                   setEditorError(null)
                   setEditorMode('create')
                 }}
               >
                 <Plus className="h-3.5 w-3.5" />
-              </IconButton>
-              <IconButton
-                label="Project changes"
-                tooltip={operations.pending.project('mcp') ? '投影中…' : 'Project changes'}
+                <span>Add server</span>
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                aria-label="Project changes"
+                className={styles.inventoryActionProject}
                 onClick={() => void operations.project('mcp')}
                 disabled={operations.pending.project('mcp')}
               >
                 <RefreshCw className="h-3.5 w-3.5" />
-              </IconButton>
+                <span>投影</span>
+              </Button>
             </div>
           </div>
-          {servers.length > 0 && (
-            <div className={styles.globalTargets}>
-              <span>应用到全部 server</span>
-              <div>
-                {visibleAgents.map((agent) => {
-                  const count = servers.filter((server) =>
-                    (server.targets ?? []).includes(agent),
-                  ).length
-                  const state = count === 0 ? 'off' : count === servers.length ? 'on' : 'mixed'
-                  return (
-                    <TargetChip
-                      key={agent}
-                      agent={agent}
-                      active={state === 'mixed' ? 'mixed' : state === 'on'}
-                      label={'全部 MCP servers 应用到 ' + agentShort[agent]}
-                      onClick={() => void operations.setAllMcpTargets(servers, agent)}
-                      disabled={operations.pending.mcp.allTargets(agent)}
-                    />
-                  )
-                })}
-              </div>
-            </div>
-          )}
           <label className={styles.searchBox}>
             <Search className="h-3.5 w-3.5" />
             <input
@@ -948,46 +1100,81 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
               aria-label="搜索 MCP server"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search server…"
+              placeholder="Filter by id, command, url"
             />
           </label>
           <div className={styles.filterRow}>
-            {(['all', ...MCP_TYPES] as const).map((item) => (
+            {MCP_FILTERS.map((item) => (
               <button
                 key={item}
                 type="button"
                 data-active={filter === item}
                 onClick={() => setFilter(item)}
               >
-                {item}
+                {item === 'all' ? 'All' : item === 'local' ? 'Local' : 'Remote'}
               </button>
             ))}
           </div>
           <div className={styles.serverList}>
             {filteredServers.map((server) => {
               const activeTargets = server.targets ?? []
+              const projectionState = serverProjectionState(server, visibleAgents)
               return (
                 <article
                   key={server.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={'选择 ' + server.id}
                   className={styles.serverCard}
                   data-selected={selected === server.id}
-                >
-                  <button
-                    type="button"
-                    className={styles.serverMain}
-                    aria-label={'选择 ' + server.id}
-                    onClick={() => {
+                  onClick={() => {
+                    setSelected(server.id)
+                    setEditorMode(null)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
                       setSelected(server.id)
                       setEditorMode(null)
-                    }}
-                  >
-                    <span>
+                    }
+                  }}
+                >
+                  <span className={styles.serverMain} aria-label={'选择 ' + server.id}>
+                    <span className={styles.serverTopline}>
                       <b>{server.id}</b>
-                      <em>{server.type}</em>
+                      <TypeBadge type={server.type} />
+                      <span className={styles.rowActions} aria-label={server.id + ' actions'}>
+                        <IconButton
+                          label={'编辑 ' + server.id}
+                          tooltip="编辑"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setSelected(server.id)
+                            setEditorError(null)
+                            setEditorMode('edit')
+                          }}
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </IconButton>
+                        <IconButton
+                          label={'删除 ' + server.id}
+                          tooltip="删除"
+                          tone="danger"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setDeleteTarget(server)
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </IconButton>
+                      </span>
                     </span>
                     <small>{serverSubtitle(server)}</small>
-                  </button>
+                  </span>
                   <div className={styles.serverFoot}>
+                    <span className={styles.projectionState} data-tone={projectionState.tone}>
+                      {projectionState.label}
+                    </span>
                     <div className={styles.rowTargets}>
                       {visibleAgents.map((agent) => (
                         <TargetChip
@@ -1003,27 +1190,6 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                           }
                         />
                       ))}
-                    </div>
-                    <div className={styles.rowActions}>
-                      <IconButton
-                        label={'编辑 ' + server.id}
-                        tooltip="编辑"
-                        onClick={() => {
-                          setSelected(server.id)
-                          setEditorError(null)
-                          setEditorMode('edit')
-                        }}
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                      </IconButton>
-                      <IconButton
-                        label={'删除 ' + server.id}
-                        tooltip="删除"
-                        tone="danger"
-                        onClick={() => setDeleteTarget(server)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </IconButton>
                     </div>
                   </div>
                 </article>

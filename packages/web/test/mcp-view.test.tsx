@@ -78,6 +78,24 @@ beforeEach(() => {
 })
 
 describe('MCP workbench view', () => {
+  it('renders global target controls as a page-level bar without projecting', async () => {
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+
+    const globalTargets = await screen.findByRole('region', { name: '全局 MCP targets' })
+    const workbench = screen.getByRole('region', { name: 'MCP workbench' })
+
+    expect(
+      Boolean(globalTargets.compareDocumentPosition(workbench) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true)
+
+    fireEvent.click(
+      within(globalTargets).getByRole('button', { name: '全部 MCP servers 应用到 OC' }),
+    )
+
+    await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalled())
+    expect(api.project).not.toHaveBeenCalled()
+  })
+
   it('keeps create/edit in the workbench and saves create without targets', async () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 

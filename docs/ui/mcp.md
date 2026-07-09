@@ -6,7 +6,8 @@ MCP 页面用于管理仓库级 MCP server、target 应用和显式 Project chan
 
 桌面端为左右两栏：
 
-- 左侧 inventory 固定宽度，包含 Add server、Project changes、全局 target chips、搜索、transport filter 和 server rows。
+- Page head 下方显示页面级全局 target bar，用于批量更新所有 server 的 desired targets。
+- 左侧 inventory 固定宽度，包含 Add server、Project changes、搜索、transport filter 和 server rows。
 - 右侧 detail/editor 固定卡片宽度，内容高度受 workbench 限制，超出后在卡片内部滚动。
 
 窄屏下两栏纵向排列，inventory 与 detail/editor 都占满宽度。切换 preview target 只能影响内容高度，不应改变卡片宽度或造成 horizontal overflow。
