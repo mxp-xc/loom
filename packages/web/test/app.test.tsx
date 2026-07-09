@@ -26,15 +26,48 @@ vi.mock('../src/lib/api', () => ({
   },
 }))
 
+vi.mock('../src/views/skills/Skills', () => ({
+  default: () => <div>Skills page</div>,
+}))
+
+vi.mock('../src/views/Mcp', () => ({
+  default: () => <div>MCP page</div>,
+}))
+
+vi.mock('../src/views/Memory', () => ({
+  default: () => <div>Memory page</div>,
+}))
+
+vi.mock('../src/views/vars/Vars', () => ({
+  default: () => <div>Vars page</div>,
+}))
+
+vi.mock('../src/views/vars/VarsProfileDemo', () => ({
+  default: () => <div>Vars lab page</div>,
+}))
+
+vi.mock('../src/views/Sync', () => ({
+  default: () => <div>Sync page</div>,
+}))
+
+vi.mock('../src/views/Settings', () => ({
+  default: () => <div>Settings page</div>,
+}))
+
 describe('App', () => {
   beforeEach(() => {
     localStorage.clear()
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 1024,
+    })
   })
 
-  function renderApp() {
+  function renderApp(initialPath = '/') {
     render(
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter future={routerFuture}>
+        <MemoryRouter future={routerFuture} initialEntries={[initialPath]}>
           <App />
         </MemoryRouter>
       </ThemeProvider>,
@@ -43,17 +76,36 @@ describe('App', () => {
 
   it('renders navigation with five items', async () => {
     renderApp()
-    expect(await screen.findByText('Skills', { exact: true })).toBeDefined()
-    expect(screen.getByText('MCP servers', { exact: true })).toBeDefined()
-    expect(screen.getByText('Variables', { exact: true })).toBeDefined()
-    expect(screen.getByText('Sync', { exact: true })).toBeDefined()
-    expect(screen.getByText('Settings', { exact: true })).toBeDefined()
+    expect(await screen.findByRole('link', { name: 'Skills' })).toBeDefined()
+    expect(screen.getByRole('link', { name: 'MCP servers' })).toBeDefined()
+    expect(screen.getByRole('link', { name: 'Variables' })).toBeDefined()
+    expect(screen.getByRole('link', { name: 'Sync' })).toBeDefined()
+    expect(screen.getByRole('link', { name: 'Settings' })).toBeDefined()
+  })
+
+  it.each([
+    ['/skills', 'workbench'],
+    ['/mcp', 'workbench'],
+    ['/memory', 'fullHeight'],
+    ['/vars', 'fullHeight'],
+    ['/vars-lab', 'fullHeight'],
+    ['/sync', 'content'],
+    ['/settings', 'content'],
+  ])('wraps %s in the %s page layout', async (path, variant) => {
+    renderApp(path)
+
+    await screen.findByRole('link', { name: 'Skills' })
+
+    await waitFor(() => {
+      const layout = document.querySelector('[data-page-layout]')
+      expect(layout?.getAttribute('data-page-layout')).toBe(variant)
+    })
   })
 
   it('collapses the sidebar to icon-only navigation', async () => {
     renderApp()
 
-    await screen.findByText('Skills', { exact: true })
+    await screen.findByRole('link', { name: 'Skills' })
     fireEvent.click(screen.getByRole('button', { name: '收起侧边栏' }))
 
     const sidebar = screen.getByLabelText('主导航')
@@ -67,7 +119,7 @@ describe('App', () => {
   it('resizes the sidebar by dragging the separator', async () => {
     renderApp()
 
-    await screen.findByText('Skills', { exact: true })
+    await screen.findByRole('link', { name: 'Skills' })
     const resizer = screen.getByRole('separator', { name: '调整侧边栏宽度' })
     const sidebar = screen.getByLabelText('主导航')
     const shell = sidebar.parentElement as HTMLElement
@@ -80,5 +132,22 @@ describe('App', () => {
       expect(shell.style.getPropertyValue('--sidebar-width')).toBe('280px')
     })
     expect(localStorage.getItem('loom-sidebar-width')).toBe('280')
+  })
+
+  it('clamps stored sidebar width to the current viewport', async () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 900,
+    })
+    localStorage.setItem('loom-sidebar-width', '360')
+
+    renderApp()
+
+    await screen.findByRole('link', { name: 'Skills' })
+    const sidebar = screen.getByLabelText('主导航')
+    const shell = sidebar.parentElement as HTMLElement
+
+    expect(shell.style.getPropertyValue('--sidebar-width')).toBe('270px')
   })
 })

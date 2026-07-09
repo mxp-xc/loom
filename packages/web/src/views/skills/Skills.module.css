@@ -1,3 +1,13 @@
+.skills-page {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
 .skills-head-actions {
   margin-left: auto;
   display: flex;

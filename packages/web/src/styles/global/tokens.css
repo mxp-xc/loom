@@ -20,6 +20,11 @@
   --oc: #8b5cf6;
   --radius: 8px;
   --radius-card: 10px;
+  --page-gutter: clamp(12px, 1.8vw, 28px);
+  --content-max: 1040px;
+  --workbench-max: 1440px;
+  --full-height-max: 1480px;
+  --panel-gap: clamp(12px, 1.2vw, 18px);
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --dur: 0.18s;
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);

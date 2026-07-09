@@ -9,6 +9,7 @@ import {
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { api } from './lib/api'
 import ToastHost from './components/ToastHost'
+import { PageLayout, type PageLayoutVariant } from './components/PageLayout'
 import Skills from './views/skills/Skills'
 import Mcp from './views/Mcp'
 import Memory from './views/Memory'
@@ -42,9 +43,22 @@ const DEFAULT_SIDEBAR_WIDTH = MIN_SIDEBAR_WIDTH
 const MAX_SIDEBAR_WIDTH = 360
 const COLLAPSED_SIDEBAR_WIDTH = 64
 
-function clampSidebarWidth(width: number) {
+function currentViewportWidth() {
+  return typeof window === 'undefined' ? undefined : window.innerWidth
+}
+
+function maxSidebarWidthForViewport(viewportWidth = currentViewportWidth()) {
+  if (!Number.isFinite(viewportWidth)) return MAX_SIDEBAR_WIDTH
+  const viewportBound = Math.floor((viewportWidth as number) * 0.3)
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, viewportBound))
+}
+
+function clampSidebarWidth(width: number, viewportWidth = currentViewportWidth()) {
   if (!Number.isFinite(width)) return DEFAULT_SIDEBAR_WIDTH
-  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)))
+  return Math.min(
+    maxSidebarWidthForViewport(viewportWidth),
+    Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)),
+  )
 }
 
 function readStoredSidebarWidth() {
@@ -160,6 +174,10 @@ function ThemeSwitcher({ collapsed }: { collapsed: boolean }) {
   )
 }
 
+function routePage(variant: PageLayoutVariant, children: ReactNode) {
+  return <PageLayout variant={variant}>{children}</PageLayout>
+}
+
 // Rendered once init resolves and repoPath is known, so useManifest can be
 // called unconditionally and share its cache with the active view.
 function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string }) {
@@ -167,6 +185,7 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
   const profile = manifest?.config?.profile ?? ''
   const isNarrowSidebarViewport = useNarrowSidebarViewport()
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth)
+  const [maxSidebarWidth, setMaxSidebarWidth] = useState(maxSidebarWidthForViewport)
   const [storedSidebarCollapsed, setStoredSidebarCollapsed] = useState(readStoredSidebarCollapsed)
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const sidebarCollapsed = storedSidebarCollapsed && !isNarrowSidebarViewport
@@ -177,6 +196,20 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth))
   }, [sidebarWidth])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const syncSidebarBounds = () => {
+      const nextMax = maxSidebarWidthForViewport()
+      setMaxSidebarWidth(nextMax)
+      setSidebarWidth((width) => clampSidebarWidth(width))
+    }
+
+    syncSidebarBounds()
+    window.addEventListener('resize', syncSidebarBounds)
+    return () => window.removeEventListener('resize', syncSidebarBounds)
+  }, [])
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(storedSidebarCollapsed))
@@ -224,7 +257,7 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
       setSidebarWidth(MIN_SIDEBAR_WIDTH)
     } else if (event.key === 'End') {
       event.preventDefault()
-      setSidebarWidth(MAX_SIDEBAR_WIDTH)
+      setSidebarWidth(maxSidebarWidth)
     }
   }
 
@@ -317,7 +350,7 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
               aria-label="调整侧边栏宽度"
               aria-orientation="vertical"
               aria-valuemin={MIN_SIDEBAR_WIDTH}
-              aria-valuemax={MAX_SIDEBAR_WIDTH}
+              aria-valuemax={maxSidebarWidth}
               aria-valuenow={sidebarWidth}
               tabIndex={0}
               title="拖拽调整侧边栏宽度"
@@ -331,13 +364,19 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
         <main className="main">
           <Routes>
             <Route index element={<Navigate to="/skills" replace />} />
-            <Route path="skills" element={<Skills repoPath={repoPath} />} />
-            <Route path="mcp" element={<Mcp repoPath={repoPath} />} />
-            <Route path="memory" element={<Memory repoPath={repoPath} />} />
-            <Route path="vars" element={<Vars repoPath={repoPath} />} />
-            <Route path="vars-lab" element={<VarsProfileDemo />} />
-            <Route path="sync" element={<Sync repoPath={repoPath} />} />
-            <Route path="settings" element={<Settings repoPath={repoPath} />} />
+            <Route path="skills" element={routePage('workbench', <Skills repoPath={repoPath} />)} />
+            <Route path="mcp" element={routePage('workbench', <Mcp repoPath={repoPath} />)} />
+            <Route
+              path="memory"
+              element={routePage('fullHeight', <Memory repoPath={repoPath} />)}
+            />
+            <Route path="vars" element={routePage('fullHeight', <Vars repoPath={repoPath} />)} />
+            <Route path="vars-lab" element={routePage('fullHeight', <VarsProfileDemo />)} />
+            <Route path="sync" element={routePage('content', <Sync repoPath={repoPath} />)} />
+            <Route
+              path="settings"
+              element={routePage('content', <Settings repoPath={repoPath} />)}
+            />
           </Routes>
         </main>
       </div>

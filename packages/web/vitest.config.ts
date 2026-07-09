@@ -2,6 +2,8 @@ import { defineProject } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
 
+const testSetup = fileURLToPath(new URL('./test/setup.ts', import.meta.url))
+
 export default defineProject({
   plugins: [react()],
   resolve: {
@@ -12,7 +14,7 @@ export default defineProject({
     globals: true,
     environment: 'jsdom',
     environmentOptions: { jsdom: { url: 'http://localhost/' } },
-    setupFiles: ['./test/setup.ts'],
+    setupFiles: [testSetup],
     include: ['test/**/*.test.{ts,tsx}'],
   },
 })

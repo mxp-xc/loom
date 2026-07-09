@@ -1,8 +1,11 @@
 .page {
   display: grid;
   gap: 14px;
-  max-width: 1240px;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .hero {
@@ -119,7 +122,7 @@
   display: grid;
   grid-template-columns: clamp(278px, 31vw, 360px) minmax(0, 1fr);
   gap: 16px;
-  height: clamp(590px, calc(100dvh - 230px), 800px);
+  height: 100%;
   min-height: 0;
 }
 
@@ -1453,6 +1456,10 @@
 }
 
 @media (max-width: 1040px) {
+  .page {
+    overflow: auto;
+  }
+
   .workbench,
   .detailGrid {
     grid-template-columns: 1fr;

@@ -4,7 +4,7 @@ patch /packages/web/src/views/Sync.module.css
 .sync-page {
   display: grid;
   gap: 16px;
-  max-width: 980px;
+  min-width: 0;
 }
 
 .hero {
@@ -542,10 +542,6 @@ patch /packages/web/src/views/Sync.module.css
 }
 
 @media (max-width: 760px) {
-  .sync-page {
-    max-width: none;
-  }
-
   .hero {
     grid-template-columns: 1fr;
   }

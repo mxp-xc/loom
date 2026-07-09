@@ -58,7 +58,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
   }
 
   return (
-    <div>
+    <div className={styles['skills-page']}>
       <div className="page-head">
         <div>
           <div className="page-title">Skills</div>

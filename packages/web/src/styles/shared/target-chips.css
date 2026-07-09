@@ -99,8 +99,13 @@
 
 @media (max-width: 760px) {
   .global-targets-bar {
-    grid-template-columns: 12px minmax(0, 1fr) max-content 32px !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
     gap: 8px !important;
+  }
+
+  .global-targets-bar > .target-chips {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
   }
 }
 

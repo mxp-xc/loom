@@ -2,6 +2,7 @@
 @import './styles/global/tokens.css';
 @import './styles/global/base.css';
 @import './styles/app-shell/shell.css';
+@import './styles/app-shell/page-layout.css';
 @import './styles/shared/typography.css';
 @import './styles/shared/page-heading.css';
 @import './styles/shared/target-chips.css';

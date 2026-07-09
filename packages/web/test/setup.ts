@@ -1,3 +1,5 @@
+import { beforeEach } from 'vitest'
+
 function createMemoryStorage(): Storage {
   const items = new Map<string, string>()
   return {
@@ -22,17 +24,25 @@ function createMemoryStorage(): Storage {
   }
 }
 
-if (typeof window !== 'undefined') {
+function installTestStorage() {
+  if (typeof window === 'undefined') return
+
   const storage = createMemoryStorage()
+
   Object.defineProperty(window, 'localStorage', {
     configurable: true,
     value: storage,
   })
+
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
+    writable: true,
     value: storage,
   })
 }
+
+installTestStorage()
+beforeEach(installTestStorage)
 
 if (typeof Range !== 'undefined') {
   Range.prototype.getClientRects ??= () => [] as unknown as DOMRectList
