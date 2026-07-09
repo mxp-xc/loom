@@ -62,6 +62,16 @@ describe('Sync force operations', () => {
     expect(await screen.findByText('强制推送完成')).toBeDefined()
   })
 
+  it('keeps the remote region mounted while the remote URL is loading', async () => {
+    api.getSyncRemote.mockImplementation(() => new Promise(() => {}))
+
+    renderSync()
+
+    const remoteRegion = screen.getByRole('region', { name: '当前远程仓库' })
+    expect(remoteRegion).toBeDefined()
+    expect(within(remoteRegion).getByText('remote loading')).toBeDefined()
+  })
+
   it('requires confirmation before force-pulling', async () => {
     renderSync()
     await screen.findByText('https://example.com/repo.git')

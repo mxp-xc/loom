@@ -396,6 +396,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
   const feedbackTitle = feedback ? feedbackCopy[feedback.action].title : ''
   const feedbackBusy = feedback?.status === 'running'
   const visibleBusy = busy !== null || feedbackOpen
+  const remoteSummaryLabel = !loaded ? 'remote loading' : remote ? 'remote ready' : 'remote missing'
   const remoteSwitchDisabled = visibleBusy || hasActiveSyncSession
   const remoteSwitchHint = hasActiveSyncSession
     ? '请先解决或放弃本次合并，再更换 remote。'
@@ -429,7 +430,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
           </div>
           <div className={styles['hero-metrics']} aria-label="同步状态摘要">
             <span>
-              <strong>{remote ? 'remote ready' : 'remote missing'}</strong>
+              <strong>{remoteSummaryLabel}</strong>
               <small>仓库连接</small>
             </span>
             <span>
@@ -449,49 +450,41 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         </div>
       </div>
 
-      {loaded && !remote && (
-        <section className={styles.card}>
-          <span className="label">配置远程仓库</span>
-          <p className={styles['card-copy']}>请输入 Git remote URL 以启用同步。</p>
-          <div className={styles['remote-form']}>
+      <section
+        className={styles['remote-card']}
+        data-editing={editingRemote || (loaded && !remote) ? 'true' : undefined}
+        data-state={!loaded ? 'loading' : remote ? 'ready' : 'missing'}
+        aria-label="当前远程仓库"
+      >
+        <div className={styles['remote-kicker']}>
+          <GitBranch className="h-3.5 w-3.5" />
+          <span>remote</span>
+        </div>
+        {!loaded ? (
+          <>
+            <span className={styles['remote-link']} aria-busy="true">
+              remote loading
+            </span>
+            <div className={styles['remote-actions']}>
+              <span className={styles['remote-chip']}>加载中</span>
+              <Button size="sm" variant="secondary" aria-label="更换 remote" disabled>
+                更换
+              </Button>
+            </div>
+          </>
+        ) : editingRemote || !remote ? (
+          <div className={styles['remote-edit']}>
             <input
+              aria-label="remote URL"
               className={styles['mock-input']}
-              value={remoteInput}
-              onChange={(event) => setRemoteInput(event.target.value)}
+              value={remote ? remoteDraft : remoteInput}
+              onChange={(event) =>
+                remote ? setRemoteDraft(event.target.value) : setRemoteInput(event.target.value)
+              }
               placeholder="https://github.com/user/repo.git"
             />
-            <Button
-              size="sm"
-              variant="primary"
-              onClick={() => void saveRemote(remoteInput)}
-              disabled={busy !== null}
-            >
-              保存
-            </Button>
-          </div>
-        </section>
-      )}
-
-      {remote && (
-        <section
-          className={styles['remote-card']}
-          data-editing={editingRemote ? 'true' : undefined}
-          aria-label="当前远程仓库"
-        >
-          <div className={styles['remote-kicker']}>
-            <GitBranch className="h-3.5 w-3.5" />
-            <span>remote</span>
-          </div>
-          {editingRemote ? (
-            <div className={styles['remote-edit']}>
-              <input
-                aria-label="remote URL"
-                className={styles['mock-input']}
-                value={remoteDraft}
-                onChange={(event) => setRemoteDraft(event.target.value)}
-                placeholder="https://github.com/user/repo.git"
-              />
-              <div className={styles['remote-edit-actions']}>
+            <div className={styles['remote-edit-actions']}>
+              {remote && (
                 <Button
                   size="sm"
                   variant="secondary"
@@ -504,48 +497,45 @@ export default function Sync({ repoPath }: { repoPath: string }) {
                 >
                   取消
                 </Button>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  aria-label="保存 remote"
-                  onClick={() => void saveRemote(remoteDraft)}
-                  disabled={busy !== null || !remoteDraft.trim()}
-                >
-                  {busy === 'remote' ? '保存中…' : '保存'}
-                </Button>
-              </div>
-              <p className={styles['remote-hint']}>
-                只更换 Git origin URL，不会自动拉取、上传或提交。
-              </p>
+              )}
+              <Button
+                size="sm"
+                variant="primary"
+                aria-label="保存 remote"
+                onClick={() => void saveRemote(remote ? remoteDraft : remoteInput)}
+                disabled={busy !== null || !(remote ? remoteDraft : remoteInput).trim()}
+              >
+                {busy === 'remote' ? '保存中…' : '保存'}
+              </Button>
             </div>
-          ) : (
-            <>
-              <a href={remote} target="_blank" rel="noreferrer" className={styles['remote-link']}>
-                {remote}
-              </a>
-              <div className={styles['remote-actions']}>
-                <span className={styles['remote-chip']} data-tone={statusTone}>
-                  {statusLabel}
-                </span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  aria-label="更换 remote"
-                  onClick={() => {
-                    setRemoteDraft(remote)
-                    setEditingRemote(true)
-                    setError(null)
-                  }}
-                  disabled={remoteSwitchDisabled}
-                >
-                  更换
-                </Button>
-              </div>
-              {remoteSwitchHint && <p className={styles['remote-blocked']}>{remoteSwitchHint}</p>}
-            </>
-          )}
-        </section>
-      )}
+          </div>
+        ) : (
+          <>
+            <a href={remote} target="_blank" rel="noreferrer" className={styles['remote-link']}>
+              {remote}
+            </a>
+            <div className={styles['remote-actions']}>
+              <span className={styles['remote-chip']} data-tone={statusTone}>
+                {statusLabel}
+              </span>
+              <Button
+                size="sm"
+                variant="secondary"
+                aria-label="更换 remote"
+                onClick={() => {
+                  setRemoteDraft(remote)
+                  setEditingRemote(true)
+                  setError(null)
+                }}
+                disabled={remoteSwitchDisabled}
+              >
+                更换
+              </Button>
+            </div>
+            {remoteSwitchHint && <p className={styles['remote-blocked']}>{remoteSwitchHint}</p>}
+          </>
+        )}
+      </section>
 
       <section className={styles['sync-console']} aria-label="同步操作">
         <div className={styles['console-head']}>

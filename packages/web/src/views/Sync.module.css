@@ -53,7 +53,9 @@ patch /packages/web/src/views/Sync.module.css
 }
 
 .hero-metrics span {
-  min-width: 112px;
+  flex: 0 0 136px;
+  min-height: 68px;
+  min-width: 0;
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--primary) 16%, var(--border));
   border-radius: var(--radius);
@@ -166,12 +168,17 @@ patch /packages/web/src/views/Sync.module.css
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
+  min-height: 72px;
   padding: 13px 14px;
 }
 
 .remote-card[data-editing='true'] {
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: flex-start;
+  align-items: center;
+}
+
+.remote-card[data-state='loading'] .remote-link {
+  color: var(--m2);
 }
 
 .remote-kicker,
@@ -247,6 +254,8 @@ patch /packages/web/src/views/Sync.module.css
 .remote-chip,
 .console-status {
   gap: 6px;
+  justify-content: center;
+  min-inline-size: 86px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
@@ -324,7 +333,7 @@ patch /packages/web/src/views/Sync.module.css
 
 .action-card {
   display: flex;
-  min-height: 74px;
+  height: 76px;
   gap: 11px;
   align-items: center;
   padding: 13px;
@@ -394,6 +403,7 @@ patch /packages/web/src/views/Sync.module.css
 .action-card strong {
   color: var(--bright);
   font-size: 13px;
+  white-space: nowrap;
 }
 
 .action-card small {

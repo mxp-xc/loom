@@ -61,6 +61,23 @@ describe('web CSS architecture', () => {
     expect(targetChipsCss).not.toContain('.achip')
   })
 
+  it('keeps every page layout aligned to the sidebar gutter', async () => {
+    const pageLayoutCss = await readCss('../src/styles/app-shell/page-layout.css')
+
+    expect(pageLayoutCss).toContain('margin-inline: 0 auto;')
+    expect(pageLayoutCss).not.toContain('margin-inline: auto;')
+  })
+
+  it('keeps Sync hero metrics stable while remote status loads', async () => {
+    const syncCss = await readCss('../src/views/Sync.module.css')
+
+    expect(syncCss).toContain('flex: 0 0 136px;')
+    expect(syncCss).toContain('min-height: 72px;')
+    expect(syncCss).toContain('min-inline-size: 86px;')
+    expect(syncCss).toContain('height: 76px;')
+    expect(syncCss).toContain('white-space: nowrap;')
+  })
+
   it('keeps legacy target chip selectors out of business CSS Modules', async () => {
     const businessModules = [
       '../src/views/skills/SkillSourceList.module.css',
