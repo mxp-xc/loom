@@ -1,24 +1,29 @@
 # Loom 规则索引
 
-本目录记录 Loom 的当前业务规则和安全边界。未来 agent 在修改 skills、MCP、memory、vars、projection 或同步相关代码前，应先读本索引，再进入对应规则文件。
+本目录记录 Loom 的当前业务规则和安全边界。未来 agent 在修改 skills、MCP、memory、vars、projection 或同步相关代码前，应先读本索引，再进入对应规则文件。新增或调整规则时参考 [规则模板](template.md)。
 
 ## 阅读顺序
 
 1. [领域术语](../../CONTEXT.md) — 统一词汇。只描述概念，不承载规则。
 2. [跨模块规则](cross-cutting.md) — 适用于 skills、MCP、memory、vars 的通用契约。
-3. [Projection 规则](projection.md) — desired state 如何落到 agent-native 文件。
-4. [Skills 规则](skills.md) — skills/source/local skill 的特有规则。
-5. [Sync 规则](sync.md) — Git 同步、冲突处理和强制同步的安全边界。
+3. [Vars 规则](vars.md) — 变量解析、分层覆盖、secret 和变更安全边界。
+4. [Memory 规则](memory.md) — memory 存储、激活、预览和投影契约。
+5. [Projection 规则](projection.md) — desired state 如何落到 agent-native 文件。
+6. [Skills 规则](skills.md) — skills/source/local skill 的特有规则。
+7. [Sync 规则](sync.md) — Git 同步、冲突处理和强制同步的安全边界。
 
 ## 规则格式
 
 每条规则使用稳定编号：
 
 - R-CROSS-*：跨模块规则
+- R-VARS-*：vars 规则
+- R-MEMORY-*：memory 规则
 - R-PROJECTION-*：projection 规则
 - R-SKILLS-*：skills 规则
+- R-SYNC-*：sync 规则
 
-规则字段：
+规则字段见 [规则模板](template.md)。核心字段：
 
 - Status：当前是否生效。
 - Applies to：适用范围。

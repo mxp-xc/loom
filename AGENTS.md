@@ -7,8 +7,8 @@ Loom 是 Bun workspace monorepo。共享且无 IO 的领域逻辑在 `packages/c
 ## 领域术语与业务规则
 
 - 领域术语入口是 `CONTEXT.md`；只用于统一概念命名，不承载业务规则。
-- 业务规则入口是 `docs/rules/index.md`。涉及 skills、MCP、memory、vars、projection 或 desired state 的改动，先读索引，再按 scope 读取相关规则文件。
-- 只要代码修改改变、澄清或新增了业务规则、安全边界、target 行为、projection reconciliation、artifact ownership，必须同步更新 `docs/rules/`，并补充或调整对应测试。
+- 业务规则入口是 `docs/rules/index.md`。涉及业务规则、安全边界、对外契约或可投影/同步行为的改动，先读该索引，再按索引读取对应规则文件；具体 scope 与规则目录以该索引为准。
+- 如果代码改动改变、澄清或新增上述规则、边界或契约，必须同步更新 `docs/rules/`，并补充或调整对应测试。
 - 纯机械重构、格式化、无行为变化的内部整理，不需要读取全部 rules；但如果重构过程中发现现有代码与规则冲突，先停下来说明冲突，再决定改代码还是改规则。
 - 新 feature spec 应链接相关 rules，不复制规则正文；规则描述当前事实，不写历史沿革。
 
