@@ -120,7 +120,7 @@
 
 .workbench {
   display: grid;
-  grid-template-columns: clamp(278px, 31vw, 360px) minmax(0, 1fr);
+  grid-template-columns: clamp(260px, 27vw, 320px) minmax(0, 1fr);
   gap: 16px;
   height: 100%;
   min-height: 0;
@@ -175,6 +175,10 @@
   flex: 0 0 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.inventoryActions :global(button) {
+  cursor: pointer;
 }
 
 .inventoryActionPrimary,
@@ -397,9 +401,23 @@
 
 .typeBadge[data-type='stdio'],
 .typeBadgeLarge[data-type='stdio'] {
-  color: var(--primary);
-  border-color: color-mix(in srgb, var(--primary) 26%, var(--border));
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--info);
+  border-color: color-mix(in srgb, var(--info) 32%, var(--border));
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+}
+
+.typeBadge[data-type='sse'],
+.typeBadgeLarge[data-type='sse'] {
+  color: var(--oc);
+  border-color: color-mix(in srgb, var(--oc) 36%, var(--border));
+  background: color-mix(in srgb, var(--oc) 12%, transparent);
+}
+
+.typeBadge[data-type='http'],
+.typeBadgeLarge[data-type='http'] {
+  color: var(--cx);
+  border-color: color-mix(in srgb, var(--cx) 34%, var(--border));
+  background: color-mix(in srgb, var(--cx) 10%, transparent);
 }
 
 .typeBadgeLarge {
@@ -534,6 +552,7 @@
 }
 
 .detailScroll {
+  grid-auto-rows: max-content;
   overflow: auto;
 }
 
@@ -554,24 +573,33 @@
 }
 
 .editorHero {
-  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px 12px;
+  min-height: 0;
+  padding: 12px 14px;
 }
 
 .editorHero .previewSwitch {
-  grid-column: 1 / -1;
-  justify-self: start;
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+}
+
+.editorHero .typeBadgeLarge {
+  justify-self: end;
 }
 
 .editorHeroMeta {
-  display: flex;
+  display: none;
   flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 14px;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .editorHeroMeta span {
-  min-height: 24px;
-  padding: 4px 9px;
+  min-height: 22px;
+  padding: 3px 8px;
   color: var(--m2);
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   border-radius: 999px;
@@ -581,11 +609,19 @@
     monospace;
 }
 
+.editorHero p {
+  display: none;
+}
+
 .detailHero h2,
 .editorHero h2 {
   font:
     650 clamp(18px, 3vw, 24px) / 1.12 'JetBrains Mono',
     monospace;
+}
+
+.editorHero h2 {
+  font-size: clamp(19px, 2.4vw, 23px);
 }
 
 .detailActions {
@@ -625,8 +661,9 @@
 
 .previewPill[data-active='true'] {
   color: white;
+  border-color: var(--c, var(--primary));
   background: var(--c, var(--primary));
-  box-shadow: 0 8px 18px color-mix(in srgb, var(--primary) 18%, transparent);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--c, var(--primary)) 22%, transparent);
 }
 
 .detailGrid {
@@ -816,6 +853,7 @@
 .previewCard {
   display: grid;
   gap: 12px;
+  min-height: max-content;
   overflow: hidden;
 }
 
@@ -886,6 +924,7 @@
 }
 
 .previewCard pre {
+  min-height: 72px;
   max-height: 300px;
   margin: 0;
   overflow: auto;
@@ -896,8 +935,14 @@
   background: var(--bg);
 }
 
+.syntaxPreview code {
+  font: inherit;
+}
+
 .editorFormStack {
   display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
   gap: 16px;
   min-width: 0;
   min-height: 0;
@@ -1082,20 +1127,23 @@
 .editorActionbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  min-height: 64px;
-  padding: 10px 12px 10px 16px;
-  border: 1px solid color-mix(in srgb, var(--primary) 14%, var(--border));
-  border-radius: 999px;
+  justify-self: end;
+  justify-content: flex-end;
+  gap: 8px;
+  width: fit-content;
+  min-height: 44px;
+  padding: 5px;
+  border: 1px solid color-mix(in srgb, var(--cx) 14%, var(--border));
+  border-radius: calc(var(--radius-card) + 2px);
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--primary) 7%, transparent), transparent 60%),
-    color-mix(in srgb, var(--card) 92%, var(--bg));
-  box-shadow: 0 -10px 28px color-mix(in srgb, black 12%, transparent);
+    linear-gradient(90deg, color-mix(in srgb, var(--cx) 5%, transparent), transparent 60%),
+    color-mix(in srgb, var(--card) 94%, var(--bg));
+  box-shadow: 0 -8px 22px color-mix(in srgb, black 10%, transparent);
+  backdrop-filter: blur(14px);
 }
 
 .editorActionbar > div:first-child {
-  display: grid;
+  display: none;
   gap: 3px;
   min-width: 0;
 }
@@ -1119,9 +1167,9 @@
 
 .editorCancel,
 .editorSave {
-  min-height: 40px !important;
+  min-height: 36px !important;
   gap: 7px !important;
-  padding-inline: 16px !important;
+  padding-inline: 14px !important;
   border: 1px solid transparent !important;
   border-radius: 999px !important;
   box-shadow: none !important;

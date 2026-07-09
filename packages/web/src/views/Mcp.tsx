@@ -81,6 +81,72 @@ function recordToLines(record: Record<string, string> | undefined): string {
     .join('\n')
 }
 
+function highlightJsonLine(line: string, keyPrefix: string): ReactNode[] {
+  const parts: ReactNode[] = []
+  const tokenPattern =
+    /("(?:\\.|[^"\\])*"\s*:)|("(?:\\.|[^"\\])*")|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}[\],:]/g
+  let cursor = 0
+  for (const match of line.matchAll(tokenPattern)) {
+    const index = match.index ?? 0
+    if (index > cursor) parts.push(line.slice(cursor, index))
+    const token = match[0]
+    const className = match[1]
+      ? 'hljs-attr'
+      : match[2]
+        ? 'hljs-string'
+        : match[3]
+          ? 'hljs-literal'
+          : /-?\d/.test(token)
+            ? 'hljs-number'
+            : 'hljs-punctuation'
+    parts.push(
+      <span key={keyPrefix + '-' + index} className={className}>
+        {token}
+      </span>,
+    )
+    cursor = index + token.length
+  }
+  if (cursor < line.length) parts.push(line.slice(cursor))
+  return parts
+}
+
+function highlightTomlLine(line: string, keyPrefix: string): ReactNode[] {
+  const section = /^(\s*)(\[[^\]]+\])(\s*)$/.exec(line)
+  if (section) {
+    return [
+      section[1],
+      <span key={keyPrefix + '-section'} className="hljs-section">
+        {section[2]}
+      </span>,
+      section[3],
+    ]
+  }
+
+  const pair = /^(\s*)([A-Za-z0-9_.-]+)(\s*=\s*)(.*)$/.exec(line)
+  if (!pair) return highlightJsonLine(line, keyPrefix)
+
+  return [
+    pair[1],
+    <span key={keyPrefix + '-key'} className="hljs-attr">
+      {pair[2]}
+    </span>,
+    <span key={keyPrefix + '-op'} className="hljs-punctuation">
+      {pair[3]}
+    </span>,
+    ...highlightJsonLine(pair[4], keyPrefix + '-value'),
+  ]
+}
+
+function renderSettingsPreviewSyntax(text: string, target: AgentId): ReactNode[] {
+  const lines = text.split('\n')
+  return lines.flatMap((line, index) => [
+    ...(target === 'codex'
+      ? highlightTomlLine(line, 'line-' + index)
+      : highlightJsonLine(line, 'line-' + index)),
+    index < lines.length - 1 ? '\n' : null,
+  ])
+}
+
 function rowsFromRecord(record: Record<string, string> | undefined): RecordRow[] {
   const rows = Object.entries(record ?? {}).map(([key, value]) => newRecordRow(key, value ?? ''))
   return rows.length > 0 ? rows : [newRecordRow()]
@@ -268,6 +334,7 @@ function PreviewTargetSwitch({
           key={agent}
           type="button"
           className={styles.previewPill}
+          style={{ '--c': agentColor[agent] } as CSSProperties}
           data-active={value === agent}
           aria-label={'Preview as ' + agentShort[agent]}
           onClick={() => onChange(agent)}
@@ -714,7 +781,9 @@ function McpDetail({
             ))}
           </div>
         )}
-        <pre>{settings.text}</pre>
+        <pre className={styles.syntaxPreview}>
+          <code>{renderSettingsPreviewSyntax(settings.text, previewTarget)}</code>
+        </pre>
       </section>
     </div>
   )
@@ -914,7 +983,9 @@ function McpEditor({
               </p>
             </div>
           </div>
-          <pre>{settings.text}</pre>
+          <pre className={styles.syntaxPreview}>
+            <code>{renderSettingsPreviewSyntax(settings.text, previewTarget)}</code>
+          </pre>
         </section>
       </div>
       <footer className={styles.editorActionbar}>
