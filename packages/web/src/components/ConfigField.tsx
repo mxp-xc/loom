@@ -177,6 +177,7 @@ export function ConfigField({
   const canEdit = !isDisabled
   const editing = draft !== undefined
   const editValue = draft ?? ''
+  const displayValue = isInherited ? effectiveValue : value
 
   const save = async (v: unknown) => {
     if (level === 'effective') return
@@ -398,7 +399,9 @@ export function ConfigField({
                   }}
                   onClick={canEdit ? startEdit : undefined}
                 >
-                  {value != null ? String(value) : isInherited ? '' : '— 未设置'}
+                  {displayValue != null && String(displayValue) !== ''
+                    ? String(displayValue)
+                    : '— 未设置'}
                 </span>
                 {canEdit && value != null && (
                   <IconButton
