@@ -69,11 +69,16 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>
 }
 
-function post(path: string, body: unknown) {
+interface RequestOptions {
+  signal?: AbortSignal
+}
+
+function post(path: string, body: unknown, options: RequestOptions = {}) {
   return fetch(`${base}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
+    signal: options.signal,
   })
 }
 
@@ -189,7 +194,8 @@ export const api = {
     fetch(`${base}/status`).then(json) as Promise<{ active_repo: string; repoPath: string }>,
   project: (body: { repo: string; scope?: 'skills' | 'mcp' | 'memory' | 'all' }) =>
     post('/project', body).then(json),
-  syncPull: (repo: string) => post('/sync/pull', { repo }).then(json) as Promise<SyncPullResponse>,
+  syncPull: (repo: string, options?: RequestOptions) =>
+    post('/sync/pull', { repo }, options).then(json) as Promise<SyncPullResponse>,
   getSyncSession: (repo: string) =>
     fetch(`${base}/sync/session?repo=${encodeURIComponent(repo)}`).then(json) as Promise<
       SyncPullResponse & { active: boolean }
@@ -197,7 +203,8 @@ export const api = {
   saveSyncConflict: (body: { sessionId: string; path: string; result: string }) =>
     post('/sync/conflicts/save', body).then(json) as Promise<SyncConflictSaveResponse>,
   abortSyncMerge: (sessionId: string) => post('/sync/conflicts/abort', { sessionId }).then(json),
-  syncPush: (repo: string) => post('/sync/push', { repo }).then(json),
+  syncPush: (repo: string, options?: RequestOptions) =>
+    post('/sync/push', { repo }, options).then(json),
   syncForcePush: (repo: string) => post('/sync/force-push', { repo }).then(json),
   syncForcePull: (repo: string) =>
     post('/sync/force-pull', { repo }).then(json) as Promise<SyncPullResponse>,

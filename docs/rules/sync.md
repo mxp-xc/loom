@@ -37,3 +37,12 @@
 - Implications：取消确认不得发起请求；确认文案必须说明会覆盖或删除的内容。
 - Safety：未配置 remote、已有冲突或同步操作进行中时，强制操作入口必须不可用。
 - Tests：`packages/web/test/sync.test.tsx`。
+
+## R-SYNC-005 切换 remote 不触发同步
+
+- Status：active
+- Applies to：Sync remote 配置。
+- Rule：切换 remote 只更新 Git `origin` URL，不得自动拉取、上传或提交。
+- Implications：切换成功后页面必须提示用户需要手动拉取或上传；已有冲突或活动同步会话时不得切换 remote。
+- Safety：切换 remote 不得静默改变本地文件、远端提交或同步会话状态。
+- Tests：`packages/server/test/api/routes.test.ts`、`packages/web/test/sync.test.tsx`。

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, vi } from 'vitest'
 import ToastHost from '../src/components/ToastHost'
 import { dismissToast } from '../src/hooks/useToast'
@@ -106,5 +106,80 @@ describe('Sync force operations', () => {
 
     expect(screen.getByRole('button', { name: '强制拉取' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: '强制推送' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '更换 remote' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByText('请先解决或放弃本次合并，再更换 remote。')).toBeDefined()
+  })
+
+  it('switches an existing remote without pulling or pushing', async () => {
+    renderSync()
+    await screen.findByText('https://example.com/repo.git')
+
+    fireEvent.click(screen.getByRole('button', { name: '更换 remote' }))
+    expect((screen.getByLabelText('remote URL') as HTMLInputElement).value).toBe(
+      'https://example.com/repo.git',
+    )
+
+    fireEvent.change(screen.getByLabelText('remote URL'), {
+      target: { value: 'https://git.example.test/user/repo.git' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存 remote' }))
+
+    await waitFor(() =>
+      expect(api.setSyncRemote).toHaveBeenCalledWith({
+        repo: '/repo',
+        remoteUrl: 'https://git.example.test/user/repo.git',
+      }),
+    )
+    expect(api.syncPull).not.toHaveBeenCalled()
+    expect(api.syncPush).not.toHaveBeenCalled()
+    const dialog = await screen.findByRole('dialog', { name: '更换 remote' })
+    expect(dialog).toBeDefined()
+    expect(
+      screen.getByText(
+        'remote 已切换到 https://git.example.test/user/repo.git，不会自动拉取，也不会自动上传。需要同步时请手动点击拉取或上传。',
+      ),
+    ).toBeDefined()
+    fireEvent.click(within(dialog).getByText('关闭'))
+    expect(
+      await screen.findByRole('link', { name: 'https://git.example.test/user/repo.git' }),
+    ).toBeDefined()
+  })
+
+  it('shows upload failure details in the feedback dialog', async () => {
+    api.syncPush.mockResolvedValue({ ok: false, error: '网络连接失败，请稍后重试' })
+
+    renderSync()
+    await screen.findByText('https://example.com/repo.git')
+
+    fireEvent.click(screen.getByRole('button', { name: '上传' }))
+
+    expect(await screen.findByRole('dialog', { name: '上传本地变更' })).toBeDefined()
+    expect(screen.getAllByText('上传失败').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('网络连接失败，请稍后重试').length).toBeGreaterThan(0)
+  })
+
+  it('can stop waiting for a running upload from the feedback dialog', async () => {
+    api.syncPush.mockImplementation(
+      (_repo: string, options?: { signal?: AbortSignal }) =>
+        new Promise((_, reject) => {
+          options?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'))
+          })
+        }),
+    )
+
+    renderSync()
+    await screen.findByText('https://example.com/repo.git')
+
+    fireEvent.click(screen.getByRole('button', { name: '上传' }))
+    expect(await screen.findByRole('dialog', { name: '上传本地变更' })).toBeDefined()
+
+    const options = api.syncPush.mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined
+    expect(options?.signal).toBeDefined()
+
+    fireEvent.click(screen.getByLabelText('关闭'))
+
+    await waitFor(() => expect(options?.signal?.aborted).toBe(true))
+    expect(await screen.findByText('已停止等待')).toBeDefined()
   })
 })

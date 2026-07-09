@@ -11,6 +11,8 @@ const platformGit = vi.hoisted(() => ({
   add: vi.fn(),
   commit: vi.fn(),
   forcePush: vi.fn(),
+  addOrUpdateRemote: vi.fn(async () => undefined),
+  getRemoteUrl: vi.fn(async () => 'https://example.com/repo.git'),
 }))
 
 const syncManager = vi.hoisted(() => ({
@@ -202,6 +204,34 @@ describe('API routes', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true, clean: true, conflicts: [] })
     expect(syncManager.forcePull).toHaveBeenCalledWith('/tmp/r')
+  })
+  it('POST /api/sync/remote only updates origin and does not sync', async () => {
+    vi.clearAllMocks()
+
+    const res = await app.request('/api/sync/remote', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/r',
+        remoteUrl: 'https://git.example.test/user/repo.git',
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      ok: true,
+      remoteUrl: 'https://git.example.test/user/repo.git',
+    })
+    expect(platformGit.addOrUpdateRemote).toHaveBeenCalledWith(
+      '/tmp/r',
+      'https://git.example.test/user/repo.git',
+    )
+    expect(syncPush).not.toHaveBeenCalled()
+    expect(syncManager.pull).not.toHaveBeenCalled()
+    expect(syncManager.forcePull).not.toHaveBeenCalled()
+    expect(platformGit.status).not.toHaveBeenCalled()
+    expect(platformGit.add).not.toHaveBeenCalled()
+    expect(platformGit.commit).not.toHaveBeenCalled()
   })
   it('POST /api/sync/conflicts/save returns remaining conflicts', async () => {
     const res = await app.request('/api/sync/conflicts/save', {
