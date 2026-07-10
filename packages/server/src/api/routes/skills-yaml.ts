@@ -1,474 +1,353 @@
 import { Hono } from 'hono'
-import { join, isAbsolute, dirname } from 'node:path'
-import {
-  deriveRepoId,
-  addLocalSkill,
-  removeLocalSkill,
-  addSource,
-  removeSource,
-  setSourceMembers,
-  setSourceMemberTargets,
-  updateSourceMeta,
-  setSkillTargets,
-  setLocalSkillTargets,
-} from '@loom/core'
-import { installSkill } from '../../remote/install.js'
-import { readYaml, writeYaml } from '../repo-config.js'
-import { resolveRepoPath } from '../repo.js'
+import { AgentIdSchema, SkillMemberOverrideSchema } from '@loom/core'
+import { z } from 'zod'
+import { SkillsApplication, SkillsApplicationError } from '../../skills/application.js'
 import { logger } from '../../lib/logger.js'
+import { resolveRepoPath } from '../repo.js'
+import { jsonValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
 
-const remoteLogger = logger.child('remote')
+const skillsRouteLogger = logger.child('skills-route')
+const RepoField = z.unknown().optional()
+const NonEmptyString = z.string().min(1)
+
+const LocalSkillBody = z.object({
+  id: NonEmptyString,
+  path: z.string().optional(),
+  targets: z.array(AgentIdSchema).optional(),
+})
+
+const LocalSkillImportItem = z.object({
+  name: NonEmptyString,
+  path: NonEmptyString,
+})
+
+const LocalSkillWriteItem = z.object({
+  name: NonEmptyString,
+  files: z.array(z.object({ path: z.string(), content: z.string() })).default([]),
+})
+
+const ScanLocalSkillsBody = z.object({
+  repo: RepoField,
+  dir: NonEmptyString,
+})
+
+const AddLocalSkillBody = z.object({
+  repo: RepoField,
+  skill: LocalSkillBody,
+})
+
+const ImportLocalSkillsBody = z.object({
+  repo: RepoField,
+  skills: z.array(LocalSkillImportItem),
+  mode: z.enum(['move', 'ref']).default('ref'),
+})
+
+const WriteLocalSkillsBody = z.object({
+  repo: RepoField,
+  skills: z.array(LocalSkillWriteItem),
+})
+
+const AddSourceBody = z.object({
+  repo: RepoField,
+  url: NonEmptyString,
+  ref: NonEmptyString,
+  type: z.enum(['branch', 'tag']).optional(),
+  scan: z.string().optional(),
+})
+
+const SourceUrlBody = z.object({
+  repo: RepoField,
+  url: NonEmptyString,
+})
+
+const SetSourceMembersBody = SourceUrlBody.extend({
+  members: z.array(SkillMemberOverrideSchema).optional(),
+})
+
+const UpdateSourceBody = SourceUrlBody.extend({
+  ref: z.string().optional(),
+  type: z.enum(['branch', 'tag']).optional(),
+  scan: z.string().optional(),
+})
+
+const DeleteLocalSkillBody = z.object({
+  repo: RepoField,
+  id: NonEmptyString,
+})
+
+const SetSkillTargetsBody = z.object({
+  repo: RepoField,
+  sourceUrl: NonEmptyString,
+  memberName: NonEmptyString,
+  targets: z.array(AgentIdSchema),
+})
+
+const SetSourceMemberTargetsBody = z.object({
+  repo: RepoField,
+  sourceUrl: NonEmptyString,
+  updates: z.array(
+    z.object({
+      memberName: NonEmptyString,
+      targets: z.array(AgentIdSchema),
+    }),
+  ),
+})
+
+const SetLocalSkillTargetsBody = DeleteLocalSkillBody.extend({
+  targets: z.array(AgentIdSchema),
+})
 
 export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
+  const skills = new SkillsApplication(deps.fs, deps.git, deps.home)
 
-  app.post('/skills/local', async (c) => {
-    try {
-      const { repo, skill } = await c.req.json()
-      let repoPath: string
+  app.post(
+    '/skills/local',
+    jsonValidator(AddLocalSkillBody, { error: 'invalid_skill' }),
+    async (c) => {
       try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const { repo, skill } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        await skills.addLocalSkill(repoPath, skill)
+        return c.json({ ok: true, skill })
       } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        return c.json(errorBody(e, 'write_failed', 'failed to add local skill'))
       }
-      const filePath = join(repoPath, 'skills.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-      const result = addLocalSkill(data, skill)
-      if (result.changed) await writeYaml(deps.fs, filePath, result.data)
-      return c.json({ ok: true, skill })
+    },
+  )
+
+  app.post(
+    '/skills/local/scan',
+    jsonValidator(ScanLocalSkillsBody, { error: 'invalid_dir' }),
+    async (c) => {
+      try {
+        const { dir, repo } = c.req.valid('json')
+        const repoPath = repo ? await resolveRequestRepo(deps, repo) : undefined
+        return c.json({ ok: true, skills: await skills.scanLocalSkills({ dir, repoPath }) })
+      } catch (e) {
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        return c.json(errorBody(e, 'scan_failed', 'failed to scan local skills'))
+      }
+    },
+  )
+
+  app.post(
+    '/skills/local/import',
+    jsonValidator(ImportLocalSkillsBody, { error: 'invalid_skills' }),
+    async (c) => {
+      try {
+        const { repo, skills: localSkills, mode } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        const result = await skills.importLocalSkills(repoPath, { skills: localSkills, mode })
+        return c.json({ ok: true, count: result.count })
+      } catch (e) {
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        return c.json(errorBody(e, 'import_failed', 'failed to import local skills'))
+      }
+    },
+  )
+
+  app.post(
+    '/skills/local/write',
+    jsonValidator(WriteLocalSkillsBody, { error: 'invalid_skills' }),
+    async (c) => {
+      try {
+        const { repo, skills: localSkills } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        const result = await skills.writeLocalSkills(repoPath, { skills: localSkills })
+        return c.json({ ok: true, count: result.count })
+      } catch (e) {
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        return c.json(errorBody(e, 'import_failed', 'failed to write local skills'))
+      }
+    },
+  )
+
+  app.post('/sources', jsonValidator(AddSourceBody, { error: sourceError }), async (c) => {
+    try {
+      const { repo, url, ref, type, scan } = c.req.valid('json')
+      const repoPath = await resolveRequestRepo(deps, repo)
+      const result = await skills.addSource(repoPath, { url, ref, type, scan })
+      return c.json({ ok: true, source: result.source })
     } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'write_failed',
-        message: String((e as Error)?.message ?? e),
-      })
+      if (isInvalidRepo(e)) return invalidRepo(c, e)
+      return c.json(errorBody(e, 'write_failed', 'failed to add source'))
     }
   })
 
-  app.post('/skills/local/scan', async (c) => {
-    try {
-      const { dir, repo } = await c.req.json()
-      if (!dir || typeof dir !== 'string') return c.json({ ok: false, error: 'invalid_dir' }, 400)
-      let repoPath: string | undefined
+  app.post(
+    '/sources/members',
+    jsonValidator(SetSourceMembersBody, { error: sourceMembersError }),
+    async (c) => {
       try {
-        if (repo) repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      const { glob } = await import('tinyglobby')
-      const { basename, dirname } = await import('node:path')
-      let resolvedDir = dir.replace(/^~/, deps.home)
-      // Relative paths (e.g. "assets/skills") resolve against the repo root,
-      // so the default scan target lands inside the managed repo.
-      if (!isAbsolute(resolvedDir) && repoPath) resolvedDir = join(repoPath, resolvedDir)
-      if (!(await deps.fs.exists(resolvedDir))) {
-        return c.json({ ok: true, skills: [] })
-      }
-      const matches = await glob('**/SKILL.md', {
-        cwd: resolvedDir,
-        ignore: ['**/.git/**', '**/node_modules/**'],
-        onlyFiles: true,
-      })
-      const skills = matches
-        .map((m) => ({ name: basename(dirname(m)), path: join(resolvedDir, dirname(m)) }))
-        .sort((a, b) => a.name.localeCompare(b.name))
-      return c.json({ ok: true, skills })
-    } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'scan_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
-
-  app.post('/skills/local/import', async (c) => {
-    try {
-      const { repo, skills, mode } = await c.req.json()
-      if (!Array.isArray(skills)) return c.json({ ok: false, error: 'invalid_skills' }, 400)
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      // Local skills canonical home is <repo>/assets/skills — this is where
-      // projection (resolveSkillSrc) looks for them, and it git-syncs.
-      const assetsSkillsDir = join(repoPath, 'assets', 'skills')
-      const assetsSkillsPrefix = assetsSkillsDir.replace(/\\/g, '/').replace(/\/+$/, '')
-      const filePath = join(repoPath, 'skills.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-
-      for (const skill of skills) {
-        const skillPath = String(skill.path ?? '')
-          .replace(/\\/g, '/')
-          .replace(/\/+$/, '')
-        const isRepoAssetSkill =
-          skillPath === assetsSkillsPrefix + '/' + skill.name ||
-          skillPath.startsWith(assetsSkillsPrefix + '/' + skill.name + '/')
-        if (mode === 'move') {
-          const dest = join(assetsSkillsDir, skill.name)
-          if (await deps.fs.exists(dest)) {
-            return c.json({
-              ok: false,
-              error: 'already_exists',
-              message: `Skill \`${skill.name}\` already exists in assets/skills`,
-            })
-          }
-          await deps.fs.mkdir(assetsSkillsDir, true)
-          await deps.fs.move(skill.path, dest)
-          const result = addLocalSkill(data, { id: skill.name })
-          if (result.changed) Object.assign(data, result.data)
-        } else {
-          const result = addLocalSkill(
-            data,
-            isRepoAssetSkill ? { id: skill.name } : { id: skill.name, path: skill.path },
-          )
-          if (result.changed) Object.assign(data, result.data)
-        }
-      }
-      await writeYaml(deps.fs, filePath, data)
-      return c.json({ ok: true, count: skills.length })
-    } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'import_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
-
-  // Import local skills by writing their file contents directly into
-  // <repo>/assets/skills/<name>/. Used by the folder picker flow, which
-  // reads files client-side (the web File API hides absolute paths) and
-  // ships the content here so it lands in the git-synced repo.
-  app.post('/skills/local/write', async (c) => {
-    try {
-      const { repo, skills } = await c.req.json()
-      if (!Array.isArray(skills)) return c.json({ ok: false, error: 'invalid_skills' }, 400)
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      const assetsSkillsDir = join(repoPath, 'assets', 'skills')
-      const filePath = join(repoPath, 'skills.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-
-      for (const skill of skills) {
-        const dest = join(assetsSkillsDir, skill.name)
-        if (await deps.fs.exists(dest)) {
-          return c.json({
-            ok: false,
-            error: 'already_exists',
-            message: `Skill \`${skill.name}\` already exists in assets/skills`,
-          })
-        }
-        await deps.fs.mkdir(dest, true)
-        for (const f of Array.isArray(skill.files) ? skill.files : []) {
-          const rel = String(f.path).replace(/^[/\\]+/, '')
-          if (!rel || rel.includes('..')) continue
-          const target = join(dest, rel)
-          await deps.fs.mkdir(dirname(target), true)
-          await deps.fs.writeFile(target, String(f.content ?? ''))
-        }
-        const result = addLocalSkill(data, { id: skill.name })
-        if (result.changed) Object.assign(data, result.data)
-      }
-      await writeYaml(deps.fs, filePath, data)
-      return c.json({ ok: true, count: skills.length })
-    } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'import_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
-
-  app.post('/sources', async (c) => {
-    try {
-      const { repo, url, ref, type, scan } = await c.req.json()
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      const filePath = join(repoPath, 'skills.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-      const result = addSource(data, {
-        url,
-        ref,
-        ...(type === 'branch' || type === 'tag' ? { type } : {}),
-        ...(typeof scan === 'string' && scan.trim() ? { scan: scan.trim() } : {}),
-      })
-      if (result.changed) await writeYaml(deps.fs, filePath, result.data)
-      // Auto-clone source repo to remote-cache so SKILL.md content is available
-      const sourceId = deriveRepoId(url)
-      try {
-        await installSkill(deps.git, deps.fs, url, ref, repoPath, sourceId)
-      } catch (installErr) {
-        // Clone failure shouldn't block source creation; user can retry via check/scan
-        remoteLogger.error('auto-install failed for source', { err: installErr, url })
-      }
-      return c.json({ ok: true, source: result.data.sources[result.data.sources.length - 1] })
-    } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'write_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
-
-  // Write the selected member list for a source into skills.yaml, replacing
-  // whatever was there before. Called after the user picks members in the
-  // scan popup. Preserves existing per-member targets/enabled where possible.
-  app.post('/sources/members', async (c) => {
-    try {
-      const { repo, url, members } = await c.req.json()
-      if (!url || typeof url !== 'string') return c.json({ ok: false, error: 'invalid_url' }, 400)
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      const memberNames: string[] = Array.isArray(members) ? members : []
-      const filePath = join(repoPath, 'skills.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-      const result = setSourceMembers(data, url, memberNames)
-      if (result.changed) {
-        await writeYaml(deps.fs, filePath, result.data)
-      } else {
-        return c.json({ ok: false, error: 'not_found', message: `Source ${url} not found` })
-      }
-      return c.json({ ok: true })
-    } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'write_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
-
-  app.delete('/sources', async (c) => {
-    try {
-      const { repo, url } = await c.req.json()
-      if (!url || typeof url !== 'string') return c.json({ ok: false, error: 'invalid_url' }, 400)
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      const filePath = join(repoPath, 'skills.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-      const result = removeSource(data, url)
-      if (result.changed) await writeYaml(deps.fs, filePath, result.data)
-      return c.json({ ok: true })
-    } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'delete_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
-
-  app.post('/sources/update', async (c) => {
-    try {
-      const { repo, url, ref, type, scan } = await c.req.json()
-      if (!url || typeof url !== 'string') return c.json({ ok: false, error: 'invalid_url' }, 400)
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      const filePath = join(repoPath, 'skills.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-      const updates: { ref?: string; type?: 'branch' | 'tag'; scan?: string | null } = {}
-      if (typeof ref === 'string') updates.ref = ref
-      if (type === 'branch' || type === 'tag') updates.type = type
-      if (typeof scan === 'string') updates.scan = scan
-      const result = updateSourceMeta(data, url, updates)
-      if (result.changed) {
-        await writeYaml(deps.fs, filePath, result.data)
+        const { repo, url, members } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        await skills.setSourceMembers(repoPath, url, members)
         return c.json({ ok: true })
-      } else {
-        return c.json({ ok: false, error: 'not_found', message: `Source ${url} not found` })
+      } catch (e) {
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        return c.json(errorBody(e, 'write_failed', 'failed to set source members'))
       }
+    },
+  )
+
+  app.delete('/sources', jsonValidator(SourceUrlBody, { error: 'invalid_url' }), async (c) => {
+    try {
+      const { repo, url } = c.req.valid('json')
+      const repoPath = await resolveRequestRepo(deps, repo)
+      await skills.removeSource(repoPath, url)
+      return c.json({ ok: true })
     } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'update_failed',
-        message: String((e as Error)?.message ?? e),
-      })
+      if (isInvalidRepo(e)) return invalidRepo(c, e)
+      return c.json(errorBody(e, 'delete_failed', 'failed to remove source'))
     }
   })
 
-  app.delete('/skills/local', async (c) => {
-    try {
-      const { repo, id } = await c.req.json()
-      if (!id || typeof id !== 'string') return c.json({ ok: false, error: 'invalid_id' }, 400)
-      let repoPath: string
+  app.post(
+    '/sources/update',
+    jsonValidator(UpdateSourceBody, { error: 'invalid_url' }),
+    async (c) => {
       try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const { repo, url, ref, type, scan } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        await skills.updateSourceMeta(repoPath, { url, ref, type, scan })
+        return c.json({ ok: true })
       } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        return c.json(errorBody(e, 'update_failed', 'failed to update source metadata'))
       }
-      const filePath = join(repoPath, 'skills.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-      // Pathless skills live in <repo>/assets/skills/<id>; removing the yaml
-      // entry should also delete that directory. ref skills keep an external
-      // path and their files are left untouched.
-      const existing = data.skills.find((s: { id: string; path?: string }) => s.id === id)
-      const result = removeLocalSkill(data, id)
-      if (result.changed) await writeYaml(deps.fs, filePath, result.data)
-      if (!existing?.path) {
-        const dir = join(repoPath, 'assets', 'skills', id)
-        if (await deps.fs.exists(dir)) await deps.fs.removeDir(dir)
-      }
-      return c.json({ ok: true })
-    } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'delete_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
+    },
+  )
 
-  app.post('/skills/targets', async (c) => {
-    try {
-      const { repo, sourceUrl, memberName, targets } = await c.req.json()
-      let repoPath: string
+  app.delete(
+    '/skills/local',
+    jsonValidator(DeleteLocalSkillBody, { error: 'invalid_id' }),
+    async (c) => {
       try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const { repo, id } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        await skills.removeLocalSkill(repoPath, id)
+        return c.json({ ok: true })
       } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        return c.json(errorBody(e, 'delete_failed', 'failed to remove local skill'))
       }
-      const filePath = join(repoPath, 'skills.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-      const result = setSkillTargets(data, sourceUrl, memberName, targets)
-      if (result.changed) {
-        await writeYaml(deps.fs, filePath, result.data)
-      } else {
-        return c.json({ ok: false, error: 'not_found', message: `Source ${sourceUrl} not found` })
-      }
-      return c.json({ ok: true })
-    } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'update_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
+    },
+  )
 
-  app.post('/skills/source-targets', async (c) => {
-    try {
-      const { repo, sourceUrl, updates } = await c.req.json()
-      if (!sourceUrl || typeof sourceUrl !== 'string')
-        return c.json({ ok: false, error: 'invalid_source_url' }, 400)
-      if (!Array.isArray(updates)) return c.json({ ok: false, error: 'invalid_updates' }, 400)
-      let repoPath: string
+  app.post(
+    '/skills/targets',
+    jsonValidator(SetSkillTargetsBody, { error: skillTargetsError }),
+    async (c) => {
       try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const { repo, sourceUrl, memberName, targets } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        await skills.setSkillTargets(repoPath, { sourceUrl, memberName, targets })
+        return c.json({ ok: true })
       } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        return c.json(errorBody(e, 'update_failed', 'failed to update skill targets'))
       }
-      const memberUpdates = updates.map((update) => ({
-        memberName: String(update?.memberName ?? ''),
-        targets: Array.isArray(update?.targets) ? update.targets : [],
-      }))
-      const filePath = join(repoPath, 'skills.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-      const result = setSourceMemberTargets(data, sourceUrl, memberUpdates)
-      if (result.changed) {
-        await writeYaml(deps.fs, filePath, result.data)
-      } else {
-        return c.json({ ok: false, error: 'not_found', message: `Source ${sourceUrl} not found` })
-      }
-      return c.json({ ok: true })
-    } catch (e) {
-      remoteLogger.error('failed to update source member targets', { err: e })
-      return c.json({
-        ok: false,
-        error: 'update_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
+    },
+  )
 
-  app.post('/skills/local/targets', async (c) => {
-    try {
-      const { repo, id, targets } = await c.req.json()
-      if (!id || typeof id !== 'string') return c.json({ ok: false, error: 'invalid_id' }, 400)
-      let repoPath: string
+  app.post(
+    '/skills/source-targets',
+    jsonValidator(SetSourceMemberTargetsBody, {
+      error: (issues) =>
+        issues[0]?.path[0] === 'sourceUrl' ? 'invalid_source_url' : 'invalid_updates',
+    }),
+    async (c) => {
       try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const { repo, sourceUrl, updates } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        await skills.setSourceMemberTargets(repoPath, sourceUrl, updates)
+        return c.json({ ok: true })
       } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        return c.json(errorBody(e, 'update_failed', 'failed to update source member targets'))
       }
-      const filePath = join(repoPath, 'skills.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-      const result = setLocalSkillTargets(data, id, targets)
-      if (result.changed) {
-        await writeYaml(deps.fs, filePath, result.data)
-      } else {
-        return c.json({ ok: false, error: 'not_found', message: `Local skill ${id} not found` })
+    },
+  )
+
+  app.post(
+    '/skills/local/targets',
+    jsonValidator(SetLocalSkillTargetsBody, { error: localSkillTargetsError }),
+    async (c) => {
+      try {
+        const { repo, id, targets } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        await skills.setLocalSkillTargets(repoPath, id, targets)
+        return c.json({ ok: true })
+      } catch (e) {
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        return c.json(errorBody(e, 'update_failed', 'failed to update local skill targets'))
       }
-      return c.json({ ok: true })
-    } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'update_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
+    },
+  )
 
   return app
+}
+
+async function resolveRequestRepo(deps: RouteDeps, repo: unknown): Promise<string> {
+  try {
+    return await resolveRepoPath(deps.fs, repo as string, deps.home)
+  } catch (cause) {
+    throw Object.assign(new Error(String((cause as Error).message), { cause }), {
+      code: 'invalid_repo',
+    })
+  }
+}
+
+function isInvalidRepo(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && 'code' in error && error.code === 'invalid_repo'
+  )
+}
+
+function invalidRepo(
+  c: { json: (body: unknown, status?: 400) => Response },
+  error: unknown,
+): Response {
+  return c.json(
+    { ok: false, error: 'invalid_repo', message: String((error as Error).message) },
+    400,
+  )
+}
+
+function sourceError(issues: z.ZodIssue[]): string {
+  return issues[0]?.path[0] === 'ref' ? 'invalid_ref' : 'invalid_url'
+}
+
+function sourceMembersError(issues: z.ZodIssue[]): string {
+  return issues[0]?.path[0] === 'members' ? 'invalid_members' : 'invalid_url'
+}
+
+function skillTargetsError(issues: z.ZodIssue[]): string {
+  const field = issues[0]?.path[0]
+  if (field === 'sourceUrl') return 'invalid_source_url'
+  if (field === 'memberName') return 'invalid_member_name'
+  return 'invalid_targets'
+}
+
+function localSkillTargetsError(issues: z.ZodIssue[]): string {
+  return issues[0]?.path[0] === 'id' ? 'invalid_id' : 'invalid_targets'
+}
+
+function errorBody(
+  error: unknown,
+  fallbackCode: string,
+  logMessage: string,
+): { ok: false; error: string; message: string } {
+  if (error instanceof SkillsApplicationError) {
+    return { ok: false, error: error.code, message: error.message }
+  }
+  skillsRouteLogger.error(logMessage, { err: error })
+  return {
+    ok: false,
+    error: fallbackCode,
+    message: String((error as Error)?.message ?? error),
+  }
 }

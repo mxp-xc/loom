@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import type { IGit } from '../ports/git.js'
 import type { IFileSystem } from '../ports/fs.js'
+import type { LoggerPort } from '../ports/logger.js'
 
 export interface GitConflictFile {
   path: string
@@ -16,10 +17,7 @@ export interface PullResult {
   conflicts: GitConflictFile[]
 }
 
-type Logger = {
-  error: (obj: unknown, msg: string) => void
-  warn?: (obj: unknown, msg: string) => void
-}
+type Logger = Pick<LoggerPort, 'error' | 'warn'>
 
 const CONFLICT_MARKER = /^(<{7}|={7}|>{7}|\|{7})(?: |$)/m
 
@@ -43,7 +41,7 @@ export async function syncPull(
       await git.add(repoPath, ['.'])
       await git.commit(repoPath, 'loom: auto-commit before pull')
     } catch (err) {
-      logger?.error({ err, repoPath }, 'auto-commit before pull failed')
+      logger?.error('auto-commit before pull failed', { err, repoPath })
       throw err
     }
   }
@@ -115,7 +113,7 @@ async function readConflicts(
       try {
         result = await fs.readFile(join(repoPath, path))
       } catch (err) {
-        logger?.warn?.({ err, repoPath, path }, 'conflict worktree file unavailable')
+        logger?.warn?.('conflict worktree file unavailable', { err, repoPath, path })
       }
       return {
         path,

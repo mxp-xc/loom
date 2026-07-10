@@ -70,6 +70,17 @@ describe('threeWayMerge', () => {
     expect(r.merged).toContain('https: L2')
     expect(r.conflicts).toHaveLength(0)
   })
+  it('config: object key order alone is not a conflict', () => {
+    const r = threeWayMerge(
+      'settings:\n  a: 1\n  b: 2\n',
+      'settings:\n  b: 2\n  a: 1\n',
+      'settings:\n  a: 1\n  b: 2\n',
+      'config',
+    )
+
+    expect(r.conflicts).toHaveLength(0)
+    expect(r.merged).toContain('settings:')
+  })
   it('mcp: both delete same id -> not in merged', () => {
     const r = threeWayMerge(
       '- id: x\n  type: stdio\n  command: c\n  targets: [claude-code]\n',

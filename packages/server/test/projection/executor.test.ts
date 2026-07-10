@@ -163,7 +163,7 @@ describe('executeProjection', () => {
       adapters: { 'claude-code': new ClaudeCodeAdapter() },
       installedAgents: installed,
       resolveSkillSrc: () => null,
-      logger: { error: (o) => logs.push(JSON.stringify(o)), warn: () => {} },
+      logger: { error: (_message, context) => logs.push(JSON.stringify(context)), warn: () => {} },
     })
     expect(res.ok).toBe(false)
     await expect(fs.readFile(join(home, '.claude.json'))).rejects.toMatchObject({ code: 'ENOENT' })

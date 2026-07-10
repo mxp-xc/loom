@@ -1,45 +1,82 @@
-import { Hono, type Context } from 'hono'
+import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import { isAbsolute, join, normalize } from 'node:path'
+import { z } from 'zod'
 import {
   AgentIdSchema,
   VarDefinitionSchema,
   VarOverrideSchema,
   VAR_KEY,
-  deleteVariable,
-  danglingDiagnostics,
-  inspectVariableDelete,
   normalizeVarEntry,
-  prepareVarsMutationPersistence,
-  renameVariable,
-  resolveVarsLifecycle,
-  setVariable,
   type VarEntry,
-  type VarsLifecycleResolution,
   type VarsDiagnostic,
-  type VarsEnvironment,
-  type VarsMutationResult,
-  validateVarDraft,
 } from '@loom/core'
 import { logger } from '../../lib/logger.js'
-import { VarsStore } from '../../vars/store.js'
-import {
-  builtinForAgent,
-  deleteAgentAwareBaseKey,
-  readAgentAwareVars,
-  readAgentAwareVarsWithDiagnostics,
-  renameAgentAwareBaseKey,
-  resolveAgentAwareVars,
-  validateAgentAwareBaseDefinitions,
-  writeAgentAwareBase,
-  writeAgentAwareOverride,
-  type VarsLayerKind,
-} from '../../vars/agent-aware.js'
+import { VarsApplication, VarsApplicationError } from '../../vars/application.js'
+import { type VarsLayerKind } from '../../vars/agent-aware.js'
 import { readLocalConfig } from '../repo-config.js'
+import { paramValidator, queryValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
 
 const apiLogger = logger.child('vars-api')
-const MASK = '••••••••'
 const ENVIRONMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/
+const NonEmptyString = z.string().min(1)
+const RepoPathSchema = z
+  .string()
+  .transform((value) => value.trim())
+  .refine((value) => value.length > 0)
+const EnvironmentNameSchema = NonEmptyString.regex(ENVIRONMENT).refine(
+  (value) => !value.includes('..'),
+)
+const VarKeySchema = NonEmptyString.regex(VAR_KEY)
+const VarEntryRequestSchema = z.unknown().transform((value, ctx): VarEntry => {
+  const entry = normalizeVarEntry(value)
+  if (entry) return entry
+  ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'entry 无效' })
+  return z.NEVER
+})
+
+const VarsRepoQuery = z.object({ repoPath: RepoPathSchema })
+const VarsAgentQuery = VarsRepoQuery.extend({ agent: AgentIdSchema })
+const VarsEnvironmentParams = z.object({ environment: EnvironmentNameSchema })
+const VarsRepoBody = z.object({ repoPath: RepoPathSchema })
+const VarsKeyBody = VarsRepoBody.extend({ key: VarKeySchema })
+const SetBaseKeyBody = VarsKeyBody.extend({ definition: VarDefinitionSchema })
+const RenameBaseKeyBody = VarsRepoBody.extend({
+  oldKey: VarKeySchema,
+  newKey: VarKeySchema,
+})
+const SetOverrideBody = VarsKeyBody.extend({
+  layer: z.enum(['base-agent', 'local', 'local-agent']),
+  agent: AgentIdSchema.optional(),
+  override: VarOverrideSchema,
+}).superRefine(requireAgentForAgentLayer)
+const ClearOverrideBody = VarsKeyBody.extend({
+  layer: z.enum(['base-agent', 'local', 'local-agent']),
+  agent: AgentIdSchema.optional(),
+}).superRefine(requireAgentForAgentLayer)
+const EnvironmentBody = VarsRepoBody.extend({ environment: EnvironmentNameSchema })
+const SetVariableBody = EnvironmentBody.extend({
+  key: VarKeySchema,
+  entry: VarEntryRequestSchema,
+})
+const RenameVariableBody = EnvironmentBody.extend({
+  oldKey: VarKeySchema,
+  newKey: VarKeySchema,
+})
+const DeleteImpactBody = EnvironmentBody.extend({ key: VarKeySchema })
+const DeleteVariableBody = DeleteImpactBody.extend({
+  confirmed: z.boolean().optional(),
+  impactToken: z.string().optional(),
+})
+const ChainBody = VarsRepoBody.extend({
+  chain: z.array(EnvironmentNameSchema).min(1),
+})
+const ValidateVariableBody = EnvironmentBody.extend({
+  key: VarKeySchema,
+  entry: VarEntryRequestSchema,
+  chain: z.array(EnvironmentNameSchema).min(1),
+})
+const RevealVariableBody = DeleteImpactBody
 type AccessMode = 'read' | 'write'
 type AccessWaiter = { mode: AccessMode; grant: (release: () => void) => void }
 type AccessState = { readers: number; writer: boolean; queue: AccessWaiter[] }
@@ -57,129 +94,78 @@ class ApiError extends Error {
   }
 }
 
-function object(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new ApiError(400, 'invalid_request', '请求体必须是对象')
-  return value as Record<string, unknown>
+function requireAgentForAgentLayer(
+  value: { layer: Exclude<VarsLayerKind, 'base'>; agent?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.layer === 'local') return
+  if (value.agent !== undefined) return
+  ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['agent'], message: 'agent 无效' })
 }
 
-function textField(value: unknown, name: string): string {
-  if (typeof value !== 'string' || value.length === 0)
-    throw new ApiError(400, 'invalid_request', `${name} 无效`)
-  return value
+const varsValidationOptions = {
+  error: 'invalid_request',
+  body: (error: string, issues: z.ZodIssue[]) => ({
+    ok: false,
+    error: { code: error, message: varsValidationMessage(issues) },
+  }),
 }
 
-function repoField(value: unknown): string {
-  return (
-    textField(value, 'repoPath').trim() ||
-    (() => {
-      throw new ApiError(400, 'invalid_request', 'repoPath 无效')
-    })()
-  )
+function varsQueryValidator<T extends z.ZodTypeAny>(schema: T) {
+  return queryValidator(schema, varsValidationOptions)
 }
 
-function environmentField(value: unknown): string {
-  const environment = textField(value, 'environment')
-  if (!ENVIRONMENT.test(environment) || environment.includes('..'))
-    throw new ApiError(400, 'invalid_request', 'environment 无效')
-  return environment
+function varsParamValidator<T extends z.ZodTypeAny>(schema: T) {
+  return paramValidator(schema, varsValidationOptions)
 }
 
-function keyField(value: unknown, name = 'key'): string {
-  const key = textField(value, name)
-  if (!VAR_KEY.test(key)) throw new ApiError(400, 'invalid_request', `${name} 无效`)
-  return key
-}
-
-function entryField(value: unknown): VarEntry {
-  const entry = normalizeVarEntry(value)
-  if (entry) return entry
-  throw new ApiError(400, 'invalid_request', 'entry 无效')
-}
-
-function definitionField(value: unknown) {
-  const result = VarDefinitionSchema.safeParse(value)
-  if (result.success) return result.data
-  throw new ApiError(400, 'invalid_request', 'definition 无效')
-}
-
-function overrideField(value: unknown) {
-  const result = VarOverrideSchema.safeParse(value)
-  if (result.success) return result.data
-  throw new ApiError(400, 'invalid_request', 'override 无效')
-}
-
-function agentField(value: unknown) {
-  const result = AgentIdSchema.safeParse(value)
-  if (result.success) return result.data
-  throw new ApiError(400, 'invalid_request', 'agent 无效')
-}
-
-function overrideLayerField(value: unknown): Exclude<VarsLayerKind, 'base'> {
-  if (value === 'base-agent' || value === 'local' || value === 'local-agent') return value
-  throw new ApiError(400, 'invalid_request', 'layer 无效')
-}
-
-function assertOverrideMatchesDefinition(definition: VarEntry, override: { value: unknown }): void {
-  const value = override.value
-  const matches =
-    definition.type === 'string' || definition.type === 'secret'
-      ? typeof value === 'string'
-      : definition.type === 'number'
-        ? typeof value === 'number' && Number.isFinite(value)
-        : definition.type === 'boolean'
-          ? typeof value === 'boolean'
-          : true
-  if (!matches) throw new ApiError(422, 'override_type_mismatch', '覆盖值类型与 base 定义不匹配')
-}
-
-async function body(c: Context): Promise<Record<string, unknown>> {
-  try {
-    return object(await c.req.json())
-  } catch (error) {
-    if (error instanceof ApiError) throw error
-    throw new ApiError(400, 'invalid_json', 'JSON 请求体无效')
+function varsJsonValidator<T extends z.ZodTypeAny>(schema: T): MiddlewareHandler {
+  return async (c, next) => {
+    let value: unknown
+    try {
+      value = await c.req.json()
+    } catch {
+      return errorResponse(c, new ApiError(400, 'invalid_json', 'JSON 请求体无效'), 'json-parse')
+    }
+    const result = await schema.safeParseAsync(value)
+    if (!result.success) {
+      return errorResponse(
+        c,
+        new ApiError(400, 'invalid_request', varsValidationMessage(result.error.issues)),
+        'json-validation',
+      )
+    }
+    c.req.addValidatedData('json', result.data)
+    return next()
   }
 }
 
-function maskEntry(entry: VarEntry): VarEntry | { type: 'secret'; value: string; masked: true } {
-  return entry.type === 'secret' ? ({ type: 'secret', value: MASK, masked: true } as const) : entry
+function validJson<T extends z.ZodTypeAny>(c: Context, schema: T): z.infer<T> {
+  void schema
+  return (c.req as unknown as { valid: (target: 'json') => z.infer<T> }).valid('json')
 }
 
-function maskEnvironment(environment: VarsEnvironment) {
-  return {
-    ...environment,
-    entries: Object.fromEntries(
-      Object.entries(environment.entries).map(([key, entry]) => [key, maskEntry(entry)]),
-    ),
-  }
-}
-
-function presentResolvedValues(
-  values: Record<string, VarEntry>,
-  secretTaintedKeys: string[],
-): Record<string, VarEntry | { type: VarEntry['type']; value: string; masked: true }> {
-  const tainted = new Set(secretTaintedKeys)
-  return Object.fromEntries(
-    Object.entries(values).map(([key, entry]) => [
-      key,
-      tainted.has(key) ? { ...entry, value: MASK, masked: true } : entry,
-    ]),
-  )
-}
-
-function presentResolution(resolution: Extract<VarsLifecycleResolution, { ok: true }>) {
-  return {
-    ok: true,
-    values: presentResolvedValues(resolution.values, resolution.secretTaintedKeys),
-    sources: resolution.sources,
-    dependencies: resolution.dependencies,
-    diagnostics: resolution.diagnostics,
-  }
+function varsValidationMessage(issues: z.ZodIssue[]): string {
+  const field = issues[0]?.path[0]
+  if (typeof field !== 'string') return '请求体必须是对象'
+  if (field === 'repoPath') return 'repoPath 无效'
+  if (field === 'environment') return 'environment 无效'
+  if (field === 'key') return 'key 无效'
+  if (field === 'oldKey') return 'oldKey 无效'
+  if (field === 'newKey') return 'newKey 无效'
+  if (field === 'definition') return 'definition 无效'
+  if (field === 'override') return 'override 无效'
+  if (field === 'agent') return 'agent 无效'
+  if (field === 'layer') return 'layer 无效'
+  if (field === 'chain') return 'chain 无效'
+  if (field === 'entry') return 'entry 无效'
+  if (field === 'confirmed') return 'confirmed 无效'
+  if (field === 'impactToken') return 'impactToken 无效'
+  return '请求无效'
 }
 
 function errorResponse(c: Context, error: unknown, operation: string, repoPath?: string) {
-  if (error instanceof ApiError) {
+  if (error instanceof ApiError || error instanceof VarsApplicationError) {
     return c.json(
       {
         ok: false,
@@ -221,18 +207,6 @@ async function run(
   } catch (error) {
     return errorResponse(c, error, operation, repoPath)
   }
-}
-
-function storeFor(deps: RouteDeps, repoPath: string): VarsStore {
-  return new VarsStore(repoPath, deps.fs, {
-    error: (context, message) => apiLogger.error(message, context),
-  })
-}
-
-async function loadAll(store: VarsStore): Promise<Record<string, VarsEnvironment>> {
-  const values: Record<string, VarsEnvironment> = Object.create(null)
-  for (const environment of await store.list()) values[environment] = await store.read(environment)
-  return values
 }
 
 async function resolveAuthorizedRepo(deps: RouteDeps, repoPath: string): Promise<string> {
@@ -329,608 +303,327 @@ export function varsAccessPendingWritersForTest(): number {
   )
 }
 
-type MutationFailure = Extract<ReturnType<typeof prepareVarsMutationPersistence>, { ok: false }>
-
-function mutationError(failure: MutationFailure): ApiError {
-  const diagnostic = failure.diagnostic
-  const status =
-    diagnostic.code === 'environment_not_found' || diagnostic.code === 'not_found'
-      ? 404
-      : diagnostic.code === 'variable_conflict' ||
-          diagnostic.code === 'impact_changed' ||
-          diagnostic.code === 'delete_confirmation_required'
-        ? 409
-        : 422
-  return new ApiError(
-    status,
-    diagnostic.code,
-    diagnostic.message,
-    failure.diagnostics,
-    failure.deleteImpact ? { deleteImpact: failure.deleteImpact } : undefined,
-  )
-}
-
-async function persistMutation(store: VarsStore, result: VarsMutationResult): Promise<void> {
-  const plan = prepareVarsMutationPersistence(result)
-  if (!plan.ok) throw mutationError(plan)
-  await store.writeMany(plan.environments)
-}
-
 export function createVarsRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
+  const varsApp = new VarsApplication(deps.fs, deps.home)
 
-  app.get('/vars/preview', (c) =>
+  app.get('/vars/preview', varsQueryValidator(VarsAgentQuery), (c) =>
     run(
       c,
       'agent-aware-preview',
       async () => {
-        const repoPath = repoField(c.req.query('repoPath'))
-        const agent = AgentIdSchema.safeParse(c.req.query('agent'))
-        if (!agent.success) throw new ApiError(400, 'invalid_request', 'agent 无效')
-        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
-          const result = await resolveAgentAwareVars(
-            deps.fs,
-            deps.home,
-            authorizedRepoPath,
-            agent.data,
-          )
-          if (!result.ok)
-            throw new ApiError(422, 'resolution_failed', '变量解析失败', result.diagnostics)
-          return c.json({ ok: true, ...result })
-        })
+        const { repoPath, agent } = c.req.valid('query')
+        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) =>
+          c.json(await varsApp.preview(authorizedRepoPath, agent)),
+        )
       },
-      c.req.query('repoPath'),
+      c.req.valid('query').repoPath,
     ),
   )
-  app.get('/vars/matrix', (c) =>
+  app.get('/vars/matrix', varsQueryValidator(VarsAgentQuery), (c) =>
     run(
       c,
       'agent-aware-matrix',
       async () => {
-        const repoPath = repoField(c.req.query('repoPath'))
-        const agent = agentField(c.req.query('agent'))
-        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
-          const [readResult, resolution] = await Promise.all([
-            readAgentAwareVarsWithDiagnostics(deps.fs, deps.home, authorizedRepoPath, agent),
-            resolveAgentAwareVars(deps.fs, deps.home, authorizedRepoPath, agent),
-          ])
-          const snapshot = readResult.snapshot
-          const mergedDiagnostics = [
-            ...readResult.diagnostics,
-            ...(!resolution.ok ? resolution.diagnostics : []),
-          ]
-          const builtinKeys = Object.keys(
-            resolution.ok
-              ? Object.fromEntries(
-                  Object.entries(resolution.values).filter(
-                    ([key]) => resolution.sources[key]?.locality === 'builtin',
-                  ),
-                )
-              : builtinForAgent(agent),
-          ).sort()
-          const userKeys = [
-            ...new Set([
-              ...Object.keys(snapshot.base),
-              ...Object.keys(snapshot.baseAgent),
-              ...Object.keys(snapshot.local),
-              ...Object.keys(snapshot.localAgent),
-            ]),
-          ].sort()
-          return c.json({
-            ok: true,
-            agent,
-            builtinKeys,
-            userKeys,
-            snapshot,
-            resolution: resolution.ok ? resolution : { ok: false, diagnostics: mergedDiagnostics },
-          })
-        })
+        const { repoPath, agent } = c.req.valid('query')
+        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) =>
+          c.json(await varsApp.matrix(authorizedRepoPath, agent)),
+        )
       },
-      c.req.query('repoPath'),
+      c.req.valid('query').repoPath,
     ),
   )
 
-  app.put('/vars/base-key', async (c) => {
-    let request: Record<string, unknown>
-    try {
-      request = await body(c)
-    } catch (error) {
-      return errorResponse(c, error, 'set-base-key')
-    }
+  app.put('/vars/base-key', varsJsonValidator(SetBaseKeyBody), async (c) => {
+    const request = validJson(c, SetBaseKeyBody)
     return run(
       c,
       'set-base-key',
       async () => {
-        const repoPath = repoField(request.repoPath)
-        const key = keyField(request.key)
-        const definition = definitionField(request.definition)
-        if (key.startsWith('LOOM_'))
-          throw new ApiError(400, 'reserved_builtin_key', 'LOOM_ 前缀保留给 builtin')
+        const { repoPath, key, definition } = request
         return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
-          const snapshot = await readAgentAwareVars(deps.fs, deps.home, authorizedRepoPath, 'codex')
-          snapshot.base[key] = definition
-          const diagnostics = await validateAgentAwareBaseDefinitions(
-            deps.fs,
-            deps.home,
-            authorizedRepoPath,
-            snapshot.base,
-          )
-          if (diagnostics.length > 0)
-            throw new ApiError(422, 'validation_failed', '变量定义会导致覆盖层失效', diagnostics)
-          await writeAgentAwareBase(deps.fs, authorizedRepoPath, snapshot.base)
+          await varsApp.setBaseKey(authorizedRepoPath, key, definition)
           return c.json({ ok: true })
         })
       },
-      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+      request.repoPath,
     )
   })
 
-  app.delete('/vars/base-key', async (c) => {
-    let request: Record<string, unknown>
-    try {
-      request = await body(c)
-    } catch (error) {
-      return errorResponse(c, error, 'delete-base-key')
-    }
+  app.delete('/vars/base-key', varsJsonValidator(VarsKeyBody), async (c) => {
+    const request = validJson(c, VarsKeyBody)
     return run(
       c,
       'delete-base-key',
       async () => {
-        const repoPath = repoField(request.repoPath)
-        const key = keyField(request.key)
+        const { repoPath, key } = request
         return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
-          const result = await deleteAgentAwareBaseKey(deps.fs, deps.home, authorizedRepoPath, key)
-          if (result.status === 'missing') throw new ApiError(404, 'not_found', '变量不存在')
-          if (result.status === 'blocked')
-            throw new ApiError(
-              409,
-              'delete_blocked_by_reference',
-              '变量仍被引用',
-              result.diagnostics,
-            )
+          await varsApp.deleteBaseKey(authorizedRepoPath, key)
           return c.json({ ok: true })
         })
       },
-      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+      request.repoPath,
     )
   })
 
-  app.post('/vars/base-key/rename', async (c) => {
-    let request: Record<string, unknown>
-    try {
-      request = await body(c)
-    } catch (error) {
-      return errorResponse(c, error, 'rename-base-key')
-    }
+  app.post('/vars/base-key/rename', varsJsonValidator(RenameBaseKeyBody), async (c) => {
+    const request = validJson(c, RenameBaseKeyBody)
     return run(
       c,
       'rename-base-key',
       async () => {
-        const repoPath = repoField(request.repoPath)
-        const oldKey = keyField(request.oldKey, 'oldKey')
-        const newKey = keyField(request.newKey, 'newKey')
-        if (newKey.startsWith('LOOM_'))
-          throw new ApiError(400, 'reserved_builtin_key', 'LOOM_ 前缀保留给 builtin')
+        const { repoPath, oldKey, newKey } = request
         return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
-          const result = await renameAgentAwareBaseKey(
-            deps.fs,
-            deps.home,
-            authorizedRepoPath,
-            oldKey,
-            newKey,
-          )
-          if (result.status === 'missing') throw new ApiError(404, 'not_found', '变量不存在')
-          if (result.status === 'conflict')
-            throw new ApiError(409, 'variable_conflict', '目标变量已存在')
-          if (result.status === 'blocked')
-            throw new ApiError(422, 'validation_failed', '变量覆盖层无效', result.diagnostics)
+          await varsApp.renameBaseKey(authorizedRepoPath, oldKey, newKey)
           return c.json({ ok: true })
         })
       },
-      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+      request.repoPath,
     )
   })
 
-  app.put('/vars/override', async (c) => {
-    let request: Record<string, unknown>
-    try {
-      request = await body(c)
-    } catch (error) {
-      return errorResponse(c, error, 'set-override')
-    }
+  app.put('/vars/override', varsJsonValidator(SetOverrideBody), async (c) => {
+    const request = validJson(c, SetOverrideBody)
     return run(
       c,
       'set-override',
       async () => {
-        const repoPath = repoField(request.repoPath)
-        const key = keyField(request.key)
-        const layer = overrideLayerField(request.layer)
-        const agent =
-          layer === 'base-agent' || layer === 'local-agent' ? agentField(request.agent) : undefined
-        const override = overrideField(request.override)
+        const { repoPath, key, layer, override } = request
         return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
-          const snapshot = await readAgentAwareVars(
-            deps.fs,
-            deps.home,
+          await varsApp.setOverride(
             authorizedRepoPath,
-            agent ?? 'codex',
-          )
-          const definition = snapshot.base[key]
-          if (!definition) throw new ApiError(404, 'not_found', '变量不存在')
-          assertOverrideMatchesDefinition(definition, override)
-          const target =
-            layer === 'base-agent'
-              ? snapshot.baseAgent
-              : layer === 'local'
-                ? snapshot.local
-                : snapshot.localAgent
-          target[key] = override
-          await writeAgentAwareOverride(
-            deps.fs,
-            deps.home,
-            authorizedRepoPath,
-            layer,
-            agent,
-            target,
+            layer === 'local'
+              ? { layer, key, override }
+              : { layer, agent: request.agent!, key, override },
           )
           return c.json({ ok: true })
         })
       },
-      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+      request.repoPath,
     )
   })
 
-  app.delete('/vars/override', async (c) => {
-    let request: Record<string, unknown>
-    try {
-      request = await body(c)
-    } catch (error) {
-      return errorResponse(c, error, 'clear-override')
-    }
+  app.delete('/vars/override', varsJsonValidator(ClearOverrideBody), async (c) => {
+    const request = validJson(c, ClearOverrideBody)
     return run(
       c,
       'clear-override',
       async () => {
-        const repoPath = repoField(request.repoPath)
-        const key = keyField(request.key)
-        const layer = overrideLayerField(request.layer)
-        const agent =
-          layer === 'base-agent' || layer === 'local-agent' ? agentField(request.agent) : undefined
+        const { repoPath, key, layer } = request
         return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
-          const snapshot = await readAgentAwareVars(
-            deps.fs,
-            deps.home,
+          await varsApp.clearOverride(
             authorizedRepoPath,
-            agent ?? 'codex',
-          )
-          const target =
-            layer === 'base-agent'
-              ? snapshot.baseAgent
-              : layer === 'local'
-                ? snapshot.local
-                : snapshot.localAgent
-          delete target[key]
-          await writeAgentAwareOverride(
-            deps.fs,
-            deps.home,
-            authorizedRepoPath,
-            layer,
-            agent,
-            target,
+            layer === 'local' ? { layer, key } : { layer, agent: request.agent!, key },
           )
           return c.json({ ok: true })
         })
       },
-      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+      request.repoPath,
     )
   })
-  app.get('/vars/environments', (c) =>
+  app.get('/vars/environments', varsQueryValidator(VarsRepoQuery), (c) =>
     run(
       c,
       'list-environments',
       async () => {
-        const repoPath = repoField(c.req.query('repoPath'))
-        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
-          const values = await loadAll(storeFor(deps, authorizedRepoPath))
-          return c.json({
-            ok: true,
-            environments: Object.keys(values).sort(),
-            diagnostics: danglingDiagnostics(values),
-          })
-        })
-      },
-      c.req.query('repoPath'),
-    ),
-  )
-
-  app.get('/vars/environments/:environment', (c) =>
-    run(
-      c,
-      'get-environment',
-      async () => {
-        const repoPath = repoField(c.req.query('repoPath'))
-        const environment = environmentField(c.req.param('environment'))
+        const { repoPath } = c.req.valid('query')
         return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) =>
-          c.json({
-            ok: true,
-            name: environment,
-            environment: maskEnvironment(
-              await storeFor(deps, authorizedRepoPath).read(environment),
-            ),
-          }),
+          c.json({ ok: true, ...(await varsApp.listEnvironments(authorizedRepoPath)) }),
         )
       },
-      c.req.query('repoPath'),
+      c.req.valid('query').repoPath,
     ),
   )
 
-  app.post('/vars/environments', async (c) => {
-    let request: Record<string, unknown>
-    try {
-      request = await body(c)
-    } catch (error) {
-      return errorResponse(c, error, 'create-environment')
-    }
-    const candidateRepo = typeof request.repoPath === 'string' ? request.repoPath : undefined
+  app.get(
+    '/vars/environments/:environment',
+    varsQueryValidator(VarsRepoQuery),
+    varsParamValidator(VarsEnvironmentParams),
+    (c) =>
+      run(
+        c,
+        'get-environment',
+        async () => {
+          const { repoPath } = c.req.valid('query')
+          const { environment } = c.req.valid('param')
+          return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) =>
+            c.json({
+              ok: true,
+              ...(await varsApp.getEnvironment(authorizedRepoPath, environment)),
+            }),
+          )
+        },
+        c.req.valid('query').repoPath,
+      ),
+  )
+
+  app.post('/vars/environments', varsJsonValidator(EnvironmentBody), async (c) => {
+    const request = validJson(c, EnvironmentBody)
     return run(
       c,
       'create-environment',
       async () => {
-        const repoPath = repoField(request.repoPath)
-        const environment = environmentField(request.environment)
+        const { repoPath, environment } = request
         await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath) =>
-          storeFor(deps, authorizedRepoPath).create(environment, {
-            format: 'typed',
-            entries: {},
-          }),
+          varsApp.createEnvironment(authorizedRepoPath, environment),
         )
         return c.json({ ok: true, environment }, 201)
       },
-      candidateRepo,
+      request.repoPath,
     )
   })
 
-  app.delete('/vars/environments', async (c) => {
-    let request: Record<string, unknown>
-    try {
-      request = await body(c)
-    } catch (error) {
-      return errorResponse(c, error, 'delete-environment')
-    }
+  app.delete('/vars/environments', varsJsonValidator(EnvironmentBody), async (c) => {
+    const request = validJson(c, EnvironmentBody)
     return run(
       c,
       'delete-environment',
       async () => {
-        const repoPath = repoField(request.repoPath)
-        const environment = environmentField(request.environment)
+        const { repoPath, environment } = request
         await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath) =>
-          storeFor(deps, authorizedRepoPath).delete(environment),
+          varsApp.deleteEnvironment(authorizedRepoPath, environment),
         )
         return c.json({ ok: true })
       },
-      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+      request.repoPath,
     )
   })
 
-  app.put('/vars/variables', async (c) =>
-    mutationRequest(c, deps, 'set-variable', (request, environments) =>
-      setVariable(
-        environments,
-        environmentField(request.environment),
-        keyField(request.key),
-        entryField(request.entry),
-      ),
-    ),
-  )
+  app.put('/vars/variables', varsJsonValidator(SetVariableBody), async (c) => {
+    const request = validJson(c, SetVariableBody)
+    return run(
+      c,
+      'set-variable',
+      async () => {
+        const { repoPath, environment, key, entry } = request
+        const result = await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath) =>
+          varsApp.setVariable(authorizedRepoPath, {
+            environment,
+            key,
+            entry,
+          }),
+        )
+        return c.json({ ok: true, changed: result.changed, diagnostics: result.diagnostics })
+      },
+      request.repoPath,
+    )
+  })
 
-  app.post('/vars/variables/rename', async (c) =>
-    mutationRequest(c, deps, 'rename-variable', (request, environments) =>
-      renameVariable(
-        environments,
-        environmentField(request.environment),
-        keyField(request.oldKey, 'oldKey'),
-        keyField(request.newKey, 'newKey'),
-      ),
-    ),
-  )
+  app.post('/vars/variables/rename', varsJsonValidator(RenameVariableBody), async (c) => {
+    const request = validJson(c, RenameVariableBody)
+    return run(
+      c,
+      'rename-variable',
+      async () => {
+        const { repoPath, environment, oldKey, newKey } = request
+        const result = await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath) =>
+          varsApp.renameVariable(authorizedRepoPath, {
+            environment,
+            oldKey,
+            newKey,
+          }),
+        )
+        return c.json({ ok: true, changed: result.changed, diagnostics: result.diagnostics })
+      },
+      request.repoPath,
+    )
+  })
 
-  app.post('/vars/variables/delete-impact', async (c) => {
-    let request: Record<string, unknown>
-    try {
-      request = await body(c)
-    } catch (error) {
-      return errorResponse(c, error, 'delete-impact')
-    }
+  app.post('/vars/variables/delete-impact', varsJsonValidator(DeleteImpactBody), async (c) => {
+    const request = validJson(c, DeleteImpactBody)
     return run(
       c,
       'delete-impact',
       async () => {
-        const repoPath = repoField(request.repoPath)
-        const environment = environmentField(request.environment)
-        const key = keyField(request.key)
+        const { repoPath, environment, key } = request
         return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
-          const environments = await loadAll(storeFor(deps, authorizedRepoPath))
-          if (!environments[environment])
-            throw new ApiError(404, 'environment_not_found', '环境不存在')
-          if (!Object.hasOwn(environments[environment].entries, key))
-            throw new ApiError(404, 'not_found', '变量不存在')
           return c.json({
             ok: true,
-            impact: inspectVariableDelete(environments, environment, key),
+            impact: await varsApp.deleteImpact(authorizedRepoPath, environment, key),
           })
         })
       },
-      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+      request.repoPath,
     )
   })
 
-  app.delete('/vars/variables', async (c) =>
-    mutationRequest(c, deps, 'delete-variable', (request, environments) => {
-      const confirmed = request.confirmed === true
-      if (request.confirmed !== undefined && typeof request.confirmed !== 'boolean')
-        throw new ApiError(400, 'invalid_request', 'confirmed 无效')
-      if (request.impactToken !== undefined && typeof request.impactToken !== 'string')
-        throw new ApiError(400, 'invalid_request', 'impactToken 无效')
-      return deleteVariable(
-        environments,
-        environmentField(request.environment),
-        keyField(request.key),
-        confirmed
-          ? { confirmed: true, expectedImpactToken: request.impactToken as string | undefined }
-          : { confirmed: false },
-      )
-    }),
-  )
+  app.delete('/vars/variables', varsJsonValidator(DeleteVariableBody), async (c) => {
+    const request = validJson(c, DeleteVariableBody)
+    return run(
+      c,
+      'delete-variable',
+      async () => {
+        const { repoPath, environment, key } = request
+        const confirmed = request.confirmed === true
+        const result = await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath) =>
+          varsApp.deleteVariable(authorizedRepoPath, {
+            environment,
+            key,
+            confirmed,
+            ...(request.impactToken !== undefined ? { impactToken: request.impactToken } : {}),
+          }),
+        )
+        return c.json({ ok: true, changed: result.changed, diagnostics: result.diagnostics })
+      },
+      request.repoPath,
+    )
+  })
 
-  app.post('/vars/resolve', async (c) => {
-    let request: Record<string, unknown>
-    try {
-      request = await body(c)
-    } catch (error) {
-      return errorResponse(c, error, 'resolve')
-    }
+  app.post('/vars/resolve', varsJsonValidator(ChainBody), async (c) => {
+    const request = validJson(c, ChainBody)
     return run(
       c,
       'resolve',
       async () => {
-        const repoPath = repoField(request.repoPath)
-        if (
-          !Array.isArray(request.chain) ||
-          request.chain.length === 0 ||
-          request.chain.some((item) => {
-            try {
-              environmentField(item)
-              return false
-            } catch {
-              return true
-            }
-          })
-        ) {
-          throw new ApiError(400, 'invalid_request', 'chain 无效')
-        }
+        const { repoPath, chain } = request
         return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
-          const result = resolveVarsLifecycle(
-            await loadAll(storeFor(deps, authorizedRepoPath)),
-            request.chain as string[],
-          )
-          if (!result.ok)
-            throw new ApiError(422, 'resolution_failed', '变量解析失败', result.diagnostics)
-          return c.json({
-            ok: true,
-            values: presentResolvedValues(result.values, result.secretTaintedKeys),
-            sources: result.sources,
-            dependencies: result.dependencies,
-            diagnostics: result.diagnostics,
-          })
+          return c.json(await varsApp.resolve(authorizedRepoPath, chain))
         })
       },
-      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+      request.repoPath,
     )
   })
 
-  app.post('/vars/validate', async (c) => {
-    let request: Record<string, unknown>
-    try {
-      request = await body(c)
-    } catch (error) {
-      return errorResponse(c, error, 'validate-variable')
-    }
+  app.post('/vars/validate', varsJsonValidator(ValidateVariableBody), async (c) => {
+    const request = validJson(c, ValidateVariableBody)
     return run(
       c,
       'validate-variable',
       async () => {
-        const repoPath = repoField(request.repoPath)
-        const environment = environmentField(request.environment)
-        const key = keyField(request.key)
-        const entry = entryField(request.entry)
-        if (
-          !Array.isArray(request.chain) ||
-          request.chain.length === 0 ||
-          request.chain.some((item) => {
-            try {
-              environmentField(item)
-              return false
-            } catch {
-              return true
-            }
-          })
-        )
-          throw new ApiError(400, 'invalid_request', 'chain 无效')
+        const { repoPath, environment, key, entry, chain } = request
         return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
-          const environments = await loadAll(storeFor(deps, authorizedRepoPath))
-          const result = validateVarDraft(environments, {
-            environment,
-            key,
-            entry,
-            chain: request.chain as string[],
-          })
-          if (!result.ok)
-            throw new ApiError(422, 'validation_failed', '变量验证失败', result.diagnostics)
           return c.json({
             ok: true,
-            resolution: presentResolution(result.resolution),
+            ...(await varsApp.validateDraft(authorizedRepoPath, {
+              environment,
+              key,
+              entry,
+              chain,
+            })),
           })
         })
       },
-      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+      request.repoPath,
     )
   })
 
-  app.post('/vars/variables/reveal', async (c) => {
-    let request: Record<string, unknown>
-    try {
-      request = await body(c)
-    } catch (error) {
-      return errorResponse(c, error, 'reveal-variable')
-    }
+  app.post('/vars/variables/reveal', varsJsonValidator(RevealVariableBody), async (c) => {
+    const request = validJson(c, RevealVariableBody)
     return run(
       c,
       'reveal-variable',
       async () => {
-        const repoPath = repoField(request.repoPath)
-        const environment = environmentField(request.environment)
-        const key = keyField(request.key)
+        const { repoPath, environment, key } = request
         return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
-          const value = await storeFor(deps, authorizedRepoPath).read(environment)
-          if (!Object.hasOwn(value.entries, key)) throw new ApiError(404, 'not_found', '变量不存在')
-          return c.json({ ok: true, entry: value.entries[key] })
+          return c.json({
+            ok: true,
+            entry: await varsApp.revealVariable(authorizedRepoPath, environment, key),
+          })
         })
       },
-      typeof request.repoPath === 'string' ? request.repoPath : undefined,
+      request.repoPath,
     )
   })
 
   return app
-}
-
-async function mutationRequest(
-  c: Context,
-  deps: RouteDeps,
-  operation: string,
-  mutate: (
-    request: Record<string, unknown>,
-    environments: Record<string, VarsEnvironment>,
-  ) => VarsMutationResult,
-): Promise<Response> {
-  let request: Record<string, unknown>
-  try {
-    request = await body(c)
-  } catch (error) {
-    return errorResponse(c, error, operation)
-  }
-  return run(
-    c,
-    operation,
-    async () => {
-      const repoPath = repoField(request.repoPath)
-      const result = await withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
-        const store = storeFor(deps, authorizedRepoPath)
-        const mutation = mutate(request, await loadAll(store))
-        await persistMutation(store, mutation)
-        return mutation
-      })
-      return c.json({ ok: true, changed: result.changed, diagnostics: result.diagnostics })
-    },
-    typeof request.repoPath === 'string' ? request.repoPath : undefined,
-  )
 }

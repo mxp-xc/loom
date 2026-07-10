@@ -45,10 +45,7 @@ export function createProjectionDeps(
       if (link.source === 'local') return join(repoPath, 'assets', 'skills', link.skillId)
       return resolveSourceSkillDir(repoPath, link.source)
     },
-    logger: {
-      error: (o, m) => projectionLogger.error(m, o as Record<string, unknown>),
-      warn: (o, m) => projectionLogger.warn(m, o as Record<string, unknown>),
-    },
+    logger: projectionLogger,
     getManagedMcpIds: async (agent) => new Set((await readState())[agent] ?? []),
     setManagedMcpIds: async (agent, ids) => {
       const data = await readState()

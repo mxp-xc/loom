@@ -102,6 +102,13 @@ describe('memory routes', () => {
     expect(cfg).not.toContain('active_memory: v1')
   })
 
+  it('DELETE /memory rejects a missing name query before resolving a file path', async () => {
+    const res = await req('DELETE', '/api/memory?repo=default')
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_name' })
+  })
+
   it('POST /memory/rename renames + syncs active', async () => {
     writeFileSync(join(home, '.loom', 'repos', 'default', 'memories', 'v1.md'), 'content')
     writeFileSync(join(home, '.loom', 'repos', 'default', 'config.yaml'), 'active_memory: v1\n')

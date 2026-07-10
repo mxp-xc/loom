@@ -32,8 +32,21 @@ function isPlain(v: unknown): v is Record<string, unknown> {
 function deepEq(a: unknown, b: unknown): boolean {
   if (a === b) return true
   if (a == null || b == null) return false
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    return a.every((item, index) => deepEq(item, b[index]))
+  }
   if (typeof a !== 'object' || typeof b !== 'object') return false
-  return JSON.stringify(a) === JSON.stringify(b)
+  const aTag = Object.prototype.toString.call(a)
+  const bTag = Object.prototype.toString.call(b)
+  if (aTag !== bTag) return false
+  if (aTag !== '[object Object]') return JSON.stringify(a) === JSON.stringify(b)
+  const aObj = asObj(a)
+  const bObj = asObj(b)
+  const aKeys = Object.keys(aObj)
+  const bKeys = Object.keys(bObj)
+  if (aKeys.length !== bKeys.length) return false
+  return aKeys.every((key) => Object.hasOwn(bObj, key) && deepEq(aObj[key], bObj[key]))
 }
 
 function mergeList<T extends Record<string, unknown>>(

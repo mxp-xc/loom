@@ -4,6 +4,7 @@ export interface SkillMeta {
   name: string
   description: string
   path: string
+  frontmatterName?: string
 }
 
 const NAME_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/
@@ -25,6 +26,7 @@ export function parseSkillMeta(
     name: dirName,
     description,
     path: skillPath,
+    ...(typeof data.name === 'string' ? { frontmatterName: data.name } : {}),
   }
 }
 

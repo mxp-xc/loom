@@ -8,6 +8,7 @@ import { parseSkillMeta } from '../remote/frontmatter.js'
 
 export const DEFAULT_SOURCE_SCAN = '**/SKILL.md'
 const DEFAULT_IGNORE = ['**/.git/**', '**/node_modules/**', '**/.cache/**']
+export const LOCAL_SKILL_SCAN_IGNORE = ['**/.git/**', '**/node_modules/**']
 const scanLogger = logger.child('projection.scan')
 const SOURCE_MEMBER_NAME_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -15,7 +16,18 @@ export interface ScannedMember {
   name: string
   path: string
   relativePath?: string
+  frontmatterName?: string
   description?: string
+}
+
+export interface ScannedLocalSkill {
+  name: string
+  path: string
+}
+
+export interface ScanLocalSkillsOptions {
+  dot?: boolean
+  ignore?: string[]
 }
 
 export async function scanSourceMembers(
@@ -40,6 +52,7 @@ export async function scanSourceMembers(
     const skillPath = join(repoPath, match)
     const skillDir = join(repoPath, dirname(match))
     let description = ''
+    let frontmatterName: string | undefined
     try {
       const content = await readFile(skillPath, 'utf8')
       const meta = parseSkillMeta(content, memberName, skillDir)
@@ -52,6 +65,7 @@ export async function scanSourceMembers(
         continue
       }
       description = meta.description
+      frontmatterName = meta.frontmatterName
     } catch (err) {
       scanLogger.error('failed to read source skill metadata', {
         err,
@@ -63,6 +77,7 @@ export async function scanSourceMembers(
       name: memberName,
       path: skillDir,
       relativePath: match.replace(/\\/g, '/'),
+      ...(frontmatterName ? { frontmatterName } : {}),
       description,
     })
   }
@@ -124,17 +139,35 @@ export async function mergeLocalSkills(
 ): Promise<LocalSkill[]> {
   const dir = join(repoPath, 'assets', 'skills')
   if (!(await fs.exists(dir))) return existing
-  let matches: string[] = []
+  let scanned: ScannedLocalSkill[] = []
   try {
-    matches = await glob('**/SKILL.md', { cwd: dir, ignore: DEFAULT_IGNORE, onlyFiles: true })
+    scanned = await scanLocalSkills(dir)
   } catch (err) {
     scanLogger.error('failed to scan local skills', { err, dir })
     return existing
   }
   const have = new Set(existing.map((s) => s.id))
   const out = [...existing]
-  for (const name of [...new Set(matches.map((m) => basename(dirname(m))))].sort()) {
+  for (const name of [...new Set(scanned.map((skill) => skill.name))]) {
     if (!have.has(name)) out.push({ id: name })
   }
   return out
+}
+
+export async function scanLocalSkills(
+  rootDir: string,
+  options: ScanLocalSkillsOptions = {},
+): Promise<ScannedLocalSkill[]> {
+  const matches = await glob(DEFAULT_SOURCE_SCAN, {
+    cwd: rootDir,
+    dot: options.dot,
+    ignore: options.ignore ?? DEFAULT_IGNORE,
+    onlyFiles: true,
+  })
+  return matches
+    .map((match) => {
+      const dir = dirname(match)
+      return { name: basename(dir), path: join(rootDir, dir) }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path))
 }

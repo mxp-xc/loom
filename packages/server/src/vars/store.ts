@@ -1,8 +1,9 @@
 import { parseVarsEnvironment, serializeVarsEnvironment, type VarsEnvironment } from '@loom/core'
 import { dirname, isAbsolute, join } from 'node:path'
 import type { IFileSystem } from '../ports/fs.js'
+import type { LoggerPort } from '../ports/logger.js'
 
-type StoreLogger = { error(context: { err: unknown; files: string[] }, message: string): void }
+type StoreLogger = Pick<LoggerPort, 'error'>
 type JournalEntry = {
   environment: string
   target: string
@@ -126,13 +127,13 @@ export class VarsStore {
           }
         } catch (rollbackError) {
           rollbackErrors.push(rollbackError)
-          this.logger?.error(
-            { err: rollbackError, files: environments },
-            'vars atomic rollback failed',
-          )
+          this.logger?.error('vars atomic rollback failed', {
+            err: rollbackError,
+            files: environments,
+          })
         }
       }
-      this.logger?.error({ err: error, files: environments }, 'vars atomic write failed')
+      this.logger?.error('vars atomic write failed', { err: error, files: environments })
     }
 
     const cleanupErrors: unknown[] = []
@@ -142,10 +143,10 @@ export class VarsStore {
       } catch (cleanupError) {
         if (!isMissing(cleanupError)) {
           cleanupErrors.push(cleanupError)
-          this.logger?.error(
-            { err: cleanupError, files: environments },
-            'vars temporary file cleanup failed',
-          )
+          this.logger?.error('vars temporary file cleanup failed', {
+            err: cleanupError,
+            files: environments,
+          })
         }
       }
     }
@@ -184,14 +185,14 @@ export class VarsStore {
     const varsRealPath = await this.fs.realPath(this.varsPath)
     if ((await this.fs.isLink(this.varsPath)) || varsRealPath !== join(repoRealPath, 'vars')) {
       const error = new Error(`invalid vars path: ${this.varsPath}`)
-      this.logger?.error({ err: error, files: [] }, 'vars path validation failed')
+      this.logger?.error('vars path validation failed', { err: error, files: [] })
       throw error
     }
     try {
       await this.fs.readDir(this.varsPath)
     } catch (error) {
       const validationError = new Error(`invalid vars path: ${this.varsPath}`, { cause: error })
-      this.logger?.error({ err: validationError, files: [] }, 'vars path validation failed')
+      this.logger?.error('vars path validation failed', { err: validationError, files: [] })
       throw validationError
     }
   }
@@ -201,7 +202,7 @@ export class VarsStore {
       const error = Object.assign(new Error(`vars environment symlink not allowed: ${target}`), {
         code: 'vars_symlink_not_allowed',
       })
-      this.logger?.error({ err: error, files: [] }, 'vars target validation failed')
+      this.logger?.error('vars target validation failed', { err: error, files: [] })
       throw error
     }
     if (!(await this.fs.exists(target))) return
@@ -211,7 +212,7 @@ export class VarsStore {
       const error = Object.assign(new Error(`invalid vars target path: ${target}`), {
         code: 'vars_target_invalid',
       })
-      this.logger?.error({ err: error, files: [] }, 'vars target validation failed')
+      this.logger?.error('vars target validation failed', { err: error, files: [] })
       throw error
     }
   }

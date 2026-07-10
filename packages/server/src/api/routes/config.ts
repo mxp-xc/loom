@@ -1,15 +1,26 @@
 import { Hono } from 'hono'
 import { join } from 'node:path'
 import { loadRepoManifest, mergeConfig, setConfigField } from '@loom/core'
+import { z } from 'zod'
 import { readRepoFiles, readLocalConfig, readYaml, writeYaml } from '../repo-config.js'
 import { resolveRepoPath } from '../repo.js'
+import { jsonValidator, queryValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
+
+const NonEmptyString = z.string().min(1)
+const ConfigQuery = z.object({ repo: NonEmptyString })
+const ConfigUpdateBody = z.object({
+  repo: z.string().optional(),
+  level: z.enum(['repo', 'local']),
+  field: NonEmptyString,
+  value: z.unknown(),
+})
 
 export function createConfigRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
 
-  app.get('/config', async (c) => {
-    const repo = c.req.query('repo')!
+  app.get('/config', queryValidator(ConfigQuery, { error: 'invalid_repo' }), async (c) => {
+    const { repo } = c.req.valid('query')
     let repoPath: string
     try {
       repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
@@ -27,9 +38,9 @@ export function createConfigRoutes(deps: RouteDeps): Hono {
     return c.json({ effective, repo: repoManifest.repoConfig, local: localConfig, profiles })
   })
 
-  app.put('/config', async (c) => {
+  app.put('/config', jsonValidator(ConfigUpdateBody, { error: configUpdateError }), async (c) => {
+    const { repo, level, field, value } = c.req.valid('json')
     try {
-      const { repo, level, field, value } = await c.req.json()
       let repoPath: string | undefined
       try {
         if (repo) repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
@@ -39,11 +50,6 @@ export function createConfigRoutes(deps: RouteDeps): Hono {
           400,
         )
       }
-      if (level !== 'repo' && level !== 'local')
-        return c.json({ ok: false, error: 'invalid_level' }, 400)
-      if (!field || typeof field !== 'string')
-        return c.json({ ok: false, error: 'invalid_field' }, 400)
-
       if (level === 'local') {
         const localPath = join(deps.home, '.loom', 'config.yaml')
         const data = (await readYaml(deps.fs, localPath)) ?? {}
@@ -71,4 +77,11 @@ export function createConfigRoutes(deps: RouteDeps): Hono {
   })
 
   return app
+}
+
+function configUpdateError(issues: z.ZodIssue[]): string {
+  const field = issues[0]?.path[0]
+  if (field === 'level') return 'invalid_level'
+  if (field === 'field') return 'invalid_field'
+  return 'invalid_request'
 }

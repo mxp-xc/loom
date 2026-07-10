@@ -78,6 +78,20 @@ vi.mock('../../src/remote/discover.js', () => ({
 describe('routes file-init safety', () => {
   const app = new Hono().route('/api', registerRoutes())
 
+  it('POST /api/mcp rejects an invalid server body with invalid_server', async () => {
+    const res = await app.request('/api/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/r1',
+        server: { id: 'broken', type: 'stdio' },
+      }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_server' })
+  })
+
   it('POST /api/skills/local works when skills.yaml does not exist', async () => {
     const res = await app.request('/api/skills/local', {
       method: 'POST',
@@ -107,6 +121,17 @@ describe('routes file-init safety', () => {
 
 describe('DELETE endpoints', () => {
   const app = new Hono().route('/api', registerRoutes())
+
+  it('DELETE /api/mcp rejects a missing id with the existing invalid_id contract', async () => {
+    const res = await app.request('/api/mcp', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/tmp/r4' }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_id' })
+  })
 
   it('DELETE /api/sources removes a source by url', async () => {
     memFiles['/tmp/r2/skills.yaml'] =
@@ -154,6 +179,17 @@ describe('DELETE endpoints', () => {
 
 describe('local skill import', () => {
   const app = new Hono().route('/api', registerRoutes())
+
+  it('POST /api/skills/local/import rejects a non-array skills field', async () => {
+    const res = await app.request('/api/skills/local/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/tmp/r7', mode: 'ref', skills: null }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_skills' })
+  })
 
   it('stores repo assets skills imports as built-in local skills without ref paths', async () => {
     memFiles['/tmp/r7/skills.yaml'] = 'sources: []\nskills: []\n'
@@ -244,6 +280,17 @@ describe('source scan', () => {
 describe('source metadata', () => {
   const app = new Hono().route('/api', registerRoutes())
 
+  it('POST /api/sources rejects a missing url with invalid_url', async () => {
+    const res = await app.request('/api/sources', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/tmp/r8', ref: 'main' }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_url' })
+  })
+
   it('POST /api/sources stores type and custom scan pattern', async () => {
     memFiles['/tmp/r8/skills.yaml'] = 'sources: []\nskills: []\n'
 
@@ -306,6 +353,21 @@ describe('source metadata', () => {
 
 describe('targets update', () => {
   const app = new Hono().route('/api', registerRoutes())
+
+  it('POST /api/skills/source-targets keeps separate invalid field error codes', async () => {
+    const res = await app.request('/api/skills/source-targets', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/r5',
+        sourceUrl: 'https://example.test/skills.git',
+        updates: null,
+      }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_updates' })
+  })
 
   it('POST /api/mcp/targets updates targets for an mcp server', async () => {
     memFiles['/tmp/r5/mcp.yaml'] =

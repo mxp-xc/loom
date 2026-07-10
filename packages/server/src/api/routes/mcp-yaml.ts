@@ -1,131 +1,152 @@
 import { Hono } from 'hono'
-import { join } from 'node:path'
-import { addMcpServer, removeMcpServer, setMcpTargets, updateMcpServer } from '@loom/core'
+import { AgentIdSchema, McpServerSchema } from '@loom/core'
+import { z } from 'zod'
 import { logger } from '../../lib/logger.js'
-import { readYaml, writeYaml } from '../repo-config.js'
+import { McpApplication, McpApplicationError } from '../../mcp/application.js'
 import { resolveRepoPath } from '../repo.js'
+import { jsonValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
+
+const mcpRouteLogger = logger.child('mcp-route')
+const RepoField = z.unknown().optional()
+const NonEmptyString = z.string().min(1)
+
+const AddMcpServerBody = z.object({
+  repo: RepoField,
+  server: McpServerSchema,
+})
+
+const DeleteMcpServerBody = z.object({
+  repo: RepoField,
+  id: NonEmptyString,
+})
+
+const UpdateMcpServerBody = z.object({
+  repo: RepoField,
+  id: NonEmptyString,
+  server: z.unknown().refine((value) => Boolean(value) && typeof value === 'object'),
+})
+
+const SetMcpTargetsBody = z.object({
+  repo: RepoField,
+  id: NonEmptyString,
+  targets: z.array(AgentIdSchema),
+})
 
 export function createMcpYamlRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
+  const mcp = new McpApplication(deps.fs)
 
-  app.post('/mcp', async (c) => {
+  app.post('/mcp', jsonValidator(AddMcpServerBody, { error: 'invalid_server' }), async (c) => {
     try {
-      const { repo, server } = await c.req.json()
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      const filePath = join(repoPath, 'mcp.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? []
-      const result = addMcpServer(data, server)
-      if (result.changed) await writeYaml(deps.fs, filePath, result.data)
+      const { repo, server } = c.req.valid('json')
+      const repoPath = await resolveRequestRepo(deps, repo)
+      await mcp.addServer(repoPath, server)
       return c.json({ ok: true, server })
     } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'write_failed',
-        message: String((e as Error)?.message ?? e),
-      })
+      if (isInvalidRepo(e)) return invalidRepo(c, e)
+      return c.json(errorBody(e, 'write_failed', 'failed to add MCP server'))
     }
   })
 
-  app.delete('/mcp', async (c) => {
+  app.delete('/mcp', jsonValidator(DeleteMcpServerBody, { error: 'invalid_id' }), async (c) => {
     try {
-      const { repo, id } = await c.req.json()
-      if (!id || typeof id !== 'string') return c.json({ ok: false, error: 'invalid_id' }, 400)
-      let repoPath: string
-      try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      } catch (e) {
-        return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
-        )
-      }
-      const filePath = join(repoPath, 'mcp.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? []
-      const result = removeMcpServer(data, id)
-      if (result.changed) await writeYaml(deps.fs, filePath, result.data)
+      const { repo, id } = c.req.valid('json')
+      const repoPath = await resolveRequestRepo(deps, repo)
+      await mcp.removeServer(repoPath, id)
       return c.json({ ok: true })
     } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'delete_failed',
-        message: String((e as Error)?.message ?? e),
-      })
+      if (isInvalidRepo(e)) return invalidRepo(c, e)
+      return c.json(errorBody(e, 'delete_failed', 'failed to remove MCP server'))
     }
   })
 
-  app.put('/mcp', async (c) => {
-    try {
-      const { repo, id, server } = await c.req.json()
-      if (!id || typeof id !== 'string' || !server || typeof server !== 'object') {
-        return c.json({ ok: false, error: 'invalid_server', message: 'id 和 server 不能为空' }, 400)
-      }
-      if (
-        !['stdio', 'sse', 'http'].includes(server.type) ||
-        (server.type === 'stdio' &&
-          (typeof server.command !== 'string' || !server.command.trim())) ||
-        (server.type !== 'stdio' && (typeof server.url !== 'string' || !server.url.trim()))
-      ) {
-        return c.json(
-          { ok: false, error: 'invalid_server', message: 'MCP server 类型或连接字段无效' },
-          400,
-        )
-      }
-      const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      const filePath = join(repoPath, 'mcp.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? []
-      const result = updateMcpServer(data, id, { ...server, id })
-      if (!result.changed) {
-        return c.json({ ok: false, error: 'not_found', message: `MCP server ${id} not found` }, 404)
-      }
-      await writeYaml(deps.fs, filePath, result.data)
-      return c.json({ ok: true, server: { ...server, id } })
-    } catch (e) {
-      logger.error('MCP server update failed', { err: e })
-      return c.json(
-        { ok: false, error: 'update_failed', message: String((e as Error)?.message ?? e) },
-        500,
-      )
-    }
-  })
-
-  app.post('/mcp/targets', async (c) => {
-    try {
-      const { repo, id, targets } = await c.req.json()
-      let repoPath: string
+  app.put(
+    '/mcp',
+    jsonValidator(UpdateMcpServerBody, {
+      error: 'invalid_server',
+      message: 'id 和 server 不能为空',
+    }),
+    async (c) => {
       try {
-        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const { repo, id, server } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        const result = await mcp.updateServer(repoPath, id, server)
+        return c.json({ ok: true, server: result.server })
       } catch (e) {
+        if (e instanceof McpApplicationError) {
+          return c.json({ ok: false, error: e.code, message: e.message }, e.status)
+        }
+        logger.error('MCP server update failed', { err: e })
         return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-          400,
+          { ok: false, error: 'update_failed', message: String((e as Error)?.message ?? e) },
+          500,
         )
       }
-      const filePath = join(repoPath, 'mcp.yaml')
-      const data = (await readYaml(deps.fs, filePath)) ?? []
-      const result = setMcpTargets(data, id, targets)
-      if (result.changed) {
-        await writeYaml(deps.fs, filePath, result.data)
-      } else {
-        return c.json({ ok: false, error: 'not_found', message: `MCP server ${id} not found` })
+    },
+  )
+
+  app.post(
+    '/mcp/targets',
+    jsonValidator(SetMcpTargetsBody, { error: mcpTargetsError }),
+    async (c) => {
+      try {
+        const { repo, id, targets } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        await mcp.setTargets(repoPath, id, targets)
+        return c.json({ ok: true })
+      } catch (e) {
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        return c.json(errorBody(e, 'update_failed', 'failed to update MCP targets'))
       }
-      return c.json({ ok: true })
-    } catch (e) {
-      return c.json({
-        ok: false,
-        error: 'update_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
+    },
+  )
 
   return app
+}
+
+async function resolveRequestRepo(deps: RouteDeps, repo: unknown): Promise<string> {
+  try {
+    return await resolveRepoPath(deps.fs, repo as string, deps.home)
+  } catch (cause) {
+    throw Object.assign(new Error(String((cause as Error).message), { cause }), {
+      code: 'invalid_repo',
+    })
+  }
+}
+
+function isInvalidRepo(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && 'code' in error && error.code === 'invalid_repo'
+  )
+}
+
+function invalidRepo(
+  c: { json: (body: unknown, status?: 400) => Response },
+  error: unknown,
+): Response {
+  return c.json(
+    { ok: false, error: 'invalid_repo', message: String((error as Error).message) },
+    400,
+  )
+}
+
+function mcpTargetsError(issues: z.ZodIssue[]): string {
+  return issues[0]?.path[0] === 'id' ? 'invalid_id' : 'invalid_targets'
+}
+
+function errorBody(
+  error: unknown,
+  fallbackCode: string,
+  logMessage: string,
+): { ok: false; error: string; message: string } {
+  if (error instanceof McpApplicationError) {
+    return { ok: false, error: error.code, message: error.message }
+  }
+  mcpRouteLogger.error(logMessage, { err: error })
+  return {
+    ok: false,
+    error: fallbackCode,
+    message: String((error as Error)?.message ?? error),
+  }
 }

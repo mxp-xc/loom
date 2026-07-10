@@ -10,6 +10,7 @@ describe('parseSkillMeta', () => {
     )
     expect(m).not.toBeNull()
     expect(m!.name).toBe('brainstorming')
+    expect(m!.frontmatterName).toBe('brainstorming')
     expect(m!.description).toBe('A skill')
   })
   it('uses dir name when frontmatter has no name', () => {
@@ -18,6 +19,9 @@ describe('parseSkillMeta', () => {
   })
   it('returns dir name when frontmatter name differs', () => {
     expect(parseSkillMeta('---\nname: other-skill\n---\n', 'my-skill', '/p')!.name).toBe('my-skill')
+    expect(parseSkillMeta('---\nname: other-skill\n---\n', 'my-skill', '/p')!.frontmatterName).toBe(
+      'other-skill',
+    )
   })
   it('rejects invalid dir name (uppercase)', () => {
     expect(parseSkillMeta('---\nname: bad-name\n---\n', 'BadName', '/p')).toBeNull()

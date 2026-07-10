@@ -67,16 +67,20 @@ vi.mock('../../src/sync/push.js', () => ({
   syncPush: vi.fn(async () => ({ ok: true })),
   syncForcePush: vi.fn(async () => ({ ok: true })),
 }))
-vi.mock('@loom/core', () => ({
-  loadRepoManifest: vi.fn(() => ({
-    repoConfig: { targets: ['claude-code'] },
-    errors: [],
-    varsFiles: { default: {} },
-  })),
-  mergeConfig: vi.fn((repo: Record<string, unknown>) => ({ ...repo, active_repo: 'default' })),
-  buildManifest: vi.fn(),
-  planProjection: vi.fn(),
-}))
+vi.mock('@loom/core', async () => {
+  const actual = await vi.importActual<typeof import('@loom/core')>('@loom/core')
+  return {
+    ...actual,
+    loadRepoManifest: vi.fn(() => ({
+      repoConfig: { targets: ['claude-code'] },
+      errors: [],
+      varsFiles: { default: {} },
+    })),
+    mergeConfig: vi.fn((repo: Record<string, unknown>) => ({ ...repo, active_repo: 'default' })),
+    buildManifest: vi.fn(),
+    planProjection: vi.fn(),
+  }
+})
 vi.mock('../../src/platform/node/index.js', () => ({
   createNodePlatform: vi.fn(() => ({
     fs: {
@@ -127,6 +131,19 @@ describe('API routes', () => {
         installedAgents: ['claude-code'],
       }),
     )
+  })
+  it('POST /api/project rejects a missing repo before projection starts', async () => {
+    vi.mocked(projectRepository).mockClear()
+
+    const res = await app.request('/api/project', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'all' }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_repo' })
+    expect(projectRepository).not.toHaveBeenCalled()
   })
   it('GET /api/manifest delegates manifest discovery to projection workflow', async () => {
     const res = await app.request('/api/manifest?repo=/tmp/r')
@@ -242,6 +259,19 @@ describe('API routes', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ ok: true, clean: true, remaining: [] })
   })
+  it('POST /api/sync/conflicts/save rejects missing path before touching the session', async () => {
+    syncManager.saveConflict.mockClear()
+
+    const res = await app.request('/api/sync/conflicts/save', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'session-1', result: 'resolved\n' }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_path' })
+    expect(syncManager.saveConflict).not.toHaveBeenCalled()
+  })
   it('POST /api/sync/conflicts/abort returns ok', async () => {
     const res = await app.request('/api/sync/conflicts/abort', {
       method: 'POST',
@@ -250,6 +280,15 @@ describe('API routes', () => {
     })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
+  })
+  it('GET /api/sync/session rejects missing repo query before session lookup', async () => {
+    syncManager.getSession.mockClear()
+
+    const res = await app.request('/api/sync/session')
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_repo' })
+    expect(syncManager.getSession).not.toHaveBeenCalled()
   })
   it('GET /api/config returns effective + repo + local config', async () => {
     const res = await app.request('/api/config?repo=/tmp/r')

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { scanSourceMembers } from '../../src/projection/scan'
+import { scanLocalSkills, scanSourceMembers } from '../../src/projection/scan'
 import { loadProjectionManifest, projectRepository } from '../../src/projection/workflow.js'
 import { NodeFileSystem } from '../../src/platform/node/fs'
 import type { IGit } from '../../src/ports/git'
@@ -70,6 +70,22 @@ describe('scanSourceMembers', () => {
       relativePath: 'skills/engineering/tdd/SKILL.md',
       description: 'Test first',
     })
+  })
+
+  it('scans local skills with the same ignore and ordering rules', async () => {
+    await mkdir(join(root, 'engineering', 'tdd'), { recursive: true })
+    await writeFile(join(root, 'engineering', 'tdd', 'SKILL.md'), 'x')
+    await mkdir(join(root, 'brainstorming'), { recursive: true })
+    await writeFile(join(root, 'brainstorming', 'SKILL.md'), 'x')
+    await mkdir(join(root, 'node_modules', 'ignored'), { recursive: true })
+    await writeFile(join(root, 'node_modules', 'ignored', 'SKILL.md'), 'x')
+    await mkdir(join(root, '.cache', 'ignored'), { recursive: true })
+    await writeFile(join(root, '.cache', 'ignored', 'SKILL.md'), 'x')
+
+    await expect(scanLocalSkills(root)).resolves.toEqual([
+      { name: 'brainstorming', path: join(root, 'brainstorming') },
+      { name: 'tdd', path: join(root, 'engineering', 'tdd') },
+    ])
   })
 
   it('uses custom scan pattern to restrict discovered members', async () => {

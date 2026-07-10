@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.0.6",
+    "@hono/zod-validator": "^0.8.0",
     "@loom/core": "workspace:*",
     "gray-matter": "^4.0.3",
     "hono": "^4.12.27",
@@ -22,7 +23,8 @@
     "proper-lockfile": "^4.1.2",
     "simple-git": "^3.25.0",
     "smol-toml": "^1.7.0",
-    "tinyglobby": "^0.2.17"
+    "tinyglobby": "^0.2.17",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

@@ -18,7 +18,7 @@
       "version": "0.1.0",
       "dependencies": {
         "js-yaml": "^4.1.0",
-        "zod": "^3.23.0",
+        "zod": "^3.25.0",
       },
       "devDependencies": {
         "@types/js-yaml": "^4.0.9",
@@ -30,6 +30,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@hono/node-server": "^2.0.6",
+        "@hono/zod-validator": "^0.8.0",
         "@loom/core": "workspace:*",
         "gray-matter": "^4.0.3",
         "hono": "^4.12.27",
@@ -38,6 +39,7 @@
         "simple-git": "^3.25.0",
         "smol-toml": "^1.7.0",
         "tinyglobby": "^0.2.17",
+        "zod": "^3.25.0",
       },
       "devDependencies": {
         "@types/js-yaml": "^4.0.9",
@@ -268,6 +270,8 @@
     "@floating-ui/utils": ["@floating-ui/utils@0.2.11", "https://registry.npmmirror.com/@floating-ui/utils/-/utils-0.2.11.tgz", {}, "sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg=="],
 
     "@hono/node-server": ["@hono/node-server@2.0.8", "https://registry.npmmirror.com/@hono/node-server/-/node-server-2.0.8.tgz", { "peerDependencies": { "hono": "^4" } }, "sha512-GuCWzLxwg218fy1JaHculFsdcuY12hxit83V+algozTPnwhNjLrRL/Alg9OYjLZLoUZ1rw/S4CdTMsnkSKCmFA=="],
+
+    "@hono/zod-validator": ["@hono/zod-validator@0.8.0", "https://registry.npmmirror.com/@hono/zod-validator/-/zod-validator-0.8.0.tgz", { "peerDependencies": { "hono": ">=4.10.0", "zod": "^3.25.0 || ^4.0.0" } }, "sha512-5uS4S1/LKtZQYvD4BtpPUFkOv8d1wNxHHrChm26buMiEYc1FrHWvDUaKVBwkiVtvSExHSpLGDvcnpI2Copyj9w=="],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "https://registry.npmmirror.com/@jridgewell/gen-mapping/-/gen-mapping-0.3.13.tgz", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 

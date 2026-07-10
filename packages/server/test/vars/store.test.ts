@@ -77,8 +77,8 @@ describe('VarsStore', () => {
     await expect(store.read('b')).rejects.toMatchObject({ code: 'environment_not_found' })
     expect((await readdir(join(root, 'vars'))).every((x) => !x.includes('.tmp-'))).toBe(true)
     expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ err: expect.any(Error), files: ['a', 'b'] }),
       'vars atomic write failed',
+      expect.objectContaining({ err: expect.any(Error), files: ['a', 'b'] }),
     )
   })
 
@@ -132,12 +132,12 @@ describe('VarsStore', () => {
     expect(failure.cause).toBe(original)
     expect(failure.errors).toEqual(expect.arrayContaining([original, rollback]))
     expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ err: rollback }),
       'vars atomic rollback failed',
+      expect.objectContaining({ err: rollback }),
     )
     expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ err: original }),
       'vars atomic write failed',
+      expect.objectContaining({ err: original }),
     )
   })
 
@@ -158,8 +158,8 @@ describe('VarsStore', () => {
     expect(failure).toBeInstanceOf(AggregateError)
     expect(fs.removed.filter((path) => path.includes('.tmp-'))).toHaveLength(4)
     expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ err: expect.any(Error) }),
       'vars temporary file cleanup failed',
+      expect.objectContaining({ err: expect.any(Error) }),
     )
   })
 

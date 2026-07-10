@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import type { IGit } from '../ports/git.js'
 import type { IFileSystem } from '../ports/fs.js'
-import { parseSkillFrontmatterName, type SkillMeta } from './frontmatter.js'
+import type { SkillMeta } from './frontmatter.js'
 import { resolveGitUrl } from './resolve-url.js'
 import { formatSourceMemberSkillId, type SkillSource } from '@loom/core'
 import { logger } from '../lib/logger.js'
@@ -34,13 +34,11 @@ export async function discoverSkills(
     const out: (SkillMeta & { installed: boolean })[] = []
     for (const member of scanned) {
       const relativePath = member.relativePath ?? 'SKILL.md'
-      const content = await fs.readFile(join(tmp, relativePath))
-      const frontmatterName = parseSkillFrontmatterName(content)
-      if (frontmatterName && frontmatterName !== member.name) {
+      if (member.frontmatterName && member.frontmatterName !== member.name) {
         discoverLogger.warn('source skill frontmatter name differs from path member name', {
           url: source.url,
           path: relativePath,
-          frontmatterName,
+          frontmatterName: member.frontmatterName,
           memberName: member.name,
         })
       }
@@ -48,6 +46,7 @@ export async function discoverSkills(
         name: member.name,
         description: member.description ?? '',
         path: relativePath,
+        ...(member.frontmatterName ? { frontmatterName: member.frontmatterName } : {}),
         installed: installed.has(formatSourceMemberSkillId(source.url, member.name, 'hyphen')),
       })
     }

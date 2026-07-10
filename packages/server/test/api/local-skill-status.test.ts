@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createSkillsYamlRoutes } from '../../src/api/routes/skills-yaml'
 import { annotateLocalSkillAvailability } from '../../src/projection/workflow'
 
@@ -61,6 +64,37 @@ describe('local skill scan path', () => {
 
     expect(response.status).toBe(200)
     expect(fs.exists).toHaveBeenCalledWith('/home/tester/.agents/skills')
+  })
+
+  it('keeps previous scan behavior by including skills under .cache directories', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'local-skill-scan-'))
+    try {
+      await mkdir(join(dir, '.cache', 'cached-skill'), { recursive: true })
+      await writeFile(join(dir, '.cache', 'cached-skill', 'SKILL.md'), 'x')
+      await mkdir(join(dir, 'node_modules', 'ignored'), { recursive: true })
+      await writeFile(join(dir, 'node_modules', 'ignored', 'SKILL.md'), 'x')
+      const fs = {
+        exists: vi.fn(async (path: string) => path === dir),
+      }
+      const app = new Hono().route(
+        '/api',
+        createSkillsYamlRoutes({ fs, git: {}, proc: {}, home: '/home/tester' } as never),
+      )
+
+      const response = await app.request('/api/skills/local/scan', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ dir }),
+      })
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        ok: true,
+        skills: [{ name: 'cached-skill', path: join(dir, '.cache', 'cached-skill') }],
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
 

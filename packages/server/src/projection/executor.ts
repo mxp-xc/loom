@@ -1,5 +1,6 @@
 import { dirname, join } from 'node:path'
 import type { IFileSystem } from '../ports/fs.js'
+import type { LoggerPort } from '../ports/logger.js'
 import type {
   IAgentAdapter,
   McpFragment,
@@ -23,10 +24,7 @@ export interface ProjectionDeps {
   adapters: Partial<Record<AgentId, IAgentAdapter>>
   installedAgents: Set<AgentId>
   resolveSkillSrc: (link: ProjectionPlan['links'][number]) => string | null
-  logger?: {
-    error: (obj: unknown, msg: string) => void
-    warn?: (obj: unknown, msg: string) => void
-  }
+  logger?: Pick<LoggerPort, 'error' | 'warn'>
   // Per-agent set of mcp ids loom projected last time (persisted by caller).
   // Used to distinguish loom-managed entries (removable) from user-handwritten (preserved).
   // Absent => first run / state lost: mergeMcp degrades to preserving all existing entries.
@@ -81,10 +79,10 @@ export async function executeProjection(
             if (await shouldRemoveRealSkillDir(fs, dest, link)) {
               await fs.removeDir(dest)
             } else {
-              deps.logger?.warn?.(
-                { dest, skillId: link.skillId },
-                'skip cleanup: target is real file/dir',
-              )
+              deps.logger?.warn?.('skip cleanup: target is real file/dir', {
+                dest,
+                skillId: link.skillId,
+              })
               continue
             }
           }
@@ -112,10 +110,10 @@ export async function executeProjection(
               await fs.removeDir(dest)
               await removeEmptySkillParents(fs, agentSkillsDir(agent), dest)
             } else {
-              deps.logger?.warn?.(
-                { dest, skillId: link.skillId },
-                'skip cleanup: target is real file/dir',
-              )
+              deps.logger?.warn?.('skip cleanup: target is real file/dir', {
+                dest,
+                skillId: link.skillId,
+              })
             }
           }
         }
@@ -183,7 +181,7 @@ export async function executeProjection(
               rendered = renderText(mp.content, ctx)
             }
           } catch (e) {
-            deps.logger?.error({ err: e, agent }, 'memory var resolve failed')
+            deps.logger?.error('memory var resolve failed', { err: e, agent })
             throw e
           }
           renderedTargets.push({ agent, path: agentMemoryFile(agent), rendered })
@@ -195,7 +193,7 @@ export async function executeProjection(
           await fs.writeFile(path, rendered)
         }
       } else {
-        deps.logger?.warn?.({}, 'no active memory, skip memory phase')
+        deps.logger?.warn?.('no active memory, skip memory phase')
       }
     }
     return { ok: true }
@@ -208,13 +206,13 @@ export async function executeProjection(
         undone++
       } catch (e) {
         rollbackFailures.push({ path: u.path, err: e })
-        deps.logger?.error({ err: e, undo: u }, 'projection rollback step failed')
+        deps.logger?.error('projection rollback step failed', { err: e, undo: u })
       }
     }
-    deps.logger?.error(
-      { err: originalError, rollbackReport: { undone, rollbackFailures } },
-      'projection failed, rolled back',
-    )
+    deps.logger?.error('projection failed, rolled back', {
+      err: originalError,
+      rollbackReport: { undone, rollbackFailures },
+    })
     return {
       ok: false,
       failure: {
@@ -286,7 +284,7 @@ async function cleanOrphanedLinks(
           await fs.removeDir(dest)
           await removeEmptySkillParents(fs, skillsDir, dest)
         } else {
-          logger?.warn?.({ dest }, 'skip orphan cleanup: target is real file/dir')
+          logger?.warn?.('skip orphan cleanup: target is real file/dir', { dest })
         }
       }
     }
@@ -328,10 +326,11 @@ async function resolveMcpFragments(
     const resolved = await ctx.resolveForAgent(agent)
     if (!resolved.ok) {
       const error = new Error(resolved.diagnostics.map((item) => item.message).join('; '))
-      logger?.error(
-        { err: error, diagnostics: resolved.diagnostics, agent },
-        'mcp var resolve failed for agent',
-      )
+      logger?.error('mcp var resolve failed for agent', {
+        err: error,
+        diagnostics: resolved.diagnostics,
+        agent,
+      })
       throw error
     }
     resolution = resolved
@@ -363,7 +362,7 @@ async function resolveMcpFragments(
         headers: rvm(s.headers),
       })
     } catch (e) {
-      logger?.error({ err: e, mcpId: s.id, agent }, 'mcp var resolve failed for entry')
+      logger?.error('mcp var resolve failed for entry', { err: e, mcpId: s.id, agent })
       throw e
     }
   }
