@@ -279,7 +279,9 @@ describe('MCP view', () => {
   it('renders the workbench and embedded create editor', async () => {
     render(<Mcp repoPath="/tmp/mcp-layout" />)
 
-    expect(await screen.findByRole('heading', { name: 'MCP Servers' })).toBeDefined()
+    const workbench = await screen.findByRole('region', { name: 'MCP workbench' })
+    expect(within(workbench).getByRole('complementary', { name: 'MCP inventory' })).toBeDefined()
+    expect(screen.queryByRole('heading', { name: 'MCP Servers' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Project changes' })).toBeDefined()
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Add server' }).at(-1)!)
@@ -438,7 +440,7 @@ describe('MCP view', () => {
     try {
       render(<Mcp repoPath="/tmp/mcp-layout" />)
 
-      await screen.findByRole('heading', { name: 'MCP Servers' })
+      await screen.findByRole('region', { name: 'MCP workbench' })
       fireEvent.click(screen.getAllByRole('button', { name: 'Add server' }).at(-1)!)
       fireEvent.click(screen.getByRole('button', { name: 'Save server' }))
 
@@ -570,6 +572,10 @@ describe('Memory view', () => {
     ])
     expect(screen.queryByText('Markdown')).toBeNull()
     expect(screen.getByRole('textbox', { name: 'Memory 内容' })).toBeDefined()
+    const targetPanel = screen.getByTestId('memory-targets')
+    expect(within(targetPanel).queryByRole('button', { name: 'CC' })).toBeNull()
+    expect(within(targetPanel).getByRole('button', { name: 'CX' })).toBeDefined()
+    expect(within(targetPanel).getByRole('button', { name: 'OC' })).toBeDefined()
   })
 
   it('toggles Memory projection targets and reconciles projection immediately', async () => {
@@ -612,11 +618,7 @@ describe('Memory view', () => {
     await waitFor(() =>
       expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/memory-targets', scope: 'memory' }),
     )
-    await waitFor(() =>
-      expect(within(panel).getByRole('button', { name: 'OC' }).getAttribute('data-state')).toBe(
-        'off',
-      ),
-    )
+    await waitFor(() => expect(within(panel).queryByRole('button', { name: 'OC' })).toBeNull())
   })
 
   it('uses the active status dot as the only memory activation control', async () => {

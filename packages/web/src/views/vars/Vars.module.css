@@ -90,7 +90,10 @@
   display: grid;
   min-height: 0;
   flex: 1;
-  grid-template-columns: 282px minmax(0, 1fr);
+  grid-template-columns: clamp(236px, 23vw, 286px) minmax(0, 1fr);
+  gap: 16px;
+  overflow: hidden;
+  padding-top: 16px;
 }
 
 .vars-profiles {
@@ -99,16 +102,13 @@
   min-height: 0;
   flex-direction: column;
   gap: 16px;
-  margin: 20px 0;
-  padding: 18px;
-  border: 1px solid color-mix(in srgb, var(--border) 86%, var(--muted));
+  padding: 14px;
+  border: 1px solid var(--border);
   border-radius: calc(var(--radius-card) + 4px);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--card) 96%, var(--accent)), var(--card)),
     var(--card);
-  box-shadow:
-    var(--shadow-card),
-    inset 0 1px 0 color-mix(in srgb, #fff 70%, transparent);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 
@@ -280,9 +280,17 @@
   min-height: 0;
   flex-direction: column;
   gap: 14px;
-  padding: 22px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-card) + 4px);
   overflow: auto;
-  background: var(--bg);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+
+.vars-page > .vars-main {
+  flex: 1 1 auto;
+  margin-top: 16px;
 }
 
 .vars-section-head {
@@ -992,13 +1000,14 @@
 
   .vars-shell {
     flex: none;
+    gap: 12px;
     min-height: auto;
+    padding-top: 12px;
   }
 
   .vars-profiles {
     width: auto;
     min-height: auto;
-    margin: 16px 16px 0;
     overflow: visible;
   }
 
@@ -1008,7 +1017,7 @@
 
   .vars-main {
     min-height: auto;
-    padding: 16px;
+    padding: 14px;
     overflow: visible;
   }
 

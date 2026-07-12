@@ -1,23 +1,13 @@
 .page {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
   min-width: 0;
   min-height: 0;
   height: 100%;
-  grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
 }
 
-.hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
-  align-items: end;
-  padding: 8px 0 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.hero h1,
 .inventory h2,
 .detailHero h2,
 .editorHero h2,
@@ -29,11 +19,6 @@
   letter-spacing: -0.03em;
 }
 
-.hero h1 {
-  font-size: clamp(22px, 2.4vw, 28px);
-}
-
-.hero p,
 .detailHero p,
 .editorHero p,
 .previewCard p,
@@ -56,95 +41,44 @@
   text-transform: uppercase;
 }
 
-.heroMeta {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(88px, max-content));
-  gap: 8px;
-  align-self: end;
-}
-
-.heroMeta span {
-  display: grid;
-  min-height: 56px;
-  gap: 4px;
-  padding: 8px 10px;
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
-}
-
-.heroMeta b {
-  padding: 0;
+.workbenchError {
+  flex: 0 0 auto;
+  padding: 10px 12px;
   color: var(--error);
-  border: 0;
-  background: transparent;
-}
-
-.heroMeta span b {
-  color: var(--bright);
-  font:
-    650 15px/1 'JetBrains Mono',
-    monospace;
-}
-
-.heroMeta span small {
-  color: var(--muted);
-  font-size: 10px;
+  border: 1px solid color-mix(in srgb, var(--error) 38%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--error) 8%, var(--card));
+  font-size: 12px;
 }
 
 .globalTargets {
-  display: flex;
+  display: grid;
   min-width: 0;
-  align-items: center;
   gap: 8px;
-  justify-content: space-between;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--card) 82%, transparent);
 }
 
 .globalTargetsLabel {
-  flex: 0 0 auto;
   color: var(--muted);
   font:
     700 10px/1 'JetBrains Mono',
     monospace;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.09em;
 }
 
 .globalTargets :global(.target-chips) {
-  margin-left: auto;
   gap: 4px;
-  justify-content: flex-end;
-}
-
-.globalTargets :global(.target-chip) {
-  min-height: 32px;
-  gap: 5px;
-  padding: 4px 10px;
-  font-size: 11px;
-  border-radius: var(--radius);
-}
-
-.globalTargets :global(.target-chip-count) {
-  height: 12px;
-  font-size: 9px;
-}
-
-.globalTargets :global(.target-chip[data-tooltip])::after {
-  right: 0;
-  left: auto;
-  transform: translateY(3px);
-}
-
-.globalTargets :global(.target-chip[data-tooltip]:hover)::after,
-.globalTargets :global(.target-chip[data-tooltip]:focus-visible)::after {
-  transform: translateY(0);
+  justify-content: flex-start;
 }
 
 .workbench {
   display: grid;
-  grid-template-columns: clamp(260px, 27vw, 320px) minmax(0, 1fr);
+  flex: 1 1 auto;
+  grid-template-columns: clamp(236px, 23vw, 286px) minmax(0, 1fr);
   gap: 16px;
-  height: 100%;
   min-height: 0;
 }
 
@@ -168,8 +102,8 @@
 
 .inventoryTop {
   display: grid;
-  gap: 10px;
-  padding: 14px 14px 10px;
+  gap: 12px;
+  padding: 14px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--card) 96%, var(--accent)), var(--card)),
@@ -182,6 +116,24 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.inventoryTitle {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.inventoryTitle h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--bright);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inventoryActions,
@@ -201,38 +153,6 @@
 
 .inventoryActions :global(button) {
   cursor: pointer;
-}
-
-.inventoryActionPrimary,
-.inventoryActionImport,
-.inventoryActionProject {
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius) !important;
-  box-shadow: none !important;
-}
-
-.inventoryActionPrimary:hover,
-.inventoryActionImport:hover,
-.inventoryActionProject:hover {
-  transform: none !important;
-}
-
-.inventoryActionImport {
-  color: var(--info) !important;
-  border-color: color-mix(in srgb, var(--info) 34%, var(--border)) !important;
-  background: color-mix(in srgb, var(--info) 10%, var(--card)) !important;
-}
-
-.inventoryActionPrimary {
-  color: var(--cc) !important;
-  border-color: color-mix(in srgb, var(--cc) 36%, var(--border)) !important;
-  background: color-mix(in srgb, var(--cc) 10%, var(--card)) !important;
-}
-
-.inventoryActionProject {
-  color: var(--oc) !important;
-  border-color: color-mix(in srgb, var(--oc) 36%, var(--border)) !important;
-  background: color-mix(in srgb, var(--oc) 11%, var(--card)) !important;
 }
 
 .searchBox {
@@ -510,12 +430,6 @@
   flex-wrap: wrap;
   gap: 4px;
   justify-content: flex-end;
-}
-
-.serverCard :global(.target-chip) {
-  min-height: 22px;
-  padding: 3px 7px;
-  font-size: 10px;
 }
 
 .serverCard :global(.target-chip[data-tooltip])::after {
@@ -1567,8 +1481,6 @@
     gap: 12px;
   }
 
-  .hero,
-  .heroMeta,
   .globalTargets,
   .detailHero,
   .editorHero {

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
-import { AGENTS, agentShort, agentColor, type AgentId } from '@/lib/agents'
+import { AGENTS, agentShort, type AgentId } from '@/lib/agents'
 import MemoryEditor from '@/components/MemoryEditor'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
+import { TargetChip } from '@/components/ui/TargetChip'
 import { useToast } from '@/hooks/useToast'
 import { refreshManifest, useManifest } from '@/hooks/useManifest'
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
@@ -30,7 +31,9 @@ export default function Memory({ repoPath }: Props) {
   const [updatingTarget, setUpdatingTarget] = useState<AgentId | null>(null)
   const { showToast } = useToast()
   const { manifest } = useManifest(repoPath)
-  const targets = manifest?.config?.targets ?? []
+  const targets = ((manifest?.config?.targets ?? []) as AgentId[]).filter((agent) =>
+    AGENTS.includes(agent),
+  )
 
   const load = async () => {
     try {
@@ -208,7 +211,8 @@ export default function Memory({ repoPath }: Props) {
       <aside className={styles['mem-list']}>
         <div className={styles['mem-list-head']} data-testid="memory-rail-header">
           <div>
-            <span className="label">memories</span>
+            <span className="label">Memory</span>
+            <h2>版本列表</h2>
           </div>
           <div className={styles['mem-list-actions']}>
             <IconButton
@@ -234,18 +238,16 @@ export default function Memory({ repoPath }: Props) {
         <div className={styles['mem-global-targets']} data-testid="memory-targets">
           <span className="label">投影目标</span>
           <div className="target-chips">
-            {AGENTS.map((a) => {
+            {targets.map((a) => {
               const activeTarget = targets.includes(a)
               const busy = updatingTarget === a
               return (
-                <button
+                <TargetChip
                   key={a}
-                  type="button"
-                  className="target-chip"
-                  data-state={activeTarget ? 'on' : 'off'}
-                  style={{ ['--c' as string]: agentColor[a] }}
-                  aria-pressed={activeTarget}
-                  data-tooltip={
+                  agent={a}
+                  state={activeTarget ? 'on' : 'off'}
+                  label={agentShort[a]}
+                  tooltip={
                     busy
                       ? '更新中…'
                       : activeTarget
@@ -254,9 +256,7 @@ export default function Memory({ repoPath }: Props) {
                   }
                   disabled={!!updatingTarget || projecting}
                   onClick={() => void toggleProjectionTarget(a)}
-                >
-                  {agentShort[a]}
-                </button>
+                />
               )
             })}
           </div>

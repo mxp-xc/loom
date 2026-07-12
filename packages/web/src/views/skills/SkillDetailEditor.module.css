@@ -1,34 +1,5 @@
 .chip {
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  transition: all var(--dur) var(--ease);
   flex-shrink: 0;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  font-weight: 400;
-  line-height: 15px;
-  padding: 0;
-}
-.chip.active {
-  background: var(--c);
-  color: #fff;
-  border-color: var(--c);
-}
-.chip.inactive {
-  background: transparent;
-  color: var(--c);
-  border-color: color-mix(in srgb, var(--c) 45%, transparent);
-  opacity: 0.5;
-}
-.chip:hover {
-  transform: scale(1.05);
-  border-color: var(--c);
 }
 
 .skill-detail-content-frame {

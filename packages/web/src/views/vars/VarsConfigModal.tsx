@@ -1,7 +1,8 @@
 import { CheckCircle2, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../lib/api.js'
-import { AGENTS, agentColor, agentShort, type AgentId } from '../../lib/agents.js'
+import { AGENTS, agentShort, type AgentId } from '../../lib/agents.js'
+import { TargetChip } from '@/components/ui/TargetChip'
 import { cn } from '@/lib/utils.js'
 import type {
   StringFormat,
@@ -417,20 +418,16 @@ export default function VarsConfigModal({
                 <span>配置槽位</span>
                 <div className="target-chips">
                   {slotOptions.map((option) => (
-                    <button
+                    <TargetChip
                       key={option}
-                      type="button"
-                      className="target-chip"
-                      data-agent={option === 'default' ? 'default' : undefined}
-                      data-state={slot === option ? 'on' : 'off'}
-                      style={{
-                        ['--c' as string]:
-                          option === 'default' ? 'var(--primary)' : agentColor[option],
-                      }}
+                      agent={option === 'default' ? undefined : option}
+                      state={slot === option ? 'on' : 'off'}
+                      color={option === 'default' ? 'var(--primary)' : undefined}
+                      label={slotLabel(option)}
                       onClick={() => setSlot(option)}
                     >
-                      {slotLabel(option)}
-                    </button>
+                      {option === 'default' ? 'default' : undefined}
+                    </TargetChip>
                   ))}
                 </div>
               </div>

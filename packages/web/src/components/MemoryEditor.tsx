@@ -3,7 +3,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { ApiError, api } from '@/lib/api'
-import { agentShort, agentColor, type AgentId } from '@/lib/agents'
+import type { AgentId } from '@/lib/agents'
+import { TargetChip } from '@/components/ui/TargetChip'
 import { cn } from '@/lib/utils'
 import type { VarsDiagnostic } from '@/lib/vars'
 import MemoryRichMarkdownEditor from './MemoryRichMarkdownEditor'
@@ -188,16 +189,12 @@ export default function MemoryEditor({
             <span className="label">预览为</span>
             <div className="target-chips">
               {targets.map((a) => (
-                <button
+                <TargetChip
                   key={a}
-                  type="button"
-                  className="target-chip"
-                  data-state={agent === a ? 'on' : 'off'}
-                  style={{ ['--c' as string]: agentColor[a] }}
+                  agent={a}
+                  state={agent === a ? 'on' : 'off'}
                   onClick={() => setAgent(a)}
-                >
-                  {agentShort[a]}
-                </button>
+                />
               ))}
             </div>
           </div>

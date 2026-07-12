@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { AGENTS, agentColor, agentShort } from '@/lib/agents'
+import { AGENTS, agentShort } from '@/lib/agents'
 import { IconButton } from '@/components/ui/IconButton'
+import { TargetChip } from '@/components/ui/TargetChip'
 import { Check, Eraser, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import styles from './ConfigField.module.css'
@@ -284,18 +285,14 @@ export function ConfigField({
               {AGENTS.map((agent) => {
                 const on = Array.isArray(value) && (value as string[]).includes(agent)
                 return (
-                  <button
-                    type="button"
+                  <TargetChip
                     key={agent}
-                    className="target-chip"
-                    style={{ ['--c' as string]: agentColor[agent] }}
-                    data-state={on ? 'on' : 'off'}
-                    aria-pressed={on}
+                    agent={agent}
+                    state={on ? 'on' : 'off'}
+                    label={agentShort[agent]}
                     disabled={isDisabled || saving}
                     onClick={() => toggleChip(agent)}
-                  >
-                    {agentShort[agent]}
-                  </button>
+                  />
                 )
               })}
             </div>

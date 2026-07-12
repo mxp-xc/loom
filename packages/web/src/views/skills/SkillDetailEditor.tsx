@@ -5,8 +5,8 @@ import Modal from '@/components/Modal'
 import MarkdownPreview from '@/components/MarkdownPreview'
 import { Copy, Check } from 'lucide-react'
 import { IconButton } from '@/components/ui/IconButton'
-import { AGENTS, agentShort, agentColor, agentSkillPath, type AgentId } from '@/lib/agents'
-import { cn } from '@/lib/utils'
+import { TargetChip } from '@/components/ui/TargetChip'
+import { AGENTS, agentShort, agentSkillPath, type AgentId } from '@/lib/agents'
 import type { SkillDetail } from './types'
 import styles from './SkillDetailEditor.module.css'
 
@@ -18,14 +18,15 @@ interface Props {
 }
 
 const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
-  <span
+  <TargetChip
     key={agent}
-    className={cn(styles.chip, active ? styles.active : styles.inactive)}
-    style={{ ['--c' as string]: agentColor[agent] }}
+    agent={agent}
+    className={styles.chip}
+    state={active ? 'on' : 'off'}
+    label={agentShort[agent]}
+    tooltip={`${agentShort[agent]} ${active ? '已启用' : '未启用'}`}
     onClick={onClick}
-  >
-    {agentShort[agent]}
-  </span>
+  />
 )
 
 export default function SkillDetailEditor({ repoPath, detail, showToast, onClose }: Props) {

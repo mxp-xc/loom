@@ -9,6 +9,7 @@ import {
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
+import { TargetChip } from '@/components/ui/TargetChip'
 import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
@@ -43,17 +44,15 @@ const chevronStyle = (isCollapsed: boolean): React.CSSProperties => ({
 })
 
 const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
-  <button
-    type="button"
+  <TargetChip
     key={agent}
-    className={cn(styles.chip, active ? styles.active : styles.inactive)}
-    style={{ ['--c' as string]: agentColor[agent] }}
+    agent={agent}
+    className={styles.chip}
+    state={active ? 'on' : 'off'}
+    label={agentShort[agent]}
+    tooltip={`${agentShort[agent]} ${active ? '已启用' : '未启用'}`}
     onClick={onClick}
-    aria-pressed={active}
-    title={`${agentShort[agent]} ${active ? '已启用' : '未启用'}`}
-  >
-    {agentShort[agent]}
-  </button>
+  />
 )
 
 function sourceTargetState(src: SkillSource, agent: AgentId) {
@@ -259,34 +258,26 @@ export default function SkillSourceList({
                     >
                       {visibleAgents.map((agent) => {
                         const { count, total, state } = sourceTargetState(src, agent)
-                        const tooltip =
+                        const status =
                           state === 'on'
                             ? '全部已选择'
                             : state === 'mixed'
                               ? '部分已选择'
                               : '全部未选择'
+                        const tooltip = state === 'mixed' ? `${status} ${count}/${total}` : status
                         const disabled =
                           total === 0 || operations.pending.skills.sourceTargets(src, agent)
                         return (
-                          <button
+                          <TargetChip
                             key={agent}
-                            type="button"
-                            className={cn('target-chip', styles['source-target-chip'])}
-                            style={{ ['--c' as string]: agentColor[agent] }}
-                            data-state={state}
-                            aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
-                            aria-label={`${repoId} ${agentShort[agent]}：${tooltip}`}
-                            data-tooltip={`${repoId} ${agentShort[agent]}：${tooltip}`}
+                            agent={agent}
+                            className={styles['source-target-chip']}
+                            state={state}
+                            label={`${repoId} ${agentShort[agent]}：${status}`}
+                            tooltip={`${repoId} ${agentShort[agent]}：${tooltip}`}
                             disabled={disabled}
                             onClick={() => void operations.setSourceSkillTargets(src, agent)}
-                          >
-                            {agentShort[agent]}
-                            {state === 'mixed' && (
-                              <span className="target-chip-count">
-                                {count}/{total}
-                              </span>
-                            )}
-                          </button>
+                          />
                         )
                       })}
                     </span>

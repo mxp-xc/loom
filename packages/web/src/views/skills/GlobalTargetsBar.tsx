@@ -1,8 +1,9 @@
-import { agentShort, agentColor, type AgentId } from '@/lib/agents'
+import { agentShort, type AgentId } from '@/lib/agents'
 import type { Manifest } from '@loom/core'
 import { Link } from 'react-router-dom'
 import { Settings2 } from 'lucide-react'
 import { IconButton } from '@/components/ui/IconButton'
+import { TargetChip } from '@/components/ui/TargetChip'
 import type { ManifestOperations } from '@/hooks/useManifestOperations'
 
 interface Props {
@@ -56,28 +57,19 @@ export default function GlobalTargetsBar({ manifest, operations }: Props) {
             (item.kind === 'source' ? item.member.targets : item.skill.targets)?.includes(agent),
           ).length
           const state = count === 0 ? 'off' : count === skills.length ? 'on' : 'mixed'
-          const tooltip =
+          const status =
             state === 'on' ? '全部已选择' : state === 'mixed' ? '部分已选择' : '全部未选择'
+          const tooltip = state === 'mixed' ? `${status} ${count}/${skills.length}` : status
           return (
-            <button
+            <TargetChip
               key={agent}
-              type="button"
-              className="target-chip"
-              style={{ ['--c' as string]: agentColor[agent] }}
-              data-state={state}
-              aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
-              aria-label={`${agentShort[agent]}：${state === 'on' ? '全部已选择' : state === 'mixed' ? '部分已选择' : '全部未选择'}`}
-              data-tooltip={`${agentShort[agent]}：${tooltip}`}
+              agent={agent}
+              state={state}
+              label={`${agentShort[agent]}：${status}`}
+              tooltip={`${agentShort[agent]}：${tooltip}`}
               disabled={anyUpdating}
               onClick={() => void operations.setAllSkillTargets(manifest, agent)}
-            >
-              {agentShort[agent]}
-              {state === 'mixed' && (
-                <span className="target-chip-count">
-                  {count}/{skills.length}
-                </span>
-              )}
-            </button>
+            />
           )
         })}
       </span>

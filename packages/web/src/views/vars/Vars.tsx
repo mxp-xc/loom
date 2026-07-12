@@ -1,7 +1,7 @@
 import { RefreshCw, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '@/hooks/useToast'
-import { agentColor, agentShort } from '../../lib/agents'
+import { TargetChip } from '@/components/ui/TargetChip'
 import { cn } from '@/lib/utils'
 import type { VarsProfileId } from './profile-model'
 import { useProfileVars } from './useProfileVars'
@@ -120,34 +120,28 @@ export default function Vars({ repoPath }: { repoPath: string }) {
         </div>
         <div className={styles['vars-agent-view']}>
           <span className={styles['vars-agent-label']}>查看范围</span>
-          <button
-            type="button"
-            className="target-chip"
-            data-agent="default"
-            data-state={vars.viewScope === 'default' ? 'on' : 'off'}
-            style={{ ['--c' as string]: 'var(--primary)' }}
+          <TargetChip
+            state={vars.viewScope === 'default' ? 'on' : 'off'}
+            color="var(--primary)"
+            label="default"
             onClick={() => {
               vars.setActiveAgent(vars.defaultAgent)
               vars.setViewScope('default')
             }}
           >
             default
-          </button>
+          </TargetChip>
           <div className="target-chips" aria-label="目标 agent">
             {vars.configuredTargets.map((agent) => (
-              <button
+              <TargetChip
                 key={agent}
-                type="button"
-                className="target-chip"
-                data-state={vars.viewScope === agent ? 'on' : 'off'}
-                style={{ ['--c' as string]: agentColor[agent] }}
+                agent={agent}
+                state={vars.viewScope === agent ? 'on' : 'off'}
                 onClick={() => {
                   vars.setActiveAgent(agent)
                   vars.setViewScope(agent)
                 }}
-              >
-                {agentShort[agent]}
-              </button>
+              />
             ))}
           </div>
         </div>

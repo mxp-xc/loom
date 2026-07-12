@@ -142,6 +142,11 @@ describe('MCP workbench view', () => {
       inventory.contains(within(inventory).getByRole('region', { name: '全局 MCP targets' })),
     ).toBe(true)
     expect(within(inventory).queryByText('全部 servers')).toBeNull()
+    expect(
+      within(inventory)
+        .getByRole('button', { name: '全部 MCP servers 应用到 OC' })
+        .getAttribute('data-tooltip'),
+    ).toBe('应用到 OC')
 
     const toolbar = within(inventory).getByRole('toolbar', { name: 'MCP inventory actions' })
     expect(within(toolbar).getByRole('button', { name: 'Add server' }).textContent?.trim()).toBe('')

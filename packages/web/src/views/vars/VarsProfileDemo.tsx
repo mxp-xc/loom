@@ -13,7 +13,8 @@ import {
 } from 'lucide-react'
 import { Button } from '../../components/ui/button'
 import { IconButton } from '../../components/ui/IconButton'
-import { AGENTS, agentColor, agentShort, type AgentId } from '../../lib/agents'
+import { TargetChip } from '@/components/ui/TargetChip'
+import { AGENTS, agentShort, type AgentId } from '../../lib/agents'
 import { cn } from '@/lib/utils'
 import styles from './VarsProfileDemo.module.css'
 
@@ -221,10 +222,6 @@ function slotLabel(slot: Slot) {
   return agentShort[slot]
 }
 
-function shortAgentId(agent: AgentId) {
-  return agent === 'claude-code' ? 'cc' : agent === 'codex' ? 'cx' : 'oc'
-}
-
 function AgentChips({
   activeAgent,
   onChange,
@@ -239,30 +236,23 @@ function AgentChips({
   return (
     <div className={cn('target-chips', styles['vars-lab-agent-chips'])} aria-label={label}>
       {includeDefault && (
-        <button
-          type="button"
-          className="target-chip"
-          data-agent="default"
-          data-state={activeAgent === 'default' ? 'on' : 'off'}
-          data-a="df"
-          style={{ ['--c' as string]: 'var(--primary)' }}
+        <TargetChip
+          state={activeAgent === 'default' ? 'on' : 'off'}
+          color="var(--primary)"
+          label="default"
           onClick={() => onChange('default')}
         >
           default
-        </button>
+        </TargetChip>
       )}
       {AGENTS.map((agent) => (
-        <button
+        <TargetChip
           key={agent}
-          type="button"
-          className="target-chip"
-          data-state={activeAgent === agent ? 'on' : 'off'}
-          data-a={shortAgentId(agent)}
-          style={{ ['--c' as string]: agentColor[agent] }}
+          agent={agent}
+          state={activeAgent === agent ? 'on' : 'off'}
+          label={agentShort[agent]}
           onClick={() => onChange(agent)}
-        >
-          {agentShort[agent]}
-        </button>
+        />
       ))}
     </div>
   )

@@ -13,6 +13,7 @@ import MonacoTextEditor from '@/components/monaco/MonacoTextEditor'
 import { registerVarsCompletionProvider } from '@/components/monaco/varsCompletion'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
+import { TargetChip } from '@/components/ui/TargetChip'
 import { useManifest } from '@/hooks/useManifest'
 import {
   normalizeManifestOperationError,
@@ -271,43 +272,6 @@ function serverProjectionState(server: McpServer, visibleAgents: AgentId[]) {
   if (active === 0) return { tone: 'draft', label: 'draft' }
   if (active === visibleAgents.length) return { tone: 'projected', label: 'projected' }
   return { tone: 'partial', label: 'partial' }
-}
-
-function TargetChip({
-  agent,
-  active,
-  label,
-  onClick,
-  disabled,
-  count,
-}: {
-  agent: AgentId
-  active: boolean | 'mixed'
-  label: string
-  onClick: () => void
-  disabled?: boolean
-  count?: number
-}) {
-  const state = active === 'mixed' ? 'mixed' : active ? 'on' : 'off'
-  return (
-    <button
-      type="button"
-      className="target-chip"
-      style={{ '--c': agentColor[agent] } as CSSProperties}
-      data-state={state}
-      data-tooltip={label}
-      aria-pressed={state === 'mixed' ? 'mixed' : state === 'on'}
-      aria-label={label}
-      onClick={(event) => {
-        event.stopPropagation()
-        onClick()
-      }}
-      disabled={disabled}
-    >
-      {agentShort[agent]}
-      {count !== undefined && <span className="target-chip-count">{count}</span>}
-    </button>
-  )
 }
 
 function TypeBadge({ type, large }: { type: McpType; large?: boolean }) {
@@ -1032,7 +996,7 @@ function GlobalTargetsBar({
   if (servers.length === 0) return null
   return (
     <section className={styles.globalTargets} role="region" aria-label="全局 MCP targets">
-      <span className={styles.globalTargetsLabel}>TARGETS</span>
+      <span className={styles.globalTargetsLabel}>投影目标</span>
       <div className="target-chips">
         {visibleAgents.map((agent) => {
           const count = servers.filter((server) => (server.targets ?? []).includes(agent)).length
@@ -1041,11 +1005,12 @@ function GlobalTargetsBar({
             <TargetChip
               key={agent}
               agent={agent}
-              active={state === 'mixed' ? 'mixed' : state === 'on'}
+              state={state}
               label={'全部 MCP servers 应用到 ' + agentShort[agent]}
-              count={count}
+              tooltip={'应用到 ' + agentShort[agent]}
               onClick={() => void operations.setAllMcpTargets(servers, agent)}
               disabled={operations.pending.mcp.allTargets(agent)}
+              stopPropagation
             />
           )
         })}
@@ -1115,14 +1080,6 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
             .includes(term)),
     )
   }, [filter, search, servers])
-  const remoteCount = servers.filter((server) => server.type !== 'stdio').length
-  const fullyProjected = servers.filter(
-    (server) =>
-      visibleAgents.length > 0 &&
-      visibleAgents.every((agent) => (server.targets ?? []).includes(agent)),
-  ).length
-  const targetLinks = servers.reduce((sum, server) => sum + (server.targets ?? []).length, 0)
-
   const submitServer = async (form: McpServerFormState) => {
     setEditorBusy(true)
     setEditorError(null)
@@ -1169,36 +1126,19 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
 
   return (
     <div className={styles.page}>
-      <section className={styles.hero}>
-        <div>
-          <div className={styles.kicker}>MCP WORKBENCH</div>
-          <h1>MCP Servers</h1>
-          <p>管理本地 stdio 与远程 SSE/HTTP server，并把它们清晰投影到各个 agent。</p>
+      {error && (
+        <div className={styles.workbenchError} role="alert">
+          {error}
         </div>
-        <div className={styles.heroMeta}>
-          <span>
-            <b>{servers.length}</b>
-            servers
-            <small>{remoteCount} remote</small>
-          </span>
-          <span>
-            <b>{fullyProjected}</b>
-            fully projected
-            <small>all targets enabled</small>
-          </span>
-          <span>
-            <b>{targetLinks}</b>
-            target links
-            <small>agent projections</small>
-          </span>
-          {error && <b>{error}</b>}
-        </div>
-      </section>
+      )}
       <section className={styles.workbench} role="region" aria-label="MCP workbench">
         <aside className={styles.inventory} aria-label="MCP inventory">
           <div className={styles.inventoryTop}>
             <div className={styles.inventoryHeading}>
-              <div className={styles.kicker}>INVENTORY</div>
+              <div className={styles.inventoryTitle}>
+                <div className={styles.kicker}>MCP</div>
+                <h2>Server 列表</h2>
+              </div>
               <div
                 className={styles.inventoryActions}
                 role="toolbar"
@@ -1334,14 +1274,16 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                         <TargetChip
                           key={agent}
                           agent={agent}
-                          active={activeTargets.includes(agent)}
+                          state={activeTargets.includes(agent) ? 'on' : 'off'}
                           label={server.id + ' 应用到 ' + agentShort[agent]}
+                          tooltip={server.id + ' 应用到 ' + agentShort[agent]}
                           onClick={() =>
                             void operations.toggleMcpTarget(
                               { ...server, targets: server.targets ?? [] },
                               agent,
                             )
                           }
+                          stopPropagation
                         />
                       ))}
                     </div>
