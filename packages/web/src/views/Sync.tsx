@@ -90,6 +90,17 @@ function stoppedFeedback(action: FeedbackAction): FeedbackState {
   }
 }
 
+function pushFailureFeedback(result: SyncPushResponse): Pick<FeedbackState, 'message' | 'detail'> {
+  if (result.nonFastForward) {
+    return {
+      message: '远端有本地没有的更新，上传被 Git 拒绝。',
+      detail:
+        '请先点“拉取”合并远端变更；如果有冲突，处理完成后再上传。只有确定要用本地覆盖远端时，才使用“强制推送”。',
+    }
+  }
+  return { message: '上传失败', detail: result.message ?? result.error ?? '上传失败' }
+}
+
 export default function Sync({ repoPath }: { repoPath: string }) {
   const [remote, setRemote] = useState('')
   const [remoteInput, setRemoteInput] = useState('')
@@ -249,12 +260,17 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         signal: controller.signal,
       })) as SyncPushResponse
       setPushResult(result)
-      if (!result.ok)
-        throw new Error(
-          result.message ??
-            result.error ??
-            (result.nonFastForward ? '非 fast-forward，请先拉取' : '上传失败'),
-        )
+      if (!result.ok) {
+        const failure = pushFailureFeedback(result)
+        console.error({ result }, 'Sync push failed')
+        setError(failure.detail)
+        setFeedback({
+          action: 'push',
+          status: 'error',
+          ...failure,
+        })
+        return
+      }
       setFeedback({
         action: 'push',
         status: 'success',

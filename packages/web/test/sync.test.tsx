@@ -168,6 +168,29 @@ describe('Sync force operations', () => {
     expect(screen.getAllByText('网络连接失败，请稍后重试').length).toBeGreaterThan(0)
   })
 
+  it('explains non-fast-forward upload failures without showing raw git output', async () => {
+    api.syncPush.mockResolvedValue({
+      ok: false,
+      nonFastForward: true,
+      message:
+        'To https://github.com/mxp-xc/my-loom.git\n ! [rejected] HEAD -> main (fetch first)\nhint: Updates were rejected because the remote contains work that you do not have locally.',
+    })
+
+    renderSync()
+    await screen.findByText('https://example.com/repo.git')
+
+    fireEvent.click(screen.getByRole('button', { name: '上传' }))
+
+    expect(await screen.findByRole('dialog', { name: '上传本地变更' })).toBeDefined()
+    expect(screen.getAllByText('远端有本地没有的更新，上传被 Git 拒绝。').length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText(
+        '请先点“拉取”合并远端变更；如果有冲突，处理完成后再上传。只有确定要用本地覆盖远端时，才使用“强制推送”。',
+      ).length,
+    ).toBeGreaterThan(0)
+    expect(screen.queryByText(/fetch first/)).toBeNull()
+  })
+
   it('can stop waiting for a running upload from the feedback dialog', async () => {
     api.syncPush.mockImplementation(
       (_repo: string, options?: { signal?: AbortSignal }) =>
