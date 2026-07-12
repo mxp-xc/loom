@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { AgentIdSchema, SkillMemberOverrideSchema } from '@loom/core'
+import { AgentIdSchema } from '@loom/core'
 import { z } from 'zod'
 import { SkillsApplication, SkillsApplicationError } from '../../skills/application.js'
 import { logger } from '../../lib/logger.js'
@@ -62,7 +62,7 @@ const SourceUrlBody = z.object({
 })
 
 const SetSourceMembersBody = SourceUrlBody.extend({
-  members: z.array(SkillMemberOverrideSchema).optional(),
+  members: z.array(NonEmptyString).optional(),
 })
 
 const UpdateSourceBody = SourceUrlBody.extend({

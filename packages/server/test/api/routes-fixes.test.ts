@@ -354,6 +354,38 @@ describe('source metadata', () => {
 describe('targets update', () => {
   const app = new Hono().route('/api', registerRoutes())
 
+  it('POST /api/sources/members accepts selected member names', async () => {
+    memFiles['/tmp/r10/skills.yaml'] = [
+      'sources:',
+      '  - url: https://example.test/skills.git',
+      '    ref: main',
+      '    members:',
+      '      - name: alpha',
+      '        targets:',
+      '          - codex',
+      'skills: []',
+      '',
+    ].join('\n')
+
+    const res = await app.request('/api/sources/members', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/r10',
+        url: 'https://example.test/skills.git',
+        members: ['alpha', 'beta'],
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    const parsed = yaml.load(memFiles['/tmp/r10/skills.yaml']) as any
+    expect(parsed.sources[0].members).toEqual([
+      { name: 'alpha', targets: ['codex'] },
+      { name: 'beta' },
+    ])
+  })
+
   it('POST /api/skills/source-targets keeps separate invalid field error codes', async () => {
     const res = await app.request('/api/skills/source-targets', {
       method: 'POST',
