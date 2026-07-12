@@ -1,5 +1,5 @@
 import { CheckCircle2, Search, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../lib/api.js'
 import { AGENTS, agentShort, type AgentId } from '../../lib/agents.js'
 import { TargetChip } from '@/components/ui/TargetChip'
@@ -240,6 +240,7 @@ export default function VarsConfigModal({
   const [baseKeyDraft, setBaseKeyDraft] = useState('')
   const [baseTypeDraft, setBaseTypeDraft] = useState<VarEntryInput['type']>('string')
   const [baseFormatDraft, setBaseFormatDraft] = useState<StringFormat>('plain')
+  const backdropPointerDownRef = useRef(false)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -356,7 +357,17 @@ export default function VarsConfigModal({
   const showPicker = modal.kind === 'add' && profile.id !== 'base'
 
   return (
-    <div className={styles['vars-modal-backdrop']} role="presentation">
+    <div
+      className={styles['vars-modal-backdrop']}
+      role="presentation"
+      onPointerDown={(event) => {
+        backdropPointerDownRef.current = event.target === event.currentTarget
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget && backdropPointerDownRef.current) onClose()
+        backdropPointerDownRef.current = false
+      }}
+    >
       <section
         className={styles['vars-modal']}
         role="dialog"

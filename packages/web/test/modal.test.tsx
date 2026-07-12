@@ -123,6 +123,25 @@ describe('Modal', () => {
     expect(document.activeElement).toBe(input)
   })
 
+  it('keeps the dialog open when a drag selection starts inside and ends on the backdrop', async () => {
+    const close = vi.fn()
+    render(<Controlled onClose={close} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开' }))
+    const input = screen.getByRole('textbox', { name: '名称' })
+    await waitFor(() => expect(document.activeElement).toBe(input))
+
+    const dialog = screen.getByRole('dialog', { name: '编辑环境' })
+    const backdrop = dialog.parentElement!
+    fireEvent.pointerDown(input)
+    fireEvent.mouseDown(input)
+    fireEvent.mouseUp(backdrop)
+    fireEvent.click(backdrop)
+
+    expect(close).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: '编辑环境' })).toBeDefined()
+  })
+
   it('keeps focus inside the dialog when busy toggles', async () => {
     render(<BusyControlled onClose={() => undefined} />)
     const input = screen.getByRole('textbox', { name: '内容' })
@@ -173,7 +192,9 @@ describe('Modal', () => {
     await waitFor(() => expect(document.activeElement).toBe(input))
 
     const dialog = screen.getByRole('dialog', { name: '编辑环境' })
-    fireEvent.click(dialog.parentElement!)
+    const backdrop = dialog.parentElement!
+    fireEvent.pointerDown(backdrop)
+    fireEvent.click(backdrop)
 
     expect(close).toHaveBeenCalledOnce()
     expect(document.activeElement).toBe(opener)

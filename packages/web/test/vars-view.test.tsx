@@ -741,6 +741,20 @@ describe('Vars view', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑配置' })).toBeNull())
   })
 
+  it('closes the config modal from the backdrop', async () => {
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('agent_name')
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 agent_name' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
+    const backdrop = dialog.parentElement!
+
+    fireEvent.pointerDown(backdrop)
+    fireEvent.click(backdrop)
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑配置' })).toBeNull())
+  })
+
   it('does not show override or restore inheritance copy', async () => {
     render(<Vars repoPath="/repo" />)
     await screen.findByText('agent_name')

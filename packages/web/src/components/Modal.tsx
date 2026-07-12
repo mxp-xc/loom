@@ -30,6 +30,7 @@ export default function Modal({
   const focusTimerRef = useRef<number | null>(null)
   const closeGuardTimerRef = useRef<number | null>(null)
   const closeRequestedRef = useRef(false)
+  const backdropPointerDownRef = useRef(false)
   const wasOpenRef = useRef(false)
 
   if (open && !wasOpenRef.current && openerRef.current === null) {
@@ -47,7 +48,10 @@ export default function Modal({
 
   useEffect(() => {
     wasOpenRef.current = open
-    if (open) closeRequestedRef.current = false
+    if (open) {
+      closeRequestedRef.current = false
+      backdropPointerDownRef.current = false
+    }
   }, [open])
 
   useEffect(() => {
@@ -171,8 +175,14 @@ export default function Modal({
             backdropFilter: 'blur(4px)',
             WebkitBackdropFilter: 'blur(4px)',
           }}
+          onPointerDown={(event) => {
+            backdropPointerDownRef.current = event.target === event.currentTarget
+          }}
           onClick={(event) => {
-            if (event.target === event.currentTarget) requestClose()
+            if (event.target === event.currentTarget && backdropPointerDownRef.current) {
+              requestClose()
+            }
+            backdropPointerDownRef.current = false
           }}
         >
           <DialogPrimitive.Content

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   Braces,
   CheckCircle2,
@@ -365,6 +365,7 @@ function VarsProfileDemo() {
   const [previewMode, setPreviewMode] = useState<PreviewMode>('edit')
   const [selectedBaseKey, setSelectedBaseKey] = useState('memory.context')
   const [showAvailable, setShowAvailable] = useState(false)
+  const backdropPointerDownRef = useRef(false)
 
   const openModal = (nextModal: Exclude<ModalState, null>) => {
     setPreviewMode('edit')
@@ -616,7 +617,19 @@ function VarsProfileDemo() {
       </div>
 
       {modal && (
-        <div className={styles['vars-lab-modal-backdrop']} role="presentation">
+        <div
+          className={styles['vars-lab-modal-backdrop']}
+          role="presentation"
+          onPointerDown={(event) => {
+            backdropPointerDownRef.current = event.target === event.currentTarget
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget && backdropPointerDownRef.current) {
+              setModal(null)
+            }
+            backdropPointerDownRef.current = false
+          }}
+        >
           <section
             className={styles['vars-lab-modal']}
             role="dialog"
