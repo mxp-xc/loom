@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { join, dirname, basename as pathBasename, isAbsolute } from 'node:path'
 import { glob } from 'tinyglobby'
-import { parseSourceMemberSkillId, sourceIdentity } from '@loom/core'
+import { deriveRepoId, parseSourceMemberSkillId, sourceIdentity } from '@loom/core'
 import { z } from 'zod'
 import { loadProjectionManifest, projectRepository } from '../../projection/workflow.js'
 import { resolveRepoPath } from '../repo.js'
@@ -102,22 +102,28 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
         }
         let skillDir: string | null = null
         if (sourceUrl) {
-          const identity = sourceIdentity(sourceUrl)
-          const repoId = identity.repoId
+          const manifest = await loadProjectionManifest(deps, repoPath)
+          const source = manifest.skills.sources.find((item) => item.url === sourceUrl)
+          const identity = sourceIdentity(source ?? sourceUrl)
+          const cacheId = deriveRepoId(sourceUrl)
           const memberName = parseSourceMemberSkillId(skillId, identity)
-          const cacheDir = join(repoPath, 'remote-cache', repoId)
+          const cacheDir = join(repoPath, 'remote-cache', cacheId)
           if (await deps.fs.exists(cacheDir)) {
             const requested = sourceSkillDirFromPath(cacheDir, localPath)
             if (requested) {
               skillDir = requested
             } else {
-              const matches = await glob('**/SKILL.md', {
-                cwd: cacheDir,
-                ignore: ['**/.git/**', '**/node_modules/**'],
-                onlyFiles: true,
-              })
-              const found = matches.find((m) => pathBasename(dirname(m)) === memberName)
-              if (found) skillDir = join(cacheDir, dirname(found))
+              const memberPath = source?.members?.find((member) => member.name === memberName)?.path
+              skillDir = memberPath ? sourceSkillDirFromPath(cacheDir, memberPath) : null
+              if (!skillDir) {
+                const matches = await glob('**/SKILL.md', {
+                  cwd: cacheDir,
+                  ignore: ['**/.git/**', '**/node_modules/**'],
+                  onlyFiles: true,
+                })
+                const found = matches.find((m) => pathBasename(dirname(m)) === memberName)
+                if (found) skillDir = join(cacheDir, dirname(found))
+              }
             }
           }
         } else if (localPath) {

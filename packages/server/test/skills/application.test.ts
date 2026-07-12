@@ -180,6 +180,7 @@ describe('SkillsApplication', () => {
     })
 
     expect(result.source).toMatchObject({
+      name: 'skills',
       url: 'https://github.com/mattpocock/skills',
       type: 'tag',
       ref: 'v1.0.1',
@@ -190,6 +191,100 @@ describe('SkillsApplication', () => {
     expect(log.error).toHaveBeenCalledWith('auto-install failed for source', {
       err,
       url: 'https://github.com/mattpocock/skills',
+    })
+  })
+
+  it('persists a custom source name and still installs into URL-derived cache', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+
+    const result = await app.addSource(repoPath, {
+      name: 'openai-skills',
+      url: 'https://github.com/mattpocock/skills',
+      ref: 'main',
+    })
+
+    expect(result.source).toMatchObject({
+      name: 'openai-skills',
+      url: 'https://github.com/mattpocock/skills',
+      ref: 'main',
+    })
+    expect(git.clone).toHaveBeenCalled()
+    const cloneDest = vi.mocked(git.clone).mock.calls[0]?.[1]
+    expect(cloneDest).toBe(join(repoPath, 'remote-cache', 'skills'))
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.sources[0].name).toBe('openai-skills')
+  })
+
+  it('rejects duplicate source urls and names', async () => {
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: superpowers',
+        '    url: https://example.test/superpowers.git',
+        '    ref: main',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+
+    await expect(
+      app.addSource(repoPath, {
+        name: 'other',
+        url: 'https://example.test/superpowers.git',
+        ref: 'main',
+      }),
+    ).rejects.toMatchObject({ status: 409, code: 'source_url_exists' })
+
+    await expect(
+      app.addSource(repoPath, {
+        name: 'superpowers',
+        url: 'https://example.test/other.git',
+        ref: 'main',
+      }),
+    ).rejects.toMatchObject({ status: 409, code: 'source_name_exists' })
+  })
+
+  it('rejects invalid source names', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+
+    await expect(
+      app.addSource(repoPath, {
+        name: 'bad/name',
+        url: 'https://example.test/skills.git',
+        ref: 'main',
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_source_name' })
+  })
+
+  it('renames a source while preserving members and targets', async () => {
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: old-name',
+        '    url: https://example.test/skills.git',
+        '    ref: main',
+        '    members:',
+        '      - name: alpha',
+        '        targets:',
+        '          - codex',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+
+    await app.updateSourceMeta(repoPath, {
+      url: 'https://example.test/skills.git',
+      name: 'new-name',
+    })
+
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.sources[0]).toEqual({
+      name: 'new-name',
+      url: 'https://example.test/skills.git',
+      ref: 'main',
+      members: [{ name: 'alpha', targets: ['codex'] }],
     })
   })
 })

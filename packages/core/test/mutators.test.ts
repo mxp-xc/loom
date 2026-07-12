@@ -14,6 +14,7 @@ import {
   updateMcpServer,
   setMcpTargets,
   setConfigField,
+  updateSourceMeta,
 } from '../src/mutators.js'
 import type { SkillsManifest, McpServer, AgentId } from '../src/types.js'
 
@@ -63,6 +64,18 @@ describe('addSource', () => {
     expect(result.data.sources).toHaveLength(1)
     expect(result.data.sources[0]).toEqual({ url: 'https://github.com/test/repo', ref: 'main' })
   })
+  it('persists an explicit source name', () => {
+    const result = addSource(emptySkills, {
+      name: 'openai-skills',
+      url: 'https://github.com/test/repo',
+      ref: 'main',
+    })
+    expect(result.data.sources[0]).toEqual({
+      name: 'openai-skills',
+      url: 'https://github.com/test/repo',
+      ref: 'main',
+    })
+  })
   it('preserves existing sources via spread', () => {
     const skills: SkillsManifest = {
       sources: [{ url: 'https://github.com/a/b', ref: 'v1', custom: 'keep' } as any],
@@ -71,6 +84,31 @@ describe('addSource', () => {
     const result = addSource(skills, { url: 'https://github.com/c/d', ref: 'main' })
     expect(result.data.sources[0]).toHaveProperty('custom', 'keep')
     expect(result.data.sources).toHaveLength(2)
+  })
+})
+
+describe('updateSourceMeta', () => {
+  it('updates a source name without touching members', () => {
+    const skills: SkillsManifest = {
+      sources: [
+        {
+          name: 'old-name',
+          url: 'https://github.com/test/repo',
+          ref: 'main',
+          members: [{ name: 'skill-a', targets: ['codex' as AgentId] }],
+        },
+      ],
+      skills: [],
+    }
+    const result = updateSourceMeta(skills, 'https://github.com/test/repo', {
+      name: 'new-name',
+    })
+    expect(result.data.sources[0]).toEqual({
+      name: 'new-name',
+      url: 'https://github.com/test/repo',
+      ref: 'main',
+      members: [{ name: 'skill-a', targets: ['codex'] }],
+    })
   })
 })
 

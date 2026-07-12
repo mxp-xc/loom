@@ -137,6 +137,7 @@ describe('executeProjection', () => {
     })
     expect(res.ok).toBe(true)
     expect(await fs.exists(join(home, '.claude', 'skills', 'frontend-design'))).toBe(false)
+    expect(await fs.exists(join(home, '.claude', 'skills'))).toBe(false)
   })
   it('mcp var resolve failure: fails projection instead of silently skipping the entry', async () => {
     const fs = new NodeFileSystem()
@@ -302,6 +303,42 @@ describe('executeProjection', () => {
     expect(cleared.ok).toBe(true)
     expect(await fs.exists(dest)).toBe(false)
     expect(await fs.exists(join(home, '.claude', 'skills', 'superpowers'))).toBe(false)
+    expect(await fs.exists(join(home, '.claude', 'skills'))).toBe(false)
+  })
+  it('projection deps resolve source skills from URL-derived cache id, not custom source name', async () => {
+    const fs = new NodeFileSystem()
+    const repoPath = join(srcDir, 'repo-with-cache')
+    const cachedSkill = join(repoPath, 'remote-cache', 'superpowers', 'skills', 'brainstorming')
+    await mkdir(cachedSkill, { recursive: true })
+    await writeFile(join(cachedSkill, 'SKILL.md'), 'remote')
+    const sourcePlan: ProjectionPlan = {
+      links: [
+        {
+          skillId: 'openai-skills/brainstorming',
+          source: { repoId: 'openai-skills', cacheId: 'superpowers', memberName: 'brainstorming' },
+          targets: ['claude-code'],
+        },
+      ],
+      mcpEntries: [],
+      memoryPlan: { active: null, content: null, targets: [] },
+      skippedAgents: [],
+      strategy: 'copy',
+    }
+
+    const res = await executeProjection(
+      sourcePlan,
+      { ...manifest, mcp: [] },
+      varsCtx,
+      createProjectionDeps({ fs, git: {} as never, proc: {} as never }, repoPath, installed, home),
+      'skills',
+    )
+
+    expect(res.ok).toBe(true)
+    expect(
+      await fs.exists(
+        join(home, '.claude', 'skills', 'openai-skills', 'brainstorming', 'SKILL.md'),
+      ),
+    ).toBe(true)
   })
   it('strategy:copy keeps unmarked source-member directories during cleanup', async () => {
     const fs = new NodeFileSystem()

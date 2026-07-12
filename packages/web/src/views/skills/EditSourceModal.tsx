@@ -16,6 +16,8 @@ interface Props {
   onSaved: () => void
 }
 
+type OpenProps = Omit<Props, 'source'> & { source: SkillSource }
+
 const mono = "'JetBrains Mono', monospace"
 
 const errBox: React.CSSProperties = {
@@ -30,7 +32,22 @@ const errBox: React.CSSProperties = {
 }
 
 export default function EditSourceModal({ repoPath, source, showToast, onClose, onSaved }: Props) {
+  if (!source) return null
+  return (
+    <EditSourceModalContent
+      key={source.url}
+      repoPath={repoPath}
+      source={source}
+      showToast={showToast}
+      onClose={onClose}
+      onSaved={onSaved}
+    />
+  )
+}
+
+function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved }: OpenProps) {
   const [type, setType] = useState<'branch' | 'tag'>('branch')
+  const [name, setName] = useState('')
   const [ref, setRef] = useState('')
   const [scan, setScan] = useState('')
   const [branches, setBranches] = useState<string[]>([])
@@ -48,22 +65,14 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
   // the source, fetch the available refs, scan the members, and pre-select
   // the members that were already configured.
   useEffect(() => {
-    if (!source) {
-      setMembers([])
-      setSelected(new Set())
-      setBranches([])
-      setTags([])
-      setRef('')
-      setScan('')
-      setError(null)
-      return
-    }
     let active = true
     const url = source.url
+    const initName = sourceIdentity(source).repoId
     const initType = source.type ?? 'branch'
     const initScan = source.scan ?? ''
     const existing = new Set((source.members ?? []).map((m) => m.name))
     setType(initType)
+    setName(initName)
     setRef(source.ref ?? '')
     setScan(initScan)
     setError(null)
@@ -75,8 +84,9 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
     void (async () => {
       setRefsLoading(true)
       try {
-        const res = await loadSourceRefs(url, { shouldNotify: () => active })
+        const res = await loadSourceRefs(url, { shouldNotify: () => active, allowConcurrent: true })
         if (!active) return
+        if (res.skipped) return
         if (res.ok) {
           const br = res.result?.branches ?? []
           const tg = res.result?.tags ?? []
@@ -97,11 +107,13 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
       try {
         const res = await scanSourceMembers(url, {
           shouldNotify: () => active,
+          allowConcurrent: true,
           ref: source.ref,
           type: initType,
           scan: initScan,
         })
         if (!active) return
+        if (res.skipped) return
         if (res.ok && Array.isArray(res.result?.members)) {
           const scanned = res.result.members as ScanMember[]
           setMembers(sortSkillMembers(scanned))
@@ -127,11 +139,10 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
   }
 
   const handleSave = async () => {
-    if (!source) return
     setSaving(true)
     setError(null)
     try {
-      const res = await saveSource({ source, ref, type, scan, members: [...selected] })
+      const res = await saveSource({ source, name, ref, type, scan, members: [...selected] })
       if (res.ok) {
         onSaved()
       } else {
@@ -143,7 +154,6 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
   }
 
   const handleScan = async () => {
-    if (!source) return
     setScanning(true)
     setError(null)
     const existing = new Set((source.members ?? []).map((m) => m.name))
@@ -153,6 +163,7 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
         type,
         scan,
       })
+      if (res.skipped) return
       if (res.ok && Array.isArray(res.result?.members)) {
         const scanned = res.result.members as ScanMember[]
         setMembers(sortSkillMembers(scanned))
@@ -164,8 +175,6 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
       setScanning(false)
     }
   }
-
-  if (!source) return null
 
   const repoId = sourceIdentity(source).repoId
   const refOptions = type === 'tag' ? tags : branches
@@ -191,6 +200,19 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
       <div style={{ marginBottom: 14 }}>
         <span className="label">url</span>
         <input value={source.url} readOnly style={{ ...inputStyle, marginTop: 0 }} />
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <label className="label" htmlFor="edit-source-name">
+          source name
+        </label>
+        <input
+          id="edit-source-name"
+          aria-label="source name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          style={inputStyle}
+        />
       </div>
 
       <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>

@@ -85,8 +85,32 @@ describe('planProjection', () => {
     const link = p.links.find((l) => l.skillId === 'superpowers-diagnosing-bugs')!
     expect(link.source).toEqual({
       repoId: 'superpowers',
+      cacheId: 'superpowers',
       memberName: 'diagnosing-bugs',
       path: 'skills/engineering/diagnosing-bugs/SKILL.md',
+    })
+  })
+  it('uses source name for projected skill id but keeps URL-derived cache id', () => {
+    const m: Manifest = {
+      ...manifest,
+      skills: {
+        ...manifest.skills,
+        sources: [
+          {
+            ...manifest.skills.sources[0],
+            name: 'openai-skills',
+            members: [{ name: 'brainstorming', targets: ['codex'] }],
+          },
+        ],
+      },
+      config: { ...manifest.config, skill_naming: 'dir' },
+    }
+    const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
+    const link = p.links.find((l) => l.skillId === 'openai-skills/brainstorming')!
+    expect(link.source).toEqual({
+      repoId: 'openai-skills',
+      cacheId: 'superpowers',
+      memberName: 'brainstorming',
     })
   })
   it('enabled:false member -> empty targets', () => {
@@ -209,6 +233,11 @@ describe('source identity helpers', () => {
   it('derive repo id and select default naming in one place', () => {
     expect(sourceIdentity({ url: 'https://github.com/obra/superpowers.git' })).toEqual({
       repoId: 'superpowers',
+    })
+    expect(
+      sourceIdentity({ name: 'openai-skills', url: 'https://github.com/obra/superpowers.git' }),
+    ).toEqual({
+      repoId: 'openai-skills',
     })
     expect(resolveSkillNaming({})).toBe('dir')
     expect(resolveSkillNaming({ skill_naming: 'hyphen' })).toBe('hyphen')

@@ -2,7 +2,7 @@ import type { Manifest, AgentId, Config, Memory, SkillSource } from './types.js'
 
 export interface LinkPlan {
   skillId: string
-  source: 'local' | { repoId: string; memberName: string; path?: string }
+  source: 'local' | { repoId: string; cacheId?: string; memberName: string; path?: string }
   targets: AgentId[]
 }
 export interface McpPlanEntry {
@@ -28,14 +28,16 @@ export interface SourceIdentity {
   repoId: string
 }
 
-type SourceIdentityInput = string | Pick<SkillSource, 'url'> | SourceIdentity
+type SourceIdentityInput = string | Pick<SkillSource, 'name' | 'url'> | SourceIdentity
 
 export function resolveSkillNaming(config?: Pick<Config, 'skill_naming'> | null): SkillNaming {
   return config?.skill_naming ?? 'dir'
 }
 
-export function sourceIdentity(source: string | Pick<SkillSource, 'url'>): SourceIdentity {
-  return { repoId: deriveRepoId(typeof source === 'string' ? source : source.url) }
+export function sourceIdentity(source: string | Pick<SkillSource, 'name' | 'url'>): SourceIdentity {
+  if (typeof source === 'string') return { repoId: deriveRepoId(source) }
+  const name = source.name?.trim()
+  return { repoId: name || deriveRepoId(source.url) }
 }
 
 export function formatSourceMemberSkillId(
@@ -82,12 +84,13 @@ export function planProjection(
   }
   for (const src of manifest.skills.sources) {
     const { repoId } = sourceIdentity(src)
+    const cacheId = deriveRepoId(src.url)
     const members = src.members?.length ? src.members : []
     for (const m of members) {
       const ts = activeTargets(m.enabled === false ? [] : (m.targets ?? []))
       links.push({
         skillId: formatSourceMemberSkillId({ repoId }, m.name, effectiveConfig),
-        source: { repoId, memberName: m.name, ...(m.path ? { path: m.path } : {}) },
+        source: { repoId, cacheId, memberName: m.name, ...(m.path ? { path: m.path } : {}) },
         targets: ts,
       })
     }
@@ -126,5 +129,5 @@ export function deriveRepoId(url: string): string {
 function sourceRepoId(source: SourceIdentityInput): string {
   if (typeof source === 'string') return deriveRepoId(source)
   if ('repoId' in source) return source.repoId
-  return deriveRepoId(source.url)
+  return sourceIdentity(source).repoId
 }

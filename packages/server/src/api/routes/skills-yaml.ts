@@ -50,6 +50,7 @@ const WriteLocalSkillsBody = z.object({
 
 const AddSourceBody = z.object({
   repo: RepoField,
+  name: z.string().optional(),
   url: NonEmptyString,
   ref: NonEmptyString,
   type: z.enum(['branch', 'tag']).optional(),
@@ -66,6 +67,7 @@ const SetSourceMembersBody = SourceUrlBody.extend({
 })
 
 const UpdateSourceBody = SourceUrlBody.extend({
+  name: z.string().optional(),
   ref: z.string().optional(),
   type: z.enum(['branch', 'tag']).optional(),
   scan: z.string().optional(),
@@ -167,12 +169,14 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/sources', jsonValidator(AddSourceBody, { error: sourceError }), async (c) => {
     try {
-      const { repo, url, ref, type, scan } = c.req.valid('json')
+      const { repo, name, url, ref, type, scan } = c.req.valid('json')
       const repoPath = await resolveRequestRepo(deps, repo)
-      const result = await skills.addSource(repoPath, { url, ref, type, scan })
+      const result = await skills.addSource(repoPath, { name, url, ref, type, scan })
       return c.json({ ok: true, source: result.source })
     } catch (e) {
       if (isInvalidRepo(e)) return invalidRepo(c, e)
+      if (e instanceof SkillsApplicationError)
+        return c.json(errorBody(e, 'write_failed', 'failed to add source'), e.status)
       return c.json(errorBody(e, 'write_failed', 'failed to add source'))
     }
   })
@@ -207,15 +211,17 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post(
     '/sources/update',
-    jsonValidator(UpdateSourceBody, { error: 'invalid_url' }),
+    jsonValidator(UpdateSourceBody, { error: updateSourceError }),
     async (c) => {
       try {
-        const { repo, url, ref, type, scan } = c.req.valid('json')
+        const { repo, url, name, ref, type, scan } = c.req.valid('json')
         const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.updateSourceMeta(repoPath, { url, ref, type, scan })
+        await skills.updateSourceMeta(repoPath, { url, name, ref, type, scan })
         return c.json({ ok: true })
       } catch (e) {
         if (isInvalidRepo(e)) return invalidRepo(c, e)
+        if (e instanceof SkillsApplicationError)
+          return c.json(errorBody(e, 'update_failed', 'failed to update source metadata'), e.status)
         return c.json(errorBody(e, 'update_failed', 'failed to update source metadata'))
       }
     },
@@ -318,7 +324,17 @@ function invalidRepo(
 }
 
 function sourceError(issues: z.ZodIssue[]): string {
-  return issues[0]?.path[0] === 'ref' ? 'invalid_ref' : 'invalid_url'
+  const field = issues[0]?.path[0]
+  if (field === 'name') return 'invalid_source_name'
+  if (field === 'ref') return 'invalid_ref'
+  return 'invalid_url'
+}
+
+function updateSourceError(issues: z.ZodIssue[]): string {
+  const field = issues[0]?.path[0]
+  if (field === 'name') return 'invalid_source_name'
+  if (field === 'ref') return 'invalid_ref'
+  return 'invalid_url'
 }
 
 function sourceMembersError(issues: z.ZodIssue[]): string {

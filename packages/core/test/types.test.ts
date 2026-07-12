@@ -32,6 +32,15 @@ describe('types', () => {
 })
 
 describe('SkillSource type field', () => {
+  it('accepts source name', () => {
+    const src: SkillSource = {
+      name: 'openai-skills',
+      url: 'https://github.com/org/repo',
+      ref: 'main',
+    }
+    expect(src.name).toBe('openai-skills')
+  })
+
   it('accepts type: "branch"', () => {
     const src: SkillSource = { url: 'https://github.com/org/repo', ref: 'main', type: 'branch' }
     expect(src.type).toBe('branch')

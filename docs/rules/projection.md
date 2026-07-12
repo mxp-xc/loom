@@ -65,23 +65,25 @@ Status: active
 Applies to: skills projection
 
 Rule:
-Projection 删除 managed 或 linked skill child 后，可以删除随之变空的 parent namespace directories，但最多删到 agent skills root 的下一层，不能删除 skills root 本身。
+Projection 删除 managed 或 linked skill child 后，可以删除随之变空的 parent namespace directories。如果 agent skills root 因本次 cleanup 变空，也可以删除该 skills root，但不能继续删除 skills root 的父目录。
 
 Implications:
 
 - 删除最后一个 managed superpowers/* skill 后，也会删除空的 superpowers directory。
+- 删除最后一个 managed skill 后，如果 skills root 为空，也会删除 skills root。
 - 非空 parent directory 保留。
 - Parent cleanup 是 managed child cleanup 的后续动作，不是独立扫描并删除目录。
 
 Safety:
 
-- 永远不删除 agent skills root。
+- 只在删除 managed child 后清理空 skills root。
 - 永远不删除非空 parent directory。
 - 不因为 parent directory 看起来像 source repo id 就删除它。
 
 Examples:
 
 - 删除 skills/superpowers/executing-plans 后，只有当 skills/superpowers 变空时才删除 skills/superpowers。
+- 如果 skills/superpowers 是 skills root 下最后一个条目，删除后也可以删除空的 skills root。
 - 如果 skills/superpowers/custom 仍存在，skills/superpowers 必须保留。
 
 Tests:

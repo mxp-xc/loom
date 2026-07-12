@@ -144,3 +144,39 @@ Tests:
 - packages/server/test/api/routes-fixes.test.ts
 - packages/web/test/manifest-operations.test.tsx
 - packages/web/test/views.test.tsx
+
+## R-SKILLS-006 Source name 是 projection namespace
+
+Status: active
+Applies to: remote sources, skills projection, skills UI
+
+Rule:
+每个 source 都有稳定的 `name`。新增 source 时如果用户没有提供 `name`，系统使用 URL 派生仓库名作为默认值并持久化到 `skills.yaml`。`name` 用于 UI 展示和 source member projection namespace；remote cache identity 仍由 source URL 派生。
+
+Implications:
+
+- 保存 source 时必须写入 `name`，旧配置缺失 `name` 时运行时回退到 `deriveRepoId(url)`。
+- 同一个 `skills.yaml` 内 source `url` 和 source `name` 都不能重复。
+- 修改 `name` 后必须重新投影 skills，因为 desired projection namespace 已变化。
+- 查找 `remote-cache`、刷新 source、读取 source 内容时不能使用 `name` 作为 cache id。
+
+Safety:
+
+- `name` 只能匹配 `^[a-z0-9]+(-[a-z0-9]+)*$`。
+- source 改名不记录 `previousName`；旧 namespace 只能由 projection orphan cleanup 删除可证明为 Loom-managed 的 artifacts。
+- 无 marker 的真实目录必须保留。
+
+Examples:
+
+- `name: openai-skills` 且 member `brainstorming` 在 `skill_naming: dir` 下投影为 `openai-skills/brainstorming`。
+- 同一个 URL 的 cache 仍位于 `remote-cache/<deriveRepoId(url)>`，改名不会触发新的 cache 目录。
+
+Tests:
+
+- packages/core/test/manifest.test.ts
+- packages/core/test/mutators.test.ts
+- packages/core/test/projection.test.ts
+- packages/server/test/skills/application.test.ts
+- packages/server/test/projection/executor.test.ts
+- packages/web/test/manifest-operations.test.tsx
+- packages/web/test/views.test.tsx

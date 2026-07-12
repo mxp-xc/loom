@@ -35,7 +35,7 @@ export async function performUpdate(
   newRef: string,
   repoPath: string,
   sourceId: string,
-  oldMembers: ScannedMember[],
+  oldMembers: Array<Pick<ScannedMember, 'name'>>,
 ): Promise<UpdateResult> {
   const cacheDir = cacheDirFor(repoPath, sourceId)
   // Repair a corrupt/missing cache before fetching — scan leaves broken .git

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  deriveRepoId,
   sourceIdentity,
   type AgentId,
   type Manifest,
@@ -27,6 +28,7 @@ export interface OperationResult<T> {
 export interface OperationNotificationOptions {
   notify?: boolean
   shouldNotify?: () => boolean
+  allowConcurrent?: boolean
 }
 
 export interface SourceScanOptions extends OperationNotificationOptions {
@@ -231,7 +233,8 @@ export function useManifestOperations(
       mutate: () => Promise<T>,
       options: RunOptions<T> = {},
     ): Promise<OperationResult<T>> => {
-      if (pendingRef.current.has(key)) return { ok: false, skipped: true }
+      if (!options.allowConcurrent && pendingRef.current.has(key))
+        return { ok: false, skipped: true }
       setPendingKey(key, true)
       try {
         const result = await mutate()
@@ -400,6 +403,7 @@ export function useManifestOperations(
 
   const addSource = useCallback(
     (input: {
+      name?: string
       url: string
       ref: string
       type?: 'branch' | 'tag'
@@ -412,6 +416,7 @@ export function useManifestOperations(
         async () => {
           const created = (await api.addSource({
             repo: repoPath,
+            name: input.name?.trim() || deriveRepoId(input.url),
             url: input.url,
             ref: input.ref,
             ...(input.type ? { type: input.type } : {}),
@@ -455,6 +460,7 @@ export function useManifestOperations(
   const saveSource = useCallback(
     (input: {
       source: SkillSource
+      name?: string
       ref: string
       type: 'branch' | 'tag'
       scan?: string
@@ -464,15 +470,19 @@ export function useManifestOperations(
       return run(
         pendingKey.saveSource(input.source.url),
         async () => {
+          const currentName = sourceIdentity(input.source).repoId
+          const nextName = input.name?.trim() || currentName
+          const nameChanged = nextName !== currentName
           const refChanged = input.ref !== input.source.ref
           const typeChanged = input.type !== (input.source.type ?? 'branch')
           const nextScan = normalizedScanPattern(input.scan)
           const sourceScan = normalizedScanPattern(input.source.scan)
           const scanChanged = nextScan !== sourceScan
-          if (refChanged || typeChanged || scanChanged) {
+          if (nameChanged || refChanged || typeChanged || scanChanged) {
             const metaResult = (await api.updateSourceMeta({
               repo: repoPath,
               url: input.source.url,
+              name: nameChanged ? nextName : undefined,
               ref: refChanged ? input.ref : undefined,
               type: typeChanged ? input.type : undefined,
               scan: scanChanged ? nextScan : undefined,
@@ -480,16 +490,24 @@ export function useManifestOperations(
             if (responseFailureMessage(metaResult, '更新 source 元信息失败')) return metaResult
             sourceMetaUpdated = true
           }
-          return api.setSourceMembers({
+          const memberResult = (await api.setSourceMembers({
             repo: repoPath,
             url: input.source.url,
             members: input.members,
-          }) as Promise<MaybeOkResponse>
+          })) as MaybeOkResponse
+          if (responseFailureMessage(memberResult, '保存 source members 失败')) return memberResult
+          const projected = (await api.project({
+            repo: repoPath,
+            scope: 'skills',
+          })) as MaybeOkResponse
+          const projectError = responseFailureMessage(projected, '投影失败')
+          return projectError ? { ok: false, message: projectError } : projected
         },
         {
           failureMessage: '保存失败',
           reloadOnFailure: () => sourceMetaUpdated,
-          successMessage: () => sourceIdentity(input.source).repoId + ' 已更新',
+          successMessage: () =>
+            (input.name?.trim() || sourceIdentity(input.source).repoId) + ' 已更新',
         },
       )
     },
@@ -581,7 +599,7 @@ export function useManifestOperations(
             source,
             newRef: update && update !== 'repair' ? (update.newRef ?? source.ref) : source.ref,
             repo: repoPath,
-            sourceId: sourceIdentity(source).repoId,
+            sourceId: deriveRepoId(source.url),
             oldMembers: source.members ?? [],
           }) as Promise<MaybeOkResponse & { pinned_commit?: string }>,
         {

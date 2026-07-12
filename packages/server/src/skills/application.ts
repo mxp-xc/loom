@@ -5,6 +5,7 @@ import {
   deriveRepoId,
   removeLocalSkill as removeLocalSkillMutation,
   removeSource as removeSourceMutation,
+  SOURCE_NAME_REGEX,
   setLocalSkillTargets as setLocalSkillTargetsMutation,
   setSkillTargets as setSkillTargetsMutation,
   setSourceMembers as setSourceMembersMutation,
@@ -51,6 +52,7 @@ export interface LocalSkillWrite {
 }
 
 export interface AddSourceCommand {
+  name?: string
   url: string
   ref: string
   type?: 'branch' | 'tag'
@@ -59,6 +61,7 @@ export interface AddSourceCommand {
 
 export interface UpdateSourceMetaCommand {
   url: string
+  name?: string
   ref?: string
   type?: 'branch' | 'tag'
   scan?: string
@@ -148,7 +151,12 @@ export class SkillsApplication {
   }
 
   async addSource(repoPath: string, command: AddSourceCommand): Promise<{ source: SkillSource }> {
+    const manifest = await this.readManifest(repoPath)
+    const sourceName = normalizeSourceName(command.name) || deriveRepoId(command.url)
+    assertValidSourceName(sourceName)
+    assertUniqueSource(manifest, { url: command.url, name: sourceName })
     const sourceInput = {
+      name: sourceName,
       url: command.url,
       ref: command.ref,
       ...(command.type === 'branch' || command.type === 'tag' ? { type: command.type } : {}),
@@ -156,9 +164,8 @@ export class SkillsApplication {
         ? { scan: command.scan.trim() }
         : {}),
     }
-    const result = await this.updateManifest(repoPath, (current) =>
-      addSourceMutation(current, sourceInput),
-    )
+    const result = addSourceMutation(manifest, sourceInput)
+    if (result.changed) await this.writeManifest(repoPath, result.data)
     const source = result.data.sources[result.data.sources.length - 1]!
 
     try {
@@ -189,13 +196,25 @@ export class SkillsApplication {
   }
 
   async updateSourceMeta(repoPath: string, command: UpdateSourceMetaCommand): Promise<void> {
-    const updates: { ref?: string; type?: 'branch' | 'tag'; scan?: string | null } = {}
+    const manifest = await this.readManifest(repoPath)
+    const existing = manifest.sources.find((source) => source.url === command.url)
+    if (!existing) throw sourceNotFound(command.url)
+    const updates: { name?: string; ref?: string; type?: 'branch' | 'tag'; scan?: string | null } =
+      {}
+    if (typeof command.name === 'string') {
+      updates.name = command.name.trim()
+      assertValidSourceName(updates.name)
+      assertUniqueSource(manifest, {
+        url: command.url,
+        name: updates.name,
+        existingUrl: command.url,
+      })
+    }
     if (typeof command.ref === 'string') updates.ref = command.ref
     if (command.type === 'branch' || command.type === 'tag') updates.type = command.type
     if (typeof command.scan === 'string') updates.scan = command.scan
-    const result = await this.updateManifest(repoPath, (manifest) =>
-      updateSourceMetaMutation(manifest, command.url, updates),
-    )
+    const result = updateSourceMetaMutation(manifest, command.url, updates)
+    if (result.changed) await this.writeManifest(repoPath, result.data)
     if (!result.changed) throw sourceNotFound(command.url)
   }
 
@@ -278,4 +297,44 @@ function alreadyExists(skillName: string): SkillsApplicationError {
 
 function sourceNotFound(url: string): SkillsApplicationError {
   return new SkillsApplicationError(404, 'not_found', `Source ${url} not found`)
+}
+
+function normalizeSourceName(name: string | undefined): string {
+  return name?.trim() ?? ''
+}
+
+function effectiveSourceName(source: SkillSource): string {
+  return normalizeSourceName(source.name) || deriveRepoId(source.url)
+}
+
+function assertValidSourceName(name: string): void {
+  if (SOURCE_NAME_REGEX.test(name)) return
+  throw new SkillsApplicationError(
+    400,
+    'invalid_source_name',
+    'Source name must match ^[a-z0-9]+(-[a-z0-9]+)*$',
+  )
+}
+
+function assertUniqueSource(
+  manifest: SkillsManifest,
+  candidate: { url: string; name: string; existingUrl?: string },
+): void {
+  for (const source of manifest.sources) {
+    const isCurrent = candidate.existingUrl !== undefined && source.url === candidate.existingUrl
+    if (!isCurrent && source.url === candidate.url) {
+      throw new SkillsApplicationError(
+        409,
+        'source_url_exists',
+        `Source URL already exists: ${candidate.url}`,
+      )
+    }
+    if (!isCurrent && effectiveSourceName(source) === candidate.name) {
+      throw new SkillsApplicationError(
+        409,
+        'source_name_exists',
+        `Source name already exists: ${candidate.name}`,
+      )
+    }
+  }
 }

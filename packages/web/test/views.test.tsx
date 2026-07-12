@@ -229,6 +229,7 @@ function EditSourceSwitchHarness() {
         type="button"
         onClick={() =>
           setSource({
+            name: 'alpha-source',
             url: 'https://example.test/alpha.git',
             ref: 'main',
             type: 'branch',
@@ -243,6 +244,7 @@ function EditSourceSwitchHarness() {
         type="button"
         onClick={() =>
           setSource({
+            name: 'beta-source',
             url: 'https://example.test/beta.git',
             ref: 'main',
             type: 'branch',
@@ -828,6 +830,7 @@ describe('Skills view', () => {
       skills: {
         sources: [
           {
+            name: 'openai-skills',
             url: 'https://github.com/obra/superpowers.git',
             ref: 'v6.1.1',
             type: 'tag',
@@ -861,7 +864,7 @@ describe('Skills view', () => {
     )
 
     const sourceBulkCodex = screen.getByRole('button', {
-      name: 'superpowers CX：部分已选择',
+      name: 'openai-skills CX：部分已选择',
     })
     expect(sourceBulkCodex).toBeDefined()
     fireEvent.click(sourceBulkCodex)
@@ -999,6 +1002,9 @@ describe('Add Skill modal', () => {
       target: { value: 'https://github.com/mattpocock/skills' },
     })
     fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
+    await waitFor(() =>
+      expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('skills'),
+    )
     await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalled())
     fireEvent.click(screen.getByRole('button', { name: 'tag' }))
     fireEvent.change(screen.getByLabelText('scan pattern'), {
@@ -1019,11 +1025,52 @@ describe('Add Skill modal', () => {
     await waitFor(() =>
       expect(api.addSource).toHaveBeenCalledWith({
         repo: '/tmp/add-source-ref-scan',
+        name: 'skills',
         url: 'https://github.com/mattpocock/skills',
         type: 'tag',
         ref: 'v1.0.1',
         scan: 'skills/engineering/**/SKILL.md',
       }),
+    )
+  })
+
+  it('does not overwrite a manually edited Add Source name after URL changes', async () => {
+    render(<AddSkillModal open repoPath="/tmp/add-source-name" onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    fireEvent.change(screen.getByLabelText('source name'), {
+      target: { value: 'custom-skills' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('https://github.com/org/repo'), {
+      target: { value: 'https://github.com/org/repo-one' },
+    })
+    fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
+    await waitFor(() =>
+      expect(api.getSourceRefs).toHaveBeenCalledWith('https://github.com/org/repo-one'),
+    )
+
+    expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('custom-skills')
+  })
+
+  it('refreshes the Add Source default name when URL changes before manual name edits', async () => {
+    render(<AddSkillModal open repoPath="/tmp/add-source-name-refresh" onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    fireEvent.change(screen.getByPlaceholderText('https://github.com/org/repo'), {
+      target: { value: 'https://github.com/org/repo-one' },
+    })
+    fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
+    await waitFor(() =>
+      expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('repo-one'),
+    )
+
+    fireEvent.change(screen.getByPlaceholderText('https://github.com/org/repo'), {
+      target: { value: 'https://github.com/org/repo-two' },
+    })
+    fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
+
+    await waitFor(() =>
+      expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('repo-two'),
     )
   })
 
@@ -1543,7 +1590,7 @@ describe('Skill source updates', () => {
 
     render(<EditSourceSwitchHarness />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
+    fireEvent.click(screen.getByText('open alpha'))
     const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
     await within(dialog).findByText('alpha')
 
@@ -1556,12 +1603,16 @@ describe('Skill source updates', () => {
     fireEvent.change(within(dialog).getByLabelText('scan pattern'), {
       target: { value: '' },
     })
+    fireEvent.change(within(dialog).getByLabelText('source name'), {
+      target: { value: 'renamed-alpha' },
+    })
     fireEvent.click(within(dialog).getByRole('button', { name: /保存/ }))
 
     await waitFor(() =>
       expect(api.updateSourceMeta).toHaveBeenCalledWith({
         repo: '/tmp/edit-switch',
         url: 'https://example.test/alpha.git',
+        name: 'renamed-alpha',
         scan: '',
       }),
     )
@@ -1676,6 +1727,96 @@ describe('Skill source updates', () => {
     } finally {
       consoleError.mockRestore()
     }
+  })
+
+  it('starts a fresh Edit Source scan after closing and reopening the same source', async () => {
+    let resolveFirstScan!: (value: { ok: true; members: [] }) => void
+    vi.mocked(api.getSourceRefs).mockResolvedValue({
+      ok: true,
+      branches: ['main'],
+      tags: [],
+    } as never)
+    vi.mocked(api.scanSource)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstScan = resolve as typeof resolveFirstScan
+          }) as never,
+      )
+      .mockResolvedValueOnce({ ok: true, members: [] } as never)
+    const scanCallCount = vi.mocked(api.scanSource).mock.calls.length
+
+    render(<EditSourceSwitchHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
+    const firstDialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount + 1)
+
+    fireEvent.click(within(firstDialog).getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Edit Source/ })).toBeNull())
+
+    fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
+    const secondDialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+
+    await waitFor(() => expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount + 2))
+    expect(within(secondDialog).queryByText('扫描失败')).toBeNull()
+
+    await act(async () => {
+      resolveFirstScan({ ok: true, members: [] })
+      await Promise.resolve()
+    })
+    expect(within(secondDialog).queryByText('扫描失败')).toBeNull()
+  })
+
+  it('does not show scan failure when an Edit Source auto-scan is already pending', async () => {
+    vi.mocked(api.getSourceRefs).mockResolvedValue({
+      ok: true,
+      branches: ['main'],
+      tags: [],
+    } as never)
+    vi.mocked(api.scanSource).mockImplementation(
+      () =>
+        new Promise(() => {
+          // Keep the first scan pending so the second auto-scan is skipped by the operation guard.
+        }) as never,
+    )
+
+    render(<EditSourceSwitchHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    fireEvent.click(screen.getByText('open alpha'))
+
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: '扫描中…' })).toBeDefined(),
+    )
+    expect(within(dialog).queryByText('扫描失败')).toBeNull()
+  })
+
+  it('loads refs again when Edit Source is reopened while refs are pending', async () => {
+    vi.mocked(api.getSourceRefs)
+      .mockImplementationOnce(
+        () =>
+          new Promise(() => {
+            // Keep the first refs request pending so the reopen path would be skipped if deduped.
+          }) as never,
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        branches: ['main'],
+        tags: ['v1.0.0'],
+      } as never)
+    vi.mocked(api.scanSource).mockResolvedValue({ ok: true, members: [] } as never)
+    const refsCallCount = vi.mocked(api.getSourceRefs).mock.calls.length
+
+    render(<EditSourceSwitchHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    fireEvent.click(screen.getByText('open alpha'))
+
+    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 2))
+    expect(within(dialog).getByRole('option', { name: 'main' })).toBeDefined()
   })
 })
 

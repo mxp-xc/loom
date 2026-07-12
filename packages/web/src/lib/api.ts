@@ -304,6 +304,7 @@ export const api = {
   }) => post('/skills/local/write', body).then(json) as Promise<{ ok: boolean; count?: number }>,
   addSource: (body: {
     repo: string
+    name: string
     url: string
     ref: string
     type?: 'branch' | 'tag'
@@ -387,6 +388,7 @@ export const api = {
   updateSourceMeta: (body: {
     repo: string
     url: string
+    name?: string
     ref?: string
     type?: 'branch' | 'tag'
     scan?: string

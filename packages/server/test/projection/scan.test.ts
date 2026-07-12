@@ -104,6 +104,23 @@ describe('scanSourceMembers', () => {
     expect(members[0].relativePath).toBe('skills/engineering/tdd/SKILL.md')
   })
 
+  it('uses URL-derived repo id for root-level source member names even with custom source name', async () => {
+    await writeFile(join(root, 'SKILL.md'), '---\ndescription: Root source skill\n---\nbody')
+
+    const members = await scanSourceMembers(root, {
+      name: 'openai-skills',
+      url: 'github:obra/superpowers',
+      ref: 'v1',
+    })
+
+    expect(members.map((m) => m.name)).toEqual(['superpowers'])
+    expect(members[0]).toMatchObject({
+      path: root,
+      relativePath: 'SKILL.md',
+      description: 'Root source skill',
+    })
+  })
+
   it('rejects custom scan patterns that escape the source cache', async () => {
     await expect(
       scanSourceMembers(root, {

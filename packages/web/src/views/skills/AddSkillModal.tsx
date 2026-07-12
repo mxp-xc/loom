@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { SelectableList, type SelectableListItem } from '@/components/ui/selectable-list'
 import { inputStyle } from '@/lib/styles'
 import { FolderInput, RefreshCw } from 'lucide-react'
+import { deriveRepoId } from '@loom/core'
 import { Segmented } from './Segmented'
 import type { ScanMember, LocalScanResult } from './types'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
@@ -73,6 +74,8 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
 
   // Source tab
   const [srcUrl, setSrcUrl] = useState('')
+  const [srcName, setSrcName] = useState('')
+  const [srcNameTouched, setSrcNameTouched] = useState(false)
   const [srcType, setSrcType] = useState<'branch' | 'tag'>('branch')
   const [srcRef, setSrcRef] = useState('')
   const [srcScan, setSrcScan] = useState('')
@@ -177,6 +180,8 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     setPickedExternal(false)
     setPickedFiles(new Map())
     setSrcUrl('')
+    setSrcName('')
+    setSrcNameTouched(false)
     setSrcType('branch')
     setSrcRef('')
     setSrcScan('')
@@ -190,6 +195,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
 
   const fetchRefs = async (url: string) => {
     if (!url) return
+    if (!srcNameTouched) setSrcName(deriveRepoId(url))
     setSrcRefsLoading(true)
     setAddErr(null)
     try {
@@ -272,6 +278,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     setAddErr(null)
     try {
       const res = await addSource({
+        name: srcName.trim() || deriveRepoId(srcUrl.trim()),
         url: srcUrl.trim(),
         ref: srcRef.trim() || 'main',
         type: srcType,
@@ -415,6 +422,23 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
                 if (srcUrl.trim()) void fetchRefs(srcUrl.trim())
               }}
               placeholder="https://github.com/org/repo"
+              style={inputStyle}
+            />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label className="label" htmlFor="add-source-name">
+              source name <span style={{ color: 'var(--error)' }}>*</span>
+            </label>
+            <input
+              id="add-source-name"
+              aria-label="source name"
+              value={srcName}
+              onChange={(e) => {
+                setSrcName(e.target.value)
+                setSrcNameTouched(true)
+              }}
+              placeholder="openai-skills"
               style={inputStyle}
             />
           </div>

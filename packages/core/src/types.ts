@@ -14,6 +14,7 @@ export interface SkillMemberOverride {
 }
 
 export interface SkillSource {
+  name?: string
   url: string
   ref: string
   type?: 'branch' | 'tag'

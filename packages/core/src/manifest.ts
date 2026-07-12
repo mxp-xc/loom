@@ -1,6 +1,7 @@
 import yaml from 'js-yaml'
 import { z } from 'zod'
 import type { Config, RepoManifest, Manifest } from './types.js'
+import { deriveRepoId } from './projection.js'
 import { parseVarsEnvironment } from './vars-codec.js'
 import type { VarsEnvironment, VarEntry } from './vars-types.js'
 
@@ -31,6 +32,7 @@ export function loadRepoManifest(files: Record<string, string>): RepoManifest {
 }
 
 export const AgentIdSchema = z.enum(['claude-code', 'codex', 'opencode'])
+export const SOURCE_NAME_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/
 export const McpServerSchema = z.discriminatedUnion('type', [
   z.object({
     id: z.string().min(1),
@@ -63,6 +65,7 @@ export const SkillMemberOverrideSchema = z.object({
   targets: z.array(AgentIdSchema).optional(),
 })
 export const SkillSourceSchema = z.object({
+  name: z.string().regex(SOURCE_NAME_REGEX).optional(),
   url: z.string().min(1),
   ref: z.string().min(1),
   type: z.enum(['branch', 'tag']).optional(),
@@ -73,11 +76,26 @@ export const SkillSourceSchema = z.object({
 
 export function validateManifest(m: RepoManifest): string[] {
   const errs: string[] = []
+  const sourceNames = new Map<string, number>()
+  const sourceUrls = new Map<string, number>()
   m.skills.sources.forEach((s, i) => {
     const r = SkillSourceSchema.safeParse(s)
     if (!r.success)
       for (const iss of r.error.issues)
         errs.push(`source[${i}].${iss.path.join('.')}: ${iss.message}`)
+    if (typeof s?.url === 'string' && s.url) {
+      const previous = sourceUrls.get(s.url)
+      if (previous !== undefined) errs.push(`source[${i}].url: duplicate source url: ${s.url}`)
+      else sourceUrls.set(s.url, i)
+    }
+    if (typeof s?.url === 'string' && s.url) {
+      const sourceName =
+        typeof s.name === 'string' && s.name.trim() ? s.name.trim() : deriveRepoId(s.url)
+      const previous = sourceNames.get(sourceName)
+      if (previous !== undefined)
+        errs.push(`source[${i}].name: duplicate source name: ${sourceName}`)
+      else sourceNames.set(sourceName, i)
+    }
   })
   m.mcp.forEach((s, i) => {
     const r = McpServerSchema.safeParse(s)

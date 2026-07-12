@@ -57,9 +57,10 @@ export function createProjectionDeps(
 
 function resolveSourceSkillDir(
   repoPath: string,
-  source: { repoId: string; memberName: string; path?: string },
+  source: { repoId: string; cacheId?: string; memberName: string; path?: string },
 ): string {
-  const fallback = skillPathFor(repoPath, source.repoId, source.memberName)
+  const cacheId = source.cacheId ?? source.repoId
+  const fallback = skillPathFor(repoPath, cacheId, source.memberName)
   if (!source.path || isAbsolute(source.path)) return fallback
   const normalized = source.path.replace(/\\/g, '/').replace(/^\/+/, '')
   if (!normalized || normalized.split('/').includes('..') || /^[A-Za-z]:\//.test(normalized)) {
@@ -69,7 +70,7 @@ function resolveSourceSkillDir(
     normalized === 'SKILL.md' || normalized.endsWith('/SKILL.md')
       ? dirname(normalized)
       : normalized.replace(/\/+$/, '')
-  return join(cacheDirFor(repoPath, source.repoId), sourceDir === '.' ? '' : sourceDir)
+  return join(cacheDirFor(repoPath, cacheId), sourceDir === '.' ? '' : sourceDir)
 }
 
 function basenameRepo(repoPath: string): string {

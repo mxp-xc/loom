@@ -74,6 +74,32 @@ describe('validateManifest (zod discriminatedUnion)', () => {
     })
     expect(validateManifest(m).some((e) => e.includes('source[0]') && e.includes('url'))).toBe(true)
   })
+  it('flags source name with unsafe path characters', () => {
+    const m = loadRepoManifest({
+      'skills.yaml':
+        'sources:\n  - name: bad/name\n    url: github:x/y\n    ref: main\nskills: []\n',
+      'mcp.yaml': '[]\n',
+    })
+    expect(validateManifest(m).some((e) => e.includes('source[0].name'))).toBe(true)
+  })
+  it('flags duplicate source names using derived names for legacy sources', () => {
+    const m = loadRepoManifest({
+      'skills.yaml':
+        'sources:\n  - url: github:a/shared\n    ref: main\n  - name: shared\n    url: github:b/other\n    ref: main\nskills: []\n',
+      'mcp.yaml': '[]\n',
+    })
+    expect(validateManifest(m).some((e) => e.includes('duplicate source name: shared'))).toBe(true)
+  })
+  it('flags duplicate source urls', () => {
+    const m = loadRepoManifest({
+      'skills.yaml':
+        'sources:\n  - name: first\n    url: github:a/shared\n    ref: main\n  - name: second\n    url: github:a/shared\n    ref: main\nskills: []\n',
+      'mcp.yaml': '[]\n',
+    })
+    expect(
+      validateManifest(m).some((e) => e.includes('duplicate source url: github:a/shared')),
+    ).toBe(true)
+  })
 })
 
 describe('mergeConfig (two-level, deep merge)', () => {

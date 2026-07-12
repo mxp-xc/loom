@@ -281,6 +281,7 @@ describe('useManifestOperations', () => {
       <Harness
         action={(ops) =>
           ops.addSource({
+            name: 'skills',
             url: 'https://example.test/skills.git',
             ref: 'v1.0.1',
             type: 'tag',
@@ -296,12 +297,50 @@ describe('useManifestOperations', () => {
     await waitFor(() =>
       expect(api.addSource).toHaveBeenCalledWith({
         repo: '/tmp/r',
+        name: 'skills',
         url: 'https://example.test/skills.git',
         ref: 'v1.0.1',
         type: 'tag',
         scan: 'skills/engineering/**/SKILL.md',
       }),
     )
+  })
+
+  it('saves a source name change and projects skills', async () => {
+    let result: Awaited<ReturnType<Operations['saveSource']>> | undefined
+
+    render(
+      <Harness
+        action={async (ops) => {
+          result = await ops.saveSource({
+            source: {
+              name: 'old-name',
+              url: 'https://example.test/skills.git',
+              ref: 'main',
+              type: 'branch',
+              members: [{ name: 'alpha' }],
+            },
+            name: 'new-name',
+            ref: 'main',
+            type: 'branch',
+            scan: '',
+            members: ['alpha'],
+          })
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() =>
+      expect(api.updateSourceMeta).toHaveBeenCalledWith({
+        repo: '/tmp/r',
+        url: 'https://example.test/skills.git',
+        name: 'new-name',
+      }),
+    )
+    await waitFor(() => expect(result?.ok).toBe(true))
+    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/r', scope: 'skills' })
   })
 
   it('returns failure and refreshes when source member save throws after source creation', async () => {

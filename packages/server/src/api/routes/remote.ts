@@ -14,17 +14,14 @@ import type { RouteDeps } from '../router.js'
 const remoteLogger = logger.child('remote')
 const NonEmptyString = z.string().min(1)
 const SourceType = z.enum(['branch', 'tag'])
-const SourceMember = z
+const UpdateOldMember = z
   .object({
     name: NonEmptyString,
-    path: z.string(),
-    relativePath: z.string().optional(),
-    frontmatterName: z.string().optional(),
-    description: z.string().optional(),
   })
   .passthrough()
 const SkillSource = z
   .object({
+    name: z.string().optional(),
     url: NonEmptyString,
     ref: NonEmptyString,
     type: SourceType.optional(),
@@ -48,7 +45,7 @@ const PerformUpdateBody = z.object({
   source: SkillSource,
   newRef: NonEmptyString,
   sourceId: NonEmptyString,
-  oldMembers: z.array(SourceMember).default([]),
+  oldMembers: z.array(UpdateOldMember).default([]),
 })
 const ScanSourceBody = z.object({
   url: NonEmptyString,
@@ -68,6 +65,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
 
   app.post('/install', jsonValidator(InstallBody, { error: remoteSourceError }), async (c) => {
     const { url, ref, repo, sourceId } = c.req.valid('json')
+    const cacheId = deriveRepoId(url)
     let repoPath: string
     try {
       repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
@@ -77,13 +75,13 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
         400,
       )
     }
-    remoteLogger.info('install skill', { url, ref, repoPath, sourceId })
+    remoteLogger.info('install skill', { url, ref, repoPath, sourceId, cacheId })
     try {
-      const res = await installSkill(deps.git, deps.fs, url, ref, repoPath, sourceId)
-      remoteLogger.info('install completed', { url, sourceId, commit: res.pinned_commit })
+      const res = await installSkill(deps.git, deps.fs, url, ref, repoPath, cacheId)
+      remoteLogger.info('install completed', { url, sourceId, cacheId, commit: res.pinned_commit })
       return c.json(res)
     } catch (e) {
-      remoteLogger.error('install failed', { err: e, url, sourceId })
+      remoteLogger.error('install failed', { err: e, url, sourceId, cacheId })
       return c.json({
         ok: false,
         error: 'install_failed',
@@ -140,13 +138,14 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
         repoPath,
       })
       try {
+        const sourceId = deriveRepoId(body.source.url)
         const res = await performUpdate(
           deps.git,
           deps.fs,
           body.source,
           body.newRef,
           repoPath,
-          body.sourceId,
+          sourceId,
           body.oldMembers,
         )
         // Persist the new pinned_commit (and ref if it changed) back to skills.yaml

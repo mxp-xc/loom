@@ -74,6 +74,14 @@ vi.mock('../../src/remote/discover.js', () => ({
     },
   ]),
 }))
+vi.mock('../../src/remote/update.js', () => ({
+  checkUpdates: vi.fn(async () => []),
+  performUpdate: vi.fn(async () => ({
+    pinned_commit: 'abc1234',
+    orphans: [],
+    newMembers: [],
+  })),
+}))
 
 describe('routes file-init safety', () => {
   const app = new Hono().route('/api', registerRoutes())
@@ -277,6 +285,88 @@ describe('source scan', () => {
   })
 })
 
+describe('source members', () => {
+  const app = new Hono().route('/api', registerRoutes())
+
+  it('POST /api/sources/members accepts selected member names from the web UI', async () => {
+    memFiles['/tmp/source-members/skills.yaml'] =
+      'sources:\n' +
+      '  - url: https://github.com/mattpocock/skills\n' +
+      '    ref: v1.0.1\n' +
+      '    type: tag\n' +
+      '    members:\n' +
+      '      - name: old-skill\n' +
+      '        targets: [codex]\n' +
+      'skills: []\n'
+
+    const res = await app.request('/api/sources/members', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/source-members',
+        url: 'https://github.com/mattpocock/skills',
+        members: ['new-skill'],
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    const parsed = yaml.load(memFiles['/tmp/source-members/skills.yaml']) as any
+    expect(parsed.sources[0].members).toEqual([{ name: 'new-skill' }])
+  })
+})
+
+describe('source updates', () => {
+  const app = new Hono().route('/api', registerRoutes())
+
+  it('POST /api/update/perform accepts manifest member overrides from the web UI', async () => {
+    memFiles['/tmp/source-update/skills.yaml'] = [
+      'sources:',
+      '  - name: custom-skills',
+      '    url: https://github.com/mattpocock/skills',
+      '    ref: v1.0.1',
+      '    type: tag',
+      '    members:',
+      '      - name: old-skill',
+      '        targets: [codex]',
+      'skills: []',
+      '',
+    ].join('\n')
+    const { performUpdate } = await import('../../src/remote/update.js')
+    vi.mocked(performUpdate).mockClear()
+
+    const res = await app.request('/api/update/perform', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/source-update',
+        source: {
+          name: 'custom-skills',
+          url: 'https://github.com/mattpocock/skills',
+          ref: 'v1.0.1',
+          type: 'tag',
+          members: [{ name: 'old-skill', targets: ['codex'] }],
+        },
+        newRef: 'v1.0.2',
+        sourceId: 'custom-skills',
+        oldMembers: [{ name: 'old-skill', targets: ['codex'] }],
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ pinned_commit: 'abc1234' })
+    expect(performUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ url: 'https://github.com/mattpocock/skills' }),
+      'v1.0.2',
+      '/tmp/source-update',
+      'skills',
+      [expect.objectContaining({ name: 'old-skill', targets: ['codex'] })],
+    )
+  })
+})
+
 describe('source metadata', () => {
   const app = new Hono().route('/api', registerRoutes())
 
@@ -310,11 +400,49 @@ describe('source metadata', () => {
     expect((await res.json()).ok).toBe(true)
     const parsed = yaml.load(memFiles['/tmp/r8/skills.yaml']) as any
     expect(parsed.sources[0]).toMatchObject({
+      name: 'skills',
       url: 'https://github.com/mattpocock/skills',
       type: 'tag',
       ref: 'v1.0.1',
       scan: 'skills/engineering/**/SKILL.md',
     })
+  })
+
+  it('POST /api/sources rejects invalid and duplicate source names with clear status codes', async () => {
+    memFiles['/tmp/r8b/skills.yaml'] = [
+      'sources:',
+      '  - name: openai-skills',
+      '    url: https://example.test/skills.git',
+      '    ref: main',
+      'skills: []',
+      '',
+    ].join('\n')
+
+    const invalid = await app.request('/api/sources', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/r8b',
+        name: 'bad/name',
+        url: 'https://example.test/other.git',
+        ref: 'main',
+      }),
+    })
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toMatchObject({ ok: false, error: 'invalid_source_name' })
+
+    const duplicate = await app.request('/api/sources', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/r8b',
+        name: 'openai-skills',
+        url: 'https://example.test/other.git',
+        ref: 'main',
+      }),
+    })
+    expect(duplicate.status).toBe(409)
+    expect(await duplicate.json()).toMatchObject({ ok: false, error: 'source_name_exists' })
   })
 
   it('POST /api/sources/update updates ref/type and clears empty scan', async () => {

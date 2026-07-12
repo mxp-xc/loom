@@ -297,7 +297,7 @@ async function removeEmptySkillParents(
   removedPath: string,
 ): Promise<void> {
   let current = dirname(removedPath)
-  while (current !== skillsDir) {
+  while (true) {
     const parent = dirname(current)
     if (parent === current) return
     let entries: string[]
@@ -308,6 +308,7 @@ async function removeEmptySkillParents(
     }
     if (entries.length > 0) return
     await fs.removeDir(current)
+    if (current === skillsDir) return
     current = parent
   }
 }

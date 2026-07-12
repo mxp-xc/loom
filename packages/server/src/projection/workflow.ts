@@ -1,6 +1,7 @@
 import { isAbsolute, join, relative } from 'node:path'
 import {
   buildManifest,
+  deriveRepoId,
   loadRepoManifest,
   planProjection,
   sourceIdentity,
@@ -140,12 +141,18 @@ async function ensureSourceMembers(
   for (const source of sources) {
     const hasConfiguredMembers = (source.members?.length ?? 0) > 0
     const { repoId } = sourceIdentity(source)
-    const cacheDir = cacheDirFor(repoPath, repoId)
+    const cacheId = deriveRepoId(source.url)
+    const cacheDir = cacheDirFor(repoPath, cacheId)
     if (!(await deps.fs.exists(cacheDir))) {
       try {
-        await installSkill(deps.git, deps.fs, source.url, source.ref, repoPath, repoId)
+        await installSkill(deps.git, deps.fs, source.url, source.ref, repoPath, cacheId)
       } catch (err) {
-        workflowLogger.error('auto-install failed for source', { err, url: source.url, repoId })
+        workflowLogger.error('auto-install failed for source', {
+          err,
+          url: source.url,
+          repoId,
+          cacheId,
+        })
         continue
       }
     }
@@ -169,7 +176,7 @@ async function ensureSourceMembers(
         }))
       }
     } catch (err) {
-      workflowLogger.error('source member scan failed', { err, url: source.url, repoId })
+      workflowLogger.error('source member scan failed', { err, url: source.url, repoId, cacheId })
     }
   }
 }

@@ -2,7 +2,7 @@ import { glob } from 'tinyglobby'
 import { join, dirname, basename, isAbsolute } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import type { IFileSystem } from '../ports/fs.js'
-import { sourceIdentity, type SkillSource, type LocalSkill } from '@loom/core'
+import { deriveRepoId, type SkillSource, type LocalSkill } from '@loom/core'
 import { logger } from '../lib/logger.js'
 import { parseSkillMeta } from '../remote/frontmatter.js'
 
@@ -91,7 +91,7 @@ export function supportedSourceMemberName(
   const normalized = match.replace(/\\/g, '/').replace(/^\.\//, '')
   if (normalized !== 'SKILL.md' && !normalized.endsWith('/SKILL.md')) return null
   const dir = dirname(normalized)
-  if (dir === '.' || dir === '') return source ? sourceIdentity(source).repoId : null
+  if (dir === '.' || dir === '') return source ? deriveRepoId(source.url) : null
   return basename(dir) || null
 }
 
