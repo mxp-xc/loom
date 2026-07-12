@@ -17,6 +17,7 @@
     "@hono/node-server": "^2.0.6",
     "@hono/zod-validator": "^0.8.0",
     "@loom/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "gray-matter": "^4.0.3",
     "hono": "^4.12.27",
     "js-yaml": "^4.1.0",

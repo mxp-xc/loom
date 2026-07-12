@@ -8,7 +8,24 @@ import {
   type ReactNode,
 } from 'react'
 import type { McpServer, McpType } from '@loom/core'
-import { Check, Copy, Download, Edit3, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
+import {
+  Activity,
+  Braces,
+  Check,
+  CircleStop,
+  Copy,
+  Download,
+  Edit3,
+  LoaderCircle,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  Unplug,
+  Wrench,
+  X,
+} from 'lucide-react'
 import MonacoTextEditor from '@/components/monaco/MonacoTextEditor'
 import { registerVarsCompletionProvider } from '@/components/monaco/varsCompletion'
 import { Button } from '@/components/ui/button'
@@ -21,6 +38,7 @@ import {
 } from '@/hooks/useManifestOperations'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
+import { api, type CreateMcpDebugSessionResponse, type McpDebugTool } from '@/lib/api'
 import { AGENTS, agentColor, agentName, agentShort, type AgentId } from '@/lib/agents'
 import type { VarsLayerRef, VarsMatrixResponse } from '@/lib/vars'
 import {
@@ -50,11 +68,100 @@ interface McpServerFormState {
 type EditorMode = 'create' | 'edit' | null
 type RecordEditMode = 'file' | 'pairs'
 type McpFilter = (typeof MCP_FILTERS)[number]
+type McpDebugSource = 'saved' | 'draft'
+type McpDebugConnectionState = 'idle' | 'connecting' | 'connected' | 'stale'
+type McpDetailTab = 'config' | 'debug'
 
 interface RecordRow {
   id: string
   key: string
   value: string
+}
+
+type JsonSchemaLike = Record<string, unknown>
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']'
+  if (!value || typeof value !== 'object') return JSON.stringify(value)
+  return (
+    '{' +
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => JSON.stringify(key) + ':' + stableStringify(item))
+      .join(',') +
+    '}'
+  )
+}
+
+function connectionOnlyServer(server: McpServer): McpServer {
+  if (server.type === 'stdio') {
+    return {
+      id: server.id,
+      type: server.type,
+      command: server.command,
+      args: server.args,
+      env: server.env,
+    }
+  }
+  return {
+    id: server.id,
+    type: server.type,
+    url: server.url,
+    env: server.env,
+    headers: server.headers,
+  }
+}
+
+function sampleObjectFromSchema(schema: unknown): Record<string, unknown> {
+  const sample = sampleFromSchema(schema, 0)
+  return isPlainRecord(sample) ? sample : {}
+}
+
+function sampleFromSchema(schema: unknown, depth: number): unknown {
+  if (!schema || typeof schema !== 'object') return null
+  const value = schema as JsonSchemaLike
+
+  if ('default' in value) return value.default
+  if ('const' in value) return value.const
+  if (Array.isArray(value.examples) && value.examples.length > 0) return value.examples[0]
+  if (Array.isArray(value.enum) && value.enum.length > 0) return value.enum[0]
+
+  for (const key of ['oneOf', 'anyOf', 'allOf'] as const) {
+    const candidates = value[key]
+    if (Array.isArray(candidates) && candidates.length > 0) {
+      return sampleFromSchema(candidates[0], depth)
+    }
+  }
+
+  const schemaType = Array.isArray(value.type) ? value.type[0] : value.type
+  if (schemaType === 'object' || isPlainRecord(value.properties)) {
+    if (depth >= 2) return {}
+    const sample: Record<string, unknown> = {}
+    const properties = isPlainRecord(value.properties) ? value.properties : {}
+    const required = Array.isArray(value.required)
+      ? value.required.filter((item): item is string => typeof item === 'string')
+      : []
+    const keys = [...required, ...Object.keys(properties).filter((key) => !required.includes(key))]
+    for (const key of keys) sample[key] = sampleFromSchema(properties[key], depth + 1)
+    return sample
+  }
+
+  if (schemaType === 'array') {
+    return value.items ? [sampleFromSchema(value.items, depth + 1)] : []
+  }
+  if (schemaType === 'integer' || schemaType === 'number') return 0
+  if (schemaType === 'boolean') return false
+  if (schemaType === 'string') return ''
+  return null
+}
+
+function starterArgsForTool(tool: McpDebugTool | null): string {
+  return JSON.stringify(sampleObjectFromSchema(tool?.inputSchema), null, 2)
 }
 
 let recordRowId = 0
@@ -626,7 +733,309 @@ function McpVariableInspector({
   )
 }
 
+function McpDebugPanel({
+  repoPath,
+  source,
+  server,
+  previewTarget,
+}: {
+  repoPath: string
+  source: McpDebugSource
+  server: McpServer
+  previewTarget: AgentId
+}) {
+  const [connection, setConnection] = useState<McpDebugConnectionState>('idle')
+  const [session, setSession] = useState<Extract<
+    CreateMcpDebugSessionResponse,
+    { ok: true }
+  > | null>(null)
+  const [selectedTool, setSelectedTool] = useState<string | null>(null)
+  const [args, setArgs] = useState('{}')
+  const [result, setResult] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [parseError, setParseError] = useState<string | null>(null)
+  const [calling, setCalling] = useState(false)
+  const sessionIdRef = useRef<string | null>(null)
+  const connectionKey = useMemo(
+    () => source + ':' + previewTarget + ':' + stableStringify(connectionOnlyServer(server)),
+    [previewTarget, server, source],
+  )
+  const connectionKeyRef = useRef(connectionKey)
+  const tools = session?.tools ?? []
+  const activeTool = tools.find((tool) => tool.name === selectedTool) ?? tools[0] ?? null
+  const regionLabel = source === 'draft' ? 'MCP draft tools debug' : 'MCP tools debug'
+
+  useEffect(() => {
+    sessionIdRef.current = session?.sessionId ?? null
+  }, [session?.sessionId])
+
+  useEffect(() => {
+    return () => {
+      if (sessionIdRef.current) void api.disconnectMcpDebugSession(sessionIdRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (connectionKeyRef.current === connectionKey) return
+    connectionKeyRef.current = connectionKey
+    if (session) {
+      const staleSessionId = session.sessionId
+      sessionIdRef.current = null
+      setSession(null)
+      setSelectedTool(null)
+      setConnection('stale')
+      setResult(null)
+      setError(null)
+      setParseError(null)
+      setCalling(false)
+      void api.disconnectMcpDebugSession(staleSessionId).catch((err) => {
+        console.error(
+          { err, sessionId: staleSessionId },
+          'Failed to disconnect stale MCP debug session',
+        )
+      })
+    }
+  }, [connectionKey, session])
+
+  useEffect(() => {
+    setArgs(starterArgsForTool(activeTool))
+    setParseError(null)
+    setResult(null)
+  }, [activeTool?.name])
+
+  const disconnectCurrent = async () => {
+    if (!session) {
+      setConnection('idle')
+      return
+    }
+    const sessionId = session.sessionId
+    setSession(null)
+    setSelectedTool(null)
+    setConnection('idle')
+    setResult(null)
+    setError(null)
+    setParseError(null)
+    try {
+      await api.disconnectMcpDebugSession(sessionId)
+    } catch (err) {
+      console.error({ err, sessionId }, 'Failed to disconnect MCP debug session')
+    }
+  }
+
+  const connect = async () => {
+    setConnection('connecting')
+    setError(null)
+    setParseError(null)
+    setResult(null)
+    if (session) {
+      try {
+        await api.disconnectMcpDebugSession(session.sessionId)
+      } catch (err) {
+        console.error({ err, sessionId: session.sessionId }, 'Failed to replace MCP debug session')
+      }
+    }
+    try {
+      const request =
+        source === 'saved'
+          ? ({ repo: repoPath, source, serverId: server.id, previewTarget } as const)
+          : ({
+              repo: repoPath,
+              source,
+              draft: connectionOnlyServer(server),
+              previewTarget,
+            } as const)
+      const response = await api.createMcpDebugSession(request)
+      if (!response.ok) {
+        setSession(null)
+        setConnection('idle')
+        setError(response.message || response.error || '连接 MCP debug session 失败')
+        return
+      }
+      setSession(response)
+      const firstTool = response.tools[0] ?? null
+      setSelectedTool(firstTool?.name ?? null)
+      setArgs(starterArgsForTool(firstTool))
+      setConnection('connected')
+    } catch (err) {
+      console.error({ err, source, serverId: server.id }, 'Failed to create MCP debug session')
+      setSession(null)
+      setConnection('idle')
+      setError(normalizeManifestOperationError(err, '连接 MCP debug session 失败'))
+    }
+  }
+
+  const callTool = async () => {
+    if (!session || !activeTool || connection !== 'connected') return
+    setCalling(true)
+    setError(null)
+    setParseError(null)
+    setResult(null)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(args)
+      if (!isPlainRecord(parsed)) throw new Error('arguments must be a JSON object')
+    } catch (err) {
+      console.error({ err, args, toolName: activeTool.name }, 'Failed to parse MCP tool arguments')
+      setParseError('参数 JSON 无法解析')
+      setCalling(false)
+      return
+    }
+
+    try {
+      const response = await api.callMcpDebugTool(session.sessionId, {
+        toolName: activeTool.name,
+        arguments: parsed,
+      })
+      if (!response.ok) {
+        setError(response.message || response.error || 'MCP tool 调用失败')
+        if (response.error === 'session_expired') {
+          setSession(null)
+          setConnection('idle')
+        }
+        return
+      }
+      setResult(JSON.stringify(response, null, 2))
+    } catch (err) {
+      console.error(
+        { err, sessionId: session.sessionId, toolName: activeTool.name },
+        'Failed to call MCP tool',
+      )
+      setError(normalizeManifestOperationError(err, 'MCP tool 调用失败'))
+    } finally {
+      setCalling(false)
+    }
+  }
+
+  const canCall = connection === 'connected' && Boolean(activeTool) && !calling
+  const connectLabel = connection === 'stale' ? 'Reconnect debug session' : 'Connect debug session'
+
+  return (
+    <section className={styles.debugPanel} role="region" aria-label={regionLabel}>
+      <div className={styles.debugToolbar}>
+        <div>
+          <div className={styles.cardKicker}>DEBUG SESSION</div>
+          <strong>Tools only</strong>
+          <small>
+            {source === 'draft'
+              ? '连接当前草稿，字段变更后需要重新连接。'
+              : '连接、tools、参数和结果在 detail 内分栏。'}
+          </small>
+        </div>
+        <div className={styles.debugActions}>
+          <span className={styles.debugState} data-state={connection}>
+            <Activity className="h-3.5 w-3.5" />
+            {connection}
+          </span>
+          {connection === 'connected' ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => void disconnectCurrent()}
+            >
+              <Unplug className="h-3.5 w-3.5" />
+              Disconnect
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              aria-label={connectLabel}
+              onClick={() => void connect()}
+              disabled={connection === 'connecting'}
+            >
+              {connection === 'connecting' ? (
+                <LoaderCircle className="h-3.5 w-3.5" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+              {connection === 'stale' ? 'Reconnect' : 'Connect'}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {(error || parseError) && <div className={styles.debugError}>{parseError ?? error}</div>}
+
+      <div className={styles.debugBody}>
+        <section className={styles.debugTools}>
+          <div className={styles.debugPanelHead}>
+            <strong>Tools</strong>
+            <span>{tools.length}</span>
+          </div>
+          <div className={styles.debugToolList}>
+            {tools.map((tool) => (
+              <button
+                key={tool.name}
+                type="button"
+                data-active={activeTool?.name === tool.name}
+                onClick={() => setSelectedTool(tool.name)}
+              >
+                <Wrench className="h-3.5 w-3.5" />
+                <span>{tool.name}</span>
+                {tool.description && <small>{tool.description}</small>}
+              </button>
+            ))}
+            {tools.length === 0 && <div className={styles.debugEmpty}>连接后显示 tools</div>}
+          </div>
+        </section>
+
+        <section className={styles.debugCall}>
+          <div className={styles.debugPanelHead}>
+            <div>
+              <strong>参数</strong>
+              <small>JSON arguments</small>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setArgs(starterArgsForTool(activeTool))}
+              disabled={!activeTool}
+            >
+              <Braces className="h-3.5 w-3.5" />
+              重置参数
+            </Button>
+          </div>
+          <div className={styles.debugEditor}>
+            <MonacoTextEditor
+              ariaLabel="Tool arguments JSON"
+              language="json"
+              height="100%"
+              value={args}
+              onChange={setArgs}
+              options={{
+                folding: false,
+                lineNumbersMinChars: 3,
+                padding: { top: 10, bottom: 10 },
+                wordWrap: 'on',
+              }}
+            />
+          </div>
+          <div className={styles.debugCallActions}>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => void callTool()}
+              disabled={!canCall}
+            >
+              {calling ? <CircleStop className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              {calling ? 'Calling' : 'Call tool'}
+            </Button>
+            <span>{connection === 'connected' ? '真实调用，无二次确认' : '连接后才能调用'}</span>
+          </div>
+          <pre className={styles.debugResult} data-empty={!result}>
+            {result ?? 'Call result will appear here.'}
+          </pre>
+        </section>
+      </div>
+    </section>
+  )
+}
+
 function McpDetail({
+  repoPath,
   server,
   previewTarget,
   matrix,
@@ -635,6 +1044,7 @@ function McpDetail({
   onCopy,
   onInspect,
 }: {
+  repoPath: string
   server: McpServer
   previewTarget: AgentId
   matrix: VarsMatrixResponse | undefined
@@ -643,6 +1053,7 @@ function McpDetail({
   onCopy: () => void
   onInspect: (key: string) => void
 }) {
+  const [detailTab, setDetailTab] = useState<McpDetailTab>('config')
   const preview = buildResolvedMcpServer(server, previewTarget, matrix)
   const settings = buildMcpSettingsPreview(server, previewTarget, matrix)
   const rawCommandLine =
@@ -672,89 +1083,121 @@ function McpDetail({
           </IconButton>
         </div>
       </section>
-      <div className={styles.detailGrid}>
-        <FieldCard title="TRANSPORT" tone={server.type}>
-          <div className={styles.codePreview}>
-            <pre className={styles.commandLine}>
-              {renderValueWithTokens(rawCommandLine, onInspect, '查看 transport 变量 ')}
-            </pre>
-            {resolvedCommandLine !== rawCommandLine && (
-              <div className={styles.resolvedPreview}>
-                <span>解析预览</span>
-                <code>{resolvedCommandLine}</code>
+      <div className={styles.detailTabs} role="tablist" aria-label="MCP detail sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={detailTab === 'config'}
+          data-active={detailTab === 'config'}
+          onClick={() => setDetailTab('config')}
+        >
+          配置
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={detailTab === 'debug'}
+          data-active={detailTab === 'debug'}
+          onClick={() => setDetailTab('debug')}
+        >
+          Tools 调试
+        </button>
+      </div>
+      {detailTab === 'config' ? (
+        <>
+          <div className={styles.detailGrid}>
+            <FieldCard title="TRANSPORT" tone={server.type}>
+              <div className={styles.codePreview}>
+                <pre className={styles.commandLine}>
+                  {renderValueWithTokens(rawCommandLine, onInspect, '查看 transport 变量 ')}
+                </pre>
+                {resolvedCommandLine !== rawCommandLine && (
+                  <div className={styles.resolvedPreview}>
+                    <span>解析预览</span>
+                    <code>{resolvedCommandLine}</code>
+                  </div>
+                )}
               </div>
+            </FieldCard>
+            <FieldCard title="ENV" tone="resolved preview">
+              <RecordPreview
+                record={server.env}
+                resolved={preview.server.env}
+                empty="未配置 env"
+                onInspect={onInspect}
+              />
+            </FieldCard>
+            {server.type !== 'stdio' && (
+              <FieldCard title="HEADERS" tone="remote auth">
+                <RecordPreview
+                  record={server.headers}
+                  resolved={preview.server.headers}
+                  empty="未配置 headers"
+                  onInspect={onInspect}
+                />
+              </FieldCard>
             )}
           </div>
-        </FieldCard>
-        <FieldCard title="ENV" tone="resolved preview">
-          <RecordPreview
-            record={server.env}
-            resolved={preview.server.env}
-            empty="未配置 env"
-            onInspect={onInspect}
-          />
-        </FieldCard>
-        {server.type !== 'stdio' && (
-          <FieldCard title="HEADERS" tone="remote auth">
-            <RecordPreview
-              record={server.headers}
-              resolved={preview.server.headers}
-              empty="未配置 headers"
-              onInspect={onInspect}
-            />
-          </FieldCard>
-        )}
-      </div>
-      {serverVariableKeys(server).length > 0 && (
-        <section className={styles.variableStrip}>
-          <span>Variables</span>
-          {serverVariableKeys(server).map((key) => (
-            <button
-              key={key}
-              type="button"
-              className={styles.varToken}
-              aria-label={'查看变量 ' + key}
-              onClick={() => onInspect(key)}
+          {serverVariableKeys(server).length > 0 && (
+            <section className={styles.variableStrip}>
+              <span>Variables</span>
+              {serverVariableKeys(server).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={styles.varToken}
+                  aria-label={'查看变量 ' + key}
+                  onClick={() => onInspect(key)}
+                >
+                  {'$' + '{' + key + '}'}
+                </button>
+              ))}
+            </section>
+          )}
+          <section className={styles.previewCard}>
+            <div className={styles.previewHead}>
+              <div>
+                <div className={styles.cardKicker}>TARGET SETTINGS PREVIEW</div>
+                <strong>{agentName[previewTarget]} 写入预览</strong>
+                <p>使用当前 target 的变量解析结果，预览 transport、env、headers 和最终配置形态。</p>
+              </div>
+            </div>
+            <div
+              className={styles.previewPath}
+              style={{ '--c': agentColor[previewTarget] } as CSSProperties}
             >
-              {'$' + '{' + key + '}'}
-            </button>
-          ))}
-        </section>
+              <span>{agentName[previewTarget]}</span>
+              <code>{settings.path}</code>
+              <em>{(server.targets ?? []).includes(previewTarget) ? '当前已应用' : '仅预览'}</em>
+            </div>
+            {settings.diagnostics.length > 0 && (
+              <div className={styles.previewDiagnostics}>
+                {settings.diagnostics.map((item, index) => (
+                  <span key={item.code + index}>
+                    {item.code}: {item.message}
+                  </span>
+                ))}
+              </div>
+            )}
+            <pre className={styles.syntaxPreview}>
+              <code>{renderSettingsPreviewSyntax(settings.text, previewTarget)}</code>
+            </pre>
+          </section>
+        </>
+      ) : (
+        <McpDebugPanel
+          repoPath={repoPath}
+          source="saved"
+          server={server}
+          previewTarget={previewTarget}
+        />
       )}
-      <section className={styles.previewCard}>
-        <div className={styles.previewHead}>
-          <div>
-            <div className={styles.cardKicker}>TARGET SETTINGS PREVIEW</div>
-            <strong>{agentName[previewTarget]} 写入预览</strong>
-            <p>使用当前 target 的变量解析结果，预览 transport、env、headers 和最终配置形态。</p>
-          </div>
-        </div>
-        <div
-          className={styles.previewPath}
-          style={{ '--c': agentColor[previewTarget] } as CSSProperties}
-        >
-          <span>{agentName[previewTarget]}</span>
-          <code>{settings.path}</code>
-          <em>{(server.targets ?? []).includes(previewTarget) ? '当前已应用' : '仅预览'}</em>
-        </div>
-        {settings.diagnostics.length > 0 && (
-          <div className={styles.previewDiagnostics}>
-            {settings.diagnostics.map((item, index) => (
-              <span key={item.code + index}>
-                {item.code}: {item.message}
-              </span>
-            ))}
-          </div>
-        )}
-        <pre className={styles.syntaxPreview}>
-          <code>{renderSettingsPreviewSyntax(settings.text, previewTarget)}</code>
-        </pre>
-      </section>
     </div>
   )
 }
 
 function McpEditor({
+  repoPath,
   mode,
   initial,
   previewTarget,
@@ -766,6 +1209,7 @@ function McpEditor({
   onCancel,
   onSubmit,
 }: {
+  repoPath: string
   mode: Exclude<EditorMode, null>
   initial?: McpServer
   previewTarget: AgentId
@@ -792,11 +1236,8 @@ function McpEditor({
     setEnvRows(rowsFromRecord(mode === 'edit' ? initial?.env : undefined))
     setHeadersRows(rowsFromRecord(mode === 'edit' ? initial?.headers : undefined))
   }, [initial?.id, mode])
-  const settings = buildMcpSettingsPreview(
-    formToDraftServer(form, initial?.id),
-    previewTarget,
-    matrix,
-  )
+  const draftServer = useMemo(() => formToDraftServer(form, initial?.id), [form, initial?.id])
+  const settings = buildMcpSettingsPreview(draftServer, previewTarget, matrix)
   const transportLabel =
     form.type === 'stdio' ? 'local process' : form.type === 'sse' ? 'event stream' : 'remote http'
   const setField = <K extends keyof McpServerFormState>(key: K, value: McpServerFormState[K]) =>
@@ -952,6 +1393,12 @@ function McpEditor({
             <code>{renderSettingsPreviewSyntax(settings.text, previewTarget)}</code>
           </pre>
         </section>
+        <McpDebugPanel
+          repoPath={repoPath}
+          source="draft"
+          server={draftServer}
+          previewTarget={previewTarget}
+        />
       </div>
       <footer className={styles.editorActionbar}>
         <div>
@@ -1304,6 +1751,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         <main className={styles.detail}>
           {editorMode ? (
             <McpEditor
+              repoPath={repoPath}
               mode={editorMode}
               initial={editorMode === 'edit' ? selectedServer : undefined}
               previewTarget={previewTarget}
@@ -1317,6 +1765,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
             />
           ) : selectedServer ? (
             <McpDetail
+              repoPath={repoPath}
               server={selectedServer}
               previewTarget={previewTarget}
               matrix={matrices[previewTarget]}

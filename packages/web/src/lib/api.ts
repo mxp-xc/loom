@@ -52,6 +52,46 @@ export type McpImportApplyResponse =
   | { ok: true; imported: number; renamed: number; ignoredFields: number; entries: McpServer[] }
   | { ok: false; error: 'stale_import_preview'; message: string }
 
+export interface McpDebugTool {
+  name: string
+  description?: string
+  inputSchema?: unknown
+}
+
+export type CreateMcpDebugSessionResponse =
+  | {
+      ok: true
+      sessionId: string
+      source: 'saved' | 'draft'
+      serverFingerprint: string
+      previewTarget: AgentId
+      tools: McpDebugTool[]
+      createdAt: string
+      idleExpiresAt: string
+      hardExpiresAt: string
+    }
+  | {
+      ok: false
+      error: string
+      message: string
+      diagnostics?: VarsDiagnostic[]
+    }
+
+export type CallMcpDebugToolResponse =
+  | {
+      ok: true
+      result: unknown
+      durationMs: number
+      calledAt: string
+      idleExpiresAt: string
+    }
+  | {
+      ok: false
+      error: string
+      message: string
+      durationMs?: number
+    }
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -333,6 +373,22 @@ export const api = {
     post('/mcp/import/scan', body).then(json) as Promise<McpImportScanResponse>,
   applyMcpImports: (body: { repo: string; sources?: AgentId[]; keys: string[] }) =>
     post('/mcp/import/apply', body).then(json) as Promise<McpImportApplyResponse>,
+  createMcpDebugSession: (
+    body:
+      | { repo: string; source: 'saved'; serverId: string; previewTarget: AgentId }
+      | { repo: string; source: 'draft'; draft: McpServer; previewTarget: AgentId },
+  ) => post('/mcp/debug/sessions', body).then(json) as Promise<CreateMcpDebugSessionResponse>,
+  callMcpDebugTool: (
+    sessionId: string,
+    body: { toolName: string; arguments: Record<string, unknown> },
+  ) =>
+    post(`/mcp/debug/sessions/${encodeURIComponent(sessionId)}/tools/call`, body).then(
+      json,
+    ) as Promise<CallMcpDebugToolResponse>,
+  disconnectMcpDebugSession: (sessionId: string) =>
+    fetch(`${base}/mcp/debug/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+    }).then(json) as Promise<{ ok: true }>,
   deleteSource: (body: { repo: string; url: string }) =>
     fetch(`${base}/sources`, {
       method: 'DELETE',

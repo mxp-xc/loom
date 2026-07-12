@@ -11,10 +11,12 @@ import { createConfigRoutes } from './routes/config.js'
 import { createSkillsYamlRoutes } from './routes/skills-yaml.js'
 import { createMcpYamlRoutes } from './routes/mcp-yaml.js'
 import { createMcpImportRoutes } from './routes/mcp-import.js'
+import { createDefaultMcpDebugManager, createMcpDebugRoutes } from './routes/mcp-debug.js'
 import { createMemoryRoutes } from './routes/memory.js'
 import { SyncSessionManager } from '../sync/session-manager.js'
 import { logger } from '../lib/logger.js'
 import { createVarsRoutes } from './routes/vars.js'
+import type { McpDebugSessionManagerLike } from './routes/mcp-debug.js'
 
 export interface RouteDeps {
   fs: IFileSystem
@@ -23,11 +25,10 @@ export interface RouteDeps {
   home: string
 }
 
-export interface SyncRouteDeps extends RouteDeps {
-  sync: SyncSessionManager
+type RegisterRouteDeps = RouteDeps & {
+  sync?: SyncSessionManager
+  mcpDebug?: McpDebugSessionManagerLike
 }
-
-type RegisterRouteDeps = RouteDeps & { sync?: SyncSessionManager }
 
 export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
   const syncLogger = logger.child('sync-session')
@@ -52,7 +53,13 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
     .recover()
     .catch((err: unknown) => syncLogger.error('sync recovery failed', { err }))
   sync.startMaintenance()
-  const deps: SyncRouteDeps = { ...baseDeps, sync }
+  let mcpDebug = baseDeps.mcpDebug
+  if (!mcpDebug) {
+    const manager = createDefaultMcpDebugManager()
+    manager.startMaintenance()
+    mcpDebug = manager
+  }
+  const deps = { ...baseDeps, sync, mcpDebug }
 
   const app = new Hono()
   app.use('*', async (_c, next) => {
@@ -67,6 +74,7 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
   app.route('/', createSkillsYamlRoutes(deps))
   app.route('/', createMcpYamlRoutes(deps))
   app.route('/', createMcpImportRoutes(deps))
+  app.route('/', createMcpDebugRoutes(deps))
   app.route('/', createMemoryRoutes(deps))
   app.route('/', createVarsRoutes(deps))
   return app

@@ -3,6 +3,14 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import Mcp from '../src/views/Mcp'
 import { api } from '../src/lib/api'
+import { createMonacoEditorMock } from './monaco-test-utils'
+
+const monacoEditorMock = createMonacoEditorMock()
+
+vi.mock('@monaco-editor/react', async () => {
+  const { createMonacoEditorMock } = await import('./monaco-test-utils')
+  return createMonacoEditorMock().module()
+})
 
 vi.mock('../src/lib/api', () => ({
   api: {
@@ -64,6 +72,38 @@ vi.mock('../src/lib/api', () => ({
       ignoredFields: 1,
       entries: [],
     })),
+    createMcpDebugSession: vi.fn(async () => ({
+      ok: true,
+      sessionId: 'debug-1',
+      source: 'saved',
+      serverFingerprint: 'fingerprint-1',
+      previewTarget: 'codex',
+      tools: [
+        {
+          name: 'capture_live_filter',
+          description: 'Filter current Reqable live capture records',
+          inputSchema: {
+            type: 'object',
+            required: ['pattern'],
+            properties: {
+              pattern: { type: 'string', default: 'mcp' },
+              caseSensitive: { type: 'boolean' },
+            },
+          },
+        },
+      ],
+      createdAt: '2026-07-13T00:00:00.000Z',
+      idleExpiresAt: '2026-07-13T00:05:00.000Z',
+      hardExpiresAt: '2026-07-13T00:30:00.000Z',
+    })),
+    callMcpDebugTool: vi.fn(async () => ({
+      ok: true,
+      result: { content: [{ type: 'text', text: 'ok' }] },
+      durationMs: 12,
+      calledAt: '2026-07-13T00:00:01.000Z',
+      idleExpiresAt: '2026-07-13T00:05:01.000Z',
+    })),
+    disconnectMcpDebugSession: vi.fn(async () => ({ ok: true })),
     getManifest: vi.fn(async () => ({
       skills: { sources: [], skills: [] },
       mcp: [
@@ -128,6 +168,7 @@ vi.mock('../src/lib/api', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
+  monacoEditorMock.reset()
 })
 
 describe('MCP workbench view', () => {
@@ -285,5 +326,88 @@ describe('MCP workbench view', () => {
 
     expect(await within(dialog).findByText('导入预览已过期，请重新扫描')).toBeDefined()
     expect(screen.getByRole('dialog', { name: 'Import MCP servers' })).toBeDefined()
+  })
+
+  it('connects a saved server debug session and calls a selected tool with editable Monaco args', async () => {
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+
+    expect((await screen.findByRole('tab', { name: '配置' })).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    expect(screen.queryByRole('region', { name: 'MCP tools debug' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Tools 调试' }))
+    const panel = await screen.findByRole('region', { name: 'MCP tools debug' })
+    fireEvent.click(within(panel).getByRole('button', { name: 'Connect debug session' }))
+
+    await waitFor(() =>
+      expect(api.createMcpDebugSession).toHaveBeenCalledWith({
+        repo: '/tmp/mcp-view',
+        source: 'saved',
+        serverId: 'playwright',
+        previewTarget: 'codex',
+      }),
+    )
+    await waitFor(() => expect(within(panel).getByText('capture_live_filter')).toBeDefined())
+
+    const args = within(panel).getByRole('textbox', { name: 'Tool arguments JSON' })
+    expect(args).toMatchObject({ value: expect.stringContaining('"pattern": "mcp"') })
+    expect(within(panel).getByText('参数')).toBeDefined()
+    expect(within(panel).getByRole('button', { name: '重置参数' })).toBeDefined()
+    fireEvent.change(args, { target: { value: '{ "pattern": "reqable" }' } })
+    fireEvent.click(within(panel).getByRole('button', { name: 'Call tool' }))
+
+    await waitFor(() =>
+      expect(api.callMcpDebugTool).toHaveBeenCalledWith('debug-1', {
+        toolName: 'capture_live_filter',
+        arguments: { pattern: 'reqable' },
+      }),
+    )
+    expect(await within(panel).findByText(/durationMs/)).toBeDefined()
+  })
+
+  it('tests editor drafts and marks the debug session stale when draft fields change', async () => {
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 playwright' }))
+    const panel = await screen.findByRole('region', { name: 'MCP draft tools debug' })
+    fireEvent.click(within(panel).getByRole('button', { name: 'Connect debug session' }))
+
+    await waitFor(() =>
+      expect(api.createMcpDebugSession).toHaveBeenCalledWith({
+        repo: '/tmp/mcp-view',
+        source: 'draft',
+        draft: expect.objectContaining({
+          id: 'playwright',
+          type: 'stdio',
+          command: 'npx',
+        }),
+        previewTarget: 'codex',
+      }),
+    )
+
+    fireEvent.change(screen.getByLabelText('command'), { target: { value: 'node' } })
+    expect(await within(panel).findByText('stale')).toBeDefined()
+    expect(within(panel).getByRole('button', { name: 'Reconnect debug session' })).toBeDefined()
+    await waitFor(() => expect(api.disconnectMcpDebugSession).toHaveBeenCalledWith('debug-1'))
+  })
+
+  it('keeps invalid JSON local and does not call the tool API', async () => {
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Tools 调试' }))
+    const panel = await screen.findByRole('region', { name: 'MCP tools debug' })
+    fireEvent.click(within(panel).getByRole('button', { name: 'Connect debug session' }))
+    await waitFor(() =>
+      expect(within(panel).getAllByText('capture_live_filter').length).toBeGreaterThan(0),
+    )
+
+    fireEvent.change(within(panel).getByRole('textbox', { name: 'Tool arguments JSON' }), {
+      target: { value: '{' },
+    })
+    fireEvent.click(within(panel).getByRole('button', { name: 'Call tool' }))
+
+    expect(api.callMcpDebugTool).not.toHaveBeenCalled()
+    expect(await within(panel).findByText('参数 JSON 无法解析')).toBeDefined()
   })
 })

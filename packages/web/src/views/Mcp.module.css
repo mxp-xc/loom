@@ -581,6 +581,34 @@
   gap: 4px;
 }
 
+.detailTabs {
+  display: inline-flex;
+  justify-self: start;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+}
+
+.detailTabs button {
+  min-height: 30px;
+  padding: 0 13px;
+  color: var(--muted);
+  cursor: pointer;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  font:
+    700 11px/1 'JetBrains Mono',
+    monospace;
+}
+
+.detailTabs button[data-active='true'] {
+  color: var(--bright);
+  background: var(--accent);
+}
+
 .previewSwitch {
   display: inline-flex;
   inline-size: 208px;
@@ -890,6 +918,210 @@
 
 .syntaxPreview code {
   font: inherit;
+}
+
+.debugPanel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--card) 78%, var(--bg));
+}
+
+.debugToolbar,
+.debugActions,
+.debugPanelHead,
+.debugCallActions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.debugToolbar strong,
+.debugPanelHead strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--bright);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.debugToolbar small,
+.debugPanelHead small,
+.debugCallActions span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.debugActions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.debugActions :global(.loom-button),
+.debugPanelHead :global(.loom-button),
+.debugCallActions :global(.loom-button) {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.debugState {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  font:
+    700 10px 'JetBrains Mono',
+    monospace;
+}
+
+.debugState[data-state='connected'] {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 34%, var(--border));
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+}
+
+.debugState[data-state='connecting'] svg {
+  animation: spin 920ms linear infinite;
+}
+
+.debugState[data-state='stale'] {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 38%, var(--border));
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+}
+
+.debugError {
+  padding: 9px 11px;
+  color: var(--error);
+  border: 1px solid color-mix(in srgb, var(--error) 42%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--error) 8%, transparent);
+  font-size: 12px;
+}
+
+.debugBody {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.38fr) minmax(0, 0.62fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.debugTools,
+.debugCall {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.debugToolList {
+  display: grid;
+  gap: 6px;
+}
+
+.debugToolList button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 10px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg) 74%, transparent);
+}
+
+.debugToolList button[data-active='true'] {
+  border-color: color-mix(in srgb, var(--primary) 36%, var(--border));
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.debugToolList button svg {
+  grid-row: span 2;
+  color: var(--primary);
+}
+
+.debugToolList button span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bright);
+  font:
+    650 11px 'JetBrains Mono',
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debugToolList button small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--m2);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debugPanelHead > span {
+  color: var(--primary);
+  font:
+    700 11px 'JetBrains Mono',
+    monospace;
+}
+
+.debugEditor {
+  min-width: 0;
+  height: 190px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.debugCallActions {
+  justify-content: flex-start;
+}
+
+.debugResult {
+  min-height: 96px;
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 11px 12px;
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font:
+    11px/1.55 'JetBrains Mono',
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.debugResult[data-empty='true'],
+.debugEmpty {
+  color: var(--muted);
 }
 
 .editorFormStack {
@@ -1456,13 +1688,20 @@
   }
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 1040px) {
   .page {
     overflow: auto;
   }
 
   .workbench,
-  .detailGrid {
+  .detailGrid,
+  .debugBody {
     grid-template-columns: 1fr;
   }
 
@@ -1493,6 +1732,30 @@
 
   .detailActions {
     justify-self: start;
+  }
+
+  .debugToolbar,
+  .debugPanelHead,
+  .debugCallActions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .debugActions {
+    justify-content: flex-start;
+  }
+
+  .detailTabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .debugActions,
+  .debugActions :global(.loom-button),
+  .debugPanelHead :global(.loom-button),
+  .debugCallActions :global(.loom-button) {
+    width: 100%;
   }
 
   .editorActionbar {
