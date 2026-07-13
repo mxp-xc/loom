@@ -6,6 +6,7 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .skills-head-actions {
@@ -24,4 +25,10 @@
 .project-button:hover {
   border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
   box-shadow: 0 0 14px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+@media (max-width: 700px) {
+  .skills-page {
+    scrollbar-gutter: auto;
+  }
 }
