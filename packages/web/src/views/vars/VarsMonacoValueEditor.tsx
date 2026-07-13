@@ -3,6 +3,7 @@ import MonacoTextEditor from '../../components/monaco/MonacoTextEditor.js'
 import { languageForVarValue } from '../../components/monaco/languages.js'
 import { registerVarsCompletionProvider } from '../../components/monaco/varsCompletion.js'
 import type { StringFormat, VarEntryInput, VarsResolution } from '../../lib/vars.js'
+import { FieldError } from '../../components/ErrorFeedback.js'
 
 type VarsResolutionLike =
   | VarsResolution
@@ -51,6 +52,7 @@ export default function VarsMonacoValueEditor({
   height = '190px',
 }: VarsMonacoValueEditorProps): JSX.Element {
   const language = languageForVarValue(type, format)
+  const errorId = `${ariaLabel}-error`
   const varsKeysRef = useRef(varsKeys)
 
   useEffect(() => {
@@ -69,6 +71,7 @@ export default function VarsMonacoValueEditor({
       <MonacoTextEditor
         key={language}
         ariaLabel={ariaLabel}
+        ariaDescribedBy={error ? errorId : undefined}
         height={height}
         language={language}
         readOnly={disabled}
@@ -79,11 +82,7 @@ export default function VarsMonacoValueEditor({
         }}
         onEditorMount={handleEditorMount}
       />
-      {error && (
-        <p className="vars-field-error" role="alert">
-          {error}
-        </p>
-      )}
+      {error && <FieldError id={errorId}>{error}</FieldError>}
     </>
   )
 }

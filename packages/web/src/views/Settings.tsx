@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { ConfigField, FIELD_SCHEMA, type ConfigLevel } from '@/components/ConfigField'
 import { useViewError } from '@/hooks/useViewError'
+import { ErrorState } from '@/components/ErrorFeedback'
+import { useToast } from '@/hooks/useToast'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
 import { cn } from '@/lib/utils'
 import styles from './Settings.module.css'
@@ -45,10 +47,17 @@ function hasPath(obj: Record<string, unknown>, path: string): boolean {
 
 export default function Settings({ repoPath }: { repoPath: string }) {
   const [cfg, setCfg] = useState<ConfigResponse | null>(null)
-  const { error, setError } = useViewError()
+  const { error, setError } = useViewError({
+    title: '配置加载失败',
+    message: '请检查服务状态后重试',
+  })
+  const { showErrorToast } = useToast()
   const operations = useManifestOperations(repoPath, {
-    onError: setError,
-    onSuccess: () => setError(null),
+    onError: (message) =>
+      showErrorToast(new Error(message), {
+        title: '配置保存失败',
+        message: '请检查输入后重试',
+      }),
   })
   const [level, setLevel] = useState<ConfigLevel>(() => {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(LS_LEVEL) : null
@@ -76,6 +85,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
   }, [repoPath])
 
   const reload = () => {
+    setError(null)
     return api
       .getConfig(repoPath)
       .then((c) => setCfg(c as ConfigResponse))
@@ -112,28 +122,13 @@ export default function Settings({ repoPath }: { repoPath: string }) {
 
   if (error) {
     return (
-      <div className="p-4" style={{ color: 'var(--error)' }}>
-        配置加载失败:{error}
-        <button
-          onClick={() => {
-            setError(null)
-            void reload()
-          }}
-          style={{
-            fontSize: 13,
-            fontWeight: 500,
-            padding: '7px 16px',
-            borderRadius: 'var(--radius)',
-            border: '1px solid var(--border)',
-            background: 'transparent',
-            color: 'var(--muted)',
-            cursor: 'pointer',
-            marginLeft: '12px',
-          }}
-        >
-          重试
-        </button>
-      </div>
+      <ErrorState
+        {...error}
+        action={{
+          label: '重试',
+          run: reload,
+        }}
+      />
     )
   }
   if (!cfg) return <div className="p-4">加载中…</div>

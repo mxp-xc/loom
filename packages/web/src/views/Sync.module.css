@@ -234,6 +234,10 @@ patch /packages/web/src/views/Sync.module.css
   align-self: flex-start;
 }
 
+.remote-edit > :global(.app-field-error) {
+  grid-column: 1 / -1;
+}
+
 .remote-hint,
 .remote-blocked {
   margin: 0;

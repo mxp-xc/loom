@@ -5,6 +5,7 @@ import { useManifest } from '@/hooks/useManifest'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
+import { ErrorState } from '@/components/ErrorFeedback'
 import type { SkillSource } from '@loom/core'
 import SkillSourceList from './SkillSourceList'
 import GlobalTargetsBar from './GlobalTargetsBar'
@@ -16,15 +17,21 @@ import type { SkillDetail } from './types'
 import styles from './Skills.module.css'
 
 export default function Skills({ repoPath }: { repoPath: string }) {
-  const { error, setError } = useViewError()
+  const { error, setError } = useViewError({
+    title: 'Skills 加载失败',
+    message: '请检查项目配置后重试',
+  })
   const { manifest } = useManifest(repoPath, {
     onError: setError,
     onSuccess: () => setError(null),
   })
-  const { showToast } = useToast()
+  const { showToast, showErrorToast } = useToast()
   const operations = useManifestOperations(repoPath, {
-    onError: setError,
-    onSuccess: () => setError(null),
+    onError: (message) =>
+      showErrorToast(new Error(message), {
+        title: 'Skills 操作失败',
+        message: '请检查配置后重试',
+      }),
     onToast: showToast,
   })
   const [addOpen, setAddOpen] = useState(false)
@@ -95,35 +102,13 @@ export default function Skills({ repoPath }: { repoPath: string }) {
       </div>
 
       {manifest?.errors && manifest.errors.length > 0 && (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 10,
-            border: `1px solid var(--error)`,
-            borderRadius: 'var(--radius-card)',
-            background: 'var(--card)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: 12,
-            color: 'var(--error)',
-          }}
-        >
-          {manifest.errors.map((e, i) => (
-            <div key={i}>{e}</div>
-          ))}
-        </div>
+        <ErrorState
+          title="部分 Skills 配置无法读取"
+          message="请修正配置后重新加载"
+          detail={manifest.errors.join('\n')}
+        />
       )}
-      {error && (
-        <div
-          style={{
-            marginTop: 12,
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: 13,
-            color: 'var(--error)',
-          }}
-        >
-          {error}
-        </div>
-      )}
+      {error && <ErrorState {...error} />}
       {!manifest && !error && <div style={{ color: 'var(--muted)', marginTop: 20 }}>加载中…</div>}
 
       {sourceCount === 0 && localCount === 0 && manifest && (

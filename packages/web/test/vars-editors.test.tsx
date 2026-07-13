@@ -173,6 +173,32 @@ describe('variable editors', () => {
     ])
   })
 
+  it('associates Monaco validation errors with the editable control', () => {
+    const view = render(
+      <VarsMonacoValueEditor
+        ariaLabel="配置值"
+        type="string"
+        value="bad"
+        error={null}
+        onChange={vi.fn()}
+      />,
+    )
+
+    view.rerender(
+      <VarsMonacoValueEditor
+        ariaLabel="配置值"
+        type="string"
+        value="bad"
+        error="值无效"
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('textbox', { name: '配置值' }).getAttribute('aria-describedby')).toBe(
+      '配置值-error',
+    )
+  })
+
   it('keeps secret values on password input without rendering Monaco', () => {
     editor({ type: 'secret', value: 'top-secret' })
     const input = screen.getByLabelText('值') as HTMLInputElement

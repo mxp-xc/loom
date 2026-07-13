@@ -2,6 +2,7 @@ import { RefreshCw, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '@/hooks/useToast'
 import { TargetChip } from '@/components/ui/TargetChip'
+import { ErrorState } from '@/components/ErrorFeedback'
 import { cn } from '@/lib/utils'
 import type { VarsProfileId } from './profile-model'
 import { useProfileVars } from './useProfileVars'
@@ -33,7 +34,7 @@ export default function Vars({ repoPath }: { repoPath: string }) {
   const [view, setView] = useState<VarsView>('definitions')
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState<VarsModalState | null>(null)
-  const { showToast } = useToast()
+  const { showErrorToast } = useToast()
 
   const state = vars.state
 
@@ -83,13 +84,12 @@ export default function Vars({ repoPath }: { repoPath: string }) {
   if (vars.error || !state || !activeProfile)
     return (
       <div className={styles['vars-page']}>
-        <div className={cn(styles['vars-state'], styles['vars-error'])} role="alert">
-          <strong>变量加载失败</strong>
-          <span>{vars.error ?? '变量数据为空'}</span>
-          <button type="button" onClick={() => void vars.reload()}>
-            重试
-          </button>
-        </div>
+        <ErrorState
+          title="变量加载失败"
+          message="请检查变量配置后重试"
+          detail={vars.error ?? (!state ? '变量数据为空' : undefined)}
+          action={{ label: '重试', run: vars.reload }}
+        />
       </div>
     )
 
@@ -217,7 +217,12 @@ export default function Vars({ repoPath }: { repoPath: string }) {
           setPending={vars.setPending}
           onClose={() => setModal(null)}
           onSaved={vars.reload}
-          onError={showToast}
+          onError={(message) =>
+            showErrorToast(new Error(message), {
+              title: '变量配置操作失败',
+              message: '请检查输入后重试',
+            })
+          }
         />
       )}
     </div>

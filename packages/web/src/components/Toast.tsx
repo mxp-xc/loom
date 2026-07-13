@@ -1,75 +1,64 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
+import { AlertCircle, Check, X } from 'lucide-react'
+import type { ToastItem } from '@/hooks/useToast'
+import { ErrorDetails } from './ErrorFeedback'
+import { Button } from './ui/button'
+import { IconButton } from './ui/IconButton'
 
-interface ToastProps {
-  message: string
-  onClose: () => void
-  duration?: number
-  icon?: ReactNode
-}
-
-export default function Toast({ message, onClose, duration = 3000, icon }: ToastProps) {
+export default function Toast({ toast, onClose }: { toast: ToastItem; onClose: () => void }) {
   const [hovered, setHovered] = useState(false)
+  const [pending, setPending] = useState(false)
 
   useEffect(() => {
-    if (hovered) return
-    const t = setTimeout(onClose, duration)
-    return () => clearTimeout(t)
-  }, [hovered, duration, onClose])
+    if (hovered || toast.duration === undefined) return
+    const timer = window.setTimeout(onClose, toast.duration)
+    return () => window.clearTimeout(timer)
+  }, [hovered, onClose, toast.duration])
+
+  const runAction = async () => {
+    const action = toast.feedback?.action
+    if (!action) return
+    setPending(true)
+    try {
+      await action.run()
+      onClose()
+    } catch (err) {
+      console.error({ err, toastId: toast.id }, 'Failed to run toast recovery action')
+      setPending(false)
+    }
+  }
 
   return (
-    <div
+    <article
+      className="app-toast"
+      data-tone={toast.tone}
+      aria-live={toast.tone === 'error' ? 'assertive' : 'polite'}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{
-        position: 'fixed',
-        top: 48,
-        right: 24,
-        zIndex: 1001,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '10px 16px',
-        borderRadius: 'var(--radius-card)',
-        background: 'color-mix(in srgb, var(--popover) 85%, transparent)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        border: '1px solid var(--border)',
-        boxShadow: 'var(--shadow-popover)',
-        fontFamily: "'Inter', sans-serif",
-        fontSize: 12,
-        fontWeight: 500,
-        color: 'var(--bright)',
-        animation: 'toast-in 0.25s var(--ease)',
-      }}
     >
-      {icon ?? (
-        <span
-          style={{
-            width: 18,
-            height: 18,
-            borderRadius: '50%',
-            background: 'var(--primary)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          <svg
-            width="11"
-            height="11"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#fff"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+      <span className="app-toast-icon" aria-hidden="true">
+        {toast.tone === 'error' ? <AlertCircle size={16} /> : <Check size={15} />}
+      </span>
+      <div className="app-toast-copy">
+        <strong>{toast.title}</strong>
+        {toast.message && <p>{toast.message}</p>}
+        {toast.count > 1 && <small>发生 {toast.count} 次</small>}
+        <ErrorDetails code={toast.feedback?.code} detail={toast.feedback?.detail} />
+        {toast.feedback?.action && (
+          <Button
+            type="button"
+            size="xs"
+            variant="secondary"
+            disabled={pending}
+            onClick={() => void runAction()}
           >
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-        </span>
-      )}
-      {message}
-    </div>
+            {pending ? '正在重试' : toast.feedback.action.label}
+          </Button>
+        )}
+      </div>
+      <IconButton label={`关闭“${toast.title}”`} tooltip="关闭" onClick={onClose}>
+        <X size={14} />
+      </IconButton>
+    </article>
   )
 }

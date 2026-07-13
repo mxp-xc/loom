@@ -1,6 +1,15 @@
-import { Component, useCallback, useState, type ErrorInfo, type ReactNode } from 'react'
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from 'react'
 import Editor from '@monaco-editor/react'
 import { monacoThemeName, useMonacoUiTheme } from './theme.js'
+import { ErrorState } from '../ErrorFeedback'
 
 interface Disposable {
   dispose: () => void
@@ -11,6 +20,7 @@ export interface MonacoTextEditorProps {
   onChange: (next: string) => void
   language?: string
   ariaLabel: string
+  ariaDescribedBy?: string
   height?: string | number
   readOnly?: boolean
   className?: string
@@ -39,11 +49,7 @@ export class MonacoRenderErrorBoundary extends Component<
 }
 
 function MonacoErrorFallback() {
-  return (
-    <div role="alert" style={{ padding: 12, color: 'var(--error)' }}>
-      编辑器加载失败
-    </div>
-  )
+  return <ErrorState title="编辑器加载失败" message="请刷新页面后重试" />
 }
 
 export default function MonacoTextEditor({
@@ -51,6 +57,7 @@ export default function MonacoTextEditor({
   onChange,
   language = 'plaintext',
   ariaLabel,
+  ariaDescribedBy,
   height = '100%',
   readOnly = false,
   className,
@@ -59,11 +66,31 @@ export default function MonacoTextEditor({
 }: MonacoTextEditorProps): JSX.Element {
   const uiTheme = useMonacoUiTheme()
   const [mountFailed, setMountFailed] = useState(false)
+  const editorRef = useRef<any>(null)
+
+  const syncErrorDescription = useCallback(
+    (editor: any) => {
+      const domNode = editor?.getDomNode?.() as HTMLElement | null | undefined
+      const editable = domNode?.matches('textarea')
+        ? domNode
+        : domNode?.querySelector<HTMLElement>('textarea')
+      if (ariaDescribedBy) editable?.setAttribute('aria-describedby', ariaDescribedBy)
+      else editable?.removeAttribute('aria-describedby')
+    },
+    [ariaDescribedBy],
+  )
+
+  useEffect(() => {
+    syncErrorDescription(editorRef.current)
+  }, [syncErrorDescription])
 
   const handleMount = useCallback(
     (editor: any, monaco: any) => {
       try {
-        editor.getDomNode?.()?.setAttribute('aria-label', ariaLabel)
+        editorRef.current = editor
+        const domNode = editor.getDomNode?.() as HTMLElement | null | undefined
+        domNode?.setAttribute('aria-label', ariaLabel)
+        syncErrorDescription(editor)
 
         const disposable = onEditorMount?.(editor, monaco)
         if (disposable) {
@@ -74,7 +101,7 @@ export default function MonacoTextEditor({
         setMountFailed(true)
       }
     },
-    [ariaLabel, onEditorMount],
+    [ariaLabel, onEditorMount, syncErrorDescription],
   )
 
   if (mountFailed) return <MonacoErrorFallback />
@@ -83,6 +110,7 @@ export default function MonacoTextEditor({
     <MonacoRenderErrorBoundary fallback={<MonacoErrorFallback />}>
       <Editor
         className={className}
+        wrapperProps={ariaDescribedBy ? { 'aria-describedby': ariaDescribedBy } : undefined}
         height={height}
         language={language}
         theme={monacoThemeName(uiTheme)}

@@ -8,6 +8,7 @@ import { sortSkillMembers, type ScanMember } from './types'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
 import { SelectableList, type SelectableListItem } from '@/components/ui/selectable-list'
 import styles from './EditSourceModal.module.css'
+import { FieldError } from '@/components/ErrorFeedback'
 
 interface Props {
   repoPath: string
@@ -20,17 +21,6 @@ interface Props {
 type OpenProps = Omit<Props, 'source'> & { source: SkillSource }
 
 const mono = "'JetBrains Mono', monospace"
-
-const errBox: React.CSSProperties = {
-  marginBottom: 12,
-  padding: 8,
-  borderRadius: 'var(--radius)',
-  fontSize: 12,
-  fontFamily: mono,
-  color: 'var(--error)',
-  border: '1px solid var(--error)',
-  background: 'var(--card)',
-}
 
 export default function EditSourceModal({ repoPath, source, showToast, onClose, onSaved }: Props) {
   if (!source) return null
@@ -202,7 +192,7 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
     >
       <div className={styles.layout}>
         <div className={styles.fields}>
-          {error && <div style={errBox}>{error}</div>}
+          {error && <FieldError id="edit-source-error">{error}</FieldError>}
 
           <div className={styles.fieldGrid}>
             <div>

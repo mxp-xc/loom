@@ -2,6 +2,7 @@ import { AlertTriangle, CornerDownRight } from 'lucide-react'
 import Modal from '../../components/Modal'
 import { Button } from '../../components/ui/button'
 import type { DeleteImpact } from '../../lib/vars'
+import { FieldError } from '../../components/ErrorFeedback'
 
 interface Props {
   variableKey: string
@@ -53,11 +54,7 @@ export default function DeleteVariableDialog({
             依赖已变化，请重新确认
           </p>
         )}
-        {error && (
-          <p className="vars-field-error" role="alert">
-            {error}
-          </p>
-        )}
+        {error && <FieldError id="delete-variable-error">{error}</FieldError>}
         {!impact ? (
           <p role="status">正在检查删除影响…</p>
         ) : (

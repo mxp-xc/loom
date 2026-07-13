@@ -9,6 +9,7 @@ import {
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { api } from './lib/api'
 import ToastHost from './components/ToastHost'
+import { ErrorState } from './components/ErrorFeedback'
 import { PageLayout, type PageLayoutVariant } from './components/PageLayout'
 import Skills from './views/skills/Skills'
 import Mcp from './views/Mcp'
@@ -388,7 +389,11 @@ export default function App() {
   const [repoPath, setRepoPath] = useState<string | null>(null)
   const [activeRepo, setActiveRepo] = useState<string>('')
   const [loading, setLoading] = useState(true)
-  const { error, setError } = useViewError()
+  const { error, setError } = useViewError({
+    title: 'Loom 初始化失败',
+    message: '请确认本地服务可用后重新加载',
+    action: { label: '重新加载', run: () => window.location.reload() },
+  })
 
   useEffect(() => {
     api
@@ -422,23 +427,7 @@ export default function App() {
         </span>
       </div>
     )
-  if (error)
-    return (
-      <div
-        style={{
-          display: 'flex',
-          height: '100vh',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'var(--bg)',
-          color: 'var(--error)',
-        }}
-      >
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14 }}>
-          初始化失败: {error}
-        </span>
-      </div>
-    )
+  if (error) return <ErrorState {...error} fullscreen />
   if (!repoPath) return null
 
   return (

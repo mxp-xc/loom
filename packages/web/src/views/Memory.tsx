@@ -29,7 +29,7 @@ export default function Memory({ repoPath }: Props) {
   const [projecting, setProjecting] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [updatingTarget, setUpdatingTarget] = useState<AgentId | null>(null)
-  const { showToast } = useToast()
+  const { showToast, showErrorToast } = useToast()
   const { manifest } = useManifest(repoPath)
   const targets = ((manifest?.config?.targets ?? []) as AgentId[]).filter((agent) =>
     AGENTS.includes(agent),
@@ -47,7 +47,7 @@ export default function Memory({ repoPath }: Props) {
       }
     } catch (e) {
       console.error({ err: e }, 'Failed to load memory list')
-      showToast(e instanceof Error ? e.message : String(e))
+      showErrorToast(e, { title: 'Memory 加载失败', message: '请稍后重试' })
     } finally {
       setLoading(false)
     }
@@ -71,6 +71,7 @@ export default function Memory({ repoPath }: Props) {
     } catch (e) {
       console.error({ err: e }, 'Failed to select memory')
       setSelectedContent('')
+      showErrorToast(e, { title: 'Memory 内容加载失败', message: '请选择其他版本后重试' })
     }
   }
 
@@ -81,11 +82,14 @@ export default function Memory({ repoPath }: Props) {
       if (res.ok) showToast('投影完成')
       else {
         console.error({ err: res }, 'Memory projection returned failure')
-        showToast(res.message || '投影失败')
+        showErrorToast(new Error(res.message || '投影失败'), {
+          title: 'Memory 投影失败',
+          message: '请检查配置后重试',
+        })
       }
     } catch (e) {
       console.error({ err: e }, 'Failed to project memory')
-      showToast(e instanceof Error ? e.message : String(e))
+      showErrorToast(e, { title: 'Memory 投影失败', message: '请检查配置后重试' })
     } finally {
       setProjecting(false)
     }
@@ -130,7 +134,7 @@ export default function Memory({ repoPath }: Props) {
           )
         }
       }
-      showToast(e instanceof Error ? e.message : String(e))
+      showErrorToast(e, { title: '投影目标更新失败', message: '请检查配置后重试' })
     } finally {
       setUpdatingTarget(null)
     }
@@ -148,7 +152,7 @@ export default function Memory({ repoPath }: Props) {
       showToast('已创建')
     } catch (e) {
       console.error({ err: e }, 'Failed to create memory')
-      showToast(e instanceof Error ? e.message : String(e))
+      showErrorToast(e, { title: 'Memory 创建失败', message: '请检查名称后重试' })
     }
   }
 
@@ -164,7 +168,7 @@ export default function Memory({ repoPath }: Props) {
       showToast('已重命名')
     } catch (e) {
       console.error({ err: e }, 'Failed to rename memory')
-      showToast(e instanceof Error ? e.message : String(e))
+      showErrorToast(e, { title: 'Memory 重命名失败', message: '请检查名称后重试' })
     }
   }
 
@@ -180,7 +184,7 @@ export default function Memory({ repoPath }: Props) {
       showToast('已删除')
     } catch (e) {
       console.error({ err: e }, 'Failed to delete memory')
-      showToast(e instanceof Error ? e.message : String(e))
+      showErrorToast(e, { title: 'Memory 删除失败', message: '请稍后重试' })
     }
   }
 
@@ -191,7 +195,7 @@ export default function Memory({ repoPath }: Props) {
       showToast(name ? `已激活 ${name}` : '已取消激活')
     } catch (e) {
       console.error({ err: e }, 'Failed to set active memory')
-      showToast(e instanceof Error ? e.message : String(e))
+      showErrorToast(e, { title: 'Memory 激活失败', message: '请稍后重试' })
     }
   }
 

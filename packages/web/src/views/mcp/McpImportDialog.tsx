@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import type { ManifestOperations } from '@/hooks/useManifestOperations'
 import { AGENTS, agentName, agentShort, type AgentId } from '@/lib/agents'
 import type { McpImportItem, McpImportScanResponse, McpImportSourceResult } from '@/lib/api'
+import { FieldError } from '@/components/ErrorFeedback'
 import styles from './McpImportDialog.module.css'
 
 const IMPORT_SOURCES = AGENTS
@@ -79,7 +80,7 @@ export default function McpImportDialog({ open, operations, onClose }: McpImport
           ))}
         </section>
 
-        {error && <div className={styles.error}>{error}</div>}
+        {error && <FieldError id="mcp-import-error">{error}</FieldError>}
 
         {!scan ? (
           <div className={styles.empty}>正在扫描 MCP 配置...</div>

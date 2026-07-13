@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { refreshManifest } from '@/hooks/useManifest'
+import { showErrorToast } from '@/hooks/useToast'
 import Modal from '@/components/Modal'
 import MarkdownPreview from '@/components/MarkdownPreview'
 import { Copy, Check } from 'lucide-react'
@@ -249,14 +250,20 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
                       try {
                         await refreshManifest(repoPath)
                       } catch (e) {
-                        showToast(
-                          '已保存，但刷新列表失败：' + (e instanceof Error ? e.message : String(e)),
-                        )
+                        console.error({ err: e }, 'Failed to refresh skills after saving content')
+                        showErrorToast(e, {
+                          title: '内容已保存，但列表刷新失败',
+                          message: '请稍后刷新页面',
+                        })
                         return
                       }
                       showToast('已保存')
                     } catch (e) {
-                      showToast(e instanceof Error ? e.message : String(e))
+                      console.error({ err: e }, 'Failed to save skill content')
+                      showErrorToast(e, {
+                        title: 'Skill 内容保存失败',
+                        message: '请检查内容后重试',
+                      })
                     }
                   }}
                 />

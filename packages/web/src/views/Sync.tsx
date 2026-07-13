@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import Modal from '@/components/Modal'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
+import { ErrorState, FieldError } from '@/components/ErrorFeedback'
 import styles from './Sync.module.css'
 
 const ConflictEditor = lazy(() => import('./sync/ConflictEditor'))
@@ -105,6 +106,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
   const [remote, setRemote] = useState('')
   const [remoteInput, setRemoteInput] = useState('')
   const [remoteDraft, setRemoteDraft] = useState('')
+  const [remoteFieldError, setRemoteFieldError] = useState<string | null>(null)
   const [editingRemote, setEditingRemote] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -116,7 +118,10 @@ export default function Sync({ repoPath }: { repoPath: string }) {
   const [confirming, setConfirming] = useState<'force-pull' | 'force-push' | null>(null)
   const [feedback, setFeedback] = useState<FeedbackState | null>(null)
   const activeRequestRef = useRef<AbortController | null>(null)
-  const { error, setError } = useViewError()
+  const { error, setError } = useViewError({
+    title: '同步操作失败',
+    message: '请检查 remote 和网络状态后重试',
+  })
   const { showToast } = useToast()
   const totalConflictCount = conflicts.length ? (pull?.conflicts.length ?? conflicts.length) : 0
   const currentConflictNumber =
@@ -366,10 +371,14 @@ export default function Sync({ repoPath }: { repoPath: string }) {
 
   const saveRemote = async (value: string) => {
     const nextRemote = value.trim()
-    if (!nextRemote) return setError('remote URL 不能为空')
+    if (!nextRemote) {
+      setRemoteFieldError('remote URL 不能为空')
+      return
+    }
     if (remote && hasActiveSyncSession) return setError('请先解决或放弃本次合并，再更换 remote。')
     if (busy !== null || feedback !== null) return
     setBusy('remote')
+    setRemoteFieldError(null)
     setError(null)
     try {
       const result = (await api.setSyncRemote({ repo: repoPath, remoteUrl: nextRemote })) as {
@@ -492,11 +501,15 @@ export default function Sync({ repoPath }: { repoPath: string }) {
           <div className={styles['remote-edit']}>
             <input
               aria-label="remote URL"
+              aria-describedby={remoteFieldError ? 'sync-remote-error' : undefined}
+              aria-invalid={remoteFieldError ? 'true' : undefined}
               className={styles['mock-input']}
               value={remote ? remoteDraft : remoteInput}
-              onChange={(event) =>
-                remote ? setRemoteDraft(event.target.value) : setRemoteInput(event.target.value)
-              }
+              onChange={(event) => {
+                setRemoteFieldError(null)
+                if (remote) setRemoteDraft(event.target.value)
+                else setRemoteInput(event.target.value)
+              }}
               placeholder="https://github.com/user/repo.git"
             />
             <div className={styles['remote-edit-actions']}>
@@ -519,11 +532,12 @@ export default function Sync({ repoPath }: { repoPath: string }) {
                 variant="primary"
                 aria-label="保存 remote"
                 onClick={() => void saveRemote(remote ? remoteDraft : remoteInput)}
-                disabled={busy !== null || !(remote ? remoteDraft : remoteInput).trim()}
+                disabled={busy !== null}
               >
                 {busy === 'remote' ? '保存中…' : '保存'}
               </Button>
             </div>
+            {remoteFieldError && <FieldError id="sync-remote-error">{remoteFieldError}</FieldError>}
           </div>
         ) : (
           <>
@@ -646,12 +660,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         </div>
       </section>
 
-      {error && (
-        <div className={styles['error-card']} role="alert">
-          <AlertTriangle className="h-4 w-4" />
-          {String(error)}
-        </div>
-      )}
+      {error && <ErrorState {...error} />}
 
       {conflicts[0] && (
         <Suspense

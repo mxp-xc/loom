@@ -703,6 +703,7 @@ describe('Skills view', () => {
       render(
         <TestRouter>
           <Skills repoPath={repoPath} />
+          <ToastHost />
         </TestRouter>,
       )
 
@@ -711,14 +712,17 @@ describe('Skills view', () => {
 
       fireEvent.click(screen.getByRole('button', { name: '投影' }))
 
-      expect(await screen.findByText('投影失败: stale yaml')).toBeDefined()
+      expect(await screen.findByText('Skills 操作失败')).toBeDefined()
+      expect(screen.getByText('投影失败: stale yaml')).toBeDefined()
       await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 1))
+
+      fireEvent.click(screen.getByRole('button', { name: '关闭“Skills 操作失败”' }))
 
       fireEvent.click(screen.getByRole('button', { name: '投影' }))
 
       await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 2))
       await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(getManifestCallsBefore + 2))
-      await waitFor(() => expect(screen.queryByText('投影失败: stale yaml')).toBeNull())
+      await waitFor(() => expect(screen.queryByText('Skills 操作失败')).toBeNull())
     } finally {
       consoleError.mockRestore()
     }

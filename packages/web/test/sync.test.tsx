@@ -155,6 +155,17 @@ describe('Sync force operations', () => {
     ).toBeDefined()
   })
 
+  it('shows an empty remote URL error next to the input', async () => {
+    api.getSyncRemote.mockResolvedValueOnce({ remoteUrl: '' })
+    renderSync()
+
+    const input = await screen.findByLabelText('remote URL')
+    fireEvent.click(screen.getByRole('button', { name: '保存 remote' }))
+
+    expect(screen.getByText('remote URL 不能为空')).toBeDefined()
+    expect(input.getAttribute('aria-describedby')).toBe('sync-remote-error')
+  })
+
   it('shows upload failure details in the feedback dialog', async () => {
     api.syncPush.mockResolvedValue({ ok: false, error: '网络连接失败，请稍后重试' })
 

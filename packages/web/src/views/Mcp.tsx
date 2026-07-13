@@ -38,6 +38,7 @@ import {
 } from '@/hooks/useManifestOperations'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
+import { ErrorState, FieldError } from '@/components/ErrorFeedback'
 import { api, type CreateMcpDebugSessionResponse, type McpDebugTool } from '@/lib/api'
 import { AGENTS, agentColor, agentName, agentShort, type AgentId } from '@/lib/agents'
 import type { VarsLayerRef, VarsMatrixResponse } from '@/lib/vars'
@@ -1260,7 +1261,7 @@ function McpEditor({
         <TypeBadge type={form.type} large />
         <PreviewTargetSwitch value={previewTarget} agents={AGENTS} onChange={onPreviewTarget} />
       </section>
-      {error && <div className={styles.formError}>{error}</div>}
+      {error && <FieldError id="mcp-server-form-error">{error}</FieldError>}
       <div className={styles.editorFormStack}>
         <section className={styles.editorCard}>
           <div className={styles.editorCardHead}>
@@ -1467,12 +1468,18 @@ function GlobalTargetsBar({
 }
 
 export default function Mcp({ repoPath }: { repoPath: string }) {
-  const { error, setError } = useViewError()
+  const { error, setError } = useViewError({
+    title: 'MCP Server 加载失败',
+    message: '请检查项目配置后重试',
+  })
   const { manifest } = useManifest(repoPath, { onError: setError, onSuccess: () => setError(null) })
-  const { showToast } = useToast()
+  const { showToast, showErrorToast } = useToast()
   const operations = useManifestOperations(repoPath, {
-    onError: setError,
-    onSuccess: () => setError(null),
+    onError: (message) =>
+      showErrorToast(new Error(message), {
+        title: 'MCP 操作失败',
+        message: '请检查配置后重试',
+      }),
     onToast: showToast,
   })
   const { matrices } = useMcpPreviewVars(repoPath)
@@ -1567,17 +1574,13 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
       })
       .catch((err) => {
         console.error({ err }, 'Failed to copy MCP server')
-        showToast('拷贝失败')
+        showErrorToast(err, { title: '复制失败', message: '请检查剪贴板权限后重试' })
       })
   }
 
   return (
     <div className={styles.page}>
-      {error && (
-        <div className={styles.workbenchError} role="alert">
-          {error}
-        </div>
-      )}
+      {error && <ErrorState {...error} />}
       <section className={styles.workbench} role="region" aria-label="MCP workbench">
         <aside className={styles.inventory} aria-label="MCP inventory">
           <div className={styles.inventoryTop}>
