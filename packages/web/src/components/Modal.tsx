@@ -7,12 +7,15 @@ import { X } from 'lucide-react'
 interface ModalProps {
   open: boolean
   onClose: () => void
-  title: string
+  title: ReactNode
+  ariaLabel?: string
   width?: number
   minHeight?: number
   busy?: boolean
   className?: string
   bodyClassName?: string
+  headerClassName?: string
+  titleClassName?: string
   children: ReactNode
 }
 
@@ -20,11 +23,14 @@ export default function Modal({
   open,
   onClose,
   title,
+  ariaLabel,
   width = 480,
   minHeight = 0,
   busy = false,
   className,
   bodyClassName,
+  headerClassName,
+  titleClassName,
   children,
 }: ModalProps) {
   const contentRef = useRef<HTMLDivElement | null>(null)
@@ -118,6 +124,14 @@ export default function Modal({
 
     const handler = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        if (event.defaultPrevented) return
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[data-dropdown-open="true"]')
+        ) {
+          event.preventDefault()
+          return
+        }
         if (busyRef.current) {
           event.preventDefault()
           return
@@ -214,6 +228,10 @@ export default function Modal({
               restoreOpenerFocus()
             }}
             onEscapeKeyDown={(event) => {
+              if (contentRef.current?.querySelector('[data-dropdown-open="true"]')) {
+                event.preventDefault()
+                return
+              }
               if (busyRef.current) event.preventDefault()
             }}
             onPointerDownOutside={(event) => {
@@ -235,6 +253,7 @@ export default function Modal({
             }}
           >
             <div
+              className={headerClassName}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -244,8 +263,12 @@ export default function Modal({
                 background: 'var(--bg)',
               }}
             >
-              <DialogPrimitive.Title asChild>
+              {ariaLabel && (
+                <DialogPrimitive.Title className="sr-only">{ariaLabel}</DialogPrimitive.Title>
+              )}
+              {ariaLabel ? (
                 <span
+                  className={titleClassName}
                   style={{
                     fontFamily: "'JetBrains Mono', monospace",
                     fontSize: 14,
@@ -255,7 +278,21 @@ export default function Modal({
                 >
                   {title}
                 </span>
-              </DialogPrimitive.Title>
+              ) : (
+                <DialogPrimitive.Title asChild>
+                  <span
+                    className={titleClassName}
+                    style={{
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: 'var(--bright)',
+                    }}
+                  >
+                    {title}
+                  </span>
+                </DialogPrimitive.Title>
+              )}
               <DialogPrimitive.Close asChild>
                 <IconButton label="关闭" tooltip="关闭" disabled={busy}>
                   <X className="h-4 w-4" />

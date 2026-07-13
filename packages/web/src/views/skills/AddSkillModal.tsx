@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
-import { SelectableList, type SelectableListItem } from '@/components/ui/selectable-list'
-import { inputStyle } from '@/lib/styles'
-import { FolderInput, RefreshCw } from 'lucide-react'
+import { Dropdown } from '@/components/ui/dropdown'
+import { Folder, FolderOpen, GitFork, RefreshCw } from 'lucide-react'
 import { deriveRepoId } from '@loom/core'
 import { Segmented } from './Segmented'
 import type { ScanMember, LocalScanResult } from './types'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
 import styles from './AddSkillModal.module.css'
+import SkillWorkbench, { SkillWorkbenchTitle } from './SkillWorkbench'
+import SkillSelectionList, { type SkillSelectionItem } from './SkillSelectionList'
 
 interface Props {
   open: boolean
@@ -20,32 +21,6 @@ interface Props {
 // user's shared cross-agent skill directory.
 const DEFAULT_LOCAL_DIR = '~/.agents/skills'
 const mono = "'JetBrains Mono', monospace"
-
-const errBox: React.CSSProperties = {
-  marginBottom: 12,
-  padding: 8,
-  borderRadius: 'var(--radius)',
-  fontSize: 12,
-  fontFamily: mono,
-  color: 'var(--error)',
-  border: '1px solid var(--error)',
-  background: 'var(--card)',
-}
-
-const listBox: React.CSSProperties = {
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius)',
-  maxHeight: 220,
-  overflow: 'auto',
-  marginBottom: 14,
-}
-
-const placeholderStyle: React.CSSProperties = {
-  padding: '12px 10px',
-  fontSize: 12,
-  color: 'var(--muted)',
-  fontFamily: mono,
-}
 
 export default function AddSkillModal({ open, repoPath, onClose }: Props) {
   const operations = useManifestOperations(repoPath)
@@ -292,23 +267,20 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     }
   }
 
-  const localListItems: SelectableListItem[] = localSkills.map((skill) => ({
+  const localListItems: SkillSelectionItem[] = localSkills.map((skill) => ({
     id: skill.name,
-    label: skill.name,
-    searchText: skill.name,
-    meta: 'SKILL.md',
+    path: skill.path.endsWith('SKILL.md') ? skill.path : `${skill.path}/SKILL.md`,
   }))
   const refOptions = srcType === 'tag' ? srcTags : srcBranches
-  const sourceListItems: SelectableListItem[] = srcMembers.map((member) => ({
+  const sourceListItems: SkillSelectionItem[] = srcMembers.map((member) => ({
     id: member.name,
-    label: member.name,
-    searchText: member.name,
-    disabled: member.installed,
-    meta: member.installed ? '已安装' : undefined,
+    description: member.description,
+    path: member.path,
+    installed: member.installed,
   }))
 
-  return (
-    <Modal open={open} onClose={onClose} title="Add Skill" width={600}>
+  const configuration = (
+    <div className={styles.configStack}>
       <div className={styles['add-skill-tabs']}>
         <Segmented
           value={addTab}
@@ -322,9 +294,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
           ]}
         />
       </div>
-
-      {addErr && <div style={errBox}>{addErr}</div>}
-
+      {addErr && <div className={styles.error}>{addErr}</div>}
       {addTab === 'local' ? (
         <>
           <input
@@ -334,102 +304,63 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
             webkitdirectory=""
             directory=""
             multiple
-            style={{ display: 'none' }}
+            hidden
             onChange={(e) => {
               void handleBrowsePick(e.target.files)
               e.target.value = ''
             }}
           />
-          <div className={styles['add-skill-section']}>
-            <span className="label">path</span>
-            <div className={styles['add-skill-path-row']}>
-              <input
-                value={localPath}
-                onChange={(e) => {
-                  setLocalPath(e.target.value)
-                  setPickedExternal(false)
-                }}
-                placeholder={DEFAULT_LOCAL_DIR}
-                style={{ ...inputStyle, marginTop: 0, flex: 1 }}
-              />
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-                title="选择外部目录导入"
-              >
-                <FolderInput className="h-3.5 w-3.5" />
-                Browse
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setPickedExternal(false)
-                  void scanLocal(localPath)
-                }}
-                disabled={localScanning || pickedExternal}
-                title="重新扫描当前路径"
-              >
-                <RefreshCw className={localScanning ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
+          <span className={styles.kicker}>Local directory</span>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Skills directory</span>
+            <div className={styles.directoryRow}>
+              <div className={styles.inputWithIcon}>
+                <Folder size={15} aria-hidden="true" />
+                <input
+                  value={localPath}
+                  onChange={(e) => {
+                    setLocalPath(e.target.value)
+                    setPickedExternal(false)
+                  }}
+                  placeholder={DEFAULT_LOCAL_DIR}
+                />
+              </div>
+              <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}>
+                <FolderOpen className="h-3.5 w-3.5" /> Choose
               </Button>
             </div>
-            <div className={styles['add-skill-helper']}>
-              默认扫描 <code style={{ fontFamily: mono }}>~/.agents/skills</code> 并以 ref
-              方式添加；仓库内 <code style={{ fontFamily: mono }}>assets/skills</code>{' '}
-              会自动加载。Browse 可将其他目录导入仓库。
-            </div>
-          </div>
-
-          {localScanning ? (
-            <div className={styles['add-skill-results']} style={listBox}>
-              <div style={placeholderStyle}>扫描中…</div>
-            </div>
-          ) : (
-            <SelectableList
-              ariaLabel="Local Skill"
-              items={localListItems}
-              selectedIds={localSelected}
-              onSelectedIdsChange={setLocalSelected}
-              searchPlaceholder="搜索 skill…"
-              showSearch={localSkills.length > 0}
-              emptyMessage="未发现 SKILL.md"
-              noMatchesMessage="无匹配"
-            />
-          )}
-
-          <div className={styles['add-skill-footer']}>
-            <span className={styles['add-skill-selection']}>已选择 {localSelected.size} 项</span>
-            <Button
-              variant="primary"
-              onClick={handleAddLocal}
-              disabled={addBusy || localSelected.size === 0}
-            >
-              {addBusy ? '添加中…' : '添加 Local Skill'}
-            </Button>
-          </div>
+          </label>
+          <Button
+            className={styles.scanAction}
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setPickedExternal(false)
+              void scanLocal(localPath)
+            }}
+            disabled={localScanning || pickedExternal}
+          >
+            <RefreshCw className={localScanning ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
+            Scan directory
+          </Button>
         </>
       ) : (
         <>
-          <div style={{ marginBottom: 14 }}>
-            <span className="label">
-              url <span style={{ color: 'var(--error)' }}>*</span>
-            </span>
-            <input
-              value={srcUrl}
-              onChange={(e) => setSrcUrl(e.target.value)}
-              onBlur={() => {
-                if (srcUrl.trim()) void fetchRefs(srcUrl.trim())
-              }}
-              placeholder="https://github.com/org/repo"
-              style={inputStyle}
-            />
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <label className="label" htmlFor="add-source-name">
-              source name <span style={{ color: 'var(--error)' }}>*</span>
-            </label>
+          <span className={styles.kicker}>Repository</span>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Repository URL</span>
+            <div className={styles.inputWithIcon}>
+              <GitFork size={15} aria-hidden="true" />
+              <input
+                value={srcUrl}
+                onChange={(e) => setSrcUrl(e.target.value)}
+                onBlur={() => srcUrl.trim() && void fetchRefs(srcUrl.trim())}
+                placeholder="https://github.com/org/repo"
+              />
+            </div>
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Source name</span>
             <input
               id="add-source-name"
               aria-label="source name"
@@ -439,103 +370,126 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
                 setSrcNameTouched(true)
               }}
               placeholder="openai-skills"
-              style={inputStyle}
+              className={styles.control}
             />
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <div className="label" style={{ marginBottom: 4 }}>
-              type
+          </label>
+          <div className={styles.fieldPair}>
+            <div>
+              <div className={styles.fieldLabel}>Type</div>
+              <Segmented
+                value={srcType}
+                onChange={handleTypeChange}
+                options={[
+                  { value: 'branch', label: 'branch' },
+                  { value: 'tag', label: 'tag' },
+                ]}
+              />
             </div>
-            <Segmented
-              value={srcType}
-              onChange={handleTypeChange}
-              options={[
-                { value: 'branch', label: 'branch' },
-                { value: 'tag', label: 'tag' },
-              ]}
-            />
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <span className="label">ref</span>
-            <select
-              value={srcRef}
-              onChange={(e) => setSrcRef(e.target.value)}
-              disabled={srcRefsLoading || refOptions.length === 0}
-              style={{ ...inputStyle, marginTop: 0, cursor: 'pointer' }}
-            >
-              {refOptions.length === 0 ? (
-                <option value="">{srcRefsLoading ? '加载中…' : '—'}</option>
-              ) : (
-                refOptions.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))
-              )}
-            </select>
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <label className="label" htmlFor="add-source-scan-pattern">
-              scan pattern
-            </label>
-            <input
-              id="add-source-scan-pattern"
-              aria-label="scan pattern"
-              value={srcScan}
-              onChange={(e) => setSrcScan(e.target.value)}
-              placeholder="**/SKILL.md"
-              style={inputStyle}
-            />
-            <div className="add-skill-helper">
-              留空使用默认 <code style={{ fontFamily: mono }}>**/SKILL.md</code>
+            <div>
+              <div className={styles.fieldLabel}>Ref</div>
+              <Dropdown
+                ariaLabel="Repository ref"
+                value={srcRef}
+                onChange={setSrcRef}
+                options={refOptions.map((item) => ({ value: item, label: item }))}
+                disabled={srcRefsLoading || refOptions.length === 0}
+                placeholder={srcRefsLoading ? '加载中…' : '—'}
+              />
             </div>
           </div>
-
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleScanSource}
-            disabled={srcScanning || !srcUrl.trim()}
-            style={{ width: '100%', marginBottom: 14 }}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            {srcScanning ? '扫描中…' : 'Scan'}
-          </Button>
-
-          {(srcScanning || srcScanned) && (
-            <>
-              {srcScanning ? (
-                <div style={listBox}>
-                  <div style={placeholderStyle}>扫描中…</div>
-                </div>
-              ) : (
-                <SelectableList
-                  ariaLabel="Source members"
-                  items={sourceListItems}
-                  selectedIds={srcSelected}
-                  onSelectedIdsChange={setSrcSelected}
-                  searchPlaceholder="搜索 skill…"
-                  showSearch={srcMembers.length > 0}
-                  emptyMessage="未发现 SKILL.md"
-                  noMatchesMessage="无匹配"
-                />
-              )}
-            </>
-          )}
-
-          <Button
-            variant="primary"
-            onClick={handleAddSource}
-            disabled={addBusy || !srcUrl.trim()}
-            style={{ width: '100%' }}
-          >
-            {addBusy ? '添加中…' : '添加 Source'}
-          </Button>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Scan pattern</span>
+            <div className={styles.patternRow}>
+              <input
+                id="add-source-scan-pattern"
+                aria-label="scan pattern"
+                value={srcScan}
+                onChange={(e) => setSrcScan(e.target.value)}
+                placeholder="**/SKILL.md"
+                className={styles.control}
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleScanSource}
+                disabled={srcScanning || !srcUrl.trim()}
+              >
+                <RefreshCw className={srcScanning ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
+                Scan repository
+              </Button>
+            </div>
+            <small>留空使用 {<code style={{ fontFamily: mono }}>**/SKILL.md</code>}</small>
+          </label>
         </>
       )}
+    </div>
+  )
+
+  const listItems = addTab === 'local' ? localListItems : sourceListItems
+  const selected = addTab === 'local' ? localSelected : srcSelected
+  const results = (addTab === 'local' ? localScanning : srcScanning) ? (
+    <div className={styles.resultState}>正在扫描 SKILL.md…</div>
+  ) : (
+    <SkillSelectionList
+      ariaLabel={addTab === 'local' ? 'Local Skill' : 'Source members'}
+      items={listItems}
+      selectedIds={selected}
+      onSelectedIdsChange={addTab === 'local' ? setLocalSelected : setSrcSelected}
+      repositoryLabel={
+        addTab === 'local'
+          ? localPath
+          : `${deriveRepoId(srcUrl) || 'repository'} · ${srcRef || 'ref'}`
+      }
+      emptyMessage={
+        addTab === 'source' && !srcScanned
+          ? 'Scan the repository to discover skills'
+          : 'No skills found'
+      }
+    />
+  )
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      ariaLabel="Add Skill"
+      title={
+        <SkillWorkbenchTitle
+          icon={addTab === 'local' ? <FolderOpen size={17} /> : <GitFork size={17} />}
+          eyebrow="Add skill"
+          title={addTab === 'local' ? 'Skills' : 'Source'}
+        />
+      }
+      width={1040}
+      className={styles.dialog}
+      bodyClassName={styles.body}
+      headerClassName={styles.header}
+      titleClassName={styles.modalTitle}
+    >
+      <SkillWorkbench
+        configuration={configuration}
+        results={results}
+        resultCount={selected.size}
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              aria-label={addTab === 'local' ? '添加 Local Skill' : '添加 Source'}
+              onClick={addTab === 'local' ? handleAddLocal : handleAddSource}
+              disabled={addBusy || (addTab === 'local' ? selected.size === 0 : !srcUrl.trim())}
+            >
+              {addBusy
+                ? '添加中…'
+                : addTab === 'local'
+                  ? `Import ${selected.size} skills`
+                  : `Add source (${selected.size})`}
+            </Button>
+          </>
+        }
+      />
     </Modal>
   )
 }

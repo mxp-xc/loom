@@ -509,6 +509,34 @@ describe('MCP view', () => {
 })
 
 describe('Skill detail modal', () => {
+  it('uses separate metadata and document panes', async () => {
+    vi.mocked(api.getSkillContent).mockResolvedValueOnce({
+      ok: true,
+      content: '# Production skill',
+    } as never)
+
+    render(
+      <SkillDetailEditor
+        repoPath="/tmp/skills-workbench"
+        detail={{
+          skillId: 'production-skill',
+          path: '/skills/production-skill/SKILL.md',
+          targets: ['codex'],
+        }}
+        showToast={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = await screen.findByRole('dialog', { name: 'production-skill' })
+    expect(within(dialog).getByText('Local skill')).toBeDefined()
+    expect(
+      within(dialog).getByRole('heading', { level: 1, name: 'production-skill' }),
+    ).toBeDefined()
+    expect(within(dialog).getByTestId('skill-metadata-pane')).toBeDefined()
+    expect(within(dialog).getByTestId('skill-document-pane')).toBeDefined()
+  })
+
   it('reserves the SKILL.md content frame while content is loading', async () => {
     let resolveContent!: (value: { ok: true; content: string }) => void
     vi.mocked(api.getSkillContent).mockImplementationOnce(
@@ -534,7 +562,7 @@ describe('Skill detail modal', () => {
     const dialog = await screen.findByRole('dialog', {
       name: 'superpowers/receiving-code-review',
     })
-    expect(dialog.getAttribute('style')).toContain('960px')
+    expect(dialog.getAttribute('style')).toContain('1180px')
     const contentFrame = within(dialog).getByTestId('skill-detail-content-frame')
     expect(contentFrame).toBeDefined()
     expect(within(dialog).getByText('加载 SKILL.md…')).toBeDefined()
@@ -934,6 +962,49 @@ describe('Skills view', () => {
 })
 
 describe('Add Skill modal', () => {
+  it('uses the responsive workbench shell for local skills and sources', async () => {
+    render(<AddSkillModal open repoPath="/tmp/add-workbench" onClose={vi.fn()} />)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Add Skill' })
+    expect(within(dialog).getByTestId('skills-workbench')).toBeDefined()
+    expect(within(dialog).getByTestId('skills-config-pane')).toBeDefined()
+    expect(within(dialog).getByTestId('skills-results-pane')).toBeDefined()
+    expect(within(dialog).getByText('Add skill')).toBeDefined()
+    expect(within(dialog).getByRole('heading', { name: 'Skills' })).toBeDefined()
+    expect(within(dialog).getByRole('button', { name: 'Scan directory' })).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Source' }))
+    expect(within(dialog).getByRole('heading', { name: 'Source' })).toBeDefined()
+    expect(within(dialog).getByRole('button', { name: 'Scan repository' })).toBeDefined()
+    expect(within(dialog).queryByRole('combobox')).toBeNull()
+    expect(within(dialog).getByRole('button', { name: 'Repository ref' })).toBeDefined()
+  })
+
+  it('closes the repository ref dropdown before closing the modal on Escape', async () => {
+    const onClose = vi.fn()
+    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
+      ok: true,
+      branches: ['main', 'release/6.1'],
+      tags: [],
+    } as never)
+    render(<AddSkillModal open repoPath="/tmp/add-dropdown-escape" onClose={onClose} />)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Add Skill' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Source' }))
+    const url = within(dialog).getByPlaceholderText('https://github.com/org/repo')
+    fireEvent.change(url, { target: { value: 'https://example.test/skills.git' } })
+    fireEvent.blur(url)
+    const trigger = await within(dialog).findByRole('button', { name: 'Repository ref' })
+    await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(trigger)
+    const option = within(dialog).getByRole('option', { name: 'main' })
+    fireEvent.keyDown(option, { key: 'Escape' })
+
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Add Skill' })).toBeDefined()
+  })
+
   it('scans ~/.agents/skills when opened', async () => {
     render(<AddSkillModal open repoPath="/tmp/r" onClose={vi.fn()} />)
     await waitFor(() =>
@@ -980,7 +1051,12 @@ describe('Add Skill modal', () => {
     vi.mocked(api.scanSource).mockResolvedValueOnce({
       ok: true,
       members: [
-        { name: 'fresh', description: '', path: 'fresh/SKILL.md', installed: false },
+        {
+          name: 'fresh',
+          description: 'Fresh skill description',
+          path: 'fresh/SKILL.md',
+          installed: false,
+        },
         { name: 'installed', description: '', path: 'installed/SKILL.md', installed: true },
       ],
     } as never)
@@ -992,9 +1068,12 @@ describe('Add Skill modal', () => {
       target: { value: 'https://example.test/source.git' },
     })
     fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
-    fireEvent.click(screen.getByRole('button', { name: 'Scan' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Scan repository' }))
 
     await screen.findByText('fresh')
+    expect(screen.getByText('Fresh skill description')).toBeDefined()
+    expect(screen.getByText('fresh/SKILL.md')).toBeDefined()
+    expect(within(screen.getByTestId('skill-result-fresh')).getByText('new')).toBeDefined()
     const installed = screen.getByRole('checkbox', { name: 'installed' })
     expect((installed as HTMLInputElement).disabled).toBe(true)
   })
@@ -1025,7 +1104,7 @@ describe('Add Skill modal', () => {
     fireEvent.change(screen.getByLabelText('scan pattern'), {
       target: { value: 'skills/engineering/**/SKILL.md' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Scan' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Scan repository' }))
 
     expect(await screen.findByText('tdd')).toBeDefined()
     expect(api.scanSource).toHaveBeenCalledWith({
@@ -1111,7 +1190,7 @@ describe('Add Skill modal', () => {
       fireEvent.change(within(dialog).getByPlaceholderText('https://github.com/org/repo'), {
         target: { value: 'https://example.test/skills.git' },
       })
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Scan' }))
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Scan repository' }))
       expect(await within(dialog).findByText('alpha')).toBeDefined()
 
       fireEvent.click(within(dialog).getByRole('button', { name: '添加 Source' }))
@@ -1241,12 +1320,14 @@ describe('Skill source updates', () => {
     )
 
     const dialog = screen.getByRole('dialog', { name: 'test-qa-skill' })
-    await within(dialog).findByText('test-qa-skill')
+    await within(dialog).findByText('Preview description')
     expect(within(dialog).queryByText(/name: test-qa-skill/)).toBeNull()
     expect(within(dialog).queryByText(/description: Preview description/)).toBeNull()
     expect(within(dialog).queryByText('metadata')).toBeNull()
     expect(within(dialog).getByText('name')).toBeDefined()
-    expect(within(dialog).getByText('Preview description')).toBeDefined()
+    expect(
+      within(dialog).getAllByRole('heading', { level: 1, name: 'test-qa-skill' }).length,
+    ).toBeGreaterThan(0)
     fireEvent.click(within(dialog).getByRole('button', { name: '复制 SKILL.md' }))
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(content))
@@ -1587,18 +1668,29 @@ describe('Skill source updates', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Edit Source · superpowers' })
     await within(dialog).findByText('brainstorming')
 
+    expect(within(dialog).getByTestId('skills-config-pane')).toBeDefined()
+    expect(within(dialog).getByTestId('skills-results-pane')).toBeDefined()
+    expect(within(dialog).getByRole('button', { name: 'Scan members' })).toBeDefined()
+    expect(within(dialog).queryByText('Membership is up to date')).toBeNull()
+
     expect(dialog.className).toContain('dialog')
     expect(
       within(dialog).getByRole('list', { name: 'Edit Source · superpowers' }).parentElement
         ?.className,
     ).toContain('skillList')
-    expect(within(dialog).getByRole('button', { name: 'Scan' }).className).toContain('scanButton')
+    expect(within(dialog).getByRole('button', { name: 'Scan members' }).className).toContain(
+      'scanButton',
+    )
 
     fireEvent.click(within(dialog).getByRole('button', { name: '全选' }))
-    expect(within(dialog).getByText('已选 2 / 2')).toBeDefined()
+    expect(within(dialog).getByTestId('skill-selection-summary').textContent).toBe(
+      '2 found · 2 selected',
+    )
 
     fireEvent.click(within(dialog).getByRole('button', { name: '全不选' }))
-    expect(within(dialog).getByText('已选 0 / 2')).toBeDefined()
+    expect(within(dialog).getByTestId('skill-selection-summary').textContent).toBe(
+      '2 found · 0 selected',
+    )
   })
 
   it('Edit Source scans and saves with the source scan pattern', async () => {
@@ -1824,7 +1916,10 @@ describe('Skill source updates', () => {
     fireEvent.click(screen.getByText('open alpha'))
 
     await waitFor(() =>
-      expect(within(dialog).getByRole('button', { name: '扫描中…' })).toBeDefined(),
+      expect(
+        (within(dialog).getByRole('button', { name: 'Scan members' }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true),
     )
     expect(within(dialog).queryByText('扫描失败')).toBeNull()
   })
@@ -1852,6 +1947,7 @@ describe('Skill source updates', () => {
     fireEvent.click(screen.getByText('open alpha'))
 
     await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 2))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Repository ref' }))
     expect(within(dialog).getByRole('option', { name: 'main' })).toBeDefined()
   })
 })

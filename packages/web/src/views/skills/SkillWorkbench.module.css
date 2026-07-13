@@ -1,0 +1,145 @@
+.workbench {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: min(618px, calc(100dvh - 130px));
+  min-height: 448px;
+  color: var(--text);
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(330px, 0.38fr) minmax(0, 0.62fr);
+  min-height: 0;
+}
+
+.configuration,
+.results {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.configuration {
+  padding: 22px;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 48%, var(--popover));
+}
+
+.results {
+  padding: 22px;
+  background: var(--popover);
+}
+
+.footer {
+  display: flex;
+  min-height: 60px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 74%, var(--popover));
+}
+
+.title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.titleIcon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--primary);
+}
+
+.title > span:last-child {
+  min-width: 0;
+}
+
+.title small {
+  display: block;
+  color: var(--primary);
+  font:
+    600 10px 'JetBrains Mono',
+    monospace;
+  text-transform: uppercase;
+}
+
+.title h1 {
+  max-width: 760px;
+  margin: 1px 0 0;
+  overflow: hidden;
+  color: var(--bright);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobileTabs {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .workbench {
+    height: calc(92dvh - 72px);
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .mobileTabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 6px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .mobileTabs button {
+    min-height: 34px;
+    border: 0;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--muted);
+    font:
+      600 11px 'JetBrains Mono',
+      monospace;
+  }
+
+  .mobileTabs button[aria-selected='true'] {
+    background: var(--accent);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+
+  .mobileTabs span {
+    margin-left: 4px;
+    color: var(--primary);
+  }
+
+  .body {
+    display: block;
+  }
+
+  .configuration,
+  .results {
+    display: none;
+    height: 100%;
+    padding: 18px;
+    border-right: 0;
+  }
+
+  .configuration[data-mobile-visible='true'],
+  .results[data-mobile-visible='true'] {
+    display: block;
+  }
+}

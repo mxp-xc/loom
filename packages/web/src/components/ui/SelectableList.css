@@ -18,6 +18,7 @@
 }
 .selectable-list-search input:focus {
   border-color: var(--primary);
+  box-shadow: none;
 }
 .selectable-list-actions {
   display: flex;

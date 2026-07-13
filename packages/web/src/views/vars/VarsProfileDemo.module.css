@@ -305,8 +305,7 @@
 }
 
 .vars-lab-search:focus-within {
-  border-color: color-mix(in srgb, var(--muted) 46%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 12%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
 }
 
 .vars-lab-search input {
@@ -317,6 +316,12 @@
   background: transparent;
   color: var(--text);
   font-size: 13px;
+}
+
+.vars-lab-search input:focus {
+  border-color: transparent;
+  box-shadow: none;
+  outline: 0;
 }
 
 .vars-lab-table {
@@ -578,7 +583,7 @@
 .vars-lab-field textarea:focus,
 .vars-lab-field select:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 25%, transparent);
+  box-shadow: none;
 }
 
 .vars-lab-key-picker {
@@ -598,6 +603,10 @@
   color: var(--muted);
 }
 
+.vars-lab-key-filter:focus-within {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+}
+
 .vars-lab-key-filter input {
   min-width: 0;
   width: 100%;
@@ -606,6 +615,12 @@
   background: transparent;
   color: var(--text);
   font-size: 12px;
+}
+
+.vars-lab-key-filter input:focus {
+  border-color: transparent;
+  box-shadow: none;
+  outline: 0;
 }
 
 .vars-lab-key-options {

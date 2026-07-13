@@ -4,12 +4,13 @@ import { refreshManifest } from '@/hooks/useManifest'
 import { showErrorToast } from '@/hooks/useToast'
 import Modal from '@/components/Modal'
 import MarkdownPreview from '@/components/MarkdownPreview'
-import { Copy, Check } from 'lucide-react'
+import { Copy, Check, FileText } from 'lucide-react'
 import { IconButton } from '@/components/ui/IconButton'
 import { TargetChip } from '@/components/ui/TargetChip'
 import { AGENTS, agentShort, agentSkillPath, type AgentId } from '@/lib/agents'
 import type { SkillDetail } from './types'
 import styles from './SkillDetailEditor.module.css'
+import { SkillWorkbenchTitle } from './SkillWorkbench'
 
 interface Props {
   repoPath: string
@@ -100,96 +101,109 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
     <Modal
       open={!!detail}
       onClose={onClose}
-      title={detail?.skillId ?? ''}
-      width={960}
+      ariaLabel={detail?.skillId ?? ''}
+      title={
+        <SkillWorkbenchTitle
+          icon={<FileText size={17} />}
+          eyebrow={detail?.source ? 'Source skill' : 'Local skill'}
+          title={detail?.skillId ?? ''}
+        />
+      }
+      width={1180}
       minHeight={460}
+      className={styles.dialog}
+      bodyClassName={styles.body}
+      headerClassName={styles.header}
+      titleClassName={styles.modalTitle}
     >
       {detail && (
-        <div>
-          {detail.source && (
+        <div className={styles.layout}>
+          <aside className={styles.metadata} data-testid="skill-metadata-pane">
+            {detail.source && (
+              <div style={{ marginBottom: 12 }}>
+                <div className="label">source</div>
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 12,
+                    color: 'var(--text)',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {detail.source}
+                </div>
+              </div>
+            )}
+            {detail.path && (
+              <div style={{ marginBottom: 12 }}>
+                <div className="label">path</div>
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 12,
+                    color: 'var(--text)',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {detail.path}
+                </div>
+              </div>
+            )}
             <div style={{ marginBottom: 12 }}>
-              <div className="label">source</div>
-              <div
-                style={{
-                  marginTop: 4,
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 12,
-                  color: 'var(--text)',
-                  wordBreak: 'break-all',
-                }}
-              >
-                {detail.source}
+              <div className="label">targets</div>
+              <div style={{ display: 'flex', gap: 7, marginTop: 6 }}>
+                {allAgents.map((a) => renderChip(a, detail.targets.includes(a)))}
               </div>
             </div>
-          )}
-          {detail.path && (
-            <div style={{ marginBottom: 12 }}>
-              <div className="label">path</div>
-              <div
-                style={{
-                  marginTop: 4,
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 12,
-                  color: 'var(--text)',
-                  wordBreak: 'break-all',
-                }}
-              >
-                {detail.path}
-              </div>
-            </div>
-          )}
-          <div style={{ marginBottom: 12 }}>
-            <div className="label">targets</div>
-            <div style={{ display: 'flex', gap: 7, marginTop: 6 }}>
-              {allAgents.map((a) => renderChip(a, detail.targets.includes(a)))}
-            </div>
-          </div>
-          <div style={{ marginBottom: 14 }}>
-            <div className="label">projected links</div>
-            <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {allAgents.map((a) => {
-                const p = agentSkillPath(a, detail.skillId)
-                const active = detail.targets.includes(a)
-                return (
-                  <div
-                    key={a}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      opacity: active ? 1 : 0.45,
-                    }}
-                  >
-                    {renderChip(a, active)}
-                    <span
+            <div style={{ marginBottom: 14 }}>
+              <div className="label">projected links</div>
+              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {allAgents.map((a) => {
+                  const p = agentSkillPath(a, detail.skillId)
+                  const active = detail.targets.includes(a)
+                  return (
+                    <div
+                      key={a}
                       style={{
-                        flex: 1,
-                        fontFamily: "'JetBrains Mono', monospace",
-                        fontSize: 11,
-                        color: 'var(--text)',
-                        wordBreak: 'break-all',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        opacity: active ? 1 : 0.45,
                       }}
                     >
-                      {p}
-                    </span>
-                    <IconButton
-                      label={copiedPath === p ? `已复制 ${p}` : `复制 ${p}`}
-                      tooltip={copiedPath === p ? '已复制' : '复制'}
-                      tone={copiedPath === p ? 'success' : 'default'}
-                      onClick={() => copyPath(p)}
-                    >
-                      {copiedPath === p ? (
-                        <Check className="h-3 w-3" />
-                      ) : (
-                        <Copy className="h-3 w-3" />
-                      )}
-                    </IconButton>
-                  </div>
-                )
-              })}
+                      {renderChip(a, active)}
+                      <span
+                        style={{
+                          flex: 1,
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: 11,
+                          color: 'var(--text)',
+                          wordBreak: 'break-all',
+                        }}
+                      >
+                        {p}
+                      </span>
+                      <IconButton
+                        label={copiedPath === p ? `已复制 ${p}` : `复制 ${p}`}
+                        tooltip={copiedPath === p ? '已复制' : '复制'}
+                        tone={copiedPath === p ? 'success' : 'default'}
+                        onClick={() => copyPath(p)}
+                      >
+                        {copiedPath === p ? (
+                          <Check className="h-3 w-3" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                      </IconButton>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
-          </div>
-          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+          </aside>
+          <section className={styles.document} data-testid="skill-document-pane">
             <div
               style={{
                 display: 'flex',
@@ -269,7 +283,7 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
                 />
               )}
             </div>
-          </div>
+          </section>
         </div>
       )}
     </Modal>

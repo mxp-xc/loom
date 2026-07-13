@@ -160,7 +160,7 @@ patch /packages/web/src/views/Sync.module.css
 
 .mock-input:focus {
   border-color: color-mix(in srgb, var(--primary) 58%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+  box-shadow: none;
 }
 
 .remote-card {

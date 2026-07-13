@@ -97,4 +97,76 @@ describe('web CSS architecture', () => {
       }),
     )
   })
+
+  it('keeps Skills workbench field labels and composite input focus aligned with the UI spec', async () => {
+    const [addSkillCss, editSourceCss, selectionCss] = await Promise.all([
+      readCss('../src/views/skills/AddSkillModal.module.css'),
+      readCss('../src/views/skills/EditSourceModal.module.css'),
+      readCss('../src/views/skills/SkillSelectionList.module.css'),
+    ])
+
+    for (const css of [addSkillCss, editSourceCss]) {
+      expect(css).toContain('.fieldLabel')
+      expect(css).toMatch(/\.fieldLabel\s*\{[^}]*font-weight:\s*600;/s)
+      expect(css).toMatch(/\.inputWithIcon input:focus\s*\{[^}]*box-shadow:\s*none;/s)
+      expect(css).toMatch(/\.control:focus\s*\{[^}]*box-shadow:\s*none;/s)
+    }
+    expect(selectionCss).toMatch(/\.search input:focus\s*\{[^}]*box-shadow:\s*none;/s)
+  })
+
+  it('keeps text-field focus free of square glow across business views', async () => {
+    const focusCss = await Promise.all(
+      [
+        '../src/styles/global/base.css',
+        '../src/components/ConfigField.module.css',
+        '../src/components/ui/SelectableList.css',
+        '../src/views/Mcp.module.css',
+        '../src/views/Sync.module.css',
+        '../src/views/vars/Vars.module.css',
+        '../src/views/vars/VarsProfileDemo.module.css',
+      ].map(readCss),
+    )
+
+    for (const css of focusCss) {
+      const focusRules = css.match(/(?:input|textarea|select)[^,{]*:focus[^{}]*\{[^}]*\}/gs) ?? []
+      for (const rule of focusRules) {
+        const shadows = [...rule.matchAll(/box-shadow:\s*([^;]+);/g)].map((match) =>
+          match[1].trim(),
+        )
+        expect(shadows.every((shadow) => shadow === 'none')).toBe(true)
+      }
+    }
+  })
+
+  it('keeps composite search focus on the rounded container only', async () => {
+    const [mcpCss, varsCss, varsDemoCss] = await Promise.all([
+      readCss('../src/views/Mcp.module.css'),
+      readCss('../src/views/vars/Vars.module.css'),
+      readCss('../src/views/vars/VarsProfileDemo.module.css'),
+    ])
+
+    expect(mcpCss).toMatch(/\.searchBox input:focus\s*\{[^}]*box-shadow:\s*none;/s)
+    for (const selector of ['vars-search', 'vars-key-filter']) {
+      expect(varsCss).toMatch(
+        new RegExp(`\\.${selector} input:focus\\s*\\{[^}]*box-shadow:\\s*none;`, 's'),
+      )
+    }
+    for (const selector of ['vars-lab-search', 'vars-lab-key-filter']) {
+      expect(varsDemoCss).toMatch(
+        new RegExp(`\\.${selector} input:focus\\s*\\{[^}]*box-shadow:\\s*none;`, 's'),
+      )
+    }
+  })
+
+  it('keeps Skills modal workbenches inside the mobile modal height', async () => {
+    const [workbenchCss, editSourceCss, detailCss] = await Promise.all([
+      readCss('../src/views/skills/SkillWorkbench.module.css'),
+      readCss('../src/views/skills/EditSourceModal.module.css'),
+      readCss('../src/views/skills/SkillDetailEditor.module.css'),
+    ])
+
+    expect(workbenchCss).toContain('height: calc(92dvh - 72px);')
+    expect(editSourceCss).not.toContain('height: calc(100dvh - 76px);')
+    expect(detailCss).not.toContain('height: calc(100dvh - 76px);')
+  })
 })

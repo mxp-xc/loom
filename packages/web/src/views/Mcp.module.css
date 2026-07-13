@@ -170,7 +170,6 @@
 
 .searchBox:focus-within {
   border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent);
 }
 
 .searchBox input {
@@ -183,6 +182,12 @@
   border: 0;
   outline: 0;
   background: transparent;
+}
+
+.searchBox input:focus {
+  border-color: transparent;
+  box-shadow: none;
+  outline: 0;
 }
 
 .filterRow {
@@ -1206,7 +1211,7 @@
 .editorCard input:focus,
 .editorCard textarea:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 25%, transparent);
+  box-shadow: none;
 }
 
 .editorCard textarea {

@@ -114,14 +114,20 @@ hover 时 shadow 加深,不做 translateY。
 
 ## 输入框
 
-| 属性  | 值                                                                            |
-| ----- | ----------------------------------------------------------------------------- |
-| 高度  | 36px (default), 32px (sm)                                                     |
-| 圆角  | `var(--radius)`                                                               |
-| 边框  | `1px solid var(--border)`                                                     |
-| focus | `border-color: var(--primary)` + `box-shadow: 0 0 0 2px var(--ring)` 25% 透明 |
+| 属性  | 值                                      |
+| ----- | --------------------------------------- |
+| 高度  | 36px (default), 32px (sm)               |
+| 圆角  | `var(--radius)`                         |
+| 边框  | `1px solid var(--border)`               |
+| focus | `border-color: var(--primary)`,无外发光 |
 
 Disabled: 见设计系统·Disabled。
+
+同一表单中的普通输入、搜索和扫描字段应复用同一控件契约，不混用旧内联样式。字段标签使用正常大小写和 semibold；大写仅用于 section kicker。
+
+复合输入框由外层表达圆角与焦点态，内部 `input:focus` 必须显式清除 `border`、`outline` 和 `box-shadow`，避免全局输入样式重新产生方形光圈。
+
+搜索框仅在快捷键真实可用时显示快捷键提示。
 
 ## Tabs
 

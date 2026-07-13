@@ -28,12 +28,10 @@ export function Segmented<T extends string>({
               borderColor: active
                 ? 'color-mix(in srgb, var(--primary) 72%, var(--border))'
                 : 'var(--border)',
-              background: active
-                ? 'color-mix(in srgb, var(--primary) 16%, var(--card))'
-                : 'transparent',
-              color: active ? 'var(--primary)' : 'var(--muted)',
+              background: active ? 'var(--primary)' : 'transparent',
+              color: active ? 'var(--primary-fg)' : 'var(--muted)',
               boxShadow: active
-                ? 'inset 0 0 0 1px color-mix(in srgb, var(--primary) 22%, transparent)'
+                ? '0 0 0 1px color-mix(in srgb, var(--primary) 42%, transparent), 0 2px 8px color-mix(in srgb, var(--primary) 20%, transparent)'
                 : 'none',
               fontFamily: mono,
               fontSize: 12,

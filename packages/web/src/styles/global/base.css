@@ -55,10 +55,10 @@ body {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 35%, transparent);
 }
 
-input:focus,
+input:not([type='checkbox']):not([type='radio']):focus,
 textarea:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 25%, transparent);
+  box-shadow: none;
   outline: none;
 }
 

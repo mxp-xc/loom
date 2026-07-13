@@ -1,0 +1,247 @@
+.stack {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+}
+
+.summary {
+  display: flex;
+  min-height: 38px;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.summary > div {
+  display: grid;
+}
+
+.summary span {
+  color: var(--muted);
+  font:
+    600 10px 'JetBrains Mono',
+    monospace;
+  text-transform: uppercase;
+}
+
+.summary strong {
+  margin-top: 3px;
+  color: var(--bright);
+  font-size: 13px;
+}
+
+.summary i {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.summary button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  font:
+    600 10px 'JetBrains Mono',
+    monospace;
+}
+
+.search {
+  display: flex;
+  height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.search:focus-within {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 4%, var(--bg));
+  color: var(--primary);
+}
+
+.search input {
+  min-width: 0;
+  height: 30px;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.search input:focus {
+  outline: 0;
+  box-shadow: none;
+}
+
+.repository {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.repository code {
+  min-width: 0;
+  overflow: hidden;
+  font:
+    10px 'JetBrains Mono',
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repository span {
+  margin-left: auto;
+  font:
+    10px 'JetBrains Mono',
+    monospace;
+}
+
+.list {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.row {
+  position: relative;
+  display: grid;
+  min-height: 66px;
+  grid-template-columns: 14px 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row:hover:not([aria-disabled='true']),
+.row[data-active='true'] {
+  background: var(--accent);
+}
+
+.row[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.branch {
+  position: relative;
+  align-self: stretch;
+  border-left: 1px solid color-mix(in srgb, var(--primary) 26%, var(--border));
+}
+
+.branch::after {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 11px;
+  height: 1px;
+  background: color-mix(in srgb, var(--primary) 26%, var(--border));
+  content: '';
+}
+
+.row input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.copy strong,
+.copy small,
+.copy code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy strong {
+  color: var(--bright);
+  font:
+    600 11px 'JetBrains Mono',
+    monospace;
+}
+
+.copy small {
+  color: var(--m2);
+  font-size: 10px;
+}
+
+.copy code {
+  color: var(--muted);
+  font:
+    9px 'JetBrains Mono',
+    monospace;
+}
+
+.status {
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--primary);
+  font:
+    600 8px 'JetBrains Mono',
+    monospace;
+  text-transform: uppercase;
+}
+
+.status[data-status='installed'],
+.status[data-status='configured'] {
+  border-color: var(--border);
+  background: var(--card);
+  color: var(--muted);
+}
+
+.status[data-status='removed'] {
+  border-color: color-mix(in srgb, var(--error) 28%, var(--border));
+  background: color-mix(in srgb, var(--error) 7%, var(--card));
+  color: var(--error);
+}
+
+.empty,
+.noMatches {
+  padding: 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font:
+    11px 'JetBrains Mono',
+    monospace;
+}
+
+@media (max-width: 560px) {
+  .row {
+    min-height: 72px;
+  }
+
+  .copy small {
+    white-space: normal;
+  }
+}

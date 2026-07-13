@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
-import { inputStyle } from '@/lib/styles'
+import { Dropdown } from '@/components/ui/dropdown'
 import { Segmented } from './Segmented'
 import { sourceIdentity, type SkillSource } from '@loom/core'
 import { sortSkillMembers, type ScanMember } from './types'
@@ -10,9 +10,11 @@ import {
   useManifestOperations,
   type PreparedSkillReconciliation,
 } from '@/hooks/useManifestOperations'
-import { SelectableList, type SelectableListItem } from '@/components/ui/selectable-list'
 import styles from './EditSourceModal.module.css'
 import { FieldError } from '@/components/ErrorFeedback'
+import { GitFork, RefreshCw } from 'lucide-react'
+import SkillWorkbench, { SkillWorkbenchTitle } from './SkillWorkbench'
+import SkillSelectionList, { type SkillSelectionItem } from './SkillSelectionList'
 
 interface Props {
   repoPath: string
@@ -216,13 +218,13 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
 
   const repoId = sourceIdentity(source).repoId
   const refOptions = type === 'tag' ? tags : branches
-  const listItems: SelectableListItem[] = members.map((member) => ({
+  const listItems: SkillSelectionItem[] = members.map((member) => ({
     id: member.name,
-    label: member.name,
-    searchText: member.name,
-    disabled: member.installed,
-    meta: member.installed ? '已安装' : undefined,
+    description: member.description,
+    path: member.path,
+    installed: member.installed,
   }))
+  const baselineIds = new Set((source.members ?? []).map((member) => member.name))
 
   return (
     <>
@@ -231,83 +233,95 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
         onClose={() => {
           if (!saving) onClose()
         }}
-        title={`Edit Source · ${repoId}`}
-        width={760}
+        ariaLabel={`Edit Source · ${repoId}`}
+        title={
+          <SkillWorkbenchTitle icon={<GitFork size={17} />} eyebrow="Edit source" title={repoId} />
+        }
+        width={1040}
         className={styles.dialog}
         bodyClassName={styles.body}
+        headerClassName={styles.header}
+        titleClassName={styles.modalTitle}
       >
-        <div className={styles.layout}>
-          <div className={styles.fields}>
-            {error && <FieldError id="edit-source-error">{error}</FieldError>}
+        <SkillWorkbench
+          resultCount={selected.size}
+          className={styles.layout}
+          configuration={
+            <div className={styles.fields}>
+              <span className={styles.kicker}>Repository</span>
+              {error && <FieldError id="edit-source-error">{error}</FieldError>}
 
-            <div className={styles.fieldGrid}>
-              <div>
-                <span className="label">url</span>
-                <input value={source.url} readOnly style={{ ...inputStyle, marginTop: 0 }} />
+              <div className={styles.field}>
+                <span className={styles.fieldLabel}>Repository URL</span>
+                <div className={styles.inputWithIcon}>
+                  <GitFork size={15} aria-hidden="true" />
+                  <input value={source.url} readOnly />
+                  <span>locked</span>
+                </div>
               </div>
 
-              <div>
-                <label className="label" htmlFor="edit-source-name">
-                  source name
+              <div className={styles.field}>
+                <label className={styles.fieldLabel} htmlFor="edit-source-name">
+                  Source name
                 </label>
                 <input
                   id="edit-source-name"
                   aria-label="source name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  style={inputStyle}
+                  className={styles.control}
                 />
               </div>
-            </div>
 
-            <div style={{ display: 'flex', gap: 14 }}>
-              <div style={{ flex: '0 0 120px' }}>
-                <div className="label" style={{ marginBottom: 4 }}>
-                  type
+              <div className={styles.fieldGrid}>
+                <div className={styles.field}>
+                  <div className={styles.fieldLabel}>Type</div>
+                  <Segmented
+                    value={type}
+                    onChange={handleTypeChange}
+                    options={[
+                      { value: 'branch', label: 'branch' },
+                      { value: 'tag', label: 'tag' },
+                    ]}
+                  />
                 </div>
-                <Segmented
-                  value={type}
-                  onChange={handleTypeChange}
-                  options={[
-                    { value: 'branch', label: 'branch' },
-                    { value: 'tag', label: 'tag' },
-                  ]}
-                />
+                <div className={styles.field}>
+                  <span className={styles.fieldLabel}>Ref</span>
+                  <Dropdown
+                    ariaLabel="Repository ref"
+                    value={ref}
+                    onChange={setRef}
+                    disabled={refsLoading || refOptions.length === 0}
+                    options={refOptions.map((item) => ({ value: item, label: item }))}
+                    placeholder={refsLoading ? '加载中…' : '—'}
+                  />
+                </div>
               </div>
-              <div style={{ flex: 1 }}>
-                <span className="label">ref</span>
-                <select
-                  value={ref}
-                  onChange={(e) => setRef(e.target.value)}
-                  disabled={refsLoading || refOptions.length === 0}
-                  style={{ ...inputStyle, marginTop: 0, cursor: 'pointer' }}
-                >
-                  {refOptions.length === 0 ? (
-                    <option value="">{refsLoading ? '加载中…' : '—'}</option>
-                  ) : (
-                    refOptions.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))
-                  )}
-                </select>
-              </div>
-            </div>
 
-            <div className={styles.scanRow}>
-              <div>
-                <label className="label" htmlFor="edit-source-scan-pattern">
-                  scan pattern
+              <div className={styles.field}>
+                <label className={styles.fieldLabel} htmlFor="edit-source-scan-pattern">
+                  Scan pattern
                 </label>
-                <input
-                  id="edit-source-scan-pattern"
-                  aria-label="scan pattern"
-                  value={scan}
-                  onChange={(e) => setScan(e.target.value)}
-                  placeholder="**/SKILL.md"
-                  style={inputStyle}
-                />
+                <div className={styles.scanRow}>
+                  <input
+                    id="edit-source-scan-pattern"
+                    aria-label="scan pattern"
+                    value={scan}
+                    onChange={(e) => setScan(e.target.value)}
+                    placeholder="**/SKILL.md"
+                    className={styles.control}
+                  />
+                  <Button
+                    className={styles.scanButton}
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void handleScan()}
+                    disabled={scanning}
+                  >
+                    <RefreshCw className={scanning ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
+                    Scan members
+                  </Button>
+                </div>
                 <div
                   style={{
                     marginTop: 6,
@@ -319,51 +333,41 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
                   留空使用默认 <code style={{ fontFamily: mono }}>**/SKILL.md</code>
                 </div>
               </div>
-
-              <Button
-                className={styles.scanButton}
-                variant="secondary"
-                size="sm"
-                onClick={() => void handleScan()}
-                disabled={scanning}
-                style={{ width: '100%' }}
-              >
-                {scanning ? '扫描中…' : 'Scan'}
-              </Button>
             </div>
-          </div>
-
-          {scanning ? (
-            <div className="selectable-list-empty">扫描中…</div>
-          ) : (
-            <SelectableList
-              className={styles.skillList}
-              ariaLabel={'Edit Source · ' + repoId}
-              items={listItems}
-              selectedIds={selected}
-              onSelectedIdsChange={setSelected}
-              searchPlaceholder="搜索 skill…"
-              showSearch={members.length > 0}
-              showSelectionActions={members.length > 0}
-              emptyMessage="未发现 SKILL.md"
-              noMatchesMessage="无匹配"
-            />
-          )}
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Button variant="primary" onClick={handleSave} disabled={saving} style={{ flex: 1 }}>
-              {saving ? '保存中…' : `保存 (${selected.size})`}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={onClose}
-              disabled={saving}
-              style={{ flex: '0 0 auto' }}
-            >
-              取消
-            </Button>
-          </div>
-        </div>
+          }
+          results={
+            scanning ? (
+              <div className="selectable-list-empty">扫描中…</div>
+            ) : (
+              <SkillSelectionList
+                className={styles.skillList}
+                ariaLabel={'Edit Source · ' + repoId}
+                items={listItems}
+                selectedIds={selected}
+                onSelectedIdsChange={setSelected}
+                repositoryLabel={`${repoId} · ${ref || 'ref'}`}
+                mode="edit"
+                baselineIds={baselineIds}
+                emptyMessage="No skills found"
+              />
+            )
+          }
+          footer={
+            <>
+              <Button variant="ghost" onClick={onClose} disabled={saving}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                aria-label={saving ? '保存中…' : `保存 (${selected.size})`}
+                onClick={handleSave}
+                disabled={saving}
+              >
+                {saving ? 'Saving…' : 'Save source'}
+              </Button>
+            </>
+          }
+        />
       </Modal>
       <SkillReconciliationDialog
         state={reconciliation}
