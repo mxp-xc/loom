@@ -3,6 +3,7 @@ import {
   addLocalSkill as addLocalSkillMutation,
   addSource as addSourceMutation,
   deriveRepoId,
+  pinSourceCommit,
   removeLocalSkill as removeLocalSkillMutation,
   removeSource as removeSourceMutation,
   SOURCE_NAME_REGEX,
@@ -166,10 +167,10 @@ export class SkillsApplication {
     }
     const result = addSourceMutation(manifest, sourceInput)
     if (result.changed) await this.writeManifest(repoPath, result.data)
-    const source = result.data.sources[result.data.sources.length - 1]!
+    let source = result.data.sources[result.data.sources.length - 1]!
 
     try {
-      await installSkill(
+      const installed = await installSkill(
         this.git,
         this.fs,
         command.url,
@@ -177,6 +178,11 @@ export class SkillsApplication {
         repoPath,
         deriveRepoId(command.url),
       )
+      const pinned = pinSourceCommit(result.data, command.url, installed.pinned_commit)
+      if (pinned.changed) {
+        await this.writeManifest(repoPath, pinned.data)
+        source = pinned.data.sources.find((item) => item.url === command.url)!
+      }
     } catch (err) {
       this.log.error('auto-install failed for source', { err, url: command.url })
     }

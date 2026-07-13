@@ -196,6 +196,8 @@ describe('SkillsApplication', () => {
 
   it('persists a custom source name and still installs into URL-derived cache', async () => {
     await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    vi.mocked(git.clone).mockResolvedValueOnce(undefined)
+    vi.mocked(git.revParseHead).mockResolvedValueOnce('abc123')
 
     const result = await app.addSource(repoPath, {
       name: 'openai-skills',
@@ -207,12 +209,14 @@ describe('SkillsApplication', () => {
       name: 'openai-skills',
       url: 'https://github.com/mattpocock/skills',
       ref: 'main',
+      pinned_commit: 'abc123',
     })
     expect(git.clone).toHaveBeenCalled()
     const cloneDest = vi.mocked(git.clone).mock.calls[0]?.[1]
     expect(cloneDest).toBe(join(repoPath, 'remote-cache', 'skills'))
     const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
     expect(parsed.sources[0].name).toBe('openai-skills')
+    expect(parsed.sources[0].pinned_commit).toBe('abc123')
   })
 
   it('rejects duplicate source urls and names', async () => {

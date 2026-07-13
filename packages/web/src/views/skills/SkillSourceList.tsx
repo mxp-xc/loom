@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
   ChevronDown,
+  Download,
   ExternalLink,
   RefreshCw,
   Pencil,
@@ -308,7 +309,7 @@ export default function SkillSourceList({
                       disabled={operations.pending.source.update(src)}
                       tone="warning"
                     >
-                      <RefreshCw className="h-3.5 w-3.5" />
+                      <Download className="h-3.5 w-3.5" />
                     </IconButton>
                   )}
                   <IconButton
