@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm, writeFile, mkdir, readFile, symlink } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, mkdir, readFile, symlink, rmdir } from 'node:fs/promises'
 import { tmpdir, platform } from 'node:os'
 import { join } from 'node:path'
 import { NodeFileSystem } from '../../../src/platform/node/fs'
@@ -183,6 +183,28 @@ describe('NodeFileSystem', () => {
       expect(await fs.exists(join(target, 'f.txt'))).toBe(true)
     },
   )
+
+  it('uses rmdir for Windows junctions to remain compatible with Bun', async () => {
+    const target = join(root, 'target')
+    await mkdir(target)
+    await writeFile(join(target, 'f.txt'), 'keep')
+    const link = join(root, 'link')
+    await symlink(target, link, 'junction')
+    const removed: string[] = []
+    const fs = new NodeFileSystem({
+      platform: 'win32',
+      rmdir: async (path) => {
+        removed.push(path)
+        await rmdir(path)
+      },
+    })
+
+    await fs.removeLink(link)
+
+    expect(removed).toEqual([link])
+    expect(await fs.isLink(link)).toBe(false)
+    expect(await fs.exists(join(target, 'f.txt'))).toBe(true)
+  })
 
   it('createLink replaces existing link to new target', async () => {
     const targetA = join(root, 'a')

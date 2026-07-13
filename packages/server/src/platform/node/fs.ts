@@ -10,6 +10,7 @@ import {
   copyFile,
   rename,
   realpath,
+  rmdir,
 } from 'node:fs/promises'
 import { join, isAbsolute, dirname } from 'node:path'
 import type { IFileSystem } from '../../ports/fs.js'
@@ -17,6 +18,7 @@ import type { IFileSystem } from '../../ports/fs.js'
 export interface FsOptions {
   forceLinkError?: string | null
   rename?: (from: string, to: string) => Promise<void>
+  rmdir?: (path: string) => Promise<void>
   platform?: NodeJS.Platform
 }
 
@@ -55,8 +57,12 @@ export class NodeFileSystem implements IFileSystem {
 
   async removeLink(linkPath: string): Promise<void> {
     if (!(await this.isLink(linkPath))) return
-    // recursive:false ensures we never recurse into the link target.
-    // On Windows junctions this avoids deleting real target contents.
+    // Bun on Windows returns EFAULT for rm(..., { recursive: false }) on junctions.
+    // rmdir removes the junction entry without traversing into its target.
+    if ((this.opts.platform ?? process.platform) === 'win32') {
+      await (this.opts.rmdir ?? rmdir)(linkPath)
+      return
+    }
     await rm(linkPath, { recursive: false, force: true })
   }
 
