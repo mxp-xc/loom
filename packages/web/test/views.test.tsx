@@ -59,7 +59,13 @@ vi.mock('../src/lib/api', () => ({
     status: vi.fn(async () => ({ active_repo: 'default', repoPath: '/tmp/r' })),
     project: vi.fn(async () => ({ ok: true })),
     update: vi.fn(async () => ({ updates: [] })),
-    performUpdate: vi.fn(async () => ({ pinned_commit: 'bbb' })),
+    prepareSourceUpdate: vi.fn(async () => ({
+      ok: true,
+      sessionId: 'update-1',
+      pinned_commit: 'bbb',
+      changes: { added: [], updated: [], removed: [] },
+    })),
+    finalizeSourceUpdate: vi.fn(async () => ({ ok: true, pinned_commit: 'bbb' })),
     syncPull: vi.fn(async () => ({ clean: true, files: [], textConflicts: [] })),
     getSyncSession: vi.fn(async () => ({ ok: true, active: false })),
     syncPush: vi.fn(async () => ({ ok: true })),
@@ -78,6 +84,11 @@ vi.mock('../src/lib/api', () => ({
     addSource: vi.fn(async () => ({ ok: true })),
     setSourceMembers: vi.fn(async () => ({ ok: true })),
     updateSourceMeta: vi.fn(async () => ({ ok: true })),
+    reconcileSource: vi.fn(async () => ({
+      ok: true,
+      finalized: true,
+      changes: { added: [], updated: [], removed: [] },
+    })),
     updateSkillTargets: vi.fn(async () => ({ ok: true })),
     updateSourceSkillTargets: vi.fn(async () => ({ ok: true })),
     updateLocalSkillTargets: vi.fn(async () => ({ ok: true })),
@@ -1501,7 +1512,9 @@ describe('Skill source updates', () => {
     fireEvent.click(await screen.findByRole('button', { name: '更新 source superpowers' }))
 
     await waitFor(() =>
-      expect(api.performUpdate).toHaveBeenCalledWith(expect.objectContaining({ newRef: 'v6.1.1' })),
+      expect(api.prepareSourceUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ newRef: 'v6.1.1' }),
+      ),
     )
   })
 
@@ -1620,11 +1633,15 @@ describe('Skill source updates', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /保存/ }))
 
     await waitFor(() =>
-      expect(api.updateSourceMeta).toHaveBeenCalledWith({
+      expect(api.reconcileSource).toHaveBeenCalledWith({
         repo: '/tmp/edit-switch',
         url: 'https://example.test/alpha.git',
         name: 'renamed-alpha',
+        ref: 'main',
+        type: 'branch',
         scan: '',
+        members: [],
+        previousMembers: [],
       }),
     )
   })
@@ -1659,10 +1676,18 @@ describe('Skill source updates', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /保存/ }))
 
     await waitFor(() =>
-      expect(api.setSourceMembers).toHaveBeenCalledWith({
+      expect(api.reconcileSource).toHaveBeenCalledWith({
         repo: '/tmp/edit-switch',
         url: 'https://example.test/alpha.git',
-        members: ['alpha', 'beta'],
+        name: 'alpha-source',
+        ref: 'main',
+        type: 'branch',
+        scan: 'skills/engineering/**/SKILL.md',
+        members: [
+          { name: 'alpha', path: 'alpha/SKILL.md' },
+          { name: 'beta', path: 'beta/SKILL.md' },
+        ],
+        previousMembers: [],
       }),
     )
   })

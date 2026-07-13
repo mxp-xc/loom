@@ -10,15 +10,17 @@ import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
 import { jsonValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
+import { prepareSourceUpdate } from '../../remote/update.js'
+import { SourceUpdateSessionStore, persistedMembers } from '../../skills/update-sessions.js'
+import { projectRepository } from '../../projection/workflow.js'
 
 const remoteLogger = logger.child('remote')
 const NonEmptyString = z.string().min(1)
 const SourceType = z.enum(['branch', 'tag'])
-const UpdateOldMember = z
-  .object({
-    name: NonEmptyString,
-  })
-  .passthrough()
+const UpdateOldMember = SkillMemberOverrideSchema.extend({
+  path: z.string().optional(),
+  description: z.string().optional(),
+}).passthrough()
 const SkillSource = z
   .object({
     name: z.string().optional(),
@@ -27,7 +29,7 @@ const SkillSource = z
     type: SourceType.optional(),
     pinned_commit: z.string().optional(),
     scan: z.string().optional(),
-    members: z.array(SkillMemberOverrideSchema).optional(),
+    members: z.array(UpdateOldMember).optional(),
   })
   .passthrough()
 const InstallBody = z.object({
@@ -47,6 +49,12 @@ const PerformUpdateBody = z.object({
   sourceId: NonEmptyString,
   oldMembers: z.array(UpdateOldMember).default([]),
 })
+const PrepareUpdateBody = PerformUpdateBody
+const FinalizeUpdateBody = z.object({
+  repo: NonEmptyString,
+  sessionId: z.string().uuid(),
+  preserve: z.array(NonEmptyString).default([]),
+})
 const ScanSourceBody = z.object({
   url: NonEmptyString,
   ref: z.string().optional(),
@@ -62,6 +70,7 @@ const SourceRefsBody = z.object({
 
 export function createRemoteRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
+  const updateSessions = new SourceUpdateSessionStore(deps.fs)
 
   app.post('/install', jsonValidator(InstallBody, { error: remoteSourceError }), async (c) => {
     const { url, ref, repo, sourceId } = c.req.valid('json')
@@ -117,6 +126,186 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
     }
     return c.json({ updates })
   })
+
+  app.post(
+    '/update/prepare',
+    jsonValidator(PrepareUpdateBody, { error: performUpdateError }),
+    async (c) => {
+      const body = c.req.valid('json')
+      try {
+        await updateSessions.prune()
+        const repoPath = await resolveRepoPath(deps.fs, body.repo, deps.home)
+        const prepared = await prepareSourceUpdate(
+          deps.git,
+          deps.fs,
+          body.source,
+          body.newRef,
+          repoPath,
+          deriveRepoId(body.source.url),
+          (body.source.members ?? []).map((member) => ({
+            name: member.name,
+            path: member.path ?? `skills/${member.name}/SKILL.md`,
+            targets: member.targets,
+          })),
+        )
+        const session = await updateSessions.create({
+          repoPath,
+          source: body.source,
+          newRef: body.newRef,
+          prepared,
+        })
+        return c.json({
+          ok: true,
+          sessionId: session.id,
+          pinned_commit: session.pinned_commit,
+          changes: {
+            added: session.changes.added,
+            updated: session.changes.updated,
+            removed: session.changes.removed,
+          },
+        })
+      } catch (e) {
+        remoteLogger.error('source update prepare failed', { err: e, source: body.source.url })
+        return c.json({
+          ok: false,
+          error: 'update_prepare_failed',
+          message: String((e as Error).message),
+        })
+      }
+    },
+  )
+
+  app.post(
+    '/update/finalize',
+    jsonValidator(FinalizeUpdateBody, { error: 'invalid_update_session' }),
+    async (c) => {
+      const { repo, sessionId, preserve } = c.req.valid('json')
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (e) {
+        remoteLogger.error('source update finalize repo resolution failed', { err: e, repo })
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          400,
+        )
+      }
+      const session = await updateSessions.get(sessionId, repoPath)
+      if (!session)
+        return c.json(
+          { ok: false, error: 'invalid_update_session', message: '更新会话不存在或已过期' },
+          404,
+        )
+      const removable = new Set(session.changes.removed.map(({ name }) => name))
+      if (preserve.some((name) => !removable.has(name)))
+        return c.json(
+          { ok: false, error: 'invalid_preserve_members', message: '保留列表包含无效 skill' },
+          400,
+        )
+      const copied: string[] = []
+      let originalData: any
+      let manifestWritten = false
+      try {
+        const filePath = join(session.repoPath, 'skills.yaml')
+        const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
+        data.sources ??= []
+        data.skills ??= []
+        originalData = structuredClone(data)
+        const sourceIndex = data.sources.findIndex((item: any) => item.url === session.source.url)
+        if (sourceIndex < 0) throw new Error(`Source not found: ${session.source.url}`)
+        for (const name of preserve) {
+          const dest = join(session.repoPath, 'assets', 'skills', name)
+          if (data.skills.some((skill: any) => skill.id === name) || (await deps.fs.exists(dest))) {
+            return c.json(
+              {
+                ok: false,
+                error: 'local_skill_exists',
+                message: `Local skill already exists: ${name}`,
+              },
+              409,
+            )
+          }
+        }
+        const nextSource = {
+          ...data.sources[sourceIndex],
+          ref: session.newRef,
+          pinned_commit: session.pinned_commit,
+          members: persistedMembers(session.source, session.newMembers),
+        }
+        data.sources[sourceIndex] = nextSource
+        for (const name of preserve) {
+          const dest = join(session.repoPath, 'assets', 'skills', name)
+          await deps.fs.copyDir(join(session.stagingDir, name), dest)
+          copied.push(dest)
+          const removed = session.changes.removed.find((member) => member.name === name)
+          data.skills.push({ id: name, ...(removed?.targets ? { targets: removed.targets } : {}) })
+        }
+        await writeYaml(deps.fs, filePath, data)
+        manifestWritten = true
+        const projected = await projectRepository(deps, session.repoPath, { scope: 'skills' })
+        if (!projected.ok) throw projected.failure.originalError
+        updateSessions.delete(sessionId)
+        try {
+          await deps.fs.removeDir(session.stagingDir)
+          await deps.fs.removeFile(
+            join(session.repoPath, 'temp', 'source-updates', `${sessionId}.json`),
+          )
+        } catch (cleanupError) {
+          remoteLogger.warn('completed source update cleanup failed', {
+            err: cleanupError,
+            sessionId,
+            stagingDir: session.stagingDir,
+          })
+        }
+        return c.json({
+          ok: true,
+          pinned_commit: session.pinned_commit,
+          changes: session.changes,
+          preserved: preserve,
+          deleted: session.changes.removed
+            .map(({ name }) => name)
+            .filter((name) => !preserve.includes(name)),
+        })
+      } catch (e) {
+        remoteLogger.error('source update finalize failed', {
+          err: e,
+          sessionId,
+          source: session.source.url,
+        })
+        for (const path of copied) {
+          try {
+            await deps.fs.removeDir(path)
+          } catch (cleanupError) {
+            remoteLogger.error('source update local rollback failed', {
+              err: cleanupError,
+              sessionId,
+              path,
+            })
+          }
+        }
+        if (manifestWritten && originalData) {
+          try {
+            await writeYaml(deps.fs, join(session.repoPath, 'skills.yaml'), originalData)
+            const rollbackProjection = await projectRepository(deps, session.repoPath, {
+              scope: 'skills',
+            })
+            if (!rollbackProjection.ok) throw rollbackProjection.failure.originalError
+          } catch (rollbackError) {
+            remoteLogger.error('source update manifest rollback failed', {
+              err: rollbackError,
+              sessionId,
+              source: session.source.url,
+            })
+          }
+        }
+        return c.json({
+          ok: false,
+          error: 'update_finalize_failed',
+          message: String((e as Error).message),
+        })
+      }
+    },
+  )
 
   app.post(
     '/update/perform',

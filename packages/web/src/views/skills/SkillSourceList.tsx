@@ -22,7 +22,12 @@ import {
   ScanLine,
 } from 'lucide-react'
 import { sortSkillMembers, type SkillDetail } from './types'
-import type { ManifestOperations, SourceUpdateState } from '@/hooks/useManifestOperations'
+import type {
+  ManifestOperations,
+  PreparedSkillReconciliation,
+  SourceUpdateState,
+} from '@/hooks/useManifestOperations'
+import SkillReconciliationDialog from './SkillReconciliationDialog'
 import styles from './SkillSourceList.module.css'
 
 interface Props {
@@ -59,7 +64,8 @@ const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
 function sourceTargetState(src: SkillSource, agent: AgentId) {
   const members = (src.members ?? []).filter((member) => member.enabled !== false)
   const count = members.filter((member) => (member.targets ?? []).includes(agent)).length
-  const state = count === 0 ? 'off' : count === members.length ? 'on' : 'mixed'
+  const state: 'off' | 'on' | 'mixed' =
+    count === 0 ? 'off' : count === members.length ? 'on' : 'mixed'
   return { count, total: members.length, state }
 }
 
@@ -128,6 +134,9 @@ export default function SkillSourceList({
 }: Props) {
   const [updates, setUpdates] = useState<Record<string, SourceUpdateState>>({})
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
+  const [reconciliation, setReconciliation] = useState<PreparedSkillReconciliation | null>(null)
+  const [reconciliationBusy, setReconciliationBusy] = useState(false)
+  const [reconciliationError, setReconciliationError] = useState<string | null>(null)
 
   const agents = manifest.config?.targets ?? []
   const visibleAgents: AgentId[] = agents
@@ -156,12 +165,27 @@ export default function SkillSourceList({
 
   const handlePerformUpdate = async (src: SkillSource) => {
     const result = await operations.performSourceUpdate(src, updates[src.url])
-    if (result.ok) {
-      setUpdates((prev) => {
-        const n = { ...prev }
-        delete n[src.url]
-        return n
-      })
+    if (result.ok && result.result) {
+      const prepared = result.result as PreparedSkillReconciliation
+      setReconciliationError(null)
+      setReconciliation(prepared)
+    }
+  }
+
+  const finalizeReconciliation = async (preserve: string[]) => {
+    if (!reconciliation) return
+    setReconciliationBusy(true)
+    setReconciliationError(null)
+    try {
+      const result = await operations.finalizeSourceUpdate(reconciliation.sessionId, preserve)
+      if (!result.ok) {
+        setReconciliationError(result.message ?? '完成 source 更新失败')
+        return
+      }
+      setReconciliation(null)
+      setUpdates({})
+    } finally {
+      setReconciliationBusy(false)
     }
   }
 
@@ -588,6 +612,13 @@ export default function SkillSourceList({
           </Button>
         </div>
       </Modal>
+      <SkillReconciliationDialog
+        state={reconciliation}
+        busy={reconciliationBusy}
+        error={reconciliationError}
+        onClose={() => {}}
+        onConfirm={finalizeReconciliation}
+      />
     </>
   )
 }

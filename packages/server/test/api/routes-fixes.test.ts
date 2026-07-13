@@ -8,6 +8,7 @@ const logFns = vi.hoisted(() => ({
   warn: vi.fn(),
   info: vi.fn(),
 }))
+const projectRepositoryMock = vi.hoisted(() => vi.fn(async () => ({ ok: true as const })))
 
 const memFiles: Record<string, string> = {}
 
@@ -23,7 +24,19 @@ const memFs = {
   exists: vi.fn(async (p: string) => p.replace(/\\/g, '/') in memFiles),
   readDir: vi.fn(async () => []),
   mkdir: vi.fn(async () => {}),
+  copyDir: vi.fn(async () => {}),
+  removeDir: vi.fn(async () => {}),
+  removeFile: vi.fn(async (p: string) => {
+    delete memFiles[p.replace(/\\/g, '/')]
+  }),
 }
+
+vi.mock('../../src/projection/workflow.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/projection/workflow.js')>(
+    '../../src/projection/workflow.js',
+  )
+  return { ...actual, projectRepository: projectRepositoryMock }
+})
 
 vi.mock('../../src/projection/executor.js', () => ({
   executeProjection: vi.fn(async () => ({ ok: true })),
@@ -76,6 +89,17 @@ vi.mock('../../src/remote/discover.js', () => ({
 }))
 vi.mock('../../src/remote/update.js', () => ({
   checkUpdates: vi.fn(async () => []),
+  prepareSourceUpdate: vi.fn(async () => ({
+    pinned_commit: 'next-commit',
+    stagingDir: '/tmp/source-update/temp/source-updates/staged',
+    newMembers: [{ name: 'next-skill', relativePath: 'skills/next-skill/SKILL.md' }],
+    changes: {
+      added: [{ name: 'next-skill' }],
+      updated: [],
+      removed: [{ name: 'old-skill', targets: ['codex'] }],
+      unchanged: [],
+    },
+  })),
   performUpdate: vi.fn(async () => ({
     pinned_commit: 'abc1234',
     orphans: [],
@@ -364,6 +388,66 @@ describe('source updates', () => {
       'skills',
       [expect.objectContaining({ name: 'old-skill', targets: ['codex'] })],
     )
+  })
+
+  it('rolls back a finalized update when projection fails and allows retry', async () => {
+    memFiles['/tmp/source-update/skills.yaml'] = [
+      'sources:',
+      '  - url: https://github.com/mattpocock/skills',
+      '    ref: main',
+      '    pinned_commit: old-commit',
+      '    members:',
+      '      - name: old-skill',
+      '        targets: [codex]',
+      'skills: []',
+      '',
+    ].join('\n')
+    projectRepositoryMock
+      .mockResolvedValueOnce({
+        ok: false,
+        failure: { originalError: new Error('projection failed') },
+      })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true })
+
+    const prepared = await app.request('/api/update/prepare', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/source-update',
+        source: {
+          url: 'https://github.com/mattpocock/skills',
+          ref: 'main',
+          pinned_commit: 'old-commit',
+          members: [{ name: 'old-skill', path: 'skills/old-skill/SKILL.md', targets: ['codex'] }],
+        },
+        newRef: 'main',
+        sourceId: 'skills',
+        oldMembers: [],
+      }),
+    })
+    const { sessionId } = (await prepared.json()) as { sessionId: string }
+    const finalizeBody = { repo: '/tmp/source-update', sessionId, preserve: ['old-skill'] }
+
+    const failed = await app.request('/api/update/finalize', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(finalizeBody),
+    })
+    expect((await failed.json()).ok).toBe(false)
+    expect((yaml.load(memFiles['/tmp/source-update/skills.yaml']) as any).sources[0]).toMatchObject(
+      {
+        pinned_commit: 'old-commit',
+        members: [{ name: 'old-skill', targets: ['codex'] }],
+      },
+    )
+
+    const retried = await app.request('/api/update/finalize', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(finalizeBody),
+    })
+    expect((await retried.json()).ok).toBe(true)
   })
 })
 

@@ -21,6 +21,18 @@ vi.mock('../src/lib/api', () => ({
     addSource: vi.fn(async () => ({ ok: true })),
     setSourceMembers: vi.fn(async () => ({ ok: true })),
     updateSourceMeta: vi.fn(async () => ({ ok: true })),
+    reconcileSource: vi.fn(async () => ({
+      ok: true,
+      finalized: true,
+      changes: { added: [], updated: [], removed: [] },
+    })),
+    prepareSourceUpdate: vi.fn(async () => ({
+      ok: true,
+      sessionId: 'update-1',
+      pinned_commit: 'bbb',
+      changes: { added: [], updated: [], removed: [] },
+    })),
+    finalizeSourceUpdate: vi.fn(async () => ({ ok: true, pinned_commit: 'bbb' })),
     importLocalSkills: vi.fn(async () => ({ ok: true })),
     writeLocalSkills: vi.fn(async () => ({ ok: true })),
     updateSkillTargets: vi.fn(async () => ({ ok: true })),
@@ -55,6 +67,12 @@ function Harness({
 describe('useManifestOperations', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(api.setSourceMembers).mockResolvedValue({ ok: true })
+    vi.mocked(api.reconcileSource).mockResolvedValue({
+      ok: true,
+      finalized: true,
+      changes: { added: [], updated: [], removed: [] },
+    })
   })
 
   it('saves config and refreshes the shared manifest cache on success', async () => {
@@ -333,14 +351,19 @@ describe('useManifestOperations', () => {
     fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
     await waitFor(() =>
-      expect(api.updateSourceMeta).toHaveBeenCalledWith({
+      expect(api.reconcileSource).toHaveBeenCalledWith({
         repo: '/tmp/r',
         url: 'https://example.test/skills.git',
         name: 'new-name',
+        ref: 'main',
+        type: 'branch',
+        scan: '',
+        members: [{ name: 'alpha' }],
+        previousMembers: [{ name: 'alpha', path: undefined }],
       }),
     )
     await waitFor(() => expect(result?.ok).toBe(true))
-    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/r', scope: 'skills' })
+    expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
   })
 
   it('returns failure and refreshes when source member save throws after source creation', async () => {
@@ -387,8 +410,7 @@ describe('useManifestOperations', () => {
     const onError = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     let result: Awaited<ReturnType<Operations['saveSource']>> | undefined
-    vi.mocked(api.updateSourceMeta).mockResolvedValueOnce({ ok: true } as never)
-    vi.mocked(api.setSourceMembers).mockResolvedValueOnce({
+    vi.mocked(api.reconcileSource).mockResolvedValueOnce({
       ok: false,
       message: 'members write failed',
     } as never)
@@ -416,17 +438,21 @@ describe('useManifestOperations', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
-      await waitFor(() => expect(api.setSourceMembers).toHaveBeenCalled())
+      await waitFor(() => expect(api.reconcileSource).toHaveBeenCalled())
       await waitFor(() => expect(result?.ok).toBe(false))
       expect(result?.message).toBe('members write failed')
       expect(onError).toHaveBeenCalledWith('members write failed')
-      expect(api.updateSourceMeta).toHaveBeenCalledWith({
+      expect(api.reconcileSource).toHaveBeenCalledWith({
         repo: '/tmp/r',
         url: 'https://example.test/skills.git',
+        name: 'skills',
         ref: 'develop',
+        type: 'branch',
         scan: '',
+        members: [{ name: 'alpha' }],
+        previousMembers: [],
       })
-      expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
+      expect(api.getManifest).not.toHaveBeenCalled()
       expect(consoleError).toHaveBeenCalledWith(
         expect.objectContaining({
           key: 'source:save:https://example.test/skills.git',

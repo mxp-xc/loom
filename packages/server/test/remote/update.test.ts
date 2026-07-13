@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NodeGit } from '../../src/platform/node/git'
 import { NodeFileSystem } from '../../src/platform/node/fs'
-import { checkUpdates, performUpdate } from '../../src/remote/update'
+import { checkUpdates, prepareSourceUpdate } from '../../src/remote/update'
 import type { SkillSource } from '@loom/core'
 import type { ScannedMember } from '../../src/projection/scan'
 import { createBareRepo } from '../helpers/git'
@@ -26,13 +26,16 @@ describe.concurrent('checkUpdates', () => {
   })
 })
 
-describe.concurrent('performUpdate', () => {
+describe.concurrent('prepareSourceUpdate', () => {
   let bare: string
   beforeAll(async () => {
     bare = await createBareRepo([
       {
         message: 'v1',
-        files: { 'skills/brainstorming/SKILL.md': '---\nname: brainstorming\n---\nv1\n' },
+        files: {
+          'skills/brainstorming/SKILL.md': '---\nname: brainstorming\n---\nv1\n',
+          'skills/brainstorming/reference.md': 'old resource',
+        },
         tags: ['v1.0.0'],
       },
       {
@@ -58,10 +61,10 @@ describe.concurrent('performUpdate', () => {
     const oldMembers: ScannedMember[] = [
       {
         name: 'brainstorming',
-        path: join(repoPath, 'remote-cache', 'superpowers', 'skills', 'brainstorming'),
+        path: 'skills/brainstorming/SKILL.md',
       },
     ]
-    const res = await performUpdate(
+    const res = await prepareSourceUpdate(
       git,
       fs,
       { url: bare, ref: 'v1.0.0', pinned_commit: 'old' },
@@ -71,7 +74,11 @@ describe.concurrent('performUpdate', () => {
       oldMembers,
     )
     expect(res.pinned_commit).toMatch(/^[0-9a-f]{7,40}$/)
-    expect(res.orphans.map((o) => o.name)).toEqual(['brainstorming'])
+    expect(res.changes.removed.map((o) => o.name)).toEqual(['brainstorming'])
+    expect(res.changes.added.map((o) => o.name)).toEqual(['tdd'])
+    expect(await fs.readFile(join(res.stagingDir, 'brainstorming', 'reference.md'))).toBe(
+      'old resource',
+    )
     await rm(repoPath, { recursive: true, force: true })
   })
 })

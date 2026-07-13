@@ -180,3 +180,38 @@ Tests:
 - packages/server/test/projection/executor.test.ts
 - packages/web/test/manifest-operations.test.tsx
 - packages/web/test/views.test.tsx
+
+## R-SKILLS-007 Source member 缺失必须确认 reconcile
+
+Status: active
+Applies to: remote source updates, source scan, source members, local skills
+
+Rule:
+远端更新或 source scan/member 选择变化导致已保存 member 缺失时，Loom 必须展示缺失项并让用户决定删除或保留为 local skill。缺失项默认选择保留；保留项复制到 assets/skills/<id>，并继承原 targets。
+
+Implications:
+
+- 更新结果分别展示新增、更新和远端已删除的 members。
+- 缺失项支持逐项选择、全选、取消全选和不保留。
+- 远端更新会更新 cache 内容、持久化最新 commit 和完整 member 集合。
+- 最终选择保存后自动 reconcile skills projection。
+
+Safety:
+
+- 现有 local skill 目录或 manifest entry 不得被覆盖。
+- 用户确认前不得丢弃需要保留的旧 member 内容。
+- Manifest 保存和 projection 完成前不能报告整体更新成功。
+
+Examples:
+
+- Source 更新后远端删除 alpha；用户保留 alpha 时，它复制到 assets/skills/alpha 并继续使用原 targets。
+- 修改 scan 后 beta 不再出现在选中视图；保存前同样要求用户决定保留或删除 beta。
+
+Tests:
+
+- packages/server/test/remote/update.test.ts
+- packages/server/test/skills/reconciliation.test.ts
+- packages/server/test/skills/application.test.ts
+- packages/web/test/skill-reconciliation-dialog.test.tsx
+- packages/web/test/manifest-operations.test.tsx
+- packages/web/test/views.test.tsx

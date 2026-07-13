@@ -28,6 +28,8 @@ import {
 import type { ScannedLocalSkill } from '../projection/scan.js'
 import { installSkill } from '../remote/install.js'
 import { readYaml, writeYaml } from '../api/repo-config.js'
+import { classifySkillMemberChanges } from './reconciliation.js'
+import { cacheDirFor } from '../remote/cache.js'
 
 const skillsLogger = logger.child('skills-application')
 
@@ -68,6 +70,12 @@ export interface UpdateSourceMetaCommand {
   scan?: string
 }
 
+export interface ReconcileSourceCommand extends UpdateSourceMetaCommand {
+  members: Array<{ name: string; path?: string }>
+  previousMembers?: Array<{ name: string; path?: string }>
+  preserve?: string[]
+}
+
 export interface SetSkillTargetsCommand {
   sourceUrl: string
   memberName: string
@@ -80,6 +88,7 @@ export class SkillsApplication {
     private readonly git: IGit,
     private readonly home: string,
     private readonly log: LoggerPort = skillsLogger,
+    private readonly projectSkills?: (repoPath: string) => Promise<void>,
   ) {}
 
   async scanLocalSkills(command: { dir: string; repoPath?: string }): Promise<ScannedLocalSkill[]> {
@@ -102,7 +111,6 @@ export class SkillsApplication {
     const assetsDir = this.assetsSkillsDir(repoPath)
     const assetsPrefix = normalizedPath(assetsDir)
     const manifest = await this.readManifest(repoPath)
-
     for (const skill of command.skills) {
       const skillPath = normalizedPath(String(skill.path ?? ''))
       const isRepoAssetSkill =
@@ -222,6 +230,115 @@ export class SkillsApplication {
     const result = updateSourceMetaMutation(manifest, command.url, updates)
     if (result.changed) await this.writeManifest(repoPath, result.data)
     if (!result.changed) throw sourceNotFound(command.url)
+  }
+
+  async reconcileSource(repoPath: string, command: ReconcileSourceCommand) {
+    const manifest = await this.readManifest(repoPath)
+    const originalManifest = structuredClone(manifest)
+    const source = manifest.sources.find((item) => item.url === command.url)
+    if (!source) throw sourceNotFound(command.url)
+    if (command.name !== undefined) {
+      const nextName = command.name.trim()
+      assertValidSourceName(nextName)
+      assertUniqueSource(manifest, { url: command.url, name: nextName, existingUrl: command.url })
+    }
+    const cacheDir = cacheDirFor(repoPath, deriveRepoId(source.url))
+    const previousPaths = new Map(
+      (command.previousMembers ?? []).map((member) => [member.name, member.path]),
+    )
+    const changes = await classifySkillMemberChanges(
+      this.fs,
+      cacheDir,
+      cacheDir,
+      (source.members ?? []).map((member) => ({
+        name: member.name,
+        path: previousPaths.get(member.name) ?? `skills/${member.name}/SKILL.md`,
+        targets: member.targets,
+      })),
+      command.members.map((member) => ({
+        name: member.name,
+        path: member.path ?? `skills/${member.name}/SKILL.md`,
+      })),
+    )
+    if (changes.removed.length > 0 && command.preserve === undefined) {
+      return { finalized: false, changes }
+    }
+    const preserve = command.preserve ?? []
+    if (preserve.some((name) => !changes.removed.some((member) => member.name === name))) {
+      throw new SkillsApplicationError(400, 'invalid_preserve_members', '保留列表包含无效 skill')
+    }
+    const copied: string[] = []
+    let manifestWritten = false
+    try {
+      for (const name of preserve) {
+        const dest = join(this.assetsSkillsDir(repoPath), name)
+        if (manifest.skills.some((skill) => skill.id === name) || (await this.fs.exists(dest))) {
+          throw alreadyExists(name)
+        }
+      }
+      for (const name of preserve) {
+        const previous = source.members?.find((member) => member.name === name)
+        const previousRuntime = command.previousMembers?.find((member) => member.name === name)
+        const skillFile = previousRuntime?.path ?? `skills/${name}/SKILL.md`
+        const normalized = skillFile.replace(/\\/g, '/')
+        if (isAbsolute(skillFile) || normalized.split('/').includes('..')) {
+          throw new SkillsApplicationError(
+            400,
+            'invalid_member_path',
+            `Invalid skill path: ${skillFile}`,
+          )
+        }
+        const sourceDir = join(
+          repoPath,
+          'remote-cache',
+          deriveRepoId(source.url),
+          dirname(normalized),
+        )
+        const dest = join(this.assetsSkillsDir(repoPath), name)
+        await this.fs.copyDir(sourceDir, dest)
+        copied.push(dest)
+        manifest.skills.push({
+          id: name,
+          ...(previous?.targets ? { targets: previous.targets } : {}),
+        })
+      }
+      const metaUpdates = updateSourceMetaMutation(manifest, command.url, {
+        ...(command.name !== undefined ? { name: command.name } : {}),
+        ...(command.ref !== undefined ? { ref: command.ref } : {}),
+        ...(command.type !== undefined ? { type: command.type } : {}),
+        ...(command.scan !== undefined ? { scan: command.scan } : {}),
+      }).data
+      const next = setSourceMembersMutation(
+        metaUpdates,
+        command.url,
+        command.members.map(({ name }) => name),
+      ).data
+      await this.writeManifest(repoPath, next)
+      manifestWritten = true
+      await this.projectSkills?.(repoPath)
+      return { finalized: true, changes, preserved: preserve }
+    } catch (err) {
+      this.log.error('source reconciliation failed', { err, url: command.url })
+      for (const path of copied) {
+        try {
+          await this.fs.removeDir(path)
+        } catch (cleanupError) {
+          this.log.error('source reconciliation cleanup failed', { err: cleanupError, path })
+        }
+      }
+      if (manifestWritten) {
+        await this.writeManifest(repoPath, originalManifest)
+        try {
+          await this.projectSkills?.(repoPath)
+        } catch (rollbackError) {
+          this.log.error('source reconciliation projection rollback failed', {
+            err: rollbackError,
+            url: command.url,
+          })
+        }
+      }
+      throw err
+    }
   }
 
   async removeLocalSkill(repoPath: string, id: string): Promise<void> {

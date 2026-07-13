@@ -6,6 +6,7 @@ import { logger } from '../../lib/logger.js'
 import { resolveRepoPath } from '../repo.js'
 import { jsonValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
+import { projectRepository } from '../../projection/workflow.js'
 
 const skillsRouteLogger = logger.child('skills-route')
 const RepoField = z.unknown().optional()
@@ -72,6 +73,13 @@ const UpdateSourceBody = SourceUrlBody.extend({
   type: z.enum(['branch', 'tag']).optional(),
   scan: z.string().optional(),
 })
+const ReconcileSourceBody = UpdateSourceBody.extend({
+  members: z.array(z.object({ name: NonEmptyString, path: z.string().optional() })),
+  previousMembers: z
+    .array(z.object({ name: NonEmptyString, path: z.string().optional() }))
+    .optional(),
+  preserve: z.array(NonEmptyString).optional(),
+})
 
 const DeleteLocalSkillBody = z.object({
   repo: RepoField,
@@ -102,7 +110,16 @@ const SetLocalSkillTargetsBody = DeleteLocalSkillBody.extend({
 
 export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
-  const skills = new SkillsApplication(deps.fs, deps.git, deps.home)
+  const skills = new SkillsApplication(
+    deps.fs,
+    deps.git,
+    deps.home,
+    undefined,
+    async (repoPath) => {
+      const projected = await projectRepository(deps, repoPath, { scope: 'skills' })
+      if (!projected.ok) throw projected.failure.originalError
+    },
+  )
 
   app.post(
     '/skills/local',
@@ -208,6 +225,25 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       return c.json(errorBody(e, 'delete_failed', 'failed to remove source'))
     }
   })
+
+  app.post(
+    '/sources/reconcile',
+    jsonValidator(ReconcileSourceBody, { error: updateSourceError }),
+    async (c) => {
+      const body = c.req.valid('json')
+      try {
+        const repoPath = await resolveRequestRepo(deps, body.repo)
+        const result = await skills.reconcileSource(repoPath, body)
+        return c.json({ ok: true, ...result })
+      } catch (e) {
+        skillsRouteLogger.error('source reconciliation failed', { err: e, url: body.url })
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        if (e instanceof SkillsApplicationError)
+          return c.json(errorBody(e, 'reconcile_failed', 'failed to reconcile source'), e.status)
+        return c.json(errorBody(e, 'reconcile_failed', 'failed to reconcile source'))
+      }
+    },
+  )
 
   app.post(
     '/sources/update',

@@ -291,4 +291,101 @@ describe('SkillsApplication', () => {
       members: [{ name: 'alpha', targets: ['codex'] }],
     })
   })
+
+  it('previews removed members and preserves selected ones as local with targets', async () => {
+    await mkdir(join(repoPath, 'remote-cache', 'skills', 'nested', 'removed'), { recursive: true })
+    await writeFile(
+      join(repoPath, 'remote-cache', 'skills', 'nested', 'removed', 'SKILL.md'),
+      '# Removed',
+    )
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: skills',
+        '    url: https://example.test/skills.git',
+        '    ref: main',
+        '    members:',
+        '      - name: keep',
+        '      - name: removed',
+        '        targets:',
+        '          - codex',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    const command = {
+      url: 'https://example.test/skills.git',
+      ref: 'main',
+      type: 'branch' as const,
+      members: [{ name: 'keep', path: 'keep/SKILL.md' }, { name: 'added' }],
+      previousMembers: [
+        { name: 'keep', path: 'keep/SKILL.md' },
+        { name: 'removed', path: 'nested/removed/SKILL.md' },
+      ],
+    }
+
+    await expect(app.reconcileSource(repoPath, command)).resolves.toMatchObject({
+      finalized: false,
+      changes: { added: [{ name: 'added' }], removed: [{ name: 'removed', targets: ['codex'] }] },
+    })
+    await app.reconcileSource(repoPath, { ...command, preserve: ['removed'] })
+
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.sources[0].members).toEqual([{ name: 'keep' }, { name: 'added' }])
+    expect(parsed.skills).toEqual([{ id: 'removed', targets: ['codex'] }])
+    await expect(
+      readFile(join(repoPath, 'assets', 'skills', 'removed', 'SKILL.md'), 'utf8'),
+    ).resolves.toBe('# Removed')
+  })
+
+  it('classifies a same-name member at a different scanned path as updated', async () => {
+    await mkdir(join(repoPath, 'remote-cache', 'skills', 'old', 'alpha'), { recursive: true })
+    await mkdir(join(repoPath, 'remote-cache', 'skills', 'new', 'alpha'), { recursive: true })
+    await writeFile(join(repoPath, 'remote-cache', 'skills', 'old', 'alpha', 'SKILL.md'), '# Same')
+    await writeFile(join(repoPath, 'remote-cache', 'skills', 'new', 'alpha', 'SKILL.md'), '# Same')
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      'sources:\n  - url: https://example.test/skills.git\n    ref: main\n    members:\n      - name: alpha\nskills: []\n',
+    )
+
+    await expect(
+      app.reconcileSource(repoPath, {
+        url: 'https://example.test/skills.git',
+        members: [{ name: 'alpha', path: 'new/alpha/SKILL.md' }],
+        previousMembers: [{ name: 'alpha', path: 'old/alpha/SKILL.md' }],
+      }),
+    ).resolves.toMatchObject({
+      finalized: true,
+      changes: { updated: [{ name: 'alpha' }] },
+    })
+  })
+
+  it('rolls back manifest and preserved directories when projection fails', async () => {
+    const projection = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('projection failed'))
+      .mockResolvedValueOnce(undefined)
+    app = new SkillsApplication(fs, git, home, log, projection)
+    await mkdir(join(repoPath, 'remote-cache', 'skills', 'removed'), { recursive: true })
+    await writeFile(join(repoPath, 'remote-cache', 'skills', 'removed', 'SKILL.md'), '# Removed')
+    const original =
+      'sources:\n  - url: https://example.test/skills.git\n    ref: main\n    members:\n      - name: removed\n        targets: [codex]\nskills: []\n'
+    await writeFile(join(repoPath, 'skills.yaml'), original)
+
+    await expect(
+      app.reconcileSource(repoPath, {
+        url: 'https://example.test/skills.git',
+        members: [],
+        previousMembers: [{ name: 'removed', path: 'removed/SKILL.md' }],
+        preserve: ['removed'],
+      }),
+    ).rejects.toThrow('projection failed')
+
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.sources[0].members).toEqual([{ name: 'removed', targets: ['codex'] }])
+    expect(parsed.skills).toEqual([])
+    expect(existsSync(join(repoPath, 'assets', 'skills', 'removed'))).toBe(false)
+    expect(projection).toHaveBeenCalledTimes(2)
+  })
 })

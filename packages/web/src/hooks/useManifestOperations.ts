@@ -52,6 +52,18 @@ export interface ManifestOperationCallbacks {
 
 export type SourceUpdateState = 'repair' | { label: string; newRef?: string }
 
+export interface SkillMemberChanges {
+  added: Array<{ name: string }>
+  updated: Array<{ name: string }>
+  removed: Array<{ name: string; targets?: string[] }>
+}
+
+export interface PreparedSkillReconciliation {
+  sessionId: string
+  pinned_commit: string
+  changes: SkillMemberChanges
+}
+
 export interface LocalSkillCandidate {
   name: string
   path: string
@@ -464,50 +476,40 @@ export function useManifestOperations(
       ref: string
       type: 'branch' | 'tag'
       scan?: string
-      members: string[]
+      members: Array<string | { name: string; path?: string }>
+      preserve?: string[]
     }) => {
       let sourceMetaUpdated = false
       return run(
         pendingKey.saveSource(input.source.url),
         async () => {
-          const currentName = sourceIdentity(input.source).repoId
-          const nextName = input.name?.trim() || currentName
-          const nameChanged = nextName !== currentName
-          const refChanged = input.ref !== input.source.ref
-          const typeChanged = input.type !== (input.source.type ?? 'branch')
-          const nextScan = normalizedScanPattern(input.scan)
-          const sourceScan = normalizedScanPattern(input.source.scan)
-          const scanChanged = nextScan !== sourceScan
-          if (nameChanged || refChanged || typeChanged || scanChanged) {
-            const metaResult = (await api.updateSourceMeta({
-              repo: repoPath,
-              url: input.source.url,
-              name: nameChanged ? nextName : undefined,
-              ref: refChanged ? input.ref : undefined,
-              type: typeChanged ? input.type : undefined,
-              scan: scanChanged ? nextScan : undefined,
-            })) as MaybeOkResponse
-            if (responseFailureMessage(metaResult, '更新 source 元信息失败')) return metaResult
-            sourceMetaUpdated = true
-          }
-          const memberResult = (await api.setSourceMembers({
+          const result = await api.reconcileSource({
             repo: repoPath,
             url: input.source.url,
-            members: input.members,
-          })) as MaybeOkResponse
-          if (responseFailureMessage(memberResult, '保存 source members 失败')) return memberResult
-          const projected = (await api.project({
-            repo: repoPath,
-            scope: 'skills',
-          })) as MaybeOkResponse
-          const projectError = responseFailureMessage(projected, '投影失败')
-          return projectError ? { ok: false, message: projectError } : projected
+            name: input.name?.trim() || sourceIdentity(input.source).repoId,
+            ref: input.ref,
+            type: input.type,
+            scan: normalizedScanPattern(input.scan),
+            members: input.members.map((member) =>
+              typeof member === 'string' ? { name: member } : member,
+            ),
+            previousMembers: (input.source.members ?? []).map(({ name, path }) => ({ name, path })),
+            ...(input.preserve !== undefined ? { preserve: input.preserve } : {}),
+          })
+          if (result.finalized) {
+            sourceMetaUpdated = true
+            await refreshManifest(repoPath)
+          }
+          return result
         },
         {
+          reload: false,
           failureMessage: '保存失败',
           reloadOnFailure: () => sourceMetaUpdated,
-          successMessage: () =>
-            (input.name?.trim() || sourceIdentity(input.source).repoId) + ' 已更新',
+          successMessage: (result) =>
+            (result as { finalized?: boolean }).finalized
+              ? (input.name?.trim() || sourceIdentity(input.source).repoId) + ' 已更新'
+              : undefined,
         },
       )
     },
@@ -595,20 +597,27 @@ export function useManifestOperations(
       run(
         pendingKey.performSourceUpdate(source.url),
         () =>
-          api.performUpdate({
+          api.prepareSourceUpdate({
             source,
             newRef: update && update !== 'repair' ? (update.newRef ?? source.ref) : source.ref,
             repo: repoPath,
             sourceId: deriveRepoId(source.url),
             oldMembers: source.members ?? [],
-          }) as Promise<MaybeOkResponse & { pinned_commit?: string }>,
+          }) as Promise<MaybeOkResponse & PreparedSkillReconciliation>,
         {
+          reload: false,
           failureMessage: '更新 source 失败',
-          successMessage: (result) =>
-            sourceIdentity(source).repoId +
-            ' 已更新到 ' +
-            (result.pinned_commit?.slice(0, 7) ?? source.ref),
         },
+      ),
+    [repoPath, run],
+  )
+
+  const finalizeSourceUpdate = useCallback(
+    (sessionId: string, preserve: string[]) =>
+      run(
+        `source:update-finalize:${sessionId}`,
+        () => api.finalizeSourceUpdate({ repo: repoPath, sessionId, preserve }),
+        { failureMessage: '完成 source 更新失败', successMessage: 'source 已更新并完成投影' },
       ),
     [repoPath, run],
   )
@@ -902,6 +911,7 @@ export function useManifestOperations(
       saveSourceMembers,
       checkSourceUpdate,
       performSourceUpdate,
+      finalizeSourceUpdate,
       deleteSource,
       deleteLocalSkill,
       toggleSourceSkillTarget,
@@ -930,6 +940,7 @@ export function useManifestOperations(
       saveSourceMembers,
       checkSourceUpdate,
       performSourceUpdate,
+      finalizeSourceUpdate,
       deleteSource,
       deleteLocalSkill,
       toggleSourceSkillTarget,

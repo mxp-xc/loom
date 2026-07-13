@@ -6,6 +6,17 @@ import { scanSourceMembers, type ScannedMember } from '../projection/scan.js'
 import { resolveGitUrl } from './resolve-url.js'
 import { isValidGitRepo, installSkill } from './install.js'
 import { cacheDirFor } from './cache.js'
+import { randomUUID } from 'node:crypto'
+import { dirname, join } from 'node:path'
+import {
+  classifySkillMemberChanges,
+  normalizeSkillPath,
+  type SkillMemberChangeSet,
+  type SkillMemberSnapshot,
+} from '../skills/reconciliation.js'
+import { logger } from '../lib/logger.js'
+
+const updateLogger = logger.child('remote.update')
 
 export async function checkUpdates(
   sources: SkillSource[],
@@ -24,8 +35,84 @@ export async function checkUpdates(
 
 export interface UpdateResult {
   pinned_commit: string
-  orphans: ScannedMember[]
+  orphans: Array<Pick<ScannedMember, 'name'>>
   newMembers: ScannedMember[]
+}
+
+export interface PreparedSourceUpdate {
+  pinned_commit: string
+  stagingDir: string
+  newMembers: ScannedMember[]
+  changes: SkillMemberChangeSet
+}
+
+export async function prepareSourceUpdate(
+  git: IGit,
+  fs: IFileSystem,
+  source: SkillSource,
+  newRef: string,
+  repoPath: string,
+  sourceId: string,
+  oldMembers: SkillMemberSnapshot[],
+): Promise<PreparedSourceUpdate> {
+  const cacheDir = cacheDirFor(repoPath, sourceId)
+  const stagingDir = join(repoPath, 'temp', 'source-updates', randomUUID())
+  await fs.mkdir(stagingDir, true)
+  try {
+    for (const member of oldMembers) {
+      const skillPath = normalizeSkillPath(member.path)
+      const sourceDir = join(cacheDir, dirname(skillPath))
+      if (await fs.exists(sourceDir)) await fs.copyDir(sourceDir, join(stagingDir, member.name))
+    }
+    if (!(await isValidGitRepo(fs, cacheDir))) {
+      await installSkill(git, fs, source.url, newRef, repoPath, sourceId)
+    }
+    await git.fetch(cacheDir)
+    try {
+      await git.resetHard(cacheDir, `origin/${newRef}`)
+    } catch (err) {
+      updateLogger.warn('remote-tracking reset failed; falling back to checkout', {
+        err,
+        source: source.url,
+        ref: newRef,
+      })
+    }
+    await git.checkout(cacheDir, newRef)
+    const pinned_commit = await git.revParseHead(cacheDir)
+    const newMembers = await scanSourceMembers(cacheDir, { ...source, ref: newRef })
+    const previousSnapshots = oldMembers.map((member) => ({
+      ...member,
+      path: `${member.name}/SKILL.md`,
+    }))
+    const nextSnapshots = newMembers.map((member) => ({
+      name: member.name,
+      path: member.relativePath ?? 'SKILL.md',
+    }))
+    const changes = await classifySkillMemberChanges(
+      fs,
+      stagingDir,
+      cacheDir,
+      previousSnapshots,
+      nextSnapshots,
+    )
+    return { pinned_commit, stagingDir, newMembers, changes }
+  } catch (err) {
+    if (source.pinned_commit) {
+      try {
+        await git.resetHard(cacheDir, source.pinned_commit)
+        await git.checkout(cacheDir, source.ref)
+      } catch (rollbackError) {
+        updateLogger.error('source update rollback failed', {
+          err: rollbackError,
+          originalError: err,
+          source: source.url,
+        })
+      }
+    }
+    await fs.removeDir(stagingDir)
+    updateLogger.error('source update prepare failed', { err, source: source.url, ref: newRef })
+    throw err
+  }
 }
 
 export async function performUpdate(
@@ -49,7 +136,12 @@ export async function performUpdate(
   // <branch>` stays on the stale local branch and we'd re-pin the old commit.
   try {
     await git.resetHard(cacheDir, `origin/${newRef}`)
-  } catch {
+  } catch (err) {
+    updateLogger.warn('remote-tracking reset failed; falling back to checkout', {
+      err,
+      source: _source.url,
+      ref: newRef,
+    })
     // ref may be a tag or commit hash — fall back to a plain checkout.
   }
   await git.checkout(cacheDir, newRef)

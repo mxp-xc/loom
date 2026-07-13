@@ -289,7 +289,24 @@ export const api = {
     post('/sync/force-pull', { repo }).then(json) as Promise<SyncPullResponse>,
   install: (body: unknown) => post('/install', body).then(json),
   update: (repo: string, sources: unknown[]) => post('/update', { repo, sources }).then(json),
-  performUpdate: (body: unknown) => post('/update/perform', body).then(json),
+  prepareSourceUpdate: (body: unknown) =>
+    post('/update/prepare', body).then(json) as Promise<{
+      ok: boolean
+      sessionId: string
+      pinned_commit: string
+      changes: {
+        added: Array<{ name: string }>
+        updated: Array<{ name: string }>
+        removed: Array<{ name: string; targets?: string[] }>
+      }
+    }>,
+  finalizeSourceUpdate: (body: { repo: string; sessionId: string; preserve: string[] }) =>
+    post('/update/finalize', body).then(json) as Promise<{
+      ok: boolean
+      pinned_commit: string
+      preserved: string[]
+      deleted: string[]
+    }>,
   getConfig: (repo: string) => fetch(`${base}/config?repo=${encodeURIComponent(repo)}`).then(json),
   getManifest: (repo: string) =>
     fetch(`${base}/manifest?repo=${encodeURIComponent(repo)}`).then(json),
@@ -453,6 +470,17 @@ export const api = {
       ok: boolean
       error?: string
       message?: string
+    }>,
+  reconcileSource: (body: unknown) =>
+    post('/sources/reconcile', body).then(json) as Promise<{
+      ok: boolean
+      finalized: boolean
+      changes: {
+        added: Array<{ name: string }>
+        updated: Array<{ name: string }>
+        removed: Array<{ name: string; targets?: string[] }>
+      }
+      preserved?: string[]
     }>,
   updateMcpTargets: (body: { repo: string; id: string; targets: string[] }) =>
     post('/mcp/targets', body).then(json),

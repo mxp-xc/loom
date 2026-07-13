@@ -5,7 +5,11 @@ import { inputStyle } from '@/lib/styles'
 import { Segmented } from './Segmented'
 import { sourceIdentity, type SkillSource } from '@loom/core'
 import { sortSkillMembers, type ScanMember } from './types'
-import { useManifestOperations } from '@/hooks/useManifestOperations'
+import SkillReconciliationDialog from './SkillReconciliationDialog'
+import {
+  useManifestOperations,
+  type PreparedSkillReconciliation,
+} from '@/hooks/useManifestOperations'
 import { SelectableList, type SelectableListItem } from '@/components/ui/selectable-list'
 import styles from './EditSourceModal.module.css'
 import { FieldError } from '@/components/ErrorFeedback'
@@ -51,6 +55,7 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reconciliation, setReconciliation] = useState<PreparedSkillReconciliation | null>(null)
   const operations = useManifestOperations(repoPath, { onError: setError, onToast: showToast })
   const { loadSourceRefs, scanSourceMembers, saveSource } = operations
 
@@ -135,8 +140,48 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
     setSaving(true)
     setError(null)
     try {
-      const res = await saveSource({ source, name, ref, type, scan, members: [...selected] })
+      const selectedMembers = members
+        .filter((member) => selected.has(member.name))
+        .map((member) => ({ name: member.name, path: member.path }))
+      const res = await saveSource({ source, name, ref, type, scan, members: selectedMembers })
       if (res.ok) {
+        const result = res.result as
+          { finalized: boolean; changes: PreparedSkillReconciliation['changes'] } | undefined
+        if (result?.finalized === false) {
+          setReconciliation({
+            sessionId: `edit:${source.url}`,
+            pinned_commit: '',
+            changes: result.changes,
+          })
+        } else {
+          onSaved()
+        }
+      } else {
+        setError(res.message || '保存失败')
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const finalizeReconciliation = async (preserve: string[]) => {
+    setSaving(true)
+    setError(null)
+    try {
+      const selectedMembers = members
+        .filter((member) => selected.has(member.name))
+        .map((member) => ({ name: member.name, path: member.path }))
+      const res = await saveSource({
+        source,
+        name,
+        ref,
+        type,
+        scan,
+        members: selectedMembers,
+        preserve,
+      })
+      if (res.ok) {
+        setReconciliation(null)
         onSaved()
       } else {
         setError(res.message || '保存失败')
@@ -180,144 +225,155 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
   }))
 
   return (
-    <Modal
-      open
-      onClose={() => {
-        if (!saving) onClose()
-      }}
-      title={`Edit Source · ${repoId}`}
-      width={760}
-      className={styles.dialog}
-      bodyClassName={styles.body}
-    >
-      <div className={styles.layout}>
-        <div className={styles.fields}>
-          {error && <FieldError id="edit-source-error">{error}</FieldError>}
+    <>
+      <Modal
+        open
+        onClose={() => {
+          if (!saving) onClose()
+        }}
+        title={`Edit Source · ${repoId}`}
+        width={760}
+        className={styles.dialog}
+        bodyClassName={styles.body}
+      >
+        <div className={styles.layout}>
+          <div className={styles.fields}>
+            {error && <FieldError id="edit-source-error">{error}</FieldError>}
 
-          <div className={styles.fieldGrid}>
-            <div>
-              <span className="label">url</span>
-              <input value={source.url} readOnly style={{ ...inputStyle, marginTop: 0 }} />
-            </div>
-
-            <div>
-              <label className="label" htmlFor="edit-source-name">
-                source name
-              </label>
-              <input
-                id="edit-source-name"
-                aria-label="source name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                style={inputStyle}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 14 }}>
-            <div style={{ flex: '0 0 120px' }}>
-              <div className="label" style={{ marginBottom: 4 }}>
-                type
+            <div className={styles.fieldGrid}>
+              <div>
+                <span className="label">url</span>
+                <input value={source.url} readOnly style={{ ...inputStyle, marginTop: 0 }} />
               </div>
-              <Segmented
-                value={type}
-                onChange={handleTypeChange}
-                options={[
-                  { value: 'branch', label: 'branch' },
-                  { value: 'tag', label: 'tag' },
-                ]}
-              />
-            </div>
-            <div style={{ flex: 1 }}>
-              <span className="label">ref</span>
-              <select
-                value={ref}
-                onChange={(e) => setRef(e.target.value)}
-                disabled={refsLoading || refOptions.length === 0}
-                style={{ ...inputStyle, marginTop: 0, cursor: 'pointer' }}
-              >
-                {refOptions.length === 0 ? (
-                  <option value="">{refsLoading ? '加载中…' : '—'}</option>
-                ) : (
-                  refOptions.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))
-                )}
-              </select>
-            </div>
-          </div>
 
-          <div className={styles.scanRow}>
-            <div>
-              <label className="label" htmlFor="edit-source-scan-pattern">
-                scan pattern
-              </label>
-              <input
-                id="edit-source-scan-pattern"
-                aria-label="scan pattern"
-                value={scan}
-                onChange={(e) => setScan(e.target.value)}
-                placeholder="**/SKILL.md"
-                style={inputStyle}
-              />
-              <div
-                style={{
-                  marginTop: 6,
-                  fontSize: 11,
-                  color: 'var(--muted)',
-                  fontFamily: mono,
-                }}
-              >
-                留空使用默认 <code style={{ fontFamily: mono }}>**/SKILL.md</code>
+              <div>
+                <label className="label" htmlFor="edit-source-name">
+                  source name
+                </label>
+                <input
+                  id="edit-source-name"
+                  aria-label="source name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  style={inputStyle}
+                />
               </div>
             </div>
 
+            <div style={{ display: 'flex', gap: 14 }}>
+              <div style={{ flex: '0 0 120px' }}>
+                <div className="label" style={{ marginBottom: 4 }}>
+                  type
+                </div>
+                <Segmented
+                  value={type}
+                  onChange={handleTypeChange}
+                  options={[
+                    { value: 'branch', label: 'branch' },
+                    { value: 'tag', label: 'tag' },
+                  ]}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <span className="label">ref</span>
+                <select
+                  value={ref}
+                  onChange={(e) => setRef(e.target.value)}
+                  disabled={refsLoading || refOptions.length === 0}
+                  style={{ ...inputStyle, marginTop: 0, cursor: 'pointer' }}
+                >
+                  {refOptions.length === 0 ? (
+                    <option value="">{refsLoading ? '加载中…' : '—'}</option>
+                  ) : (
+                    refOptions.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+            </div>
+
+            <div className={styles.scanRow}>
+              <div>
+                <label className="label" htmlFor="edit-source-scan-pattern">
+                  scan pattern
+                </label>
+                <input
+                  id="edit-source-scan-pattern"
+                  aria-label="scan pattern"
+                  value={scan}
+                  onChange={(e) => setScan(e.target.value)}
+                  placeholder="**/SKILL.md"
+                  style={inputStyle}
+                />
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 11,
+                    color: 'var(--muted)',
+                    fontFamily: mono,
+                  }}
+                >
+                  留空使用默认 <code style={{ fontFamily: mono }}>**/SKILL.md</code>
+                </div>
+              </div>
+
+              <Button
+                className={styles.scanButton}
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleScan()}
+                disabled={scanning}
+                style={{ width: '100%' }}
+              >
+                {scanning ? '扫描中…' : 'Scan'}
+              </Button>
+            </div>
+          </div>
+
+          {scanning ? (
+            <div className="selectable-list-empty">扫描中…</div>
+          ) : (
+            <SelectableList
+              className={styles.skillList}
+              ariaLabel={'Edit Source · ' + repoId}
+              items={listItems}
+              selectedIds={selected}
+              onSelectedIdsChange={setSelected}
+              searchPlaceholder="搜索 skill…"
+              showSearch={members.length > 0}
+              showSelectionActions={members.length > 0}
+              emptyMessage="未发现 SKILL.md"
+              noMatchesMessage="无匹配"
+            />
+          )}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="primary" onClick={handleSave} disabled={saving} style={{ flex: 1 }}>
+              {saving ? '保存中…' : `保存 (${selected.size})`}
+            </Button>
             <Button
-              className={styles.scanButton}
               variant="secondary"
-              size="sm"
-              onClick={() => void handleScan()}
-              disabled={scanning}
-              style={{ width: '100%' }}
+              onClick={onClose}
+              disabled={saving}
+              style={{ flex: '0 0 auto' }}
             >
-              {scanning ? '扫描中…' : 'Scan'}
+              取消
             </Button>
           </div>
         </div>
-
-        {scanning ? (
-          <div className="selectable-list-empty">扫描中…</div>
-        ) : (
-          <SelectableList
-            className={styles.skillList}
-            ariaLabel={'Edit Source · ' + repoId}
-            items={listItems}
-            selectedIds={selected}
-            onSelectedIdsChange={setSelected}
-            searchPlaceholder="搜索 skill…"
-            showSearch={members.length > 0}
-            showSelectionActions={members.length > 0}
-            emptyMessage="未发现 SKILL.md"
-            noMatchesMessage="无匹配"
-          />
-        )}
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button variant="primary" onClick={handleSave} disabled={saving} style={{ flex: 1 }}>
-            {saving ? '保存中…' : `保存 (${selected.size})`}
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={onClose}
-            disabled={saving}
-            style={{ flex: '0 0 auto' }}
-          >
-            取消
-          </Button>
-        </div>
-      </div>
-    </Modal>
+      </Modal>
+      <SkillReconciliationDialog
+        state={reconciliation}
+        busy={saving}
+        error={error}
+        onClose={() => {
+          if (!saving) setReconciliation(null)
+        }}
+        onConfirm={finalizeReconciliation}
+      />
+    </>
   )
 }
