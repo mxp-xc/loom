@@ -7,14 +7,24 @@ interface SkillWorkbenchProps {
   footer: ReactNode
   resultCount?: number
   className?: string
+  bodyClassName?: string
+  configurationClassName?: string
+  resultsClassName?: string
+  configurationLabel?: string
+  resultsLabel?: string
 }
 
 export default function SkillWorkbench({
   configuration,
   results,
   footer,
-  resultCount = 0,
+  resultCount,
   className = '',
+  bodyClassName = '',
+  configurationClassName = '',
+  resultsClassName = '',
+  configurationLabel = 'Configuration',
+  resultsLabel = 'Skills',
 }: SkillWorkbenchProps) {
   const [mobilePane, setMobilePane] = useState<'configuration' | 'skills'>('configuration')
 
@@ -27,7 +37,7 @@ export default function SkillWorkbench({
           aria-selected={mobilePane === 'configuration'}
           onClick={() => setMobilePane('configuration')}
         >
-          Configuration
+          {configurationLabel}
         </button>
         <button
           type="button"
@@ -35,19 +45,19 @@ export default function SkillWorkbench({
           aria-selected={mobilePane === 'skills'}
           onClick={() => setMobilePane('skills')}
         >
-          Skills <span>{resultCount}</span>
+          {resultsLabel} {resultCount != null && <span>{resultCount}</span>}
         </button>
       </div>
-      <div className={styles.body}>
+      <div className={`${styles.body} ${bodyClassName}`}>
         <section
-          className={styles.configuration}
+          className={`${styles.configuration} ${configurationClassName}`}
           data-testid="skills-config-pane"
           data-mobile-visible={mobilePane === 'configuration'}
         >
           {configuration}
         </section>
         <section
-          className={styles.results}
+          className={`${styles.results} ${resultsClassName}`}
           data-testid="skills-results-pane"
           data-mobile-visible={mobilePane === 'skills'}
         >

@@ -1,7 +1,3 @@
-.chip {
-  flex-shrink: 0;
-}
-
 .dialog {
   overflow: hidden !important;
 }
@@ -13,96 +9,373 @@
 
 .modalTitle {
   display: block;
+  min-width: 0;
 }
 
 .body {
   padding: 0 !important;
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: 310px minmax(0, 1fr);
-  height: min(618px, calc(100dvh - 130px));
-  min-height: 448px;
+.editorBody {
+  grid-template-columns: 310px minmax(0, 1fr) !important;
 }
 
-.metadata,
-.document {
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 22px;
+.layout :global([data-testid='skills-config-pane']).metadata {
+  padding: 18px !important;
+  background: color-mix(in srgb, var(--card) 48%, var(--popover));
 }
 
-.metadata {
-  border-right: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 88%, var(--card));
+.layout :global([data-testid='skills-results-pane']).document {
+  overflow: hidden !important;
+  padding: 0 !important;
+  background: var(--bg);
 }
 
-.document {
-  background: var(--popover);
-}
-
-.skill-detail-content-frame {
-  --skill-detail-panel-height: clamp(320px, 48vh, 520px);
-  min-height: calc(var(--skill-detail-panel-height) + 36px);
-}
-.skill-detail-preview-tabs {
-  display: flex;
+.savedState {
+  display: inline-flex;
+  min-height: 28px;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
-  margin-bottom: 8px;
-}
-.skill-detail-preview-tabs span {
-  padding: 4px 10px;
+  padding: 0 9px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  background: color-mix(in srgb, var(--card) 72%, transparent);
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 500;
+  font:
+    600 10px 'JetBrains Mono',
+    monospace;
+  white-space: nowrap;
 }
-.skill-detail-preview-tabs span.on {
-  border-color: var(--primary);
-  background: var(--accent);
+
+.savedState[data-state='saved'] {
   color: var(--primary);
 }
-.skill-detail-loading-panel,
-.skill-detail-error {
-  box-sizing: border-box;
-  height: var(--skill-detail-panel-height);
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--muted);
-  font-size: 12px;
+
+.savedState[data-state='dirty'] {
+  color: var(--warn);
 }
 
-@media (max-width: 700px) {
-  .layout {
-    display: block;
-    height: calc(92dvh - 72px);
-    min-height: 0;
-    overflow: auto;
-  }
-
-  .metadata,
-  .document {
-    overflow: visible;
-    padding: 18px;
-  }
-
-  .metadata {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-}
-.skill-detail-loading-panel {
+.metadataContent {
   display: grid;
-  place-items: center;
+  align-content: start;
+  gap: 22px;
 }
-.skill-detail-error {
+
+.metadataContent section {
+  min-width: 0;
+}
+
+.kicker {
+  color: var(--muted);
+  font:
+    600 10px 'JetBrains Mono',
+    monospace;
+  text-transform: uppercase;
+}
+
+.metaList {
+  margin: 8px 0 0;
+}
+
+.metaList > div {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.metaList dt {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.metaList dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font:
+    10px/1.5 'JetBrains Mono',
+    monospace;
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sectionHeading > span:last-child {
+  color: var(--muted);
+  font:
+    9px 'JetBrains Mono',
+    monospace;
+}
+
+.targetList {
+  display: grid;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.targetRow {
+  display: grid;
+  min-height: 48px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  opacity: 0.58;
+}
+
+.targetRow[data-active='true'] {
+  opacity: 1;
+  box-shadow: inset 2px 0 var(--agent-color);
+}
+
+.agentBadge {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--agent-color) 48%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--agent-color) 10%, var(--card));
+  color: var(--agent-color);
+  font:
+    700 9px 'JetBrains Mono',
+    monospace;
+}
+
+.targetRow > div {
+  display: grid;
+  min-width: 0;
+}
+
+.targetRow strong {
+  color: var(--bright);
+  font-size: 10px;
+}
+
+.targetRow code {
+  overflow: hidden;
+  color: var(--muted);
+  font:
+    8px 'JetBrains Mono',
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.targetState {
+  color: var(--muted);
+  font:
+    8px 'JetBrains Mono',
+    monospace;
+}
+
+.targetRow[data-active='true'] .targetState {
+  color: var(--primary);
+}
+
+.documentPane {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.documentToolbar {
+  display: flex;
+  min-height: 50px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.documentTabs,
+.documentActions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.documentTabs {
+  gap: 3px;
+}
+
+.documentTabs button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font:
+    500 11px 'JetBrains Mono',
+    monospace;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+.documentTabs button:hover {
+  background: var(--accent);
+  color: var(--text);
+}
+
+.documentTabs button[aria-selected='true'] {
+  border-color: var(--border);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  color: var(--bright);
+}
+
+.documentTabs button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 28%, transparent);
+  outline-offset: 1px;
+}
+
+.documentActions > span {
+  color: var(--muted);
+  font:
+    10px 'JetBrains Mono',
+    monospace;
+}
+
+.documentContent {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.markdownPreview {
+  height: 100%;
+  overflow: auto;
+  padding: 26px clamp(24px, 5vw, 64px) 48px;
+  color: var(--text);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.markdownPreview h1 {
+  margin: 0 0 12px;
+  font-size: 24px;
+  letter-spacing: 0;
+}
+
+.markdownPreview h2 {
+  margin: 26px 0 8px;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.sourceEditor {
+  height: 100%;
+  overflow: hidden;
+  border: 0;
+}
+
+.readOnlySource {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: auto;
+  padding: 22px 24px;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    11px/1.7 'JetBrains Mono',
+    monospace;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.resultState {
+  display: grid;
+  height: 100%;
+  align-content: center;
+  justify-items: center;
+  gap: 9px;
+  padding: 24px;
+  color: var(--primary);
+  text-align: center;
+}
+
+.resultState strong {
+  color: var(--bright);
+  font-size: 14px;
+}
+
+.resultState p {
+  max-width: 380px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.saveError {
+  padding: 8px 14px;
+  border-top: 1px solid color-mix(in srgb, var(--error) 40%, var(--border));
+  background: color-mix(in srgb, var(--error) 8%, var(--card));
   color: var(--error);
-  font-family: 'JetBrains Mono', monospace;
+  font:
+    10px 'JetBrains Mono',
+    monospace;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .savedState {
+    display: none;
+  }
+
+  .layout :global([data-testid='skills-config-pane']).metadata {
+    padding: 18px !important;
+  }
+
+  .layout :global([data-testid='skills-results-pane']).document {
+    padding: 0 !important;
+  }
+
+  .documentActions > span {
+    display: none;
+  }
+
+  .markdownPreview {
+    padding: 22px 18px 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
 }

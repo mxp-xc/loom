@@ -509,7 +509,7 @@ describe('MCP view', () => {
 })
 
 describe('Skill detail modal', () => {
-  it('uses separate metadata and document panes', async () => {
+  it('matches the approved Edit Skill workbench structure', async () => {
     vi.mocked(api.getSkillContent).mockResolvedValueOnce({
       ok: true,
       content: '# Production skill',
@@ -535,6 +535,21 @@ describe('Skill detail modal', () => {
     ).toBeDefined()
     expect(within(dialog).getByTestId('skill-metadata-pane')).toBeDefined()
     expect(within(dialog).getByTestId('skill-document-pane')).toBeDefined()
+    expect(within(dialog).getByTestId('skills-workbench')).toBeDefined()
+    expect(within(dialog).getByRole('tab', { name: 'Details' })).toBeDefined()
+    expect(within(dialog).getByRole('tab', { name: 'SKILL.md' })).toBeDefined()
+    expect(within(dialog).getByText('Location')).toBeDefined()
+    expect(within(dialog).getByText('Projected links')).toBeDefined()
+    expect(within(dialog).getByText('1 of 3')).toBeDefined()
+    expect(within(dialog).getByText('Claude Code')).toBeDefined()
+    expect(within(dialog).getByText('Codex')).toBeDefined()
+    expect(within(dialog).getByText('OpenCode')).toBeDefined()
+    expect(within(dialog).getByRole('tab', { name: 'Preview' })).toBeDefined()
+    expect(within(dialog).getByRole('tab', { name: 'Source' })).toBeDefined()
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeDefined()
+    expect(
+      within(dialog).getByRole('button', { name: 'Save SKILL.md' }).hasAttribute('disabled'),
+    ).toBe(true)
   })
 
   it('reserves the SKILL.md content frame while content is loading', async () => {
@@ -565,7 +580,7 @@ describe('Skill detail modal', () => {
     expect(dialog.getAttribute('style')).toContain('1180px')
     const contentFrame = within(dialog).getByTestId('skill-detail-content-frame')
     expect(contentFrame).toBeDefined()
-    expect(within(dialog).getByText('加载 SKILL.md…')).toBeDefined()
+    expect(within(dialog).getByText('Loading SKILL.md')).toBeDefined()
 
     await act(async () => {
       resolveContent({ ok: true, content: '# Loaded skill' })
@@ -573,10 +588,56 @@ describe('Skill detail modal', () => {
 
     const loadedHeading = await within(dialog).findByText('Loaded skill')
     const previewPanel = loadedHeading.closest('.md-preview') as HTMLElement
-    expect(previewPanel.style.height).toBe('var(--skill-detail-panel-height)')
-    expect(previewPanel.style.maxHeight).toBe('')
+    expect(contentFrame.contains(previewPanel)).toBe(true)
     const copyButton = within(dialog).getByRole('button', { name: '复制 SKILL.md' })
-    expect(contentFrame.contains(copyButton)).toBe(true)
+    expect(within(dialog).getByTestId('skill-document-pane').contains(copyButton)).toBe(true)
+    expect(within(dialog).queryByRole('button', { name: 'Save SKILL.md' })).toBeNull()
+  })
+
+  it('keeps source skills read-only in the Source pane', async () => {
+    vi.mocked(api.getSkillContent).mockResolvedValueOnce({
+      ok: true,
+      content: '# Managed by source',
+    } as never)
+
+    render(
+      <SkillDetailEditor
+        repoPath="/tmp/source-skill"
+        detail={{
+          skillId: 'source-skill',
+          source: 'https://github.com/example/skills.git',
+          path: 'skills/source-skill/SKILL.md',
+          targets: ['codex', 'opencode'],
+        }}
+        showToast={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = await screen.findByRole('dialog', { name: 'source-skill' })
+    expect(within(dialog).getByText('Read only')).toBeDefined()
+    expect(within(dialog).getByText('2 of 3')).toBeDefined()
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Source' }))
+    expect(within(dialog).getByText('# Managed by source')).toBeDefined()
+    expect(within(dialog).queryByRole('textbox', { name: 'SKILL.md 内容' })).toBeNull()
+    expect(within(dialog).queryByRole('button', { name: 'Save SKILL.md' })).toBeNull()
+  })
+
+  it('opens an empty local skill directly into the source editor', async () => {
+    vi.mocked(api.getSkillContent).mockResolvedValueOnce({ ok: true, content: '' } as never)
+
+    render(
+      <SkillDetailEditor
+        repoPath="/tmp/empty-local-skill"
+        detail={{ skillId: 'empty-local-skill', path: './skills/empty', targets: [] }}
+        showToast={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = await screen.findByRole('dialog', { name: 'empty-local-skill' })
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Start editing' }))
+    expect(within(dialog).getByRole('textbox', { name: 'SKILL.md 内容' })).toBeDefined()
   })
 })
 
@@ -1364,16 +1425,16 @@ describe('Skill source updates', () => {
     )
 
     const dialog = screen.getByRole('dialog', { name: 'frontend-design' })
-    fireEvent.click(await within(dialog).findByRole('button', { name: '编辑' }))
+    fireEvent.click(await within(dialog).findByRole('tab', { name: 'Source' }))
     const skillEditor = within(dialog).getByRole('textbox', { name: 'SKILL.md 内容' })
     expect(
       monacoEditorMock.props.some(
-        (props) =>
-          props.language === 'markdown' && props.height === 'var(--skill-detail-panel-height)',
+        (props) => props.language === 'markdown' && props.height === '100%',
       ),
     ).toBe(true)
     fireEvent.change(skillEditor, { target: { value: updated } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(within(dialog).getByText('Unsaved')).toBeDefined()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save SKILL.md' }))
 
     await waitFor(() =>
       expect(api.saveSkillContent).toHaveBeenCalledWith({
@@ -1385,6 +1446,7 @@ describe('Skill source updates', () => {
     )
     await waitFor(() => expect(api.getManifest).toHaveBeenCalledWith('/tmp/skill-save-refresh'))
     expect(showToast).toHaveBeenCalledWith('已保存')
+    expect(within(dialog).getByText('Saved')).toBeDefined()
   })
 
   it('logs the full object when editable Markdown save fails', async () => {

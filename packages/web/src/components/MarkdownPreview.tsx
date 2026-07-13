@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, type CSSProperties, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -75,6 +75,27 @@ function FrontmatterFormatter({ fields }: { fields: FrontmatterField[] }) {
   )
 }
 
+export function MarkdownDocument({
+  content,
+  className = '',
+  style,
+}: {
+  content: string
+  className?: string
+  style?: CSSProperties
+}) {
+  const { fields, body } = parseFrontmatter(content)
+
+  return (
+    <article className={`md-preview ${className}`} style={style}>
+      <FrontmatterFormatter fields={fields} />
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+        {body}
+      </ReactMarkdown>
+    </article>
+  )
+}
+
 export default function MarkdownPreview({
   content,
   editable = false,
@@ -129,8 +150,6 @@ export default function MarkdownPreview({
   }
 
   const sourceLabel = editable ? '编辑' : '原文'
-  const { fields: frontmatterFields, body: markdownBody } = parseFrontmatter(content)
-
   const buttons = (
     <div
       className="md-preview-toolbar"
@@ -232,8 +251,8 @@ export default function MarkdownPreview({
   return (
     <div>
       {buttons}
-      <div
-        className="md-preview"
+      <MarkdownDocument
+        content={content}
         style={{
           height: 'var(--skill-detail-panel-height)',
           overflow: 'auto',
@@ -246,12 +265,7 @@ export default function MarkdownPreview({
           lineHeight: 1.6,
           color: 'var(--text)',
         }}
-      >
-        <FrontmatterFormatter fields={frontmatterFields} />
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-          {markdownBody}
-        </ReactMarkdown>
-      </div>
+      />
     </div>
   )
 }

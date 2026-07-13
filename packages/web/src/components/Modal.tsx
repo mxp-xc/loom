@@ -16,6 +16,7 @@ interface ModalProps {
   bodyClassName?: string
   headerClassName?: string
   titleClassName?: string
+  headerActions?: ReactNode
   children: ReactNode
 }
 
@@ -31,6 +32,7 @@ export default function Modal({
   bodyClassName,
   headerClassName,
   titleClassName,
+  headerActions,
   children,
 }: ModalProps) {
   const contentRef = useRef<HTMLDivElement | null>(null)
@@ -293,11 +295,14 @@ export default function Modal({
                   </span>
                 </DialogPrimitive.Title>
               )}
-              <DialogPrimitive.Close asChild>
-                <IconButton label="关闭" tooltip="关闭" disabled={busy}>
-                  <X className="h-4 w-4" />
-                </IconButton>
-              </DialogPrimitive.Close>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {headerActions}
+                <DialogPrimitive.Close asChild>
+                  <IconButton label="关闭" tooltip="关闭" disabled={busy}>
+                    <X className="h-4 w-4" />
+                  </IconButton>
+                </DialogPrimitive.Close>
+              </div>
             </div>
             <div className={bodyClassName} style={{ padding: '18px 20px' }}>
               {children}

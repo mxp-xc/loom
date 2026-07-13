@@ -1,16 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { api } from '@/lib/api'
 import { refreshManifest } from '@/hooks/useManifest'
 import { showErrorToast } from '@/hooks/useToast'
 import Modal from '@/components/Modal'
-import MarkdownPreview from '@/components/MarkdownPreview'
-import { Copy, Check, FileText } from 'lucide-react'
+import { MarkdownDocument } from '@/components/MarkdownPreview'
+import MonacoTextEditor from '@/components/monaco/MonacoTextEditor'
+import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
-import { TargetChip } from '@/components/ui/TargetChip'
-import { AGENTS, agentShort, agentSkillPath, type AgentId } from '@/lib/agents'
+import { Check, Code2, Copy, FileText, LoaderCircle } from 'lucide-react'
+import {
+  AGENTS,
+  agentColor,
+  agentName,
+  agentShort,
+  agentSkillPath,
+  type AgentId,
+} from '@/lib/agents'
 import type { SkillDetail } from './types'
+import SkillWorkbench, { SkillWorkbenchTitle } from './SkillWorkbench'
 import styles from './SkillDetailEditor.module.css'
-import { SkillWorkbenchTitle } from './SkillWorkbench'
 
 interface Props {
   repoPath: string
@@ -19,83 +27,126 @@ interface Props {
   onClose: () => void
 }
 
-const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
-  <TargetChip
-    key={agent}
-    agent={agent}
-    className={styles.chip}
-    state={active ? 'on' : 'off'}
-    label={agentShort[agent]}
-    tooltip={`${agentShort[agent]} ${active ? '已启用' : '未启用'}`}
-    onClick={onClick}
-  />
-)
+type DocumentMode = 'preview' | 'source'
+
+function skillDocumentPath(path?: string): string {
+  if (!path) return 'Resolved from skill source'
+  if (/SKILL\.md$/i.test(path)) return path
+  return `${path.replace(/[\\/]+$/, '')}/SKILL.md`
+}
 
 export default function SkillDetailEditor({ repoPath, detail, showToast, onClose }: Props) {
-  const allAgents: AgentId[] = [...AGENTS]
   const [skillContent, setSkillContent] = useState<string | null>(null)
-  const [skillLoading, setSkillLoading] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [mode, setMode] = useState<DocumentMode>('preview')
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [skillError, setSkillError] = useState<string | null>(null)
-  const [copiedPath, setCopiedPath] = useState<string | null>(null)
-  const [copiedSkillContent, setCopiedSkillContent] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     if (!detail) {
       setSkillContent(null)
+      setDraft('')
       setSkillError(null)
-      setSkillLoading(false)
-      setCopiedSkillContent(false)
+      setSaveError(null)
+      setMode('preview')
+      setDirty(false)
+      setSaving(false)
+      setCopied(false)
       return
     }
+
     let active = true
-    setSkillLoading(true)
-    setSkillError(null)
     setSkillContent(null)
-    setCopiedSkillContent(false)
+    setDraft('')
+    setSkillError(null)
+    setSaveError(null)
+    setMode('preview')
+    setDirty(false)
+    setCopied(false)
+
     api
       .getSkillContent(repoPath, detail.skillId, detail.source, detail.path)
       .then((res) => {
         if (!active) return
-        if (res.ok) setSkillContent(res.content ?? null)
-        else setSkillError(res.message ?? res.error ?? '读取失败')
+        if (!res.ok) {
+          setSkillError(res.message ?? res.error ?? '读取失败')
+          return
+        }
+        const content = res.content ?? ''
+        setSkillContent(content)
+        setDraft(content)
       })
-      .catch((e: unknown) => {
+      .catch((err: unknown) => {
         if (!active) return
-        const msg = e instanceof Error ? e.message : String(e)
-        setSkillError(msg === 'Failed to fetch' ? '网络错误,请检查后端服务是否运行' : msg)
+        console.error({ err }, 'Failed to load skill content')
+        const message = err instanceof Error ? err.message : String(err)
+        setSkillError(message === 'Failed to fetch' ? '网络错误,请检查后端服务是否运行' : message)
       })
-      .finally(() => {
-        if (active) setSkillLoading(false)
-      })
+
     return () => {
       active = false
     }
-  }, [detail, repoPath])
-
-  const copyPath = async (p: string) => {
-    if (!navigator.clipboard) return
-    try {
-      await navigator.clipboard.writeText(p)
-      setCopiedPath(p)
-      setTimeout(() => setCopiedPath(null), 1500)
-    } catch {
-      /* clipboard unavailable */
-    }
-  }
+  }, [detail, reloadKey, repoPath])
 
   const copySkillContent = async () => {
-    if (!navigator.clipboard || !skillContent) return
+    if (!navigator.clipboard || skillContent == null) return
     try {
-      await navigator.clipboard.writeText(skillContent)
-      setCopiedSkillContent(true)
+      await navigator.clipboard.writeText(mode === 'source' ? draft : skillContent)
+      setCopied(true)
       showToast('已复制 SKILL.md')
-      setTimeout(() => setCopiedSkillContent(false), 1500)
-    } catch {
-      /* clipboard unavailable */
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch (err) {
+      console.error({ err }, 'Failed to copy skill content')
     }
   }
 
-  const showSkillLoading = Boolean(detail) && !skillContent && !skillError
+  const saveSkillContent = async () => {
+    if (!detail || detail.source || !dirty || saving) return
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const result = await api.saveSkillContent({
+        repo: repoPath,
+        skillId: detail.skillId,
+        localPath: detail.path,
+        content: draft,
+      })
+      if (!result.ok) throw new Error(result.message ?? result.error ?? '保存失败')
+
+      setSkillContent(draft)
+      setDirty(false)
+      try {
+        await refreshManifest(repoPath)
+      } catch (err) {
+        console.error({ err }, 'Failed to refresh skills after saving content')
+        showErrorToast(err, {
+          title: '内容已保存，但列表刷新失败',
+          message: '请稍后刷新页面',
+        })
+        return
+      }
+      showToast('已保存')
+    } catch (err) {
+      console.error({ err }, 'Failed to save skill content')
+      const message = err instanceof Error ? err.message : String(err)
+      setSaveError(message)
+      showErrorToast(err, {
+        title: 'Skill 内容保存失败',
+        message: '请检查内容后重试',
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const activeTargets = detail ? AGENTS.filter((agent) => detail.targets.includes(agent)).length : 0
+  const isLocal = Boolean(detail && !detail.source)
+  const savedState = detail?.source ? 'Read only' : saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'
+  const savedTone = saving ? 'saving' : dirty ? 'dirty' : 'saved'
 
   return (
     <Modal
@@ -110,181 +161,196 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
         />
       }
       width={1180}
-      minHeight={460}
+      busy={saving}
       className={styles.dialog}
       bodyClassName={styles.body}
       headerClassName={styles.header}
       titleClassName={styles.modalTitle}
+      headerActions={
+        detail ? (
+          <span className={styles.savedState} data-state={savedTone}>
+            {saving ? <LoaderCircle size={13} className={styles.spin} /> : <Check size={13} />}
+            {savedState}
+          </span>
+        ) : null
+      }
     >
       {detail && (
-        <div className={styles.layout}>
-          <aside className={styles.metadata} data-testid="skill-metadata-pane">
-            {detail.source && (
-              <div style={{ marginBottom: 12 }}>
-                <div className="label">source</div>
-                <div
-                  style={{
-                    marginTop: 4,
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: 12,
-                    color: 'var(--text)',
-                    wordBreak: 'break-all',
-                  }}
-                >
-                  {detail.source}
-                </div>
-              </div>
-            )}
-            {detail.path && (
-              <div style={{ marginBottom: 12 }}>
-                <div className="label">path</div>
-                <div
-                  style={{
-                    marginTop: 4,
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: 12,
-                    color: 'var(--text)',
-                    wordBreak: 'break-all',
-                  }}
-                >
-                  {detail.path}
-                </div>
-              </div>
-            )}
-            <div style={{ marginBottom: 12 }}>
-              <div className="label">targets</div>
-              <div style={{ display: 'flex', gap: 7, marginTop: 6 }}>
-                {allAgents.map((a) => renderChip(a, detail.targets.includes(a)))}
-              </div>
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <div className="label">projected links</div>
-              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {allAgents.map((a) => {
-                  const p = agentSkillPath(a, detail.skillId)
-                  const active = detail.targets.includes(a)
-                  return (
-                    <div
-                      key={a}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        opacity: active ? 1 : 0.45,
-                      }}
-                    >
-                      {renderChip(a, active)}
-                      <span
-                        style={{
-                          flex: 1,
-                          fontFamily: "'JetBrains Mono', monospace",
-                          fontSize: 11,
-                          color: 'var(--text)',
-                          wordBreak: 'break-all',
-                        }}
-                      >
-                        {p}
-                      </span>
-                      <IconButton
-                        label={copiedPath === p ? `已复制 ${p}` : `复制 ${p}`}
-                        tooltip={copiedPath === p ? '已复制' : '复制'}
-                        tone={copiedPath === p ? 'success' : 'default'}
-                        onClick={() => copyPath(p)}
-                      >
-                        {copiedPath === p ? (
-                          <Check className="h-3 w-3" />
-                        ) : (
-                          <Copy className="h-3 w-3" />
-                        )}
-                      </IconButton>
+        <SkillWorkbench
+          className={styles.layout}
+          bodyClassName={styles.editorBody}
+          configurationClassName={styles.metadata}
+          resultsClassName={styles.document}
+          configurationLabel="Details"
+          resultsLabel="SKILL.md"
+          configuration={
+            <div className={styles.metadataContent} data-testid="skill-metadata-pane">
+              <section>
+                <span className={styles.kicker}>Location</span>
+                <dl className={styles.metaList}>
+                  {detail.source && (
+                    <div>
+                      <dt>Source</dt>
+                      <dd>{detail.source}</dd>
                     </div>
-                  )
-                })}
+                  )}
+                  <div>
+                    <dt>Path</dt>
+                    <dd>{skillDocumentPath(detail.path)}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section>
+                <div className={styles.sectionHeading}>
+                  <span className={styles.kicker}>Projected links</span>
+                  <span>
+                    {activeTargets} of {AGENTS.length}
+                  </span>
+                </div>
+                <div className={styles.targetList}>
+                  {AGENTS.map((agent: AgentId) => {
+                    const active = detail.targets.includes(agent)
+                    return (
+                      <div
+                        key={agent}
+                        className={styles.targetRow}
+                        data-active={active}
+                        style={{ '--agent-color': agentColor[agent] } as CSSProperties}
+                      >
+                        <span className={styles.agentBadge}>{agentShort[agent]}</span>
+                        <div>
+                          <strong>{agentName[agent]}</strong>
+                          <code>{agentSkillPath(agent, detail.skillId)}</code>
+                        </div>
+                        <span className={styles.targetState}>{active ? 'linked' : 'off'}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            </div>
+          }
+          results={
+            <div className={styles.documentPane} data-testid="skill-document-pane">
+              <div className={styles.documentToolbar}>
+                <div className={styles.documentTabs} role="tablist" aria-label="SKILL.md view">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === 'preview'}
+                    onClick={() => setMode('preview')}
+                  >
+                    <FileText size={14} />
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === 'source'}
+                    onClick={() => setMode('source')}
+                  >
+                    <Code2 size={14} />
+                    Source
+                  </button>
+                </div>
+                <div className={styles.documentActions}>
+                  <span>SKILL.md</span>
+                  <IconButton
+                    label={copied ? '已复制 SKILL.md' : '复制 SKILL.md'}
+                    tooltip={copied ? '已复制' : '复制'}
+                    tone={copied ? 'success' : 'default'}
+                    onClick={() => void copySkillContent()}
+                    disabled={skillContent == null}
+                  >
+                    {copied ? <Check size={14} /> : <Copy size={14} />}
+                  </IconButton>
+                </div>
               </div>
-            </div>
-          </aside>
-          <section className={styles.document} data-testid="skill-document-pane">
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 8,
-              }}
-            >
-              <div className="label">SKILL.md</div>
-            </div>
-            <div
-              className={styles['skill-detail-content-frame']}
-              data-testid="skill-detail-content-frame"
-            >
-              {showSkillLoading && (
-                <>
-                  <div className={styles['skill-detail-preview-tabs']} aria-hidden="true">
-                    <span className={styles.on}>预览</span>
-                    <span>原文</span>
+
+              <div className={styles.documentContent} data-testid="skill-detail-content-frame">
+                {skillContent == null && !skillError && (
+                  <div className={styles.resultState} role="status">
+                    <LoaderCircle size={20} className={styles.spin} />
+                    <strong>Loading SKILL.md</strong>
+                    <p>正在读取 skill 内容…</p>
                   </div>
-                  <div className={styles['skill-detail-loading-panel']} role="status">
-                    {skillLoading ? '加载 SKILL.md…' : '准备加载 SKILL.md…'}
+                )}
+
+                {skillError && (
+                  <div className={styles.resultState} role="alert">
+                    <FileText size={20} />
+                    <strong>SKILL.md failed to load</strong>
+                    <p>{skillError}</p>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setReloadKey((key) => key + 1)}
+                    >
+                      Retry
+                    </Button>
                   </div>
-                </>
-              )}
-              {skillError && (
-                <div className={styles['skill-detail-error']} role="alert">
-                  {skillError}
+                )}
+
+                {skillContent != null && mode === 'preview' && skillContent.trim() === '' && (
+                  <div className={styles.resultState}>
+                    <FileText size={22} />
+                    <strong>Empty SKILL.md</strong>
+                    <Button size="sm" onClick={() => setMode('source')}>
+                      {isLocal ? 'Start editing' : 'View source'}
+                    </Button>
+                  </div>
+                )}
+
+                {skillContent != null && mode === 'preview' && skillContent.trim() !== '' && (
+                  <MarkdownDocument content={skillContent} className={styles.markdownPreview} />
+                )}
+
+                {skillContent != null && mode === 'source' && isLocal && (
+                  <MonacoTextEditor
+                    className={styles.sourceEditor}
+                    ariaLabel="SKILL.md 内容"
+                    height="100%"
+                    language="markdown"
+                    value={draft}
+                    onChange={(next) => {
+                      setDraft(next)
+                      setDirty(next !== skillContent)
+                      setSaveError(null)
+                    }}
+                    options={{
+                      lineNumbers: 'on',
+                      padding: { top: 18, bottom: 18 },
+                      renderWhitespace: 'selection',
+                    }}
+                  />
+                )}
+
+                {skillContent != null && mode === 'source' && !isLocal && (
+                  <pre className={styles.readOnlySource}>{skillContent}</pre>
+                )}
+              </div>
+
+              {saveError && (
+                <div className={styles.saveError} role="alert">
+                  {saveError}
                 </div>
               )}
-              {skillContent && (
-                <MarkdownPreview
-                  content={skillContent}
-                  editable={!detail.source}
-                  toolbarEnd={
-                    <IconButton
-                      label={copiedSkillContent ? '已复制 SKILL.md' : '复制 SKILL.md'}
-                      tooltip={copiedSkillContent ? '已复制' : '复制'}
-                      tone={copiedSkillContent ? 'success' : 'default'}
-                      onClick={() => void copySkillContent()}
-                    >
-                      {copiedSkillContent ? (
-                        <Check className="h-3 w-3" />
-                      ) : (
-                        <Copy className="h-3 w-3" />
-                      )}
-                    </IconButton>
-                  }
-                  onSave={async (newContent) => {
-                    try {
-                      await api.saveSkillContent({
-                        repo: repoPath,
-                        skillId: detail.skillId,
-                        localPath: detail.path,
-                        content: newContent,
-                      })
-                      setSkillContent(newContent)
-                      try {
-                        await refreshManifest(repoPath)
-                      } catch (e) {
-                        console.error({ err: e }, 'Failed to refresh skills after saving content')
-                        showErrorToast(e, {
-                          title: '内容已保存，但列表刷新失败',
-                          message: '请稍后刷新页面',
-                        })
-                        return
-                      }
-                      showToast('已保存')
-                    } catch (e) {
-                      console.error({ err: e }, 'Failed to save skill content')
-                      showErrorToast(e, {
-                        title: 'Skill 内容保存失败',
-                        message: '请检查内容后重试',
-                      })
-                    }
-                  }}
-                />
-              )}
             </div>
-          </section>
-        </div>
+          }
+          footer={
+            <>
+              <Button variant="ghost" onClick={onClose} disabled={saving}>
+                Close
+              </Button>
+              {isLocal && (
+                <Button onClick={() => void saveSkillContent()} disabled={saving || !dirty}>
+                  {saving ? 'Saving…' : 'Save SKILL.md'}
+                </Button>
+              )}
+            </>
+          }
+        />
       )}
     </Modal>
   )
