@@ -51,7 +51,13 @@ describe.concurrent('SyncSessionManager', () => {
 
   it('applies a resolved merge only after every conflict is saved', async () => {
     const { home, repo } = await setupRepo('value: base\n', 'value: local\n', 'value: remote\n')
-    const manager = new SyncSessionManager({ home })
+    const applied: string[] = []
+    const manager = new SyncSessionManager({
+      home,
+      onApplied: async (repoPath) => {
+        applied.push(repoPath)
+      },
+    })
     const pulled = await manager.pull(repo)
 
     const saved = await manager.saveConflict(pulled.sessionId!, 'skills.yaml', 'value: chosen\n')
@@ -59,6 +65,7 @@ describe.concurrent('SyncSessionManager', () => {
     expect(saved.clean).toBe(true)
     expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).toBe('value: chosen\n')
     expect(await manager.getSession(repo)).toBeNull()
+    expect(applied).toEqual([repo])
   })
 
   it('remerges onto formal changes made while the session is open', async () => {
@@ -170,7 +177,13 @@ describe.concurrent('SyncSessionManager', () => {
     await writeFile(join(repo, 'scratch', 'note.txt'), 'temporary\n')
     await writeFile(join(repo, 'loose.txt'), 'temporary\n')
 
-    const result = await new SyncSessionManager({ home }).forcePull(repo)
+    const applied: string[] = []
+    const result = await new SyncSessionManager({
+      home,
+      onApplied: async (repoPath) => {
+        applied.push(repoPath)
+      },
+    }).forcePull(repo)
 
     expect(result.clean).toBe(true)
     const git = simpleGit(repo)
@@ -181,5 +194,6 @@ describe.concurrent('SyncSessionManager', () => {
     await expect(readFile(join(repo, 'loose.txt'), 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',
     })
+    expect(applied).toEqual([repo])
   })
 })

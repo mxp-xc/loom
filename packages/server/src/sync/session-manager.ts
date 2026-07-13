@@ -49,6 +49,7 @@ export class SyncSessionError extends Error {
 export interface SyncSessionManagerOptions {
   home: string
   logger?: Logger
+  onApplied?: (repoPath: string) => Promise<void>
   maxWorktrees?: number
   maxTotalBytes?: number
   maxSessionBytes?: number
@@ -69,6 +70,7 @@ export class SyncSessionManager {
   private readonly cacheRoot: string
   private readonly stateRoot: string
   private readonly logger?: Logger
+  private readonly onApplied?: (repoPath: string) => Promise<void>
   private readonly maxWorktrees: number
   private readonly maxTotalBytes: number
   private readonly maxSessionBytes: number
@@ -80,6 +82,7 @@ export class SyncSessionManager {
     this.cacheRoot = join(loomRoot, 'cache', 'sync-worktrees')
     this.stateRoot = join(loomRoot, 'state', 'sync-sessions')
     this.logger = options.logger
+    this.onApplied = options.onApplied
     this.maxWorktrees = options.maxWorktrees ?? envNumber('LOOM_SYNC_MAX_WORKTREES', 16)
     this.maxTotalBytes = options.maxTotalBytes ?? envNumber('LOOM_SYNC_MAX_BYTES', 2 * 1024 ** 3)
     this.maxSessionBytes =
@@ -213,6 +216,7 @@ export class SyncSessionManager {
       }
       await git.raw(['reset', '--hard', remoteTip])
       await git.raw(['clean', '-fd'])
+      await this.onApplied?.(canonical)
       this.logger?.info?.('force pull completed', { repoPath: canonical, remoteTip })
       return { clean: true, conflicts: [] }
     })
@@ -398,6 +402,7 @@ export class SyncSessionManager {
     }
     await formalGit.raw(['merge', '--ff-only', candidate])
     await this.cleanup(session)
+    await this.onApplied?.(session.repoPath)
     return { clean: true, conflicts: [] }
   }
 

@@ -17,6 +17,7 @@ import { SyncSessionManager } from '../sync/session-manager.js'
 import { logger } from '../lib/logger.js'
 import { createVarsRoutes } from './routes/vars.js'
 import type { McpDebugSessionManagerLike } from './routes/mcp-debug.js'
+import { projectRepository } from '../projection/workflow.js'
 
 export interface RouteDeps {
   fs: IFileSystem
@@ -29,6 +30,8 @@ type RegisterRouteDeps = RouteDeps & {
   sync?: SyncSessionManager
   mcpDebug?: McpDebugSessionManagerLike
 }
+
+export type SyncRouteDeps = RouteDeps & { sync: SyncSessionManager }
 
 export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
   const syncLogger = logger.child('sync-session')
@@ -43,6 +46,10 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
     baseDeps.sync ??
     new SyncSessionManager({
       home: baseDeps.home,
+      onApplied: async (repoPath) => {
+        const result = await projectRepository(baseDeps, repoPath, {})
+        if (!result.ok) throw result.failure.originalError
+      },
       logger: {
         error: (message, context) => syncLogger.error(message, context),
         warn: (message, context) => syncLogger.warn(message, context),

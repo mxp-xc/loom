@@ -129,3 +129,25 @@ Tests:
 
 - packages/server/test/api/routes.test.ts
 - packages/web/test/sync.test.tsx
+
+## R-SYNC-006 拉取完成后应用投影
+
+Status: active
+Applies to: Sync 普通拉取、冲突解决完成、强制拉取
+
+Rule:
+远端状态成功应用到本地仓库后，必须立即按同步后的 desired state 执行完整 projection reconciliation。
+
+Implications:
+
+- 远端新增或删除的 skills、MCP、memory 投影会同步应用到本地 agent-native 文件。
+- 存在未解决冲突时不得提前应用投影；最后一个冲突解决并应用后再执行。
+- Projection 失败必须作为同步失败暴露，不能静默返回同步完成。
+
+Safety:
+
+- 投影仍须遵守 Projection 规则中的 managed artifact 边界，不得删除 user-owned 文件。
+
+Tests:
+
+- packages/server/test/sync/session-manager.test.ts
