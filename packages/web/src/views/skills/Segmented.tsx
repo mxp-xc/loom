@@ -20,15 +20,24 @@ export function Segmented<T extends string>({
             key={o.value}
             variant="ghost"
             size="sm"
+            aria-pressed={active}
             onClick={() => onChange(o.value)}
             style={{
               flex: 1,
-              border: '1px solid var(--border)',
-              background: active ? 'var(--bg)' : 'transparent',
-              color: active ? 'var(--bright)' : 'var(--muted)',
+              border: '1px solid',
+              borderColor: active
+                ? 'color-mix(in srgb, var(--primary) 72%, var(--border))'
+                : 'var(--border)',
+              background: active
+                ? 'color-mix(in srgb, var(--primary) 16%, var(--card))'
+                : 'transparent',
+              color: active ? 'var(--primary)' : 'var(--muted)',
+              boxShadow: active
+                ? 'inset 0 0 0 1px color-mix(in srgb, var(--primary) 22%, transparent)'
+                : 'none',
               fontFamily: mono,
               fontSize: 12,
-              fontWeight: 500,
+              fontWeight: active ? 600 : 500,
             }}
           >
             {o.label}

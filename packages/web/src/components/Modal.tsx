@@ -11,6 +11,8 @@ interface ModalProps {
   width?: number
   minHeight?: number
   busy?: boolean
+  className?: string
+  bodyClassName?: string
   children: ReactNode
 }
 
@@ -21,6 +23,8 @@ export default function Modal({
   width = 480,
   minHeight = 0,
   busy = false,
+  className,
+  bodyClassName,
   children,
 }: ModalProps) {
   const contentRef = useRef<HTMLDivElement | null>(null)
@@ -187,6 +191,7 @@ export default function Modal({
         >
           <DialogPrimitive.Content
             ref={contentRef}
+            className={className}
             aria-modal="true"
             aria-busy={busy}
             onClick={(event) => event.stopPropagation()}
@@ -257,7 +262,9 @@ export default function Modal({
                 </IconButton>
               </DialogPrimitive.Close>
             </div>
-            <div style={{ padding: '18px 20px' }}>{children}</div>
+            <div className={bodyClassName} style={{ padding: '18px 20px' }}>
+              {children}
+            </div>
           </DialogPrimitive.Content>
         </DialogPrimitive.Overlay>
       </DialogPrimitive.Portal>

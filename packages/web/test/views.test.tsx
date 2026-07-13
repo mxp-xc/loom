@@ -1570,6 +1570,13 @@ describe('Skill source updates', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Edit Source · superpowers' })
     await within(dialog).findByText('brainstorming')
 
+    expect(dialog.className).toContain('dialog')
+    expect(
+      within(dialog).getByRole('list', { name: 'Edit Source · superpowers' }).parentElement
+        ?.className,
+    ).toContain('skillList')
+    expect(within(dialog).getByRole('button', { name: 'Scan' }).className).toContain('scanButton')
+
     fireEvent.click(within(dialog).getByRole('button', { name: '全选' }))
     expect(within(dialog).getByText('已选 2 / 2')).toBeDefined()
 

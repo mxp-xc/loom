@@ -7,6 +7,7 @@ import { sourceIdentity, type SkillSource } from '@loom/core'
 import { sortSkillMembers, type ScanMember } from './types'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
 import { SelectableList, type SelectableListItem } from '@/components/ui/selectable-list'
+import styles from './EditSourceModal.module.css'
 
 interface Props {
   repoPath: string
@@ -46,16 +47,18 @@ export default function EditSourceModal({ repoPath, source, showToast, onClose, 
 }
 
 function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved }: OpenProps) {
-  const [type, setType] = useState<'branch' | 'tag'>('branch')
-  const [name, setName] = useState('')
-  const [ref, setRef] = useState('')
-  const [scan, setScan] = useState('')
+  const [type, setType] = useState<'branch' | 'tag'>(source.type ?? 'branch')
+  const [name, setName] = useState(() => sourceIdentity(source).repoId)
+  const [ref, setRef] = useState(source.ref ?? '')
+  const [scan, setScan] = useState(source.scan ?? '')
   const [branches, setBranches] = useState<string[]>([])
   const [tags, setTags] = useState<string[]>([])
   const [refsLoading, setRefsLoading] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [members, setMembers] = useState<ScanMember[]>([])
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set((source.members ?? []).map((member) => member.name)),
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const operations = useManifestOperations(repoPath, { onError: setError, onToast: showToast })
@@ -193,125 +196,137 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
         if (!saving) onClose()
       }}
       title={`Edit Source · ${repoId}`}
-      width={560}
+      width={760}
+      className={styles.dialog}
+      bodyClassName={styles.body}
     >
-      {error && <div style={errBox}>{error}</div>}
+      <div className={styles.layout}>
+        <div className={styles.fields}>
+          {error && <div style={errBox}>{error}</div>}
 
-      <div style={{ marginBottom: 14 }}>
-        <span className="label">url</span>
-        <input value={source.url} readOnly style={{ ...inputStyle, marginTop: 0 }} />
-      </div>
+          <div className={styles.fieldGrid}>
+            <div>
+              <span className="label">url</span>
+              <input value={source.url} readOnly style={{ ...inputStyle, marginTop: 0 }} />
+            </div>
 
-      <div style={{ marginBottom: 14 }}>
-        <label className="label" htmlFor="edit-source-name">
-          source name
-        </label>
-        <input
-          id="edit-source-name"
-          aria-label="source name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          style={inputStyle}
-        />
-      </div>
-
-      <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
-        <div style={{ flex: '0 0 120px' }}>
-          <div className="label" style={{ marginBottom: 4 }}>
-            type
+            <div>
+              <label className="label" htmlFor="edit-source-name">
+                source name
+              </label>
+              <input
+                id="edit-source-name"
+                aria-label="source name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
           </div>
-          <Segmented
-            value={type}
-            onChange={handleTypeChange}
-            options={[
-              { value: 'branch', label: 'branch' },
-              { value: 'tag', label: 'tag' },
-            ]}
+
+          <div style={{ display: 'flex', gap: 14 }}>
+            <div style={{ flex: '0 0 120px' }}>
+              <div className="label" style={{ marginBottom: 4 }}>
+                type
+              </div>
+              <Segmented
+                value={type}
+                onChange={handleTypeChange}
+                options={[
+                  { value: 'branch', label: 'branch' },
+                  { value: 'tag', label: 'tag' },
+                ]}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <span className="label">ref</span>
+              <select
+                value={ref}
+                onChange={(e) => setRef(e.target.value)}
+                disabled={refsLoading || refOptions.length === 0}
+                style={{ ...inputStyle, marginTop: 0, cursor: 'pointer' }}
+              >
+                {refOptions.length === 0 ? (
+                  <option value="">{refsLoading ? '加载中…' : '—'}</option>
+                ) : (
+                  refOptions.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+          </div>
+
+          <div className={styles.scanRow}>
+            <div>
+              <label className="label" htmlFor="edit-source-scan-pattern">
+                scan pattern
+              </label>
+              <input
+                id="edit-source-scan-pattern"
+                aria-label="scan pattern"
+                value={scan}
+                onChange={(e) => setScan(e.target.value)}
+                placeholder="**/SKILL.md"
+                style={inputStyle}
+              />
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 11,
+                  color: 'var(--muted)',
+                  fontFamily: mono,
+                }}
+              >
+                留空使用默认 <code style={{ fontFamily: mono }}>**/SKILL.md</code>
+              </div>
+            </div>
+
+            <Button
+              className={styles.scanButton}
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleScan()}
+              disabled={scanning}
+              style={{ width: '100%' }}
+            >
+              {scanning ? '扫描中…' : 'Scan'}
+            </Button>
+          </div>
+        </div>
+
+        {scanning ? (
+          <div className="selectable-list-empty">扫描中…</div>
+        ) : (
+          <SelectableList
+            className={styles.skillList}
+            ariaLabel={'Edit Source · ' + repoId}
+            items={listItems}
+            selectedIds={selected}
+            onSelectedIdsChange={setSelected}
+            searchPlaceholder="搜索 skill…"
+            showSearch={members.length > 0}
+            showSelectionActions={members.length > 0}
+            emptyMessage="未发现 SKILL.md"
+            noMatchesMessage="无匹配"
           />
-        </div>
-        <div style={{ flex: 1 }}>
-          <span className="label">ref</span>
-          <select
-            value={ref}
-            onChange={(e) => setRef(e.target.value)}
-            disabled={refsLoading || refOptions.length === 0}
-            style={{ ...inputStyle, marginTop: 0, cursor: 'pointer' }}
+        )}
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button variant="primary" onClick={handleSave} disabled={saving} style={{ flex: 1 }}>
+            {saving ? '保存中…' : `保存 (${selected.size})`}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={onClose}
+            disabled={saving}
+            style={{ flex: '0 0 auto' }}
           >
-            {refOptions.length === 0 ? (
-              <option value="">{refsLoading ? '加载中…' : '—'}</option>
-            ) : (
-              refOptions.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))
-            )}
-          </select>
+            取消
+          </Button>
         </div>
-      </div>
-
-      <div style={{ marginBottom: 14 }}>
-        <label className="label" htmlFor="edit-source-scan-pattern">
-          scan pattern
-        </label>
-        <input
-          id="edit-source-scan-pattern"
-          aria-label="scan pattern"
-          value={scan}
-          onChange={(e) => setScan(e.target.value)}
-          placeholder="**/SKILL.md"
-          style={inputStyle}
-        />
-        <div
-          style={{
-            marginTop: 6,
-            fontSize: 11,
-            color: 'var(--muted)',
-            fontFamily: mono,
-          }}
-        >
-          留空使用默认 <code style={{ fontFamily: mono }}>**/SKILL.md</code>
-        </div>
-      </div>
-
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={() => void handleScan()}
-        disabled={scanning}
-        style={{ width: '100%', marginBottom: 14 }}
-      >
-        {scanning ? '扫描中…' : 'Scan'}
-      </Button>
-
-      {scanning ? (
-        <div className="selectable-list-empty">扫描中…</div>
-      ) : (
-        <SelectableList
-          ariaLabel={'Edit Source · ' + repoId}
-          items={listItems}
-          selectedIds={selected}
-          onSelectedIdsChange={setSelected}
-          searchPlaceholder="搜索 skill…"
-          showSearch={members.length > 0}
-          showSelectionActions={members.length > 0}
-          emptyMessage="未发现 SKILL.md"
-          noMatchesMessage="无匹配"
-        />
-      )}
-
-      <div style={{ display: 'flex', gap: 8 }}>
-        <Button variant="primary" onClick={handleSave} disabled={saving} style={{ flex: 1 }}>
-          {saving ? '保存中…' : `保存 (${selected.size})`}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={onClose}
-          disabled={saving}
-          style={{ flex: '0 0 auto' }}
-        >
-          取消
-        </Button>
       </div>
     </Modal>
   )
