@@ -673,7 +673,8 @@ describe('Memory view', () => {
       '解析预览',
     ])
     expect(screen.queryByText('Markdown')).toBeNull()
-    expect(screen.getByRole('textbox', { name: 'Memory 内容' })).toBeDefined()
+    expect(screen.getByRole('article').textContent).toContain('Active memory')
+    expect(screen.getByRole('button', { name: '复制 Memory 原始内容' })).toBeDefined()
     const targetPanel = screen.getByTestId('memory-targets')
     expect(within(targetPanel).queryByRole('button', { name: 'CC' })).toBeNull()
     expect(within(targetPanel).getByRole('button', { name: 'CX' })).toBeDefined()

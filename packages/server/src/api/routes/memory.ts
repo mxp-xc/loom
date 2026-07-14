@@ -8,9 +8,15 @@ import { jsonValidator, queryValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
 import { renderAgentAwareText } from '../../vars/agent-aware.js'
 
-const NAME_RE = /^[A-Za-z0-9_-]+$/
+const NAME_RE = /^[A-Za-z0-9._-]+$/
+const WINDOWS_RESERVED_NAME_RE = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i
 const NonEmptyString = z.string().min(1)
-const MemoryName = z.string().regex(NAME_RE)
+const MemoryName = z
+  .string()
+  .min(1)
+  .max(252)
+  .regex(NAME_RE)
+  .refine((name) => !WINDOWS_RESERVED_NAME_RE.test(name))
 const RepoQuery = z.object({ repo: NonEmptyString })
 const MemoryQuery = RepoQuery.extend({ name: MemoryName.optional() })
 const RequiredMemoryQuery = RepoQuery.extend({ name: MemoryName })
@@ -26,6 +32,15 @@ const PreviewMemoryBody = z.object({
 
 function memoriesDir(repoPath: string) {
   return join(repoPath, 'memories')
+}
+
+async function hasMemoryNameConflict(fs: RouteDeps['fs'], dir: string, name: string) {
+  if (!(await fs.exists(dir))) return false
+  const normalizedName = name.toLowerCase()
+  return (await fs.readDir(dir)).some(
+    (fileName) =>
+      fileName.endsWith('.md') && fileName.slice(0, -'.md'.length).toLowerCase() === normalizedName,
+  )
 }
 
 async function readConfig(fs: any, repoPath: string): Promise<Record<string, any>> {
@@ -72,7 +87,8 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
       const dir = memoriesDir(repoPath)
       await deps.fs.mkdir(dir, true)
       const file = join(dir, `${name}.md`)
-      if (await deps.fs.exists(file)) return c.json({ ok: false, error: 'exists' }, 409)
+      if (await hasMemoryNameConflict(deps.fs, dir, name))
+        return c.json({ ok: false, error: 'exists' }, 409)
       if (!file.startsWith(dir + sep)) return c.json({ ok: false, error: 'invalid_name' }, 400)
       await deps.fs.writeFile(file, '')
       return c.json({ ok: true, name })
@@ -140,7 +156,8 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
         const oldFile = join(dir, `${name}.md`)
         const newFile = join(dir, `${newName}.md`)
         if (!(await deps.fs.exists(oldFile))) return c.json({ ok: false, error: 'not_found' }, 404)
-        if (await deps.fs.exists(newFile)) return c.json({ ok: false, error: 'exists' }, 409)
+        if (await hasMemoryNameConflict(deps.fs, dir, newName))
+          return c.json({ ok: false, error: 'exists' }, 409)
         if (!newFile.startsWith(dir + sep)) return c.json({ ok: false, error: 'invalid_name' }, 400)
         await deps.fs.move(oldFile, newFile)
         const cfg = await readConfig(deps.fs, repoPath)

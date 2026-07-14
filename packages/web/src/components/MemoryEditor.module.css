@@ -75,8 +75,12 @@
 .mem-preview-targets :global(.target-chips) {
   flex-wrap: nowrap;
 }
+.mem-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .mem-save {
-  margin-left: auto;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   padding: 5px 12px;

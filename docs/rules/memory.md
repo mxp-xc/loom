@@ -8,22 +8,27 @@ Status: active
 Applies to: memory manifest, memory API
 
 Rule:
-Memory 列表来自仓库内 `memories/*.md` 文件，激活项由 `config.active_memory` 指向。不存在独立的 memory 元数据文件；memory name 即文件名派生出的业务 id。
+Memory 列表来自仓库内 `memories/*.md` 文件，激活项由 `config.active_memory` 指向。不存在独立的 memory 元数据文件；memory name 即文件名派生出的业务 id。新建和重命名使用跨平台可移植名称：1 至 252 个 ASCII 字符，只允许字母、数字、`.`、`_`、`-`，且名称首段不得是不区分大小写的 Windows 保留设备名 `CON`、`PRN`、`AUX`、`NUL`、`COM1` 至 `COM9`、`LPT1` 至 `LPT9`；设备名带扩展时仍视为保留名。
 
 Implications:
 
 - 没有 `memories/` 目录时，memory 列表为空且 active 为 `null`。
 - `active_memory` 指向不存在的 memory 时，active 为 `null` 并记录 manifest error。
 - 读取 active memory 时返回其原始 markdown 内容。
+- `.` 是合法 memory name，对应文件 `memories/..md`。
+- 新建和重命名按不区分大小写的文件名检查冲突，避免在大小写敏感系统创建无法同步到大小写不敏感系统的两个 memory。
+- 已存在但不符合新建规则的 `.md` 文件仍可被 manifest 发现；Loom 不自动重命名或删除。
 
 Safety:
 
 - Memory name 不能允许路径穿越。
+- Memory name 不能使用跨平台不稳定字符或保留文件名。
 - 文件列表和 active 状态不能从 projection artifact 反向推断。
 
 Examples:
 
 - `memories/default.md` 存在且 `config.active_memory: default` 时，manifest 中 active 为 `default`，activeContent 为该文件内容。
+- name `team.v2` 可创建为 `memories/team.v2.md`；name `CON`、`CON.notes` 和与既有 `Team` 冲突的 `team` 必须拒绝。
 
 Tests:
 

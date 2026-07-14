@@ -13,6 +13,11 @@ const editorMocks = vi.hoisted(() => ({
   monacoProviderDispose: vi.fn(),
 }))
 
+const toastMocks = vi.hoisted(() => ({
+  showToast: vi.fn(),
+  showErrorToast: vi.fn(),
+}))
+
 function monacoLineModel(line: string) {
   return {
     getValueInRange: ({ startColumn, endColumn }: { startColumn: number; endColumn: number }) =>
@@ -125,6 +130,10 @@ vi.mock('../src/lib/api', async () => {
   }
 })
 
+vi.mock('../src/hooks/useToast', () => ({
+  useToast: () => toastMocks,
+}))
+
 describe('MemoryEditor', () => {
   beforeEach(() => {
     editorMocks.richProps = []
@@ -133,7 +142,7 @@ describe('MemoryEditor', () => {
     vi.clearAllMocks()
   })
 
-  it('uses MDXEditor as a read-only raw preview and Monaco for source editing', async () => {
+  it('uses the standard Markdown preview and Monaco for source editing', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
     const content = '| 场景 | 规则 |\n|---|---|\n| Memory | 使用 rich editor |'
     render(
@@ -152,12 +161,9 @@ describe('MemoryEditor', () => {
       '解析预览',
     ])
     expect(screen.getByRole('tab', { name: '所见编辑' }).getAttribute('aria-selected')).toBe('true')
-    expect(screen.getByTestId('memory-rich-mdx-editor')).toBeTruthy()
+    expect(screen.queryByTestId('memory-rich-mdx-editor')).toBeNull()
     expect(screen.getByRole('table')).toBeTruthy()
-    expect(editorMocks.richProps.at(-1).readOnly).toBe(true)
     expect(screen.queryByRole('listbox', { name: '变量引用建议' })).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: 'mock rich change' }))
     expect(screen.queryByRole('button', { name: '保存' })).toBeNull()
     expect(onSave).not.toHaveBeenCalled()
 
@@ -238,7 +244,7 @@ describe('MemoryEditor', () => {
     expect(monacoEditorMock.props.at(-1)?.theme).toBe('vs')
   })
 
-  it('keeps rich preview usable with rich variable completion disabled', async () => {
+  it('keeps the standard preview read-only without variable completion', async () => {
     render(
       <MemoryEditor
         repo="/repo"
@@ -246,41 +252,106 @@ describe('MemoryEditor', () => {
         content="# Preview first"
         targets={['codex']}
         onSave={async () => {}}
-        enableRichVarsCompletion={false}
       />,
     )
 
-    expect(screen.getByTestId('memory-rich-mdx-editor')).toBeTruthy()
+    expect(screen.queryByTestId('memory-rich-mdx-editor')).toBeNull()
     expect(screen.getByRole('heading', { name: 'Preview first' })).toBeTruthy()
-    expect(editorMocks.richProps.at(-1).readOnly).toBe(true)
     expect(screen.queryByRole('listbox', { name: '变量引用建议' })).toBeNull()
     await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'codex'))
   })
 
-  it('keeps markdown comments visible in the rich editor adapter', async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined)
+  it('keeps markdown comments visible in the standard preview', async () => {
     render(
       <MemoryEditor
         repo="/repo"
         name="default"
         content="<!-- CODEGRAPH_START -->\n\nVisible notes\n\n<!-- CODEGRAPH_END -->"
         targets={['codex']}
-        onSave={onSave}
+        onSave={async () => {}}
       />,
     )
 
-    expect(editorMocks.richProps.at(-1).markdown).toContain('\\<!-- CODEGRAPH_START -->')
-    expect(editorMocks.richProps.at(-1).markdown).toContain('\\<!-- CODEGRAPH_END -->')
-    expect(editorMocks.richProps.at(-1).suppressHtmlProcessing).toBeUndefined()
-    expect(editorMocks.richProps.at(-1).readOnly).toBe(true)
-    act(() => {
-      editorMocks.richProps
-        .at(-1)
-        .onChange('\\<!-- CODEGRAPH_START -->\n\nEdited notes\n\n\\<!-- CODEGRAPH_END -->', false)
-    })
-    expect(screen.queryByRole('button', { name: '保存' })).toBeNull()
-    expect(onSave).not.toHaveBeenCalled()
+    const preview = document.querySelector('.md-preview')
+    expect(preview?.textContent).toContain('<!-- CODEGRAPH_START -->')
+    expect(preview?.textContent).toContain('<!-- CODEGRAPH_END -->')
+    expect(preview?.textContent).toContain('Visible notes')
     await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'codex'))
+  })
+
+  it('renders content after a CommonMark angle-bracket link destination', async () => {
+    render(
+      <MemoryEditor
+        repo="/repo"
+        name="default"
+        content={'[My Report](</abs/path/My Project/My Report.md:3>)\n\nContent after the link'}
+        targets={['codex']}
+        onSave={async () => {}}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'My Report' })).toBeTruthy()
+    expect(screen.getByText('Content after the link')).toBeTruthy()
+    await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'codex'))
+  })
+
+  it('copies the current raw Markdown including unsaved source edits', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    render(
+      <MemoryEditor
+        repo="/repo"
+        name="default"
+        content="# Saved"
+        targets={['codex']}
+        onSave={async () => {}}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Memory 内容' }), {
+      target: { value: '# Unsaved raw Markdown' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '复制 Memory 原始内容' }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('# Unsaved raw Markdown'))
+    expect(toastMocks.showToast).toHaveBeenCalledWith('已复制')
+    expect(screen.getByRole('button', { name: '已复制 Memory 原始内容' })).toBeTruthy()
+  })
+
+  it('logs and reports clipboard failures', async () => {
+    const cause = new Error('clipboard denied')
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(cause) },
+    })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      render(
+        <MemoryEditor
+          repo="/repo"
+          name="default"
+          content="raw"
+          targets={['codex']}
+          onSave={async () => {}}
+        />,
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: '复制 Memory 原始内容' }))
+
+      await waitFor(() =>
+        expect(errorSpy).toHaveBeenCalledWith({ err: cause }, 'Failed to copy memory content'),
+      )
+      expect(toastMocks.showErrorToast).toHaveBeenCalledWith(cause, {
+        title: '复制失败',
+        message: '请检查剪贴板权限后重试',
+      })
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it('shows structured resolver diagnostics in the agent rendered preview', async () => {

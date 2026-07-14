@@ -60,6 +60,35 @@ describe('memory routes', () => {
     )
   })
 
+  it('POST /memory accepts portable names containing dots', async () => {
+    for (const name of ['.', 'team.v2', 'a'.repeat(252)]) {
+      const res = await req('POST', '/api/memory', { repo: 'default', name })
+
+      expect(res.status).toBe(200)
+      expect(
+        readFileSync(join(home, '.loom', 'repos', 'default', 'memories', `${name}.md`), 'utf8'),
+      ).toBe('')
+    }
+  })
+
+  it.each(['a'.repeat(253), 'CON', 'CON.notes', 'com1', 'com1.backup', 'Lpt9'])(
+    'POST /memory rejects non-portable name %s',
+    async (name) => {
+      const res = await req('POST', '/api/memory', { repo: 'default', name })
+
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ ok: false, error: 'invalid_name' })
+    },
+  )
+
+  it('POST /memory rejects case-insensitive filename collisions', async () => {
+    writeFileSync(join(home, '.loom', 'repos', 'default', 'memories', 'Team.md'), 'x')
+
+    const res = await req('POST', '/api/memory', { repo: 'default', name: 'team' })
+
+    expect(res.status).toBe(409)
+  })
+
   it('POST /memory rejects duplicate name (409)', async () => {
     writeFileSync(join(home, '.loom', 'repos', 'default', 'memories', 'v1.md'), 'x')
     const res = await req('POST', '/api/memory', { repo: 'default', name: 'v1' })
@@ -118,6 +147,53 @@ describe('memory routes', () => {
     )
     const cfg = readFileSync(join(home, '.loom', 'repos', 'default', 'config.yaml'), 'utf8')
     expect(cfg).toContain('active_memory: v2')
+  })
+
+  it('uses a dotted name consistently across content, activation, rename, and deletion', async () => {
+    expect((await req('POST', '/api/memory', { repo: 'default', name: '.' })).status).toBe(200)
+    expect(
+      (
+        await req('PUT', '/api/memory/content', {
+          repo: 'default',
+          name: '.',
+          content: 'portable',
+        })
+      ).status,
+    ).toBe(200)
+    expect((await req('POST', '/api/memory/active', { repo: 'default', name: '.' })).status).toBe(
+      200,
+    )
+
+    const read = await req('GET', '/api/memory?repo=default&name=.')
+    expect(await read.json()).toEqual({ content: 'portable' })
+
+    expect(
+      (
+        await req('POST', '/api/memory/rename', {
+          repo: 'default',
+          name: '.',
+          newName: 'release.v1',
+        })
+      ).status,
+    ).toBe(200)
+    expect(readFileSync(join(home, '.loom', 'repos', 'default', 'config.yaml'), 'utf8')).toContain(
+      'active_memory: release.v1',
+    )
+
+    expect((await req('DELETE', '/api/memory?repo=default&name=release.v1')).status).toBe(200)
+  })
+
+  it('POST /memory/rename rejects a case-insensitive filename collision', async () => {
+    writeFileSync(join(home, '.loom', 'repos', 'default', 'memories', 'draft.md'), 'draft')
+    writeFileSync(join(home, '.loom', 'repos', 'default', 'memories', 'Release.md'), 'release')
+
+    const res = await req('POST', '/api/memory/rename', {
+      repo: 'default',
+      name: 'draft',
+      newName: 'release',
+    })
+
+    expect(res.status).toBe(409)
   })
 
   it('POST /memory/preview renders ${VAR} for agent', async () => {
