@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,15 +11,19 @@ import { createBareRepo } from '../helpers/git'
 
 describe.concurrent('checkUpdates', () => {
   it('hasUpdate when remote tag commit != pinned_commit', async () => {
-    const mockGit = { lsRemote: async () => ({ tags: { 'v5.1.4': 'bbb' }, head: 'bbb' }) } as any
-    const sources: SkillSource[] = [{ url: 'github:x/y', ref: 'v5.1.4', pinned_commit: 'aaa' }]
+    const lsRemote = vi.fn(async () => ({ tags: { 'v5.1.4': 'bbb' }, head: 'bbb' }))
+    const mockGit = { lsRemote } as any
+    const sources: SkillSource[] = [
+      { url: 'https://git.example.com/x/y.git', ref: 'v5.1.4', pinned_commit: 'aaa' },
+    ]
     const r = await checkUpdates(sources, mockGit)
     expect(r[0].hasUpdate).toBe(true)
+    expect(lsRemote).toHaveBeenCalledWith('https://git.example.com/x/y.git')
   })
   it('no update when pinned_commit matches latest tag commit', async () => {
     const mockGit = { lsRemote: async () => ({ tags: { 'v5.1.4': 'aaa' }, head: 'aaa' }) } as any
     const r = await checkUpdates(
-      [{ url: 'github:x/y', ref: 'v5.1.4', pinned_commit: 'aaa' }],
+      [{ url: 'https://git.example.com/x/y.git', ref: 'v5.1.4', pinned_commit: 'aaa' }],
       mockGit,
     )
     expect(r[0].hasUpdate).toBe(false)

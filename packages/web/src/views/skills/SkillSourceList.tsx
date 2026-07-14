@@ -287,9 +287,6 @@ function sourceSkillRelativePath(member: SourceSkillMember): string {
 
 function githubRepositoryUrl(sourceUrl: string): string | null {
   const withoutGitSuffix = sourceUrl.replace(/\.git$/, '')
-  if (withoutGitSuffix.startsWith('github:')) {
-    return 'https://github.com/' + withoutGitSuffix.slice('github:'.length).replace(/^\/+/, '')
-  }
   if (withoutGitSuffix.startsWith('git@github.com:')) {
     return 'https://github.com/' + withoutGitSuffix.slice('git@github.com:'.length)
   }

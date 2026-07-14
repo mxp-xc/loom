@@ -3,7 +3,6 @@ import type { IFileSystem } from '../ports/fs.js'
 import type { SkillSource } from '@loom/core'
 import { compareVersion, type RemoteRef, type VersionStatus } from '@loom/core'
 import { scanSourceMembers, type ScannedMember } from '../projection/scan.js'
-import { resolveGitUrl } from './resolve-url.js'
 import { isValidGitRepo, installSkill } from './install.js'
 import { cacheDirFor } from './cache.js'
 import { randomUUID } from 'node:crypto'
@@ -24,7 +23,7 @@ export async function checkUpdates(
 ): Promise<(VersionStatus & { source: SkillSource })[]> {
   const out: (VersionStatus & { source: SkillSource })[] = []
   for (const s of sources) {
-    const remote: RemoteRef = await git.lsRemote(resolveGitUrl(s.url))
+    const remote: RemoteRef = await git.lsRemote(s.url)
     out.push({
       ...compareVersion({ ref: s.ref, pinned_commit: s.pinned_commit ?? '' }, remote),
       source: s,

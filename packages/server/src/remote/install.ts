@@ -3,7 +3,6 @@ import { rm } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { IGit } from '../ports/git.js'
 import type { IFileSystem } from '../ports/fs.js'
-import { resolveGitUrl } from './resolve-url.js'
 import { cacheDirFor } from './cache.js'
 
 // Windows often holds a brief lock on freshly-touched directories (antivirus,
@@ -48,7 +47,7 @@ export async function installSkill(
   const cacheDir = cacheDirFor(repoPath, sourceId)
   if (await fs.exists(cacheDir)) await rmRetry(cacheDir)
   try {
-    await git.clone(resolveGitUrl(url), cacheDir, false)
+    await git.clone(url, cacheDir, false)
     await git.checkout(cacheDir, ref)
     const pinned_commit = await git.revParseHead(cacheDir)
     return { pinned_commit, cacheDir }

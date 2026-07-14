@@ -244,3 +244,33 @@ Tests:
 - packages/core/test/order.test.ts
 - packages/server/test/skills/application.test.ts
 - packages/web/test/views.test.tsx
+
+## R-SKILLS-009 Source URL 使用标准 Git remote URL
+
+Status: active
+Applies to: remote sources, source scan, source updates
+
+Rule:
+Source `url` 必须使用 Git 可直接识别的完整 remote URL。Loom 将该值原样传给 Git，不展开 provider-specific 简写。新增 Source 的 UI 默认引导使用 HTTPS；用户仍可显式配置 SSH URL。
+
+Implications:
+
+- HTTPS URL 可用于 GitHub、GitLab、GitCode、Gitee 或自建 Git 服务。
+- SSH URL 使用运行 Loom 的系统 Git/SSH 凭据和 host 配置。
+- `github:owner/repo`、`gitee:owner/repo` 等 Loom 简写不受支持。
+
+Safety:
+
+- Loom 不得把用户选择的 SSH URL 静默改写为 HTTPS，反之亦然。
+- Loom 不维护 provider 域名白名单；连接和认证错误由 Git 返回。
+
+Examples:
+
+- `https://git.example.com/team/skills.git`
+- `git@gitcode.com:team/skills.git`
+
+Tests:
+
+- packages/server/test/remote/discover.test.ts
+- packages/server/test/remote/update.test.ts
+- packages/core/test/derive-repo-id.test.ts

@@ -368,7 +368,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
                 value={srcUrl}
                 onChange={(e) => setSrcUrl(e.target.value)}
                 onBlur={() => srcUrl.trim() && void fetchRefs(srcUrl.trim())}
-                placeholder="https://github.com/org/repo"
+                placeholder="https://host.example/org/repo.git"
               />
             </div>
           </label>

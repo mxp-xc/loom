@@ -3,7 +3,6 @@ import { mkdtemp, mkdir, writeFile, rm, cp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { discoverSkills } from '../../src/remote/discover'
-import { resolveGitUrl } from '../../src/remote/resolve-url'
 import { NodeFileSystem } from '../../src/platform/node/fs'
 import { formatSourceMemberSkillId } from '@loom/core'
 import type { IGit } from '../../src/ports/git'
@@ -17,19 +16,6 @@ afterEach(async () => {
   await rm(srcTmp, { recursive: true, force: true }).catch(() => {})
 })
 
-describe('resolveGitUrl', () => {
-  it('github:owner/repo -> https URL', () => {
-    expect(resolveGitUrl('github:obra/superpowers')).toBe('https://github.com/obra/superpowers.git')
-  })
-  it('gitee:owner/repo -> https URL', () => {
-    expect(resolveGitUrl('gitee:obra/superpowers')).toBe('https://gitee.com/obra/superpowers.git')
-  })
-  it('bare URL passthrough', () => {
-    expect(resolveGitUrl('/tmp/bare-repo')).toBe('/tmp/bare-repo')
-    expect(resolveGitUrl('https://github.com/x/y.git')).toBe('https://github.com/x/y.git')
-  })
-})
-
 describe('discoverSkills', () => {
   const cloneLocalSource = {
     clone: async (_u: string, dest: string) => {
@@ -37,6 +23,20 @@ describe('discoverSkills', () => {
     },
     checkout: vi.fn(async () => {}),
   } as unknown as IGit
+
+  it.each(['https://gitlab.example.com/owner/skills.git', 'git@gitcode.com:owner/skills.git'])(
+    'passes the configured Git URL through unchanged: %s',
+    async (url) => {
+      const clone = vi.fn(async (_url: string, dest: string) => {
+        await cp(srcTmp, dest, { recursive: true })
+      })
+      const git = { clone, checkout: vi.fn(async () => {}) } as unknown as IGit
+
+      await discoverSkills(git, new NodeFileSystem(), { url, ref: 'main' })
+
+      expect(clone).toHaveBeenCalledWith(url, expect.any(String), false)
+    },
+  )
 
   it('returns SKILL.md members from any directory using the parent directory name', async () => {
     await mkdir(join(srcTmp, 'skills', 'engineering', 'foo'), { recursive: true })

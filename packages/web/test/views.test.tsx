@@ -1156,7 +1156,7 @@ describe('Add Skill modal', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'Add Skill or Source' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Source' }))
-    const url = within(dialog).getByPlaceholderText('https://github.com/org/repo')
+    const url = within(dialog).getByPlaceholderText('https://host.example/org/repo.git')
     fireEvent.change(url, { target: { value: 'https://example.test/skills.git' } })
     fireEvent.blur(url)
     const trigger = await within(dialog).findByRole('button', { name: 'Repository ref' })
@@ -1229,10 +1229,10 @@ describe('Add Skill modal', () => {
     render(<AddSkillModal open repoPath="/tmp/add-source-disabled" onClose={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Source' }))
-    fireEvent.change(screen.getByPlaceholderText('https://github.com/org/repo'), {
+    fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
       target: { value: 'https://example.test/source.git' },
     })
-    fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
+    fireEvent.blur(screen.getByPlaceholderText('https://host.example/org/repo.git'))
     fireEvent.click(screen.getByRole('button', { name: 'Scan repository' }))
 
     await screen.findByText('fresh')
@@ -1257,10 +1257,10 @@ describe('Add Skill modal', () => {
     render(<AddSkillModal open repoPath="/tmp/add-source-ref-scan" onClose={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Source' }))
-    fireEvent.change(screen.getByPlaceholderText('https://github.com/org/repo'), {
+    fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
       target: { value: 'https://github.com/mattpocock/skills' },
     })
-    fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
+    fireEvent.blur(screen.getByPlaceholderText('https://host.example/org/repo.git'))
     await waitFor(() =>
       expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('skills'),
     )
@@ -1300,10 +1300,10 @@ describe('Add Skill modal', () => {
     fireEvent.change(screen.getByLabelText('source name'), {
       target: { value: 'custom-skills' },
     })
-    fireEvent.change(screen.getByPlaceholderText('https://github.com/org/repo'), {
+    fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
       target: { value: 'https://github.com/org/repo-one' },
     })
-    fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
+    fireEvent.blur(screen.getByPlaceholderText('https://host.example/org/repo.git'))
     await waitFor(() =>
       expect(api.getSourceRefs).toHaveBeenCalledWith('https://github.com/org/repo-one'),
     )
@@ -1315,18 +1315,18 @@ describe('Add Skill modal', () => {
     render(<AddSkillModal open repoPath="/tmp/add-source-name-refresh" onClose={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Source' }))
-    fireEvent.change(screen.getByPlaceholderText('https://github.com/org/repo'), {
+    fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
       target: { value: 'https://github.com/org/repo-one' },
     })
-    fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
+    fireEvent.blur(screen.getByPlaceholderText('https://host.example/org/repo.git'))
     await waitFor(() =>
       expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('repo-one'),
     )
 
-    fireEvent.change(screen.getByPlaceholderText('https://github.com/org/repo'), {
+    fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
       target: { value: 'https://github.com/org/repo-two' },
     })
-    fireEvent.blur(screen.getByPlaceholderText('https://github.com/org/repo'))
+    fireEvent.blur(screen.getByPlaceholderText('https://host.example/org/repo.git'))
 
     await waitFor(() =>
       expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('repo-two'),
@@ -1352,7 +1352,7 @@ describe('Add Skill modal', () => {
 
       const dialog = await screen.findByRole('dialog', { name: 'Add Skill or Source' })
       fireEvent.click(within(dialog).getByRole('button', { name: 'Source' }))
-      fireEvent.change(within(dialog).getByPlaceholderText('https://github.com/org/repo'), {
+      fireEvent.change(within(dialog).getByPlaceholderText('https://host.example/org/repo.git'), {
         target: { value: 'https://example.test/skills.git' },
       })
       fireEvent.click(within(dialog).getByRole('button', { name: 'Scan repository' }))

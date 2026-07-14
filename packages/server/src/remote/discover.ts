@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import type { IGit } from '../ports/git.js'
 import type { IFileSystem } from '../ports/fs.js'
 import type { SkillMeta } from './frontmatter.js'
-import { resolveGitUrl } from './resolve-url.js'
 import { formatSourceMemberSkillId, type SkillSource } from '@loom/core'
 import { logger } from '../lib/logger.js'
 import { scanSourceMembers } from '../projection/scan.js'
@@ -23,7 +22,7 @@ export async function discoverSkills(
   const source = normalizeDiscoverSource(sourceInput)
   const tmp = await mkdtemp(join(tmpdir(), 'discover-'))
   try {
-    await git.clone(resolveGitUrl(source.url), tmp, !source.ref)
+    await git.clone(source.url, tmp, !source.ref)
     if (source.ref) await git.checkout(tmp, source.ref)
     const scanned = await scanSourceMembers(tmp, {
       url: source.url,
