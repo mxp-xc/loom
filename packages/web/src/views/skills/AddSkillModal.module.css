@@ -213,7 +213,7 @@
 
 .resultState {
   display: grid;
-  min-height: 280px;
+  height: 100%;
   place-items: center;
   border: 1px dashed var(--border);
   border-radius: var(--radius-card);
