@@ -663,7 +663,21 @@ describe('Memory view', () => {
 
     const railHeader = screen.getByTestId('memory-rail-header')
     const projectButton = screen.getByRole('button', { name: '投影 memory' })
+    const createButton = screen.getByRole('button', { name: '新建 memory' })
     expect(railHeader.contains(projectButton)).toBe(true)
+    expect(railHeader.contains(createButton)).toBe(true)
+    expect(projectButton.querySelector('.lucide-send')).not.toBeNull()
+    expect(projectButton.className).toContain('border-[var(--border)]')
+    expect(createButton.className).toContain('border-[var(--border)]')
+    expect(projectButton.style.width).toBe('32px')
+    expect(projectButton.style.height).toBe('32px')
+    expect(createButton.style.width).toBe('32px')
+    expect(createButton.style.height).toBe('32px')
+    expect(
+      within(railHeader)
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label')),
+    ).toEqual(['新建 memory', '投影 memory'])
 
     expect(railHeader.textContent).not.toContain('2 份')
     expect(screen.getByRole('tab', { name: '所见编辑' }).getAttribute('aria-selected')).toBe('true')
@@ -781,13 +795,19 @@ describe('Memory view', () => {
 })
 
 describe('Skills view', () => {
-  it('renders heading and project button', async () => {
+  it('renders unambiguous page actions without the legacy footer guidance', async () => {
     render(
       <TestRouter>
         <Skills repoPath="/tmp/r" />
       </TestRouter>,
     )
-    expect(await screen.findByText('投影', { exact: false })).toBeDefined()
+    const projectButton = await screen.findByRole('button', { name: '投影' })
+    expect(projectButton.querySelector('.lucide-send')).not.toBeNull()
+    const addButton = screen.getByRole('button', { name: '添加 Skill 或 Source' })
+    expect(addButton.textContent).toContain('添加')
+    expect(addButton.querySelector('.lucide-plus')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add skill' })).toBeNull()
+    expect(screen.queryByText(/source 级操作/)).toBeNull()
   })
 
   it('clears stale project errors after a successful project mutation refreshes manifest', async () => {
@@ -1027,15 +1047,22 @@ describe('Add Skill modal', () => {
   it('uses the responsive workbench shell for local skills and sources', async () => {
     render(<AddSkillModal open repoPath="/tmp/add-workbench" onClose={vi.fn()} />)
 
-    const dialog = await screen.findByRole('dialog', { name: 'Add Skill' })
+    const dialog = await screen.findByRole('dialog', { name: 'Add Skill or Source' })
     expect(within(dialog).getByTestId('skills-workbench')).toBeDefined()
     expect(within(dialog).getByTestId('skills-config-pane')).toBeDefined()
     expect(within(dialog).getByTestId('skills-results-pane')).toBeDefined()
-    expect(within(dialog).getByText('Add skill')).toBeDefined()
+    expect(within(dialog).getByText('Add')).toBeDefined()
     expect(within(dialog).getByRole('heading', { name: 'Skills' })).toBeDefined()
     expect(within(dialog).getByRole('button', { name: 'Scan directory' })).toBeDefined()
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Source' }))
+    const localMode = within(dialog).getByRole('button', { name: 'Local skill' })
+    const sourceMode = within(dialog).getByRole('button', { name: 'Source' })
+    expect(localMode.getAttribute('aria-pressed')).toBe('true')
+    expect(sourceMode.getAttribute('aria-pressed')).toBe('false')
+
+    fireEvent.click(sourceMode)
+    expect(localMode.getAttribute('aria-pressed')).toBe('false')
+    expect(sourceMode.getAttribute('aria-pressed')).toBe('true')
     expect(within(dialog).getByRole('heading', { name: 'Source' })).toBeDefined()
     expect(within(dialog).getByRole('button', { name: 'Scan repository' })).toBeDefined()
     expect(within(dialog).queryByRole('combobox')).toBeNull()
@@ -1051,7 +1078,7 @@ describe('Add Skill modal', () => {
     } as never)
     render(<AddSkillModal open repoPath="/tmp/add-dropdown-escape" onClose={onClose} />)
 
-    const dialog = await screen.findByRole('dialog', { name: 'Add Skill' })
+    const dialog = await screen.findByRole('dialog', { name: 'Add Skill or Source' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Source' }))
     const url = within(dialog).getByPlaceholderText('https://github.com/org/repo')
     fireEvent.change(url, { target: { value: 'https://example.test/skills.git' } })
@@ -1064,7 +1091,7 @@ describe('Add Skill modal', () => {
 
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
     expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByRole('dialog', { name: 'Add Skill' })).toBeDefined()
+    expect(screen.getByRole('dialog', { name: 'Add Skill or Source' })).toBeDefined()
   })
 
   it('scans ~/.agents/skills when opened', async () => {
@@ -1247,7 +1274,7 @@ describe('Add Skill modal', () => {
     try {
       render(<AddSkillModal open repoPath="/tmp/r" onClose={onClose} />)
 
-      const dialog = await screen.findByRole('dialog', { name: 'Add Skill' })
+      const dialog = await screen.findByRole('dialog', { name: 'Add Skill or Source' })
       fireEvent.click(within(dialog).getByRole('button', { name: 'Source' }))
       fireEvent.change(within(dialog).getByPlaceholderText('https://github.com/org/repo'), {
         target: { value: 'https://example.test/skills.git' },
@@ -1261,7 +1288,7 @@ describe('Add Skill modal', () => {
       await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(getManifestCallsBefore + 1))
       expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
       expect(onClose).not.toHaveBeenCalled()
-      expect(screen.getByRole('dialog', { name: 'Add Skill' })).toBeDefined()
+      expect(screen.getByRole('dialog', { name: 'Add Skill or Source' })).toBeDefined()
       expect(consoleError).toHaveBeenCalledWith(
         expect.objectContaining({
           key: 'source:add',

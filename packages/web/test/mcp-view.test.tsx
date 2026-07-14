@@ -192,9 +192,9 @@ describe('MCP workbench view', () => {
     const toolbar = within(inventory).getByRole('toolbar', { name: 'MCP inventory actions' })
     expect(within(toolbar).getByRole('button', { name: 'Add server' }).textContent?.trim()).toBe('')
     expect(within(toolbar).getByRole('button', { name: 'Import MCP' }).textContent?.trim()).toBe('')
-    expect(
-      within(toolbar).getByRole('button', { name: 'Project changes' }).textContent?.trim(),
-    ).toBe('')
+    const projectButton = within(toolbar).getByRole('button', { name: 'Project changes' })
+    expect(projectButton.textContent?.trim()).toBe('')
+    expect(projectButton.querySelector('.lucide-send')).not.toBeNull()
   })
 
   it('renders global target controls inside inventory without projecting', async () => {

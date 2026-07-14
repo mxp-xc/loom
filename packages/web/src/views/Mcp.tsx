@@ -21,6 +21,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Send,
   Trash2,
   Unplug,
   Wrench,
@@ -1620,14 +1621,17 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                 </IconButton>
                 <IconButton
                   label="Project changes"
-                  tooltip="投影"
+                  tooltip={operations.pending.project('mcp') ? '投影中…' : '投影'}
                   variant="secondary"
                   size="sm"
-                  className={styles.inventoryActionProject}
                   onClick={() => void operations.project('mcp')}
                   disabled={operations.pending.project('mcp')}
                 >
-                  <RefreshCw className="h-3.5 w-3.5" />
+                  {operations.pending.project('mcp') ? (
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5" />
+                  )}
                 </IconButton>
               </div>
             </div>

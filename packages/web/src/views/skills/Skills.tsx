@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { ChevronsDownUp, ChevronsUpDown, Plus, RefreshCw } from 'lucide-react'
+import { ChevronsDownUp, ChevronsUpDown, LoaderCircle, Plus, Send } from 'lucide-react'
 import { useManifest } from '@/hooks/useManifest'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
 import { useToast } from '@/hooks/useToast'
@@ -66,7 +66,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
 
   return (
     <div className={styles['skills-page']}>
-      <div className="page-head">
+      <div className={`page-head ${styles['skills-head']}`}>
         <div>
           <div className="page-title">Skills</div>
           <div className="page-sub">
@@ -84,18 +84,26 @@ export default function Skills({ repoPath }: { repoPath: string }) {
               {allCollapsed ? '全部展开' : '全部收起'}
             </Button>
           )}
-          <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
+          <Button
+            aria-label="添加 Skill 或 Source"
+            variant="primary"
+            size="sm"
+            onClick={() => setAddOpen(true)}
+          >
             <Plus className="h-3.5 w-3.5" />
-            Add skill
+            添加
           </Button>
           <Button
             variant="secondary"
             size="sm"
-            className={styles['project-button']}
             onClick={() => void operations.project('skills')}
             disabled={operations.pending.project('skills')}
           >
-            <RefreshCw className="h-3.5 w-3.5" />
+            {operations.pending.project('skills') ? (
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
             {operations.pending.project('skills') ? '投影中…' : '投影'}
           </Button>
         </div>
@@ -124,7 +132,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
         >
           <p style={{ fontSize: 14 }}>还没有配置任何 Skill</p>
           <p style={{ marginTop: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
-            点击右上 <b>+ Add skill</b> 添加 source 或 local skill
+            点击右上角的 <b>+</b> 添加 Skill 或 Source
           </p>
         </div>
       )}

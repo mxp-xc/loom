@@ -281,18 +281,31 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
 
   const configuration = (
     <div className={styles.configStack}>
-      <div className={styles['add-skill-tabs']}>
-        <Segmented
-          value={addTab}
-          onChange={(t) => {
-            setAddTab(t)
+      <div className={styles.modeSwitch} role="group" aria-label="Add skill type">
+        <button
+          type="button"
+          aria-pressed={addTab === 'local'}
+          data-active={addTab === 'local'}
+          onClick={() => {
+            setAddTab('local')
             setAddErr(null)
           }}
-          options={[
-            { value: 'local', label: 'Local Skill' },
-            { value: 'source', label: 'Source' },
-          ]}
-        />
+        >
+          <FolderOpen size={14} aria-hidden="true" />
+          Local skill
+        </button>
+        <button
+          type="button"
+          aria-pressed={addTab === 'source'}
+          data-active={addTab === 'source'}
+          onClick={() => {
+            setAddTab('source')
+            setAddErr(null)
+          }}
+        >
+          <GitFork size={14} aria-hidden="true" />
+          Source
+        </button>
       </div>
       {addErr && <div className={styles.error}>{addErr}</div>}
       {addTab === 'local' ? (
@@ -452,11 +465,11 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     <Modal
       open={open}
       onClose={onClose}
-      ariaLabel="Add Skill"
+      ariaLabel="Add Skill or Source"
       title={
         <SkillWorkbenchTitle
           icon={addTab === 'local' ? <FolderOpen size={17} /> : <GitFork size={17} />}
-          eyebrow="Add skill"
+          eyebrow="Add"
           title={addTab === 'local' ? 'Skills' : 'Source'}
         />
       }

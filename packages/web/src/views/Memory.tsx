@@ -8,7 +8,7 @@ import { IconButton } from '@/components/ui/IconButton'
 import { TargetChip } from '@/components/ui/TargetChip'
 import { useToast } from '@/hooks/useToast'
 import { refreshManifest, useManifest } from '@/hooks/useManifest'
-import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { LoaderCircle, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import styles from './Memory.module.css'
 
@@ -220,22 +220,30 @@ export default function Memory({ repoPath }: Props) {
           </div>
           <div className={styles['mem-list-actions']}>
             <IconButton
-              label="投影 memory"
-              tooltip={projecting ? '投影中…' : '投影'}
-              onClick={project}
-              disabled={projecting}
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-            </IconButton>
-            <IconButton
               label="新建 memory"
               tooltip="新建"
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 setCreating(true)
                 setDraftName('')
               }}
             >
               <Plus className="h-3.5 w-3.5" />
+            </IconButton>
+            <IconButton
+              label="投影 memory"
+              tooltip={projecting ? '投影中…' : '投影'}
+              variant="secondary"
+              size="sm"
+              onClick={project}
+              disabled={projecting}
+            >
+              {projecting ? (
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="h-3.5 w-3.5" />
+              )}
             </IconButton>
           </div>
         </div>

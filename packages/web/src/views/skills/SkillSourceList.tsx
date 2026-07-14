@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { agentShort, agentColor, type AgentId } from '@/lib/agents'
+import { agentShort, type AgentId } from '@/lib/agents'
 import {
   formatSourceMemberSkillId,
   sourceIdentity,
@@ -551,23 +551,6 @@ export default function SkillSourceList({
               })}
           </div>
         )}
-      </div>
-
-      <div className={styles.legend}>
-        {visibleAgents.map((agent) => (
-          <div className={styles.lg} key={agent}>
-            <span className={styles.sw} style={{ background: agentColor[agent] }} />
-            {agentShort[agent]}{' '}
-            {agent === 'claude-code' ? 'Claude Code' : agent === 'codex' ? 'Codex' : 'OpenCode'}
-          </div>
-        ))}
-        <div className={styles.lg}>
-          <span className={styles.sw} style={{ background: 'var(--warn)' }} />
-          有更新
-        </div>
-      </div>
-      <div className={styles.hint}>
-        source 级操作(更新 ref / scan / 删除)在分组头右侧;发现安装新 source 走右上 + Add source
       </div>
 
       <Modal
