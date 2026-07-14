@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import yaml from 'js-yaml'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,13 +9,15 @@ import { NodeFileSystem } from '../../src/platform/node/fs.js'
 describe('McpApplication', () => {
   let home: string
   let repoPath: string
+  let fs: NodeFileSystem
   let app: McpApplication
 
   beforeEach(async () => {
     home = await mkdtemp(join(tmpdir(), 'loom-mcp-app-'))
     repoPath = join(home, '.loom', 'repos', 'default')
     await mkdir(repoPath, { recursive: true })
-    app = new McpApplication(new NodeFileSystem())
+    fs = new NodeFileSystem()
+    app = new McpApplication(fs)
   })
 
   afterEach(async () => rm(home, { recursive: true, force: true }))
@@ -76,5 +78,55 @@ describe('McpApplication', () => {
 
     const parsed = yaml.load(await readFile(join(repoPath, 'mcp.yaml'), 'utf8'))
     expect(parsed).toEqual([])
+  })
+
+  it('reorders servers, ignores unknown ids, and appends omitted servers', async () => {
+    await writeFile(
+      join(repoPath, 'mcp.yaml'),
+      [
+        '- id: a',
+        '  type: stdio',
+        '  command: a',
+        '- id: b',
+        '  type: stdio',
+        '  command: b',
+        '- id: c',
+        '  type: stdio',
+        '  command: c',
+        '',
+      ].join('\n'),
+    )
+
+    await expect(app.reorderServers(repoPath, ['c', 'unknown', 'c'])).resolves.toEqual({
+      ids: ['c', 'a', 'b'],
+    })
+    const parsed = yaml.load(await readFile(join(repoPath, 'mcp.yaml'), 'utf8')) as any[]
+    expect(parsed.map((server) => server.id)).toEqual(['c', 'a', 'b'])
+  })
+
+  it('rejects duplicate server ids when reordering', async () => {
+    await writeFile(
+      join(repoPath, 'mcp.yaml'),
+      '- id: duplicate\n  type: stdio\n  command: a\n- id: duplicate\n  type: stdio\n  command: b\n',
+    )
+
+    await expect(app.reorderServers(repoPath, ['duplicate'])).rejects.toMatchObject({
+      status: 409,
+      code: 'duplicate_mcp_id',
+    })
+  })
+
+  it('does not rewrite an unchanged order and rejects malformed manifests', async () => {
+    await writeFile(join(repoPath, 'mcp.yaml'), '- id: a\n  type: stdio\n  command: a\n')
+    const replace = vi.spyOn(fs, 'replaceFile')
+
+    await expect(app.reorderServers(repoPath, ['a'])).resolves.toEqual({ ids: ['a'] })
+    expect(replace).not.toHaveBeenCalled()
+
+    await writeFile(join(repoPath, 'mcp.yaml'), 'servers: []\n')
+    await expect(app.reorderServers(repoPath, [])).rejects.toMatchObject({
+      status: 422,
+      code: 'invalid_mcp_manifest',
+    })
   })
 })

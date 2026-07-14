@@ -38,6 +38,7 @@ export interface LocalSkill {
 export interface SkillsManifest {
   sources: SkillSource[]
   skills: LocalSkill[]
+  group_order?: string[]
 }
 
 export interface Memory {
@@ -84,6 +85,7 @@ export interface Config {
   proxy?: ProxyConfig
   skill_naming?: 'dir' | 'hyphen'
   active_memory?: string
+  memory_order?: string[]
 }
 
 export interface VarsFile {

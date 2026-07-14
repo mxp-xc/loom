@@ -1,4 +1,6 @@
 import { join } from 'node:path'
+import { basename, dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import yaml from 'js-yaml'
 import { logger } from '../lib/logger.js'
 
@@ -47,11 +49,34 @@ export async function readYaml(
 }
 
 export async function writeYaml(
-  fs: { writeFile: (p: string, content: string) => Promise<void> },
+  fs: {
+    writeFile: (p: string, content: string) => Promise<void>
+    replaceFile: (tempPath: string, targetPath: string) => Promise<void>
+    removeFile: (p: string) => Promise<void>
+  },
   filePath: string,
   data: any,
 ): Promise<void> {
-  await fs.writeFile(filePath, yaml.dump(data) + '\n')
+  const temporary = join(
+    dirname(filePath),
+    `.${basename(filePath)}.tmp-${process.pid}-${randomUUID()}`,
+  )
+  try {
+    await fs.writeFile(temporary, yaml.dump(data) + '\n')
+    await fs.replaceFile(temporary, filePath)
+  } catch (error) {
+    repoConfigLogger.error('failed to atomically write YAML config', { err: error, path: filePath })
+    try {
+      await fs.removeFile(temporary)
+    } catch (cleanupError) {
+      if (!isMissing(cleanupError))
+        repoConfigLogger.error('failed to clean up YAML temporary file', {
+          err: cleanupError,
+          path: temporary,
+        })
+    }
+    throw error
+  }
 }
 
 export async function readRepoFiles(

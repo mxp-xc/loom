@@ -215,3 +215,32 @@ Tests:
 - packages/web/test/skill-reconciliation-dialog.test.tsx
 - packages/web/test/manifest-operations.test.tsx
 - packages/web/test/views.test.tsx
+
+## R-SKILLS-008 顶层 group 顺序是仓库共享展示状态
+
+Status: active
+Applies to: skills manifest, skills UI
+
+Rule:
+`skills.yaml.group_order` 非权威地表达 source groups 与整个 local group 的展示顺序。Source 使用 `source:<url>`，存在至少一个 local skill 时使用 `local`；source member 与 local group 内的 skill 不参与排序。
+
+Implications:
+
+- 读取时按保存顺序去重、忽略未知 group，并按当前 source 顺序追加遗漏 source，最后按需追加 local。
+- 字段缺失、类型错误或包含非字符串时回退为当前 source 顺序加末尾 local。
+- 读取不自动改写；下一次成功 reorder 或相关 Skills mutation 写入完整规范顺序。
+
+Safety:
+
+- `group_order` 不能创建、删除、隐藏或恢复任何 skill 实体。
+- Reorder 不修改 targets、source/member 定义，也不触发 projection。
+
+Examples:
+
+- 当前 groups 为 A、C、local，保存值为 B、A、A 时，展示顺序为 A、C、local。
+
+Tests:
+
+- packages/core/test/order.test.ts
+- packages/server/test/skills/application.test.ts
+- packages/web/test/views.test.tsx

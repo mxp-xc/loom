@@ -7,7 +7,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react'
-import type { McpServer, McpType } from '@loom/core'
+import { normalizeOrder, type McpServer, type McpType } from '@loom/core'
 import {
   Activity,
   Braces,
@@ -32,6 +32,7 @@ import { registerVarsCompletionProvider } from '@/components/monaco/varsCompleti
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
 import { TargetChip } from '@/components/ui/TargetChip'
+import { SortableList } from '@/components/ui/sortable-list'
 import { useManifest } from '@/hooks/useManifest'
 import {
   normalizeManifestOperationError,
@@ -1495,8 +1496,15 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   const [inspectedVar, setInspectedVar] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [serverOrder, setServerOrder] = useState<string[]>([])
 
-  const servers = manifest?.mcp ?? []
+  const manifestServers = manifest?.mcp ?? []
+  const orderedServerIds = normalizeOrder(
+    serverOrder,
+    manifestServers.map((server) => server.id),
+  )
+  const serversById = new Map(manifestServers.map((server) => [server.id, server]))
+  const servers = orderedServerIds.map((id) => serversById.get(id)!).filter(Boolean)
   const visibleAgents = ((manifest?.config?.targets ?? AGENTS) as AgentId[]).filter((agent) =>
     AGENTS.includes(agent),
   )
@@ -1577,6 +1585,26 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         console.error({ err }, 'Failed to copy MCP server')
         showErrorToast(err, { title: '复制失败', message: '请检查剪贴板权限后重试' })
       })
+  }
+
+  const reorderServers = async (next: McpServer[]) => {
+    const previous = orderedServerIds
+    const nextIds = next.map((server) => server.id)
+    setServerOrder(nextIds)
+    try {
+      const result = await api.reorderMcpServers({ repo: repoPath, ids: nextIds })
+      setServerOrder(result.ids)
+    } catch (reorderError) {
+      console.error({ err: reorderError }, 'Failed to reorder MCP servers')
+      setServerOrder(previous)
+      try {
+        const current = (await api.getManifest(repoPath)) as { mcp?: McpServer[] }
+        setServerOrder(current.mcp?.map((server) => server.id) ?? previous)
+      } catch (reloadError) {
+        console.error({ err: reloadError }, 'Failed to reload MCP order after reorder failure')
+      }
+      showErrorToast(reorderError, { title: 'MCP 排序失败', message: '已恢复原顺序，请重试' })
+    }
   }
 
   return (
@@ -1664,87 +1692,86 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
             ))}
           </div>
           <div className={styles.serverList}>
-            {filteredServers.map((server) => {
-              const activeTargets = server.targets ?? []
-              const projectionState = serverProjectionState(server, visibleAgents)
-              return (
-                <article
-                  key={server.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={'选择 ' + server.id}
-                  className={styles.serverCard}
-                  data-selected={selected === server.id}
-                  onClick={() => {
-                    setSelected(server.id)
-                    setEditorMode(null)
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
+            <SortableList
+              items={filteredServers}
+              label={(server) => server.id}
+              disabled={search.trim().length > 0 || filter !== 'all'}
+              onReorder={reorderServers}
+            >
+              {(server) => {
+                const activeTargets = server.targets ?? []
+                const projectionState = serverProjectionState(server, visibleAgents)
+                return (
+                  <article
+                    role="button"
+                    tabIndex={-1}
+                    aria-label={'选择 ' + server.id}
+                    className={styles.serverCard}
+                    data-selected={selected === server.id}
+                    onClick={() => {
                       setSelected(server.id)
                       setEditorMode(null)
-                    }
-                  }}
-                >
-                  <span className={styles.serverMain} aria-label={'选择 ' + server.id}>
-                    <span className={styles.serverTopline}>
-                      <b>{server.id}</b>
-                      <TypeBadge type={server.type} />
-                      <span className={styles.rowActions} aria-label={server.id + ' actions'}>
-                        <IconButton
-                          label={'编辑 ' + server.id}
-                          tooltip="编辑"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            setSelected(server.id)
-                            setEditorError(null)
-                            setEditorMode('edit')
-                          }}
-                        >
-                          <Edit3 className="h-3.5 w-3.5" />
-                        </IconButton>
-                        <IconButton
-                          label={'删除 ' + server.id}
-                          tooltip="删除"
-                          tone="danger"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            setDeleteTarget(server)
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </IconButton>
+                    }}
+                  >
+                    <span className={styles.serverMain} aria-label={'选择 ' + server.id}>
+                      <span className={styles.serverTopline}>
+                        <b>{server.id}</b>
+                        <TypeBadge type={server.type} />
+                        <span className={styles.rowActions} aria-label={server.id + ' actions'}>
+                          <IconButton
+                            label={'编辑 ' + server.id}
+                            tooltip="编辑"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setSelected(server.id)
+                              setEditorError(null)
+                              setEditorMode('edit')
+                            }}
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                          </IconButton>
+                          <IconButton
+                            label={'删除 ' + server.id}
+                            tooltip="删除"
+                            tone="danger"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setDeleteTarget(server)
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </IconButton>
+                        </span>
                       </span>
+                      <small>{serverSubtitle(server)}</small>
                     </span>
-                    <small>{serverSubtitle(server)}</small>
-                  </span>
-                  <div className={styles.serverFoot}>
-                    <span className={styles.projectionState} data-tone={projectionState.tone}>
-                      {projectionState.label}
-                    </span>
-                    <div className={styles.rowTargets}>
-                      {visibleAgents.map((agent) => (
-                        <TargetChip
-                          key={agent}
-                          agent={agent}
-                          state={activeTargets.includes(agent) ? 'on' : 'off'}
-                          label={server.id + ' 应用到 ' + agentShort[agent]}
-                          tooltip={server.id + ' 应用到 ' + agentShort[agent]}
-                          onClick={() =>
-                            void operations.toggleMcpTarget(
-                              { ...server, targets: server.targets ?? [] },
-                              agent,
-                            )
-                          }
-                          stopPropagation
-                        />
-                      ))}
+                    <div className={styles.serverFoot}>
+                      <span className={styles.projectionState} data-tone={projectionState.tone}>
+                        {projectionState.label}
+                      </span>
+                      <div className={styles.rowTargets}>
+                        {visibleAgents.map((agent) => (
+                          <TargetChip
+                            key={agent}
+                            agent={agent}
+                            state={activeTargets.includes(agent) ? 'on' : 'off'}
+                            label={server.id + ' 应用到 ' + agentShort[agent]}
+                            tooltip={server.id + ' 应用到 ' + agentShort[agent]}
+                            onClick={() =>
+                              void operations.toggleMcpTarget(
+                                { ...server, targets: server.targets ?? [] },
+                                agent,
+                              )
+                            }
+                            stopPropagation
+                          />
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                </article>
-              )
-            })}
+                  </article>
+                )
+              }}
+            </SortableList>
             {filteredServers.length === 0 && (
               <div className={styles.emptyState}>没有匹配的 MCP server</div>
             )}

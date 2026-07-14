@@ -29,6 +29,12 @@ const memFs = {
   removeFile: vi.fn(async (p: string) => {
     delete memFiles[p.replace(/\\/g, '/')]
   }),
+  replaceFile: vi.fn(async (tempPath: string, targetPath: string) => {
+    const temp = tempPath.replace(/\\/g, '/')
+    const target = targetPath.replace(/\\/g, '/')
+    memFiles[target] = memFiles[temp]
+    delete memFiles[temp]
+  }),
 }
 
 vi.mock('../../src/projection/workflow.js', async () => {
@@ -148,6 +154,97 @@ describe('routes file-init safety', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.ok).toBe(true)
+  })
+})
+
+describe('reorder endpoints', () => {
+  const app = new Hono().route('/api', registerRoutes())
+
+  it('normalizes Skills order without projection and maps duplicate or malformed entities', async () => {
+    const repo = '/tmp/reorder-skills'
+    memFiles[`${repo}/skills.yaml`] = [
+      'sources:',
+      '  - url: https://example.test/a',
+      '    ref: main',
+      '  - url: https://example.test/b',
+      '    ref: main',
+      'skills:',
+      '  - id: local',
+      '',
+    ].join('\n')
+    projectRepositoryMock.mockClear()
+
+    const reordered = await app.request('/api/skills/order', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo, ids: ['local', 'unknown', 'local'] }),
+    })
+    expect(await reordered.json()).toEqual({
+      ok: true,
+      ids: ['local', 'source:https://example.test/a', 'source:https://example.test/b'],
+    })
+    expect(projectRepositoryMock).not.toHaveBeenCalled()
+
+    memFiles[`${repo}/skills.yaml`] =
+      'sources:\n  - url: duplicate\n  - url: duplicate\nskills: []\n'
+    expect(
+      (
+        await app.request('/api/skills/order', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ repo, ids: [] }),
+        })
+      ).status,
+    ).toBe(409)
+
+    memFiles[`${repo}/skills.yaml`] = 'sources: {}\nskills: []\n'
+    expect(
+      (
+        await app.request('/api/skills/order', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ repo, ids: [] }),
+        })
+      ).status,
+    ).toBe(422)
+  })
+
+  it('normalizes MCP order without projection and maps duplicate or malformed entities', async () => {
+    const repo = '/tmp/reorder-mcp'
+    memFiles[`${repo}/mcp.yaml`] =
+      '- id: a\n  type: stdio\n  command: a\n- id: b\n  type: stdio\n  command: b\n'
+    projectRepositoryMock.mockClear()
+
+    const reordered = await app.request('/api/mcp/order', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo, ids: ['b', 'missing', 'b'] }),
+    })
+    expect(await reordered.json()).toEqual({ ok: true, ids: ['b', 'a'] })
+    expect(projectRepositoryMock).not.toHaveBeenCalled()
+
+    memFiles[`${repo}/mcp.yaml`] =
+      '- id: duplicate\n  type: stdio\n  command: a\n- id: duplicate\n  type: stdio\n  command: b\n'
+    expect(
+      (
+        await app.request('/api/mcp/order', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ repo, ids: [] }),
+        })
+      ).status,
+    ).toBe(409)
+
+    memFiles[`${repo}/mcp.yaml`] = 'servers: []\n'
+    expect(
+      (
+        await app.request('/api/mcp/order', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ repo, ids: [] }),
+        })
+      ).status,
+    ).toBe(422)
   })
 })
 

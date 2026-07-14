@@ -100,12 +100,15 @@ vi.mock('../src/lib/api', () => ({
     updateMcpServer: vi.fn(async () => ({ ok: true })),
     updateMcpTargets: vi.fn(async () => ({ ok: true })),
     deleteMcpServer: vi.fn(async () => ({ ok: true })),
+    reorderMcpServers: vi.fn(async ({ ids }: { ids: string[] }) => ({ ok: true, ids })),
     getMemory: vi.fn(async () => ({ memories: [], active: null, activeContent: '' })),
     setMemoryActive: vi.fn(async () => ({ ok: true })),
     createMemory: vi.fn(async () => ({ ok: true })),
     renameMemory: vi.fn(async () => ({ ok: true })),
     deleteMemory: vi.fn(async () => ({ ok: true })),
     saveMemoryContent: vi.fn(async () => ({ ok: true })),
+    reorderMemories: vi.fn(async ({ names }: { names: string[] }) => ({ ok: true, names })),
+    reorderSkillGroups: vi.fn(async ({ ids }: { ids: string[] }) => ({ ok: true, ids })),
     vars: {
       getMatrix: vi.fn(async () => ({
         ok: true,
@@ -207,6 +210,8 @@ function SkillSourceListHarness({
   onOpenEdit,
   expandedGroups,
   onToggleGroup,
+  groupOrder,
+  onReorderGroups,
 }: {
   repoPath: string
   manifest: any
@@ -217,6 +222,8 @@ function SkillSourceListHarness({
   onOpenEdit: (source: any) => void
   expandedGroups: Set<string>
   onToggleGroup: (key: string) => void
+  groupOrder?: string[]
+  onReorderGroups?: (ids: string[]) => Promise<void> | void
 }) {
   const operations = useManifestOperations(repoPath, { onError: setError, onToast: showToast })
   return (
@@ -228,6 +235,8 @@ function SkillSourceListHarness({
       onOpenEdit={onOpenEdit}
       expandedGroups={expandedGroups}
       onToggleGroup={onToggleGroup}
+      groupOrder={groupOrder}
+      onReorderGroups={onReorderGroups}
     />
   )
 }
@@ -505,6 +514,37 @@ describe('MCP view', () => {
     releaseFirst()
     await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(callsBefore + 2))
     vi.mocked(api.updateMcpTargets).mockResolvedValue({ ok: true } as never)
+  })
+
+  it('keeps selection while reordering to the end and disables sorting while filtered', async () => {
+    render(<Mcp repoPath="/tmp/mcp-layout" />)
+
+    const first = await screen.findByLabelText('调整 test-mcp 顺序')
+    const second = screen.getByLabelText('调整 remote-mcp 顺序')
+    ;[first, second].forEach((element, index) => {
+      element.getBoundingClientRect = () =>
+        DOMRect.fromRect({ x: 0, y: index * 100, width: 320, height: 92 })
+    })
+    fireEvent.click(screen.getAllByRole('button', { name: '选择 remote-mcp' })[0])
+
+    first.focus()
+    fireEvent.keyDown(first, { key: ' ', code: 'Space' })
+    await waitFor(() => expect(first.getAttribute('aria-pressed')).toBe('true'))
+    fireEvent.keyDown(document, { key: 'ArrowDown', code: 'ArrowDown' })
+    fireEvent.keyDown(document, { key: ' ', code: 'Space' })
+
+    await waitFor(() =>
+      expect(api.reorderMcpServers).toHaveBeenCalledWith({
+        repo: '/tmp/mcp-layout',
+        ids: ['remote-mcp', 'test-mcp'],
+      }),
+    )
+    expect(
+      screen.getAllByRole('button', { name: '选择 remote-mcp' })[0].getAttribute('data-selected'),
+    ).toBe('true')
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'remote' } })
+    expect(screen.getByLabelText('调整 remote-mcp 顺序').getAttribute('aria-disabled')).toBe('true')
   })
 })
 
@@ -791,6 +831,42 @@ describe('Memory view', () => {
       expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/memory-feedback', scope: 'memory' }),
     )
     expect(await screen.findByText('投影完成')).toBeDefined()
+  })
+
+  it('keeps active selection and editor draft while moving a memory to the end', async () => {
+    vi.mocked(api.getMemory).mockResolvedValueOnce({
+      memories: [{ name: 'v1' }, { name: 'v2' }],
+      active: 'v1',
+      activeContent: '# v1',
+    } as never)
+    render(<Memory repoPath="/tmp/memory-order" />)
+
+    fireEvent.click(await screen.findByRole('tab', { name: '源码' }))
+    const editor = await screen.findByRole('textbox', { name: 'Memory 内容' })
+    fireEvent.change(editor, { target: { value: '# unsaved draft' } })
+    const first = screen.getByLabelText('调整 v1 顺序')
+    const second = screen.getByLabelText('调整 v2 顺序')
+    ;[first, second].forEach((element, index) => {
+      element.getBoundingClientRect = () =>
+        DOMRect.fromRect({ x: 0, y: index * 44, width: 260, height: 40 })
+    })
+
+    first.focus()
+    fireEvent.keyDown(first, { key: ' ', code: 'Space' })
+    await waitFor(() => expect(first.getAttribute('aria-pressed')).toBe('true'))
+    fireEvent.keyDown(document, { key: 'ArrowDown', code: 'ArrowDown' })
+    fireEvent.keyDown(document, { key: ' ', code: 'Space' })
+
+    await waitFor(() =>
+      expect(api.reorderMemories).toHaveBeenCalledWith({
+        repo: '/tmp/memory-order',
+        names: ['v2', 'v1'],
+      }),
+    )
+    expect(
+      (screen.getByRole('textbox', { name: 'Memory 内容' }) as HTMLTextAreaElement).value,
+    ).toBe('# unsaved draft')
+    expect(screen.getByRole('button', { name: '取消激活 memory v1' })).toBeDefined()
   })
 })
 
@@ -1548,6 +1624,50 @@ describe('Skill source updates', () => {
       path: 'skills/engineering/systematic-debugging/SKILL.md',
       targets: ['codex'],
     })
+  })
+
+  it('uses persisted DOM group order and never starts sorting from a member row', () => {
+    const onReorderGroups = vi.fn()
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/group-sort-scope"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  url: 'https://example.test/source',
+                  ref: 'main',
+                  members: [{ name: 'member', targets: [] }],
+                },
+              ],
+              skills: [{ id: 'local-skill', targets: [] }],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: [] },
+            errors: [],
+          } as never
+        }
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set(['https://example.test/source-main'])}
+        onToggleGroup={vi.fn()}
+        groupOrder={['local', 'source:https://example.test/source']}
+        onReorderGroups={onReorderGroups}
+      />,
+    )
+
+    const localGroup = screen.getByTestId('skill-group-head-local').parentElement?.parentElement
+    const sourceGroup = screen.getByTestId('skill-group-head-source').parentElement?.parentElement
+    expect(localGroup?.compareDocumentPosition(sourceGroup!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+
+    const member = screen.getByTestId('source-skill-member')
+    fireEvent.mouseDown(member, { clientX: 20, clientY: 20 })
+    fireEvent.mouseMove(document, { clientX: 40, clientY: 40 })
+    fireEvent.mouseUp(document)
+    expect(onReorderGroups).not.toHaveBeenCalled()
   })
 
   it('renders source members in the same sorted order used by scan', () => {

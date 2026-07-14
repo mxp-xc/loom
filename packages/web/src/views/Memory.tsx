@@ -6,6 +6,7 @@ import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
 import { TargetChip } from '@/components/ui/TargetChip'
+import { SortableList } from '@/components/ui/sortable-list'
 import { useToast } from '@/hooks/useToast'
 import { refreshManifest, useManifest } from '@/hooks/useManifest'
 import { LoaderCircle, Pencil, Plus, Send, Trash2 } from 'lucide-react'
@@ -206,6 +207,29 @@ export default function Memory({ repoPath }: Props) {
     showToast('已保存')
   }
 
+  const reorderMemories = async (next: Array<{ id: string; name: string }>) => {
+    const previous = memories
+    setMemories(next.map(({ name }) => ({ name })))
+    try {
+      const result = await api.reorderMemories({
+        repo: repoPath,
+        names: next.map(({ name }) => name),
+      })
+      const byName = new Map(next.map((memory) => [memory.name, memory]))
+      setMemories(result.names.map((name) => ({ name: byName.get(name)?.name ?? name })))
+    } catch (error) {
+      console.error({ err: error }, 'Failed to reorder memories')
+      setMemories(previous)
+      try {
+        const current = await api.getMemory(repoPath)
+        setMemories(current.memories)
+      } catch (reloadError) {
+        console.error({ err: reloadError }, 'Failed to reload memories after reorder failure')
+      }
+      showErrorToast(error, { title: 'Memory 排序失败', message: '已恢复原顺序，请重试' })
+    }
+  }
+
   return (
     <div
       className={styles['mem-layout']}
@@ -284,52 +308,57 @@ export default function Memory({ repoPath }: Props) {
               </span>
             </div>
           )}
-          {memories.map((m) => {
-            const isActive = active === m.name
-            return (
-              <div
-                key={m.name}
-                className={cn(styles['mem-item'], selected === m.name && styles.sel)}
-                data-testid={`memory-row-${m.name}`}
-                onClick={() => select(m.name)}
-              >
-                <button
-                  type="button"
-                  className={cn(styles['mem-active-dot'], !isActive && styles.dim)}
-                  aria-label={isActive ? `取消激活 memory ${m.name}` : `激活 memory ${m.name}`}
-                  aria-pressed={isActive}
-                  data-state={isActive ? 'active' : 'inactive'}
-                  data-tooltip={isActive ? '已激活，点击取消' : '未激活，点击设为投影'}
-                  title={isActive ? '已激活，点击取消' : '未激活，点击设为投影'}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    activate(isActive ? null : m.name)
-                  }}
-                />
-                <span className={styles['mem-name']}>{m.name}</span>
-                <span className={styles['mem-actions']} onClick={(e) => e.stopPropagation()}>
-                  <IconButton
-                    label={`重命名 memory ${m.name}`}
-                    tooltip="重命名"
-                    onClick={() => {
-                      setRenaming(m.name)
-                      setDraftName(m.name)
+          <SortableList
+            items={memories.map((memory) => ({ ...memory, id: memory.name }))}
+            label={(memory) => memory.name}
+            onReorder={reorderMemories}
+          >
+            {(m) => {
+              const isActive = active === m.name
+              return (
+                <div
+                  className={cn(styles['mem-item'], selected === m.name && styles.sel)}
+                  data-testid={`memory-row-${m.name}`}
+                  onClick={() => select(m.name)}
+                >
+                  <button
+                    type="button"
+                    className={cn(styles['mem-active-dot'], !isActive && styles.dim)}
+                    aria-label={isActive ? `取消激活 memory ${m.name}` : `激活 memory ${m.name}`}
+                    aria-pressed={isActive}
+                    data-state={isActive ? 'active' : 'inactive'}
+                    data-tooltip={isActive ? '已激活，点击取消' : '未激活，点击设为投影'}
+                    title={isActive ? '已激活，点击取消' : '未激活，点击设为投影'}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      activate(isActive ? null : m.name)
                     }}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </IconButton>
-                  <IconButton
-                    label={`删除 memory ${m.name}`}
-                    tooltip="删除"
-                    tone="danger"
-                    onClick={() => setDeleting(m.name)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </IconButton>
-                </span>
-              </div>
-            )
-          })}
+                  />
+                  <span className={styles['mem-name']}>{m.name}</span>
+                  <span className={styles['mem-actions']} onClick={(e) => e.stopPropagation()}>
+                    <IconButton
+                      label={`重命名 memory ${m.name}`}
+                      tooltip="重命名"
+                      onClick={() => {
+                        setRenaming(m.name)
+                        setDraftName(m.name)
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </IconButton>
+                    <IconButton
+                      label={`删除 memory ${m.name}`}
+                      tooltip="删除"
+                      tone="danger"
+                      onClick={() => setDeleting(m.name)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </IconButton>
+                  </span>
+                </div>
+              )
+            }}
+          </SortableList>
         </div>
       </aside>
 

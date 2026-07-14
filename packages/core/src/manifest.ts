@@ -4,6 +4,7 @@ import type { Config, RepoManifest, Manifest } from './types.js'
 import { deriveRepoId } from './projection.js'
 import { parseVarsEnvironment } from './vars-codec.js'
 import type { VarsEnvironment, VarEntry } from './vars-types.js'
+import { normalizeOrder, normalizeSkillGroupOrder } from './order.js'
 
 export function loadRepoManifest(files: Record<string, string>): RepoManifest {
   const parse = (p: string, fallback: unknown): unknown => {
@@ -128,10 +129,8 @@ export function buildManifest(repo: RepoManifest, localConfig: Config): Manifest
   const profileName = effective.profile ?? 'default'
   const defaultVars = toVarsFile(repo.varsFiles['default'])
   const activeEnvironment = repo.varsFiles[profileName]
-  const memories = Object.entries(repo.memoriesFiles).map(([name, content]) => ({
-    name,
-    content,
-  }))
+  const memoryNames = normalizeOrder(repo.repoConfig?.memory_order, Object.keys(repo.memoriesFiles))
+  const memories = memoryNames.map((name) => ({ name, content: repo.memoriesFiles[name] }))
   const activeName = effective.active_memory ?? null
   const active = activeName ? (memories.find((m) => m.name === activeName) ?? null) : null
   const activeContent = active?.content ?? ''
@@ -140,7 +139,7 @@ export function buildManifest(repo: RepoManifest, localConfig: Config): Manifest
     errors.push(`active_memory references unknown memory: ${activeName}`)
   }
   return {
-    skills: repo.skills,
+    skills: { ...repo.skills, group_order: normalizeSkillGroupOrder(repo.skills) },
     mcp: repo.mcp,
     memory: { memories, active, activeContent },
     vars: {

@@ -497,6 +497,10 @@ export const api = {
   }) => post('/skills/source-targets', body).then(json),
   updateLocalSkillTargets: (body: { repo: string; id: string; targets: string[] }) =>
     post('/skills/local/targets', body).then(json),
+  reorderSkillGroups: (body: { repo: string; ids: string[] }) =>
+    put('/skills/order', body).then(json) as Promise<{ ok: true; ids: string[] }>,
+  reorderMcpServers: (body: { repo: string; ids: string[] }) =>
+    put('/mcp/order', body).then(json) as Promise<{ ok: true; ids: string[] }>,
 
   getMemory: (repo: string) =>
     fetch(`${base}/memory?repo=${encodeURIComponent(repo)}`).then(json) as Promise<{
@@ -519,6 +523,8 @@ export const api = {
     post('/memory/rename', body).then(json),
   setMemoryActive: (body: { repo: string; name: string | null }) =>
     post('/memory/active', body).then(json),
+  reorderMemories: (body: { repo: string; names: string[] }) =>
+    put('/memory/order', body).then(json) as Promise<{ ok: true; names: string[] }>,
   previewMemory: (body: { repo: string; content: string; agent: string }) =>
     post('/memory/preview', body).then(json) as Promise<{
       rendered?: string

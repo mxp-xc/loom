@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Hono } from 'hono'
 import { registerRoutes } from '../../src/api/router.js'
+import { createMemoryRoutes } from '../../src/api/routes/memory.js'
+import { NodeFileSystem } from '../../src/platform/node/fs.js'
 
 describe('memory routes', () => {
   let home: string
@@ -49,6 +51,20 @@ describe('memory routes', () => {
     const res = await req('GET', '/api/memory?repo=default&name=v1')
     const j = await res.json()
     expect(j.content).toBe('# raw ${LOOM_AGENT}')
+  })
+
+  it('supports dots in safe memory file names', async () => {
+    const repo = join(home, '.loom', 'repos', 'default')
+    writeFileSync(join(repo, 'memories', 'gpt-5.6.md'), '# dotted')
+
+    const content = await req('GET', '/api/memory?repo=default&name=gpt-5.6')
+    expect(await content.json()).toEqual({ content: '# dotted' })
+
+    const reordered = await req('PUT', '/api/memory/order', {
+      repo: 'default',
+      names: ['gpt-5.6'],
+    })
+    expect(await reordered.json()).toEqual({ ok: true, names: ['gpt-5.6'] })
   })
 
   it('POST /memory creates new memory', async () => {
@@ -194,6 +210,104 @@ describe('memory routes', () => {
     })
 
     expect(res.status).toBe(409)
+  })
+
+  it('persists memory order and keeps it normalized through create, rename, and delete', async () => {
+    const repo = join(home, '.loom', 'repos', 'default')
+    writeFileSync(join(repo, 'memories', 'a.md'), 'a')
+    writeFileSync(join(repo, 'memories', 'b.md'), 'b')
+
+    const reordered = await req('PUT', '/api/memory/order', {
+      repo: 'default',
+      names: ['b', 'missing', 'b'],
+    })
+    expect(await reordered.json()).toEqual({ ok: true, names: ['b', 'a'] })
+
+    await req('POST', '/api/memory', { repo: 'default', name: 'c' })
+    await req('POST', '/api/memory/rename', { repo: 'default', name: 'b', newName: 'team' })
+    await req('DELETE', '/api/memory?repo=default&name=a')
+
+    const listed = await req('GET', '/api/memory?repo=default')
+    expect((await listed.json()).memories.map((memory: any) => memory.name)).toEqual(['team', 'c'])
+    expect(readFileSync(join(repo, 'config.yaml'), 'utf8')).toContain(
+      'memory_order:\n  - team\n  - c',
+    )
+  })
+
+  it('does not rewrite an unchanged order and rejects malformed memory data', async () => {
+    const repo = join(home, '.loom', 'repos', 'default')
+    writeFileSync(join(repo, 'memories', 'a.md'), 'a')
+    writeFileSync(join(repo, 'memories', 'b.md'), 'b')
+    const originalConfig = 'memory_order:\n  - a\n  - b\n'
+    writeFileSync(join(repo, 'config.yaml'), originalConfig)
+
+    const unchanged = await req('PUT', '/api/memory/order', {
+      repo: 'default',
+      names: ['a', 'b'],
+    })
+    expect(await unchanged.json()).toEqual({ ok: true, names: ['a', 'b'] })
+    expect(readFileSync(join(repo, 'config.yaml'), 'utf8')).toBe(originalConfig)
+
+    writeFileSync(join(repo, 'memories', 'invalid name.md'), 'invalid')
+    const malformedFiles = await req('PUT', '/api/memory/order', {
+      repo: 'default',
+      names: [],
+    })
+    expect(malformedFiles.status).toBe(422)
+
+    writeFileSync(join(repo, 'config.yaml'), '- invalid\n')
+    const malformedConfig = await req('PUT', '/api/memory/order', {
+      repo: 'default',
+      names: [],
+    })
+    expect(malformedConfig.status).toBe(422)
+  })
+
+  it('rolls back memory file mutations when the config replace fails', async () => {
+    const repo = join(home, '.loom', 'repos', 'default')
+    class FailingConfigFileSystem extends NodeFileSystem {
+      override async replaceFile(): Promise<void> {
+        throw new Error('config replace failed')
+      }
+    }
+    const rollbackApp = new Hono().route(
+      '/api',
+      createMemoryRoutes({ fs: new FailingConfigFileSystem(), home } as any),
+    )
+    const rollbackReq = (method: string, path: string, body?: unknown) =>
+      rollbackApp.request(`http://localhost${path}`, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      })
+
+    const createResponse = await rollbackReq('POST', '/api/memory', {
+      repo: 'default',
+      name: 'created',
+    })
+    expect(createResponse.status).toBe(400)
+    expect(existsSync(join(repo, 'memories', 'created.md'))).toBe(false)
+
+    writeFileSync(join(repo, 'memories', 'original.md'), 'original content')
+    writeFileSync(
+      join(repo, 'config.yaml'),
+      'active_memory: original\nmemory_order:\n  - original\n',
+    )
+    const deleteResponse = await rollbackReq('DELETE', '/api/memory?repo=default&name=original')
+    expect(deleteResponse.status).toBe(400)
+    expect(readFileSync(join(repo, 'memories', 'original.md'), 'utf8')).toBe('original content')
+
+    const renameResponse = await rollbackReq('POST', '/api/memory/rename', {
+      repo: 'default',
+      name: 'original',
+      newName: 'renamed',
+    })
+    expect(renameResponse.status).toBe(400)
+    expect(existsSync(join(repo, 'memories', 'original.md'))).toBe(true)
+    expect(existsSync(join(repo, 'memories', 'renamed.md'))).toBe(false)
+    expect(readFileSync(join(repo, 'config.yaml'), 'utf8')).toBe(
+      'active_memory: original\nmemory_order:\n  - original\n',
+    )
   })
 
   it('POST /memory/preview renders ${VAR} for agent', async () => {

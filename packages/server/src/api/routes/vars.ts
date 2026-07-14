@@ -77,11 +77,6 @@ const ValidateVariableBody = EnvironmentBody.extend({
   chain: z.array(EnvironmentNameSchema).min(1),
 })
 const RevealVariableBody = DeleteImpactBody
-type AccessMode = 'read' | 'write'
-type AccessWaiter = { mode: AccessMode; grant: (release: () => void) => void }
-type AccessState = { readers: number; writer: boolean; queue: AccessWaiter[] }
-const repoAccessLocks = new Map<string, AccessState>()
-
 class ApiError extends Error {
   constructor(
     readonly status: 400 | 403 | 404 | 409 | 422 | 500,
@@ -227,80 +222,14 @@ async function resolveAuthorizedRepo(deps: RouteDeps, repoPath: string): Promise
   return normalize(requested)
 }
 
-function drainAccessQueue(lockKey: string, state: AccessState): void {
-  if (state.writer || state.readers > 0) return
-  const first = state.queue[0]
-  if (!first) {
-    if (repoAccessLocks.get(lockKey) === state) repoAccessLocks.delete(lockKey)
-    return
-  }
-  if (first.mode === 'write') {
-    state.queue.shift()
-    state.writer = true
-    first.grant(() => {
-      state.writer = false
-      drainAccessQueue(lockKey, state)
-    })
-    return
-  }
-  while (state.queue[0]?.mode === 'read') {
-    const waiter = state.queue.shift()!
-    state.readers += 1
-    waiter.grant(() => {
-      state.readers -= 1
-      drainAccessQueue(lockKey, state)
-    })
-  }
-}
-
-function acquireRepoAccess(lockKey: string, mode: AccessMode): Promise<() => void> {
-  const state = repoAccessLocks.get(lockKey) ?? { readers: 0, writer: false, queue: [] }
-  repoAccessLocks.set(lockKey, state)
-  if (mode === 'read' && !state.writer && state.queue.length === 0) {
-    state.readers += 1
-    return Promise.resolve(() => {
-      state.readers -= 1
-      drainAccessQueue(lockKey, state)
-    })
-  }
-  if (mode === 'write' && !state.writer && state.readers === 0 && state.queue.length === 0) {
-    state.writer = true
-    return Promise.resolve(() => {
-      state.writer = false
-      drainAccessQueue(lockKey, state)
-    })
-  }
-  return new Promise((grant) => state.queue.push({ mode, grant }))
-}
-
-async function queued<T>(lockKey: string, mode: AccessMode, action: () => Promise<T>): Promise<T> {
-  const release = await acquireRepoAccess(lockKey, mode)
-  try {
-    return await action()
-  } finally {
-    release()
-  }
-}
-
 async function withRepoAccess<T>(
   deps: RouteDeps,
   repoPath: string,
-  mode: AccessMode,
+  _mode: 'read' | 'write',
   action: (authorizedRepoPath: string) => Promise<T>,
 ): Promise<T> {
   const authorizedRepoPath = await resolveAuthorizedRepo(deps, repoPath)
-  return queued(authorizedRepoPath, mode, () => action(authorizedRepoPath))
-}
-
-export function varsAccessLockCountForTest(): number {
-  return repoAccessLocks.size
-}
-
-export function varsAccessPendingWritersForTest(): number {
-  return [...repoAccessLocks.values()].reduce(
-    (count, state) => count + state.queue.filter((waiter) => waiter.mode === 'write').length,
-    0,
-  )
+  return action(authorizedRepoPath)
 }
 
 export function createVarsRoutes(deps: RouteDeps): Hono {

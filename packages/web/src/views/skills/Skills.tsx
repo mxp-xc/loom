@@ -6,7 +6,8 @@ import { useManifestOperations } from '@/hooks/useManifestOperations'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
 import { ErrorState } from '@/components/ErrorFeedback'
-import type { SkillSource } from '@loom/core'
+import { normalizeOrder, normalizeSkillGroupOrder, type SkillSource } from '@loom/core'
+import { api } from '@/lib/api'
 import SkillSourceList from './SkillSourceList'
 import GlobalTargetsBar from './GlobalTargetsBar'
 import MemberScanModal from './MemberScanModal'
@@ -39,6 +40,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
   const [detail, setDetail] = useState<SkillDetail | null>(null)
   const [editSource, setEditSource] = useState<SkillSource | null>(null)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [groupOrder, setGroupOrder] = useState<string[]>([])
 
   const sourceCount = manifest?.skills?.sources?.length ?? 0
   const localCount = manifest?.skills?.skills?.length ?? 0
@@ -50,6 +52,30 @@ export default function Skills({ repoPath }: { repoPath: string }) {
     ...(localCount > 0 ? ['local'] : []),
   ]
   const allCollapsed = groupKeys.every((key) => !expandedGroups.has(key))
+  const normalizedGroupOrder = manifest
+    ? normalizeOrder(groupOrder, normalizeSkillGroupOrder(manifest.skills))
+    : []
+
+  const reorderGroups = async (ids: string[]) => {
+    const previous = normalizedGroupOrder
+    setGroupOrder(ids)
+    try {
+      const result = await api.reorderSkillGroups({ repo: repoPath, ids })
+      setGroupOrder(result.ids)
+    } catch (reorderError) {
+      console.error({ err: reorderError }, 'Failed to reorder skill groups')
+      setGroupOrder(previous)
+      try {
+        const current = (await api.getManifest(repoPath)) as {
+          skills?: { group_order?: string[]; sources?: unknown[]; skills?: unknown[] }
+        }
+        if (current.skills?.group_order) setGroupOrder(current.skills.group_order)
+      } catch (reloadError) {
+        console.error({ err: reloadError }, 'Failed to reload skill order after reorder failure')
+      }
+      showErrorToast(reorderError, { title: 'Skills 排序失败', message: '已恢复原顺序，请重试' })
+    }
+  }
 
   const toggleGroup = (key: string) => {
     setExpandedGroups((current) => {
@@ -148,6 +174,8 @@ export default function Skills({ repoPath }: { repoPath: string }) {
             onOpenEdit={setEditSource}
             expandedGroups={expandedGroups}
             onToggleGroup={toggleGroup}
+            groupOrder={normalizedGroupOrder}
+            onReorderGroups={reorderGroups}
           />
         </>
       )}

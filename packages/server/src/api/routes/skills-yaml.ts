@@ -108,6 +108,11 @@ const SetLocalSkillTargetsBody = DeleteLocalSkillBody.extend({
   targets: z.array(AgentIdSchema),
 })
 
+const ReorderSkillGroupsBody = z.object({
+  repo: RepoField,
+  ids: z.array(NonEmptyString),
+})
+
 export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
   const skills = new SkillsApplication(
@@ -326,6 +331,23 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       } catch (e) {
         if (isInvalidRepo(e)) return invalidRepo(c, e)
         return c.json(errorBody(e, 'update_failed', 'failed to update local skill targets'))
+      }
+    },
+  )
+
+  app.put(
+    '/skills/order',
+    jsonValidator(ReorderSkillGroupsBody, { error: 'invalid_order' }),
+    async (c) => {
+      try {
+        const { repo, ids } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        return c.json({ ok: true, ...(await skills.reorderGroups(repoPath, ids)) })
+      } catch (e) {
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        if (e instanceof SkillsApplicationError)
+          return c.json(errorBody(e, 'reorder_failed', 'failed to reorder skill groups'), e.status)
+        return c.json(errorBody(e, 'reorder_failed', 'failed to reorder skill groups'), 500)
       }
     },
   )

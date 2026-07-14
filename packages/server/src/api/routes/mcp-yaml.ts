@@ -33,6 +33,11 @@ const SetMcpTargetsBody = z.object({
   targets: z.array(AgentIdSchema),
 })
 
+const ReorderMcpServersBody = z.object({
+  repo: RepoField,
+  ids: z.array(NonEmptyString),
+})
+
 export function createMcpYamlRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
   const mcp = new McpApplication(deps.fs)
@@ -98,6 +103,27 @@ export function createMcpYamlRoutes(deps: RouteDeps): Hono {
       } catch (e) {
         if (isInvalidRepo(e)) return invalidRepo(c, e)
         return c.json(errorBody(e, 'update_failed', 'failed to update MCP targets'))
+      }
+    },
+  )
+
+  app.put(
+    '/mcp/order',
+    jsonValidator(ReorderMcpServersBody, { error: 'invalid_order' }),
+    async (c) => {
+      try {
+        const { repo, ids } = c.req.valid('json')
+        const repoPath = await resolveRequestRepo(deps, repo)
+        return c.json({ ok: true, ...(await mcp.reorderServers(repoPath, ids)) })
+      } catch (e) {
+        if (isInvalidRepo(e)) return invalidRepo(c, e)
+        if (e instanceof McpApplicationError)
+          return c.json({ ok: false, error: e.code, message: e.message }, e.status)
+        mcpRouteLogger.error('failed to reorder MCP servers', { err: e })
+        return c.json(
+          { ok: false, error: 'reorder_failed', message: 'failed to reorder MCP servers' },
+          500,
+        )
       }
     },
   )

@@ -89,6 +89,35 @@ Tests:
 - packages/web/test/mcp-preview.test.ts
 - packages/web/test/mcp-view.test.tsx
 
+## R-MCP-007 MCP 数组顺序是仓库共享展示顺序
+
+Status: active
+Applies to: MCP manifest, MCP UI, MCP API
+
+Rule:
+`mcp.yaml` server 数组顺序同时是 MCP 页面仓库共享的展示顺序，不保存独立 order 字段。
+
+Implications:
+
+- Reorder 只重排当前仍存在的 server；请求遗漏的 server 按当前顺序追加。
+- 搜索或 transport filter 生效时 UI 禁止排序，避免把局部结果误写成全局顺序。
+- 顺序未变化时不写文件。
+
+Safety:
+
+- Reorder 不修改 server 定义或 targets，也不触发 projection。
+- MCP 数据自身存在重复 id 时拒绝 reorder，不能猜测实体身份。
+
+Examples:
+
+- 当前为 A、B、C，请求为 C、A 时，最终为 C、A、B。
+
+Tests:
+
+- packages/server/test/mcp/application.test.ts
+- packages/server/test/api/routes-fixes.test.ts
+- packages/web/test/views.test.tsx
+
 ## R-MCP-006 MCP import 是显式 desired-state 写入
 
 Status: active

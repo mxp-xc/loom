@@ -32,7 +32,7 @@ Examples:
 
 Tests:
 
-- packages/core/test/memory-manifest.test.ts
+- packages/core/test/order.test.ts
 - packages/core/test/memory-types.test.ts
 - packages/server/test/api/memory.test.ts
 
@@ -124,3 +124,33 @@ Tests:
 
 - packages/web/test/memory-editor.test.tsx
 - packages/server/test/api/memory.test.ts
+
+## R-MEMORY-005 Memory 顺序是非权威仓库展示状态
+
+Status: active
+Applies to: memory manifest, memory API, memory UI
+
+Rule:
+`config.memory_order` 非权威地表达 `memories/*.md` 的仓库共享展示顺序。Memory 文件仍是实体权威来源，顺序字段不保存内容或 active 状态。
+
+Implications:
+
+- 读取时去重、忽略不存在的 name，并按当前文件顺序追加遗漏 name。
+- Create 将新 name 追加到末尾，delete 移除，rename 在原位置替换。
+- 字段缺失或 malformed 时回退为当前文件顺序；读取不自动改写。
+
+Safety:
+
+- `memory_order` 不能创建、删除、隐藏或恢复 markdown 文件。
+- Reorder 不修改 markdown、selected memory、`active_memory` 或 projection。
+- 同时修改文件与 config 的 mutation 失败时必须回滚已完成步骤并记录完整错误。
+
+Examples:
+
+- 文件为 default、team，保存顺序为 old、team、team 时，展示顺序为 team、default。
+
+Tests:
+
+- packages/core/test/memory-manifest.test.ts
+- packages/server/test/api/memory.test.ts
+- packages/web/test/views.test.tsx

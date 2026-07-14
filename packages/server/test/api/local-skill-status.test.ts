@@ -125,6 +125,13 @@ describe('source skill target routes', () => {
       writeFile: vi.fn(async (path: string, content: string) => {
         files.set(path, content)
       }),
+      replaceFile: vi.fn(async (temporary: string, target: string) => {
+        files.set(target, files.get(temporary) ?? '')
+        files.delete(temporary)
+      }),
+      removeFile: vi.fn(async (path: string) => {
+        files.delete(path)
+      }),
     }
     const app = new Hono().route(
       '/api',

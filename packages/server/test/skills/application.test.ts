@@ -388,4 +388,66 @@ describe('SkillsApplication', () => {
     expect(existsSync(join(repoPath, 'assets', 'skills', 'removed'))).toBe(false)
     expect(projection).toHaveBeenCalledTimes(2)
   })
+
+  it('reorders top-level source and local groups with stale ids normalized', async () => {
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      [
+        'sources:',
+        '  - url: https://example.test/a',
+        '    ref: main',
+        '  - url: https://example.test/b',
+        '    ref: main',
+        'skills:',
+        '  - id: local-skill',
+        'group_order:',
+        '  - source:https://example.test/missing',
+        '  - source:https://example.test/a',
+        '',
+      ].join('\n'),
+    )
+
+    await expect(
+      app.reorderGroups(repoPath, ['local', 'source:https://example.test/b', 'unknown']),
+    ).resolves.toEqual({
+      ids: ['local', 'source:https://example.test/b', 'source:https://example.test/a'],
+    })
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.group_order).toEqual([
+      'local',
+      'source:https://example.test/b',
+      'source:https://example.test/a',
+    ])
+  })
+
+  it('rejects duplicate source urls when reordering', async () => {
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      'sources:\n  - url: https://example.test/a\n    ref: main\n  - url: https://example.test/a\n    ref: dev\nskills: []\n',
+    )
+
+    await expect(app.reorderGroups(repoPath, [])).rejects.toMatchObject({
+      status: 409,
+      code: 'duplicate_source_url',
+    })
+  })
+
+  it('does not rewrite an unchanged group order and rejects malformed entities', async () => {
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      'sources:\n  - url: https://example.test/a\n    ref: main\nskills: []\ngroup_order:\n  - source:https://example.test/a\n',
+    )
+    const replace = vi.spyOn(fs, 'replaceFile')
+
+    await expect(app.reorderGroups(repoPath, ['source:https://example.test/a'])).resolves.toEqual({
+      ids: ['source:https://example.test/a'],
+    })
+    expect(replace).not.toHaveBeenCalled()
+
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: {}\nskills: []\n')
+    await expect(app.reorderGroups(repoPath, [])).rejects.toMatchObject({
+      status: 422,
+      code: 'invalid_skills_manifest',
+    })
+  })
 })

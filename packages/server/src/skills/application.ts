@@ -4,6 +4,9 @@ import {
   addSource as addSourceMutation,
   deriveRepoId,
   pinSourceCommit,
+  normalizeOrder,
+  normalizeSkillGroupOrder,
+  sameOrder,
   removeLocalSkill as removeLocalSkillMutation,
   removeSource as removeSourceMutation,
   SOURCE_NAME_REGEX,
@@ -35,7 +38,7 @@ const skillsLogger = logger.child('skills-application')
 
 export class SkillsApplicationError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409,
+    readonly status: 400 | 404 | 409 | 422,
     readonly code: string,
     message: string,
   ) {
@@ -380,12 +383,26 @@ export class SkillsApplication {
     )
   }
 
+  async reorderGroups(repoPath: string, ids: string[]): Promise<{ ids: string[] }> {
+    const manifest = await this.readManifest(repoPath)
+    assertUniqueSourceUrls(manifest)
+    const current = normalizeSkillGroupOrder(manifest)
+    const next = normalizeOrder(ids, current)
+    if (!sameOrder(current, next)) {
+      await this.writeManifest(repoPath, { ...manifest, group_order: next })
+    }
+    return { ids: next }
+  }
+
   private async readManifest(repoPath: string): Promise<SkillsManifest> {
     return (await readYaml(this.fs, this.skillsYamlPath(repoPath))) ?? { sources: [], skills: [] }
   }
 
   private async writeManifest(repoPath: string, manifest: SkillsManifest): Promise<void> {
-    await writeYaml(this.fs, this.skillsYamlPath(repoPath), manifest)
+    await writeYaml(this.fs, this.skillsYamlPath(repoPath), {
+      ...manifest,
+      group_order: normalizeSkillGroupOrder(manifest),
+    })
   }
 
   private async updateManifest(
@@ -459,5 +476,37 @@ function assertUniqueSource(
         `Source name already exists: ${candidate.name}`,
       )
     }
+  }
+}
+
+function assertUniqueSourceUrls(manifest: SkillsManifest): void {
+  if (
+    !manifest ||
+    typeof manifest !== 'object' ||
+    !Array.isArray(manifest.sources) ||
+    !Array.isArray(manifest.skills) ||
+    manifest.skills.some(
+      (skill) => !skill || typeof skill !== 'object' || typeof skill.id !== 'string' || !skill.id,
+    )
+  ) {
+    throw new SkillsApplicationError(422, 'invalid_skills_manifest', 'Skills manifest is malformed')
+  }
+  const seen = new Set<string>()
+  for (const source of manifest.sources) {
+    if (typeof source?.url !== 'string' || !source.url) {
+      throw new SkillsApplicationError(
+        422,
+        'invalid_skills_manifest',
+        'Skills manifest is malformed',
+      )
+    }
+    if (seen.has(source.url)) {
+      throw new SkillsApplicationError(
+        409,
+        'duplicate_source_url',
+        `Duplicate source URL: ${source.url}`,
+      )
+    }
+    seen.add(source.url)
   }
 }
