@@ -1,5 +1,6 @@
 .workbench {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   height: min(618px, calc(100dvh - 130px));
   min-height: 448px;

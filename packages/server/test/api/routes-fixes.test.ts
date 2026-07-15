@@ -9,6 +9,63 @@ const logFns = vi.hoisted(() => ({
   info: vi.fn(),
 }))
 const projectRepositoryMock = vi.hoisted(() => vi.fn(async () => ({ ok: true as const })))
+const platformGit = vi.hoisted(() => ({
+  clone: vi.fn(async () => {}),
+  checkout: vi.fn(async () => {}),
+  fetch: vi.fn(async () => {}),
+  revParseHead: vi.fn(async () => 'installed-commit'),
+  revParse: vi.fn(async (_repoPath: string, ref: string) =>
+    ref.endsWith('^{tree}') ? 'root-tree' : 'installed-commit',
+  ),
+  readTree: vi.fn(async () => [
+    { mode: '040000', type: 'tree' as const, oid: 'skills-tree', path: 'skills' },
+    {
+      mode: '040000',
+      type: 'tree' as const,
+      oid: 'review-tree',
+      path: 'skills/review',
+    },
+    {
+      mode: '100644',
+      type: 'blob' as const,
+      oid: 'review-skill',
+      path: 'skills/review/SKILL.md',
+    },
+    { mode: '040000', type: 'tree' as const, oid: 'shared-tree', path: 'shared' },
+    {
+      mode: '100644',
+      type: 'blob' as const,
+      oid: 'private-resource',
+      path: 'shared/private.md',
+    },
+  ]),
+  show: vi.fn(async () => '# Review'),
+  lsRemote: vi.fn(async () => {
+    throw new TypeError('remote unavailable')
+  }),
+}))
+const prepareSourceUpdateMock = vi.hoisted(() =>
+  vi.fn(async () => ({
+    pinned_commit: 'next-commit',
+    stagingDir: '/tmp/source-update/temp/source-updates/staged',
+    candidateDir: '/tmp/source-update/temp/source-updates/candidate',
+    newMembers: [{ name: 'next-skill', entry: 'skills/next-skill/SKILL.md' }],
+    resourceBoundaryChanges: [] as Array<{ name: string; entry: string; path: string }>,
+    pathMoves: [],
+    changes: {
+      added: [{ name: 'next-skill' }],
+      updated: [],
+      removed: [
+        {
+          name: 'old-skill',
+          previousPath: 'skills/old-skill/SKILL.md',
+          targets: ['codex'],
+        },
+      ],
+      unchanged: [],
+    },
+  })),
+)
 
 const memFiles: Record<string, string> = {}
 
@@ -25,6 +82,7 @@ const memFs = {
   readDir: vi.fn(async () => []),
   mkdir: vi.fn(async () => {}),
   copyDir: vi.fn(async () => {}),
+  move: vi.fn(async () => {}),
   removeDir: vi.fn(async () => {}),
   removeFile: vi.fn(async (p: string) => {
     delete memFiles[p.replace(/\\/g, '/')]
@@ -62,7 +120,11 @@ vi.mock('@loom/core', async () => {
   }
 })
 vi.mock('../../src/platform/node/index.js', () => ({
-  createNodePlatform: vi.fn(() => ({ fs: memFs, git: {}, proc: {} })),
+  createNodePlatform: vi.fn(() => ({
+    fs: memFs,
+    git: platformGit,
+    proc: {},
+  })),
 }))
 vi.mock('../../src/lib/logger.js', () => ({
   logger: {
@@ -78,6 +140,21 @@ vi.mock('../../src/api/repo.js', () => ({
   listRepos: vi.fn(async () => []),
 }))
 vi.mock('../../src/remote/discover.js', () => ({
+  discoverSourceTree: vi.fn(async () => ({
+    commit: 'commit-oid',
+    nodes: [
+      {
+        kind: 'bundle',
+        name: 'brainstorming',
+        path: 'skills/brainstorming',
+        entry: 'skills/brainstorming/SKILL.md',
+        mode: '040000',
+        oid: 'bundle-oid',
+        description: 'desc',
+      },
+    ],
+    diagnostics: [],
+  })),
   discoverSkills: vi.fn(async () => [
     {
       name: 'brainstorming',
@@ -95,22 +172,7 @@ vi.mock('../../src/remote/discover.js', () => ({
 }))
 vi.mock('../../src/remote/update.js', () => ({
   checkUpdates: vi.fn(async () => []),
-  prepareSourceUpdate: vi.fn(async () => ({
-    pinned_commit: 'next-commit',
-    stagingDir: '/tmp/source-update/temp/source-updates/staged',
-    newMembers: [{ name: 'next-skill', relativePath: 'skills/next-skill/SKILL.md' }],
-    changes: {
-      added: [{ name: 'next-skill' }],
-      updated: [],
-      removed: [{ name: 'old-skill', targets: ['codex'] }],
-      unchanged: [],
-    },
-  })),
-  performUpdate: vi.fn(async () => ({
-    pinned_commit: 'abc1234',
-    orphans: [],
-    newMembers: [],
-  })),
+  prepareSourceUpdate: prepareSourceUpdateMock,
 }))
 
 describe('routes file-init safety', () => {
@@ -343,36 +405,142 @@ describe('local skill import', () => {
 describe('source scan', () => {
   const app = new Hono().route('/api', registerRoutes())
 
-  it('POST /api/sources/scan returns discovered members', async () => {
-    const { discoverSkills } = await import('../../src/remote/discover.js')
-    vi.mocked(discoverSkills).mockClear()
+  it('POST /api/sources/scan returns the source commit tree', async () => {
+    const { discoverSourceTree } = await import('../../src/remote/discover.js')
+    vi.mocked(discoverSourceTree).mockClear()
+    const res = await app.request('/api/sources/scan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'custom-source',
+        url: 'https://github.com/obra/superpowers',
+        type: 'tag',
+        ref: 'v1.0.1',
+      }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toMatchObject({
+      ok: true,
+      commit: 'commit-oid',
+      summary: { bundles: 1, containers: 0, resources: 0, symlinks: 0, submodules: 0 },
+      diagnostics: [],
+      tree: {
+        commit: 'commit-oid',
+        nodes: [{ kind: 'bundle', entry: 'skills/brainstorming/SKILL.md' }],
+        diagnostics: [],
+      },
+    })
+    expect(discoverSourceTree).toHaveBeenCalledWith(expect.anything(), {
+      name: 'custom-source',
+      url: 'https://github.com/obra/superpowers',
+      type: 'tag',
+      ref: 'v1.0.1',
+    })
+  })
+
+  it('POST /api/sources/scan rejects the removed glob field', async () => {
     const res = await app.request('/api/sources/scan', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         url: 'https://github.com/obra/superpowers',
-        type: 'tag',
-        ref: 'v1.0.1',
-        scan: 'skills/engineering/**/SKILL.md',
+        scan: '**/SKILL.md',
       }),
     })
-    expect(res.status).toBe(200)
-    const body = await res.json()
-    expect(body.members).toHaveLength(2)
-    expect(body.members[0].name).toBe('brainstorming')
-    expect(discoverSkills).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
-      url: 'https://github.com/obra/superpowers',
-      type: 'tag',
-      ref: 'v1.0.1',
-      scan: 'skills/engineering/**/SKILL.md',
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).ok).toBe(false)
+  })
+
+  it('POST /api/sources/tree reads the pinned tree from cache without remote git operations', async () => {
+    const repo = '/tmp/cached-source'
+    memFiles[`${repo}/remote-cache/superpowers/.git`] = 'gitdir'
+    platformGit.clone.mockClear()
+    platformGit.checkout.mockClear()
+    platformGit.fetch.mockClear()
+    platformGit.lsRemote.mockClear()
+    platformGit.revParse.mockClear()
+    platformGit.readTree.mockClear()
+    platformGit.show.mockClear()
+
+    const res = await app.request('/api/sources/tree', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo,
+        url: 'https://github.com/obra/superpowers',
+        pinned_commit: 'pinned-commit',
+      }),
     })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      commit: 'installed-commit',
+      summary: { bundles: 1, containers: 2, resources: 1, symlinks: 0, submodules: 0 },
+      diagnostics: [],
+      tree: {
+        commit: 'installed-commit',
+        nodes: [
+          {
+            kind: 'container',
+            path: 'shared',
+            children: [{ kind: 'resource', path: 'shared/private.md' }],
+          },
+          {
+            kind: 'container',
+            path: 'skills',
+            children: [{ kind: 'bundle', entry: 'skills/review/SKILL.md' }],
+          },
+        ],
+      },
+    })
+    expect(platformGit.revParse).toHaveBeenCalledWith(
+      expect.stringMatching(/[\\/]remote-cache[\\/]superpowers$/),
+      'pinned-commit^{commit}',
+    )
+    expect(platformGit.clone).not.toHaveBeenCalled()
+    expect(platformGit.checkout).not.toHaveBeenCalled()
+    expect(platformGit.fetch).not.toHaveBeenCalled()
+    expect(platformGit.lsRemote).not.toHaveBeenCalled()
+  })
+
+  it('POST /api/sources/tree reports a missing cache without starting git operations', async () => {
+    platformGit.clone.mockClear()
+    platformGit.checkout.mockClear()
+    platformGit.fetch.mockClear()
+    platformGit.lsRemote.mockClear()
+    platformGit.revParse.mockClear()
+    platformGit.readTree.mockClear()
+    platformGit.show.mockClear()
+
+    const res = await app.request('/api/sources/tree', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/missing-cached-source',
+        url: 'https://github.com/obra/superpowers',
+        pinned_commit: 'pinned-commit',
+      }),
+    })
+
+    expect(res.status).toBe(404)
+    expect(await res.json()).toMatchObject({ ok: false, error: 'source_cache_unavailable' })
+    expect(platformGit.revParse).not.toHaveBeenCalled()
+    expect(platformGit.readTree).not.toHaveBeenCalled()
+    expect(platformGit.show).not.toHaveBeenCalled()
+    expect(platformGit.clone).not.toHaveBeenCalled()
+    expect(platformGit.checkout).not.toHaveBeenCalled()
+    expect(platformGit.fetch).not.toHaveBeenCalled()
+    expect(platformGit.lsRemote).not.toHaveBeenCalled()
   })
 
   it('POST /api/sources/scan logs scan failures', async () => {
     logFns.error.mockClear()
-    const { discoverSkills } = await import('../../src/remote/discover.js')
+    const { discoverSourceTree } = await import('../../src/remote/discover.js')
     const err = new Error('scan exploded')
-    vi.mocked(discoverSkills).mockRejectedValueOnce(err)
+    vi.mocked(discoverSourceTree).mockRejectedValueOnce(err)
 
     const res = await app.request('/api/sources/scan', {
       method: 'POST',
@@ -409,143 +577,266 @@ describe('source scan', () => {
 describe('source members', () => {
   const app = new Hono().route('/api', registerRoutes())
 
-  it('POST /api/sources/members accepts selected member names from the web UI', async () => {
-    memFiles['/tmp/source-members/skills.yaml'] =
-      'sources:\n' +
-      '  - url: https://github.com/mattpocock/skills\n' +
-      '    ref: v1.0.1\n' +
-      '    type: tag\n' +
-      '    members:\n' +
-      '      - name: old-skill\n' +
-      '        targets: [codex]\n' +
-      'skills: []\n'
-
+  it('POST /api/sources/members is not available', async () => {
     const res = await app.request('/api/sources/members', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        repo: '/tmp/source-members',
-        url: 'https://github.com/mattpocock/skills',
-        members: ['new-skill'],
-      }),
+      body: JSON.stringify({ repo: '/tmp/source-members' }),
     })
 
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true })
-    const parsed = yaml.load(memFiles['/tmp/source-members/skills.yaml']) as any
-    expect(parsed.sources[0].members).toEqual([{ name: 'new-skill' }])
+    expect(res.status).toBe(404)
   })
 })
 
 describe('source updates', () => {
   const app = new Hono().route('/api', registerRoutes())
 
-  it('POST /api/update/perform accepts manifest member overrides from the web UI', async () => {
-    memFiles['/tmp/source-update/skills.yaml'] = [
-      'sources:',
-      '  - name: custom-skills',
-      '    url: https://github.com/mattpocock/skills',
-      '    ref: v1.0.1',
-      '    type: tag',
-      '    members:',
-      '      - name: old-skill',
-      '        targets: [codex]',
-      'skills: []',
-      '',
-    ].join('\n')
-    const { performUpdate } = await import('../../src/remote/update.js')
-    vi.mocked(performUpdate).mockClear()
+  it('POST /api/install is not available', async () => {
+    const res = await app.request('/api/install', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/tmp/source-install' }),
+    })
 
+    expect(res.status).toBe(404)
+  })
+
+  it('POST /api/update/perform is not available', async () => {
     const res = await app.request('/api/update/perform', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        repo: '/tmp/source-update',
-        source: {
-          name: 'custom-skills',
-          url: 'https://github.com/mattpocock/skills',
-          ref: 'v1.0.1',
-          type: 'tag',
-          members: [{ name: 'old-skill', targets: ['codex'] }],
-        },
-        newRef: 'v1.0.2',
-        sourceId: 'custom-skills',
-        oldMembers: [{ name: 'old-skill', targets: ['codex'] }],
-      }),
+      body: JSON.stringify({}),
     })
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ pinned_commit: 'abc1234' })
-    expect(performUpdate).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ url: 'https://github.com/mattpocock/skills' }),
-      'v1.0.2',
-      '/tmp/source-update',
-      'skills',
-      [expect.objectContaining({ name: 'old-skill', targets: ['codex'] })],
-    )
+    expect(res.status).toBe(404)
   })
 
-  it('rolls back a finalized update when projection fails and allows retry', async () => {
-    memFiles['/tmp/source-update/skills.yaml'] = [
+  it('requires explicit confirmation when an update creates a resource bundle boundary', async () => {
+    memFiles['/tmp/source-boundary/skills.yaml'] = [
       'sources:',
       '  - url: https://github.com/mattpocock/skills',
       '    ref: main',
       '    pinned_commit: old-commit',
       '    members:',
       '      - name: old-skill',
+      '        entry: skills/old-skill/SKILL.md',
       '        targets: [codex]',
+      '    resources:',
+      '      include:',
+      '        - path: shared',
+      '          kind: directory',
+      '      exclude: []',
       'skills: []',
       '',
     ].join('\n')
-    projectRepositoryMock
-      .mockResolvedValueOnce({
-        ok: false,
-        failure: { originalError: new Error('projection failed') },
-      })
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true })
-
+    prepareSourceUpdateMock.mockResolvedValueOnce({
+      pinned_commit: 'next-commit',
+      stagingDir: '/tmp/source-boundary/temp/source-updates/staged',
+      candidateDir: '/tmp/source-boundary/temp/source-updates/candidate',
+      newMembers: [{ name: 'new-skill', entry: 'shared/new-skill/SKILL.md' }],
+      resourceBoundaryChanges: [
+        {
+          name: 'new-skill',
+          entry: 'shared/new-skill/SKILL.md',
+          path: 'shared/new-skill',
+        },
+      ],
+      pathMoves: [],
+      changes: { added: [{ name: 'new-skill' }], updated: [], removed: [], unchanged: [] },
+    })
     const prepared = await app.request('/api/update/prepare', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        repo: '/tmp/source-update',
+        repo: '/tmp/source-boundary',
         source: {
           url: 'https://github.com/mattpocock/skills',
           ref: 'main',
           pinned_commit: 'old-commit',
-          members: [{ name: 'old-skill', path: 'skills/old-skill/SKILL.md', targets: ['codex'] }],
+          members: [{ name: 'old-skill', entry: 'skills/old-skill/SKILL.md', targets: ['codex'] }],
+          resources: {
+            include: [{ path: 'shared', kind: 'directory' }],
+            exclude: [],
+          },
         },
         newRef: 'main',
-        sourceId: 'skills',
-        oldMembers: [],
+      }),
+    })
+    const preview = (await prepared.json()) as any
+    expect(preview.resourceBoundaryChanges).toEqual([
+      {
+        name: 'new-skill',
+        entry: 'shared/new-skill/SKILL.md',
+        path: 'shared/new-skill',
+      },
+    ])
+
+    const blocked = await app.request('/api/update/finalize', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/source-boundary',
+        sessionId: preview.sessionId,
+        preserve: [],
+      }),
+    })
+    expect(blocked.status).toBe(409)
+    expect((await blocked.json()).error).toBe('resource_boundary_confirmation_required')
+
+    const accepted = await app.request('/api/update/finalize', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/source-boundary',
+        sessionId: preview.sessionId,
+        preserve: [],
+        resourceBoundaryDecisions: [{ entry: 'shared/new-skill/SKILL.md', action: 'enable' }],
+      }),
+    })
+    expect((await accepted.json()).ok).toBe(true)
+    expect(
+      (yaml.load(memFiles['/tmp/source-boundary/skills.yaml']) as any).sources[0].members,
+    ).toEqual([{ name: 'new-skill', entry: 'shared/new-skill/SKILL.md' }])
+  })
+
+  it('preserves target edits made after update prepare when finalize writes members', async () => {
+    memFiles['/tmp/source-concurrent/skills.yaml'] = [
+      'sources:',
+      '  - url: https://github.com/mattpocock/skills',
+      '    ref: main',
+      '    members:',
+      '      - name: retained',
+      '        entry: skills/retained/SKILL.md',
+      '        targets: [codex]',
+      'skills: []',
+      '',
+    ].join('\n')
+    prepareSourceUpdateMock.mockResolvedValueOnce({
+      pinned_commit: 'next-commit',
+      stagingDir: '/tmp/source-concurrent/temp/source-updates/staged',
+      candidateDir: '/tmp/source-concurrent/temp/source-updates/candidate',
+      newMembers: [{ name: 'retained', entry: 'skills/retained/SKILL.md' }],
+      resourceBoundaryChanges: [],
+      pathMoves: [],
+      changes: { added: [], updated: [], removed: [], unchanged: [{ name: 'retained' }] },
+    })
+    const prepared = await app.request('/api/update/prepare', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/source-concurrent',
+        source: {
+          url: 'https://github.com/mattpocock/skills',
+          ref: 'main',
+          members: [
+            {
+              name: 'retained',
+              entry: 'skills/retained/SKILL.md',
+              targets: ['codex'],
+            },
+          ],
+        },
+        newRef: 'main',
       }),
     })
     const { sessionId } = (await prepared.json()) as { sessionId: string }
-    const finalizeBody = { repo: '/tmp/source-update', sessionId, preserve: ['old-skill'] }
+    memFiles['/tmp/source-concurrent/skills.yaml'] = memFiles[
+      '/tmp/source-concurrent/skills.yaml'
+    ].replace('[codex]', '[opencode]')
 
-    const failed = await app.request('/api/update/finalize', {
+    const finalized = await app.request('/api/update/finalize', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(finalizeBody),
+      body: JSON.stringify({
+        repo: '/tmp/source-concurrent',
+        sessionId,
+        preserve: [],
+        resourceBoundaryDecisions: [],
+      }),
     })
-    expect((await failed.json()).ok).toBe(false)
-    expect((yaml.load(memFiles['/tmp/source-update/skills.yaml']) as any).sources[0]).toMatchObject(
+
+    expect((await finalized.json()).ok).toBe(true)
+    expect(
+      (yaml.load(memFiles['/tmp/source-concurrent/skills.yaml']) as any).sources[0].members,
+    ).toEqual([
       {
-        pinned_commit: 'old-commit',
-        members: [{ name: 'old-skill', targets: ['codex'] }],
+        name: 'retained',
+        entry: 'skills/retained/SKILL.md',
+        targets: ['opencode'],
       },
-    )
-
-    const retried = await app.request('/api/update/finalize', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(finalizeBody),
-    })
-    expect((await retried.json()).ok).toBe(true)
+    ])
   })
+
+  it.each([
+    ['missing', false],
+    ['corrupt', true],
+  ])(
+    'rolls back a repair update without reprojecting when the previous cache is %s',
+    async (suffix, cacheDirectoryExists) => {
+      const repo = `/tmp/source-update-${suffix}`
+      memFiles[`${repo}/skills.yaml`] = [
+        'sources:',
+        '  - url: https://github.com/mattpocock/skills',
+        '    ref: main',
+        '    pinned_commit: old-commit',
+        '    members:',
+        '      - name: old-skill',
+        '        entry: skills/old-skill/SKILL.md',
+        '        targets: [codex]',
+        'skills: []',
+        '',
+      ].join('\n')
+      if (cacheDirectoryExists) memFiles[`${repo}/remote-cache/skills`] = 'corrupt cache'
+      projectRepositoryMock.mockClear()
+      projectRepositoryMock.mockResolvedValue({ ok: true })
+      projectRepositoryMock.mockResolvedValueOnce({
+        ok: false,
+        failure: { originalError: new Error('projection failed') },
+      })
+
+      const prepared = await app.request('/api/update/prepare', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          repo,
+          source: {
+            url: 'https://github.com/mattpocock/skills',
+            ref: 'main',
+            pinned_commit: 'old-commit',
+            members: [
+              {
+                name: 'old-skill',
+                entry: 'skills/old-skill/SKILL.md',
+                targets: ['codex'],
+              },
+            ],
+          },
+          newRef: 'main',
+        }),
+      })
+      const { sessionId } = (await prepared.json()) as { sessionId: string }
+      const finalizeBody = { repo, sessionId, preserve: ['old-skill'] }
+
+      const failed = await app.request('/api/update/finalize', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(finalizeBody),
+      })
+      expect((await failed.json()).ok).toBe(false)
+      expect(projectRepositoryMock).toHaveBeenCalledTimes(1)
+      expect((yaml.load(memFiles[`${repo}/skills.yaml`]) as any).sources[0]).toMatchObject({
+        pinned_commit: 'old-commit',
+        members: [{ name: 'old-skill', entry: 'skills/old-skill/SKILL.md', targets: ['codex'] }],
+      })
+
+      const retried = await app.request('/api/update/finalize', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(finalizeBody),
+      })
+      expect((await retried.json()).ok).toBe(true)
+      expect(projectRepositoryMock).toHaveBeenCalledTimes(2)
+    },
+  )
 })
 
 describe('source metadata', () => {
@@ -562,7 +853,7 @@ describe('source metadata', () => {
     expect(await res.json()).toEqual({ ok: false, error: 'invalid_url' })
   })
 
-  it('POST /api/sources stores type and custom scan pattern', async () => {
+  it('POST /api/sources atomically stores selected bundles and resources', async () => {
     memFiles['/tmp/r8/skills.yaml'] = 'sources: []\nskills: []\n'
 
     const res = await app.request('/api/sources', {
@@ -573,7 +864,11 @@ describe('source metadata', () => {
         url: 'https://github.com/mattpocock/skills',
         type: 'tag',
         ref: 'v1.0.1',
-        scan: 'skills/engineering/**/SKILL.md',
+        members: [{ name: 'review', entry: 'skills/review/SKILL.md' }],
+        resources: {
+          include: [{ path: 'shared', kind: 'directory' }],
+          exclude: [{ path: 'shared/private.md', kind: 'file' }],
+        },
       }),
     })
 
@@ -585,8 +880,28 @@ describe('source metadata', () => {
       url: 'https://github.com/mattpocock/skills',
       type: 'tag',
       ref: 'v1.0.1',
-      scan: 'skills/engineering/**/SKILL.md',
+      pinned_commit: 'installed-commit',
+      members: [{ name: 'review', entry: 'skills/review/SKILL.md' }],
+      resources: {
+        include: [{ path: 'shared', kind: 'directory' }],
+        exclude: [{ path: 'shared/private.md', kind: 'file' }],
+      },
     })
+  })
+
+  it('POST /api/sources rejects the removed scan field', async () => {
+    const res = await app.request('/api/sources', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/tmp/r8',
+        url: 'https://github.com/mattpocock/skills',
+        ref: 'main',
+        scan: '**/SKILL.md',
+      }),
+    })
+
+    expect(res.status).toBe(400)
   })
 
   it('POST /api/sources rejects invalid and duplicate source names with clear status codes', async () => {
@@ -626,74 +941,19 @@ describe('source metadata', () => {
     expect(await duplicate.json()).toMatchObject({ ok: false, error: 'source_name_exists' })
   })
 
-  it('POST /api/sources/update updates ref/type and clears empty scan', async () => {
-    memFiles['/tmp/r9/skills.yaml'] = [
-      'sources:',
-      '  - url: https://github.com/mattpocock/skills',
-      '    type: tag',
-      '    ref: v1.0.1',
-      '    scan: skills/engineering/**/SKILL.md',
-      'skills: []',
-      '',
-    ].join('\n')
-
+  it('POST /api/sources/update is not available', async () => {
     const res = await app.request('/api/sources/update', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        repo: '/tmp/r9',
-        url: 'https://github.com/mattpocock/skills',
-        type: 'branch',
-        ref: 'main',
-        scan: '',
-      }),
+      body: JSON.stringify({ repo: '/tmp/r9' }),
     })
 
-    expect(res.status).toBe(200)
-    expect((await res.json()).ok).toBe(true)
-    const parsed = yaml.load(memFiles['/tmp/r9/skills.yaml']) as any
-    expect(parsed.sources[0]).toEqual({
-      url: 'https://github.com/mattpocock/skills',
-      type: 'branch',
-      ref: 'main',
-    })
+    expect(res.status).toBe(404)
   })
 })
 
 describe('targets update', () => {
   const app = new Hono().route('/api', registerRoutes())
-
-  it('POST /api/sources/members accepts selected member names', async () => {
-    memFiles['/tmp/r10/skills.yaml'] = [
-      'sources:',
-      '  - url: https://example.test/skills.git',
-      '    ref: main',
-      '    members:',
-      '      - name: alpha',
-      '        targets:',
-      '          - codex',
-      'skills: []',
-      '',
-    ].join('\n')
-
-    const res = await app.request('/api/sources/members', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        repo: '/tmp/r10',
-        url: 'https://example.test/skills.git',
-        members: ['alpha', 'beta'],
-      }),
-    })
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true })
-    const parsed = yaml.load(memFiles['/tmp/r10/skills.yaml']) as any
-    expect(parsed.sources[0].members).toEqual([
-      { name: 'alpha', targets: ['codex'] },
-      { name: 'beta' },
-    ])
-  })
 
   it('POST /api/skills/source-targets keeps separate invalid field error codes', async () => {
     const res = await app.request('/api/skills/source-targets', {

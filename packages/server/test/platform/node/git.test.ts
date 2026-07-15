@@ -7,7 +7,13 @@ import { NodeGit } from '../../../src/platform/node/git'
 import { createBareRepo, testGit } from '../../helpers/git'
 
 async function makeBareWithCommit(): Promise<string> {
-  return createBareRepo([{ message: 'init', files: { 'a.txt': 'x' }, tags: ['v1.0.0'] }])
+  return createBareRepo([
+    {
+      message: 'init',
+      files: { 'a.txt': 'x', 'skills/demo/SKILL.md': 'body' },
+      tags: ['v1.0.0'],
+    },
+  ])
 }
 
 describe('NodeGit', () => {
@@ -112,7 +118,7 @@ describe('NodeGit', () => {
     expect(files).not.toContain('remote.txt')
   })
 
-  describe('show/revParseHead/lsTree', () => {
+  describe('show/revParseHead/lsTree/readTree', () => {
     it('show reads file content at ref', async () => {
       expect(await new NodeGit().show(readOnlyRepo, 'HEAD', 'a.txt')).toContain('x')
     })
@@ -125,6 +131,28 @@ describe('NodeGit', () => {
     })
     it('lsTree returns [] for nonexistent dir', async () => {
       expect(await new NodeGit().lsTree(readOnlyRepo, 'HEAD', 'nonexistent/')).toEqual([])
+    })
+    it('readTree returns structured and stably sorted commit entries', async () => {
+      await writeFile(join(readOnlyRepo, 'untracked.txt'), 'not committed')
+
+      const entries = await new NodeGit().readTree(readOnlyRepo, 'HEAD')
+
+      expect(entries.map((entry) => entry.path)).toEqual([
+        'a.txt',
+        'skills',
+        'skills/demo',
+        'skills/demo/SKILL.md',
+      ])
+      expect(entries.find((entry) => entry.path === 'skills/demo')).toMatchObject({
+        mode: '040000',
+        type: 'tree',
+      })
+      expect(entries.find((entry) => entry.path === 'skills/demo/SKILL.md')).toMatchObject({
+        mode: '100644',
+        type: 'blob',
+      })
+      expect(entries.every((entry) => /^[0-9a-f]{40,64}$/.test(entry.oid))).toBe(true)
+      expect(entries.some((entry) => entry.path === 'untracked.txt')).toBe(false)
     })
   })
 })

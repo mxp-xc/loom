@@ -10,7 +10,6 @@ import { normalizeOrder, normalizeSkillGroupOrder, type SkillSource } from '@loo
 import { api } from '@/lib/api'
 import SkillSourceList from './SkillSourceList'
 import GlobalTargetsBar from './GlobalTargetsBar'
-import MemberScanModal from './MemberScanModal'
 import SkillDetailEditor from './SkillDetailEditor'
 import EditSourceModal from './EditSourceModal'
 import AddSkillModal from './AddSkillModal'
@@ -36,7 +35,6 @@ export default function Skills({ repoPath }: { repoPath: string }) {
     onToast: showToast,
   })
   const [addOpen, setAddOpen] = useState(false)
-  const [scanSource, setScanSource] = useState<SkillSource | null>(null)
   const [detail, setDetail] = useState<SkillDetail | null>(null)
   const [editSource, setEditSource] = useState<SkillSource | null>(null)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
@@ -170,7 +168,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
             manifest={manifest}
             operations={operations}
             onOpenDetail={setDetail}
-            onOpenScan={setScanSource}
+            onOpenScan={setEditSource}
             onOpenEdit={setEditSource}
             expandedGroups={expandedGroups}
             onToggleGroup={toggleGroup}
@@ -179,13 +177,6 @@ export default function Skills({ repoPath }: { repoPath: string }) {
           />
         </>
       )}
-
-      <MemberScanModal
-        source={scanSource}
-        operations={operations}
-        onClose={() => setScanSource(null)}
-        onConfirm={() => setScanSource(null)}
-      />
 
       <SkillDetailEditor
         repoPath={repoPath}

@@ -1,5 +1,5 @@
 import { simpleGit, type SimpleGit } from 'simple-git'
-import type { GitPushResult, IGit } from '../../ports/git.js'
+import type { GitPushResult, GitTreeEntry, IGit } from '../../ports/git.js'
 
 export class NodeGit implements IGit {
   private git(path?: string): SimpleGit {
@@ -135,6 +135,27 @@ export class NodeGit implements IGit {
     } catch {
       return []
     }
+  }
+
+  async readTree(repoPath: string, ref: string): Promise<GitTreeEntry[]> {
+    const out = await this.git(repoPath).raw(['ls-tree', '-r', '-t', '-z', '--full-tree', ref])
+    return out
+      .split('\0')
+      .filter(Boolean)
+      .map((record) => {
+        const tab = record.indexOf('\t')
+        const header = tab >= 0 ? record.slice(0, tab) : ''
+        const path = tab >= 0 ? record.slice(tab + 1) : ''
+        const match = /^(\d{6}) (blob|tree|commit) ([0-9a-f]+)$/.exec(header)
+        if (!match || !path) throw new Error(`Invalid git ls-tree record: ${record}`)
+        return {
+          mode: match[1],
+          type: match[2] as GitTreeEntry['type'],
+          oid: match[3],
+          path,
+        }
+      })
+      .sort((a, b) => a.path.localeCompare(b.path, 'en'))
   }
 
   async commitTree(

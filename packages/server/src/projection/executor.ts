@@ -1,4 +1,5 @@
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { createHash } from 'node:crypto'
 import type { IFileSystem } from '../ports/fs.js'
 import type { LoggerPort } from '../ports/logger.js'
 import type {
@@ -8,7 +9,14 @@ import type {
   UndoAction,
   ProjectionFailure,
 } from '../ports/adapter.js'
-import type { ProjectionPlan, McpPlanEntry, Manifest, AgentId, McpServer } from '@loom/core'
+import type {
+  ProjectionPlan,
+  SourceProjectionPlan,
+  McpPlanEntry,
+  Manifest,
+  AgentId,
+  McpServer,
+} from '@loom/core'
 import {
   resolveVars,
   renderText,
@@ -21,9 +29,12 @@ import { mergeMcp } from './mcp-merge.js'
 
 export interface ProjectionDeps {
   fs: IFileSystem
+  ownerRepo?: string
   adapters: Partial<Record<AgentId, IAgentAdapter>>
   installedAgents: Set<AgentId>
   resolveSkillSrc: (link: ProjectionPlan['links'][number]) => string | null
+  resolveSourceRoot?: (sourcePlan: SourceProjectionPlan) => string | null
+  resolveSourceFiles?: (sourcePlan: SourceProjectionPlan) => Promise<string[]>
   logger?: Pick<LoggerPort, 'error' | 'warn'>
   // Per-agent set of mcp ids loom projected last time (persisted by caller).
   // Used to distinguish loom-managed entries (removable) from user-handwritten (preserved).
@@ -36,6 +47,7 @@ export type ProjectionResult = { ok: true } | { ok: false; failure: ProjectionFa
 
 export type ProjectionScope = 'skills' | 'mcp' | 'memory' | 'all'
 const COPY_MARKER = '.loom-projection.json'
+const SOURCE_MARKER_KIND = 'skill-source'
 
 type AgentAwareVarsContext = VarsContext & {
   resolveForAgent?: (agent: AgentId) => Promise<LayeredVarsResolution>
@@ -96,8 +108,7 @@ export async function executeProjection(
           builtDests.add(dest)
         }
       }
-      // Phase B: clean stale links for skills still in manifest but no longer projected
-      // (enabled:false etc). Orphaned links from deleted skills are cleaned in Phase C.
+      // Phase B: clean stale links for skills still in manifest but no longer projected.
       for (const link of plan.links) {
         for (const agent of installedAgents) {
           const dest = join(agentSkillsDir(agent), link.skillId)
@@ -122,6 +133,7 @@ export async function executeProjection(
       // Scan each installed agent's skills dir; any loom-projected link whose id is
       // not in the current plan's link set is removed. Non-link real dirs are skipped.
       await cleanOrphanedLinks(plan, installedAgents, fs, deps.logger)
+      await projectSourceNamespaces(plan, deps, journal)
     }
     // MCP config
     if (scope === 'mcp' || scope === 'all') {
@@ -196,6 +208,7 @@ export async function executeProjection(
         deps.logger?.warn?.('no active memory, skip memory phase')
       }
     }
+    await discardNamespaceBackups(journal, fs, deps.logger)
     return { ok: true }
   } catch (originalError) {
     const rollbackFailures: { path: string; err: unknown }[] = []
@@ -220,6 +233,314 @@ export async function executeProjection(
         originalError,
         rollbackReport: { undone, rollbackFailures },
       },
+    }
+  }
+}
+
+async function projectSourceNamespaces(
+  plan: ProjectionPlan,
+  deps: ProjectionDeps,
+  journal: ProjectionJournal,
+): Promise<void> {
+  if ((plan.sourcePlans?.length ?? 0) > 0 && !deps.ownerRepo) {
+    throw new Error('Source projection ownerRepo is unavailable')
+  }
+  if ((plan.sourcePlans?.length ?? 0) > 0 && !deps.resolveSourceFiles) {
+    throw new Error('Source projection tracked file resolver is unavailable')
+  }
+  const desired = new Set<string>()
+  const sourceFilesByTree = new Map<string, Promise<string[]>>()
+  for (const sourcePlan of plan.sourcePlans ?? []) {
+    const sourceRoot = deps.resolveSourceRoot?.(sourcePlan)
+    if (!sourceRoot) throw new Error(`Source cache unavailable: ${sourcePlan.sourceUrl}`)
+    const sourceTreeKey = `${sourcePlan.cacheId}\0${sourcePlan.commit}`
+    let sourceFilesPromise = sourceFilesByTree.get(sourceTreeKey)
+    if (!sourceFilesPromise) {
+      sourceFilesPromise = deps.resolveSourceFiles!(sourcePlan)
+      sourceFilesByTree.set(sourceTreeKey, sourceFilesPromise)
+    }
+    const sourceFiles = await sourceFilesPromise
+    const namespace = join(agentSkillsDir(sourcePlan.target), sourcePlan.sourceName)
+    desired.add(namespace)
+    await replaceSourceNamespace(
+      sourcePlan,
+      sourceRoot,
+      sourceFiles,
+      namespace,
+      plan.strategy,
+      deps.ownerRepo!,
+      deps.fs,
+      journal,
+      deps.logger,
+    )
+  }
+  if (deps.ownerRepo) {
+    await cleanOrphanedSourceNamespaces(
+      desired,
+      deps.ownerRepo,
+      deps.installedAgents,
+      deps.fs,
+      journal,
+      deps.logger,
+    )
+  }
+}
+
+async function replaceSourceNamespace(
+  plan: SourceProjectionPlan,
+  sourceRoot: string,
+  sourceFiles: readonly string[],
+  namespace: string,
+  strategy: ProjectionPlan['strategy'],
+  ownerRepo: string,
+  fs: IFileSystem,
+  journal: ProjectionJournal,
+  logger?: ProjectionDeps['logger'],
+): Promise<void> {
+  const reservedEntry = plan.entries.find(({ targetPath }) => isSourceMarkerPath(targetPath))
+  if (reservedEntry) {
+    throw new Error(
+      `Projection destination uses reserved ownership marker path: ${reservedEntry.targetPath}`,
+    )
+  }
+  const suffix = `${process.pid}-${crypto.randomUUID()}`
+  const staging = sourceTransactionPath(namespace, 'staging', suffix)
+  const backup = sourceTransactionPath(namespace, 'backup', suffix)
+  await fs.mkdir(dirname(namespace), true)
+  try {
+    await fs.mkdir(staging, true)
+    const trackedFiles = normalizeTrackedSourceFiles(sourceFiles)
+    const materializedTargets = new Set<string>()
+    for (const entry of plan.entries) {
+      const entryFiles = trackedFilesForEntry(entry, trackedFiles)
+      if (entryFiles.length === 0) {
+        throw new Error(`Tracked source content unavailable: ${entry.sourcePath || '.'}`)
+      }
+      for (const sourcePath of entryFiles) {
+        const relativePath =
+          entry.kind === 'resource-file'
+            ? ''
+            : entry.sourcePath
+              ? sourcePath.slice(entry.sourcePath.length + 1)
+              : sourcePath
+        const targetPath = relativePath
+          ? entry.targetPath
+            ? `${entry.targetPath}/${relativePath}`
+            : relativePath
+          : entry.targetPath
+        if (isSourceMarkerPath(targetPath)) {
+          throw new Error(
+            `Projection destination uses reserved ownership marker path: ${targetPath}`,
+          )
+        }
+        const destination = targetPath.toLowerCase()
+        if (materializedTargets.has(destination)) {
+          throw new Error(`Projection destination collision: ${targetPath}`)
+        }
+        materializedTargets.add(destination)
+        const source = join(sourceRoot, sourcePath)
+        const target = join(staging, targetPath)
+        if (strategy === 'copy') await fs.copyFile(source, target)
+        else await fs.createFileLink(source, target)
+      }
+    }
+    await writeSourceMarker(fs, staging, plan, ownerRepo)
+
+    const existing = (await fs.isLink(namespace)) || (await fs.exists(namespace))
+    if (
+      existing &&
+      !(await isManagedSourceNamespace(fs, namespace, {
+        ownerRepo,
+        sourceKey: sha256(plan.sourceUrl),
+      }))
+    ) {
+      throw new Error(`refuse to overwrite user-owned source namespace: ${namespace}`)
+    }
+    let backupPath: string | null = null
+    let restoreUndo: Extract<UndoAction, { kind: 'restoreNamespace' }> | null = null
+    if (existing) {
+      await fs.move(namespace, backup)
+      backupPath = backup
+      restoreUndo = { kind: 'restoreNamespace', path: namespace, backupPath }
+      journal.undos.push(restoreUndo)
+    }
+    try {
+      await fs.move(staging, namespace)
+    } catch (error) {
+      if (backupPath && restoreUndo) {
+        try {
+          await fs.move(backupPath, namespace)
+          const undoIndex = journal.undos.lastIndexOf(restoreUndo)
+          if (undoIndex >= 0) journal.undos.splice(undoIndex, 1)
+        } catch (restoreError) {
+          logger?.error('source namespace immediate restore failed', {
+            err: restoreError,
+            namespace,
+            backupPath,
+          })
+          // Keep the undo entry so the outer rollback can retry restoration.
+        }
+      }
+      throw error
+    }
+    if (!existing)
+      journal.undos.push({ kind: 'restoreNamespace', path: namespace, backupPath: null })
+  } catch (error) {
+    try {
+      await fs.removeDir(staging)
+    } catch (cleanupError) {
+      logger?.warn?.('failed to clean source namespace staging directory', {
+        err: cleanupError,
+        staging,
+      })
+    }
+    throw error
+  }
+}
+
+function isSourceMarkerPath(path: string): boolean {
+  const normalized = path.toLowerCase()
+  return normalized === COPY_MARKER || normalized.startsWith(`${COPY_MARKER}/`)
+}
+
+function normalizeTrackedSourceFiles(sourceFiles: readonly string[]): string[] {
+  const normalized = new Set<string>()
+  for (const sourcePath of sourceFiles) {
+    const canonical = sourcePath.replace(/\\/g, '/')
+    if (
+      !canonical ||
+      canonical !== sourcePath ||
+      canonical.startsWith('/') ||
+      /^[A-Za-z]:\//.test(canonical) ||
+      canonical.split('/').some((part) => !part || part === '.' || part === '..')
+    ) {
+      throw new Error(`Invalid tracked source path: ${sourcePath}`)
+    }
+    normalized.add(canonical)
+  }
+  return [...normalized].sort((left, right) => left.localeCompare(right, 'en'))
+}
+
+function trackedFilesForEntry(
+  entry: SourceProjectionPlan['entries'][number],
+  sourceFiles: readonly string[],
+): string[] {
+  if (entry.kind === 'resource-file') {
+    return sourceFiles.includes(entry.sourcePath) ? [entry.sourcePath] : []
+  }
+  if (!entry.sourcePath) return [...sourceFiles]
+  const prefix = `${entry.sourcePath}/`
+  return sourceFiles.filter((sourcePath) => sourcePath.startsWith(prefix))
+}
+
+async function writeSourceMarker(
+  fs: IFileSystem,
+  namespace: string,
+  plan: SourceProjectionPlan,
+  ownerRepo: string,
+): Promise<void> {
+  await fs.writeFile(
+    join(namespace, COPY_MARKER),
+    JSON.stringify({
+      version: 1,
+      managedBy: 'loom',
+      kind: SOURCE_MARKER_KIND,
+      ownerRepo,
+      sourceKey: sha256(plan.sourceUrl),
+      sourceName: plan.sourceName,
+    }) + '\n',
+  )
+}
+
+async function isManagedSourceNamespace(
+  fs: IFileSystem,
+  namespace: string,
+  expected?: { ownerRepo?: string; sourceKey?: string },
+): Promise<boolean> {
+  try {
+    const marker = JSON.parse(await fs.readFile(join(namespace, COPY_MARKER))) as {
+      version?: unknown
+      managedBy?: unknown
+      kind?: unknown
+      ownerRepo?: unknown
+      sourceKey?: unknown
+    }
+    return (
+      marker.version === 1 &&
+      marker.managedBy === 'loom' &&
+      marker.kind === SOURCE_MARKER_KIND &&
+      (!expected?.ownerRepo || marker.ownerRepo === expected.ownerRepo) &&
+      (!expected?.sourceKey || marker.sourceKey === expected.sourceKey)
+    )
+  } catch {
+    return false
+  }
+}
+
+async function cleanOrphanedSourceNamespaces(
+  desired: Set<string>,
+  ownerRepo: string,
+  installedAgents: Set<AgentId>,
+  fs: IFileSystem,
+  journal: ProjectionJournal,
+  logger?: ProjectionDeps['logger'],
+): Promise<void> {
+  for (const agent of installedAgents) {
+    const skillsDir = agentSkillsDir(agent)
+    let entries: string[]
+    try {
+      entries = await fs.readDir(skillsDir)
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (entry.includes('.loom-backup-') || entry.includes('.loom-staging-')) continue
+      const namespace = join(skillsDir, entry)
+      if (desired.has(namespace) || !(await isManagedSourceNamespace(fs, namespace, { ownerRepo })))
+        continue
+      try {
+        const backupPath = sourceTransactionPath(
+          namespace,
+          'backup',
+          `${process.pid}-${crypto.randomUUID()}`,
+        )
+        await fs.move(namespace, backupPath)
+        journal.undos.push({ kind: 'restoreNamespace', path: namespace, backupPath })
+      } catch (err) {
+        logger?.error('failed to clean orphaned source namespace', { err, namespace })
+        throw err
+      }
+    }
+  }
+}
+
+function sourceTransactionPath(
+  namespace: string,
+  kind: 'staging' | 'backup',
+  suffix: string,
+): string {
+  return join(
+    dirname(dirname(namespace)),
+    '.loom-projection-transactions',
+    `${basename(namespace)}.loom-${kind}-${suffix}`,
+  )
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+async function discardNamespaceBackups(
+  journal: ProjectionJournal,
+  fs: IFileSystem,
+  logger?: ProjectionDeps['logger'],
+): Promise<void> {
+  for (const undo of journal.undos) {
+    if (undo.kind !== 'restoreNamespace' || !undo.backupPath) continue
+    try {
+      await fs.removeDir(undo.backupPath)
+    } catch (err) {
+      logger?.warn?.('failed to discard source namespace backup', { err, path: undo.backupPath })
     }
   }
 }
@@ -256,6 +577,7 @@ async function collectProjectedSkillIds(
     if (entry === COPY_MARKER) continue
     const rel = prefix ? prefix + '/' + entry : entry
     const full = join(base, rel)
+    if (await isManagedSourceNamespace(fs, full)) continue
     if (await fs.exists(join(full, 'SKILL.md'))) out.push(rel)
     out.push(...(await collectProjectedSkillIds(fs, base, rel)))
   }
@@ -379,6 +701,9 @@ export async function applyUndo(u: UndoAction, fs: IFileSystem): Promise<void> {
     } else {
       throw new Error(`cannot rollback copy artifact (not a link): ${u.path}`)
     }
+  } else if (u.kind === 'restoreNamespace') {
+    if ((await fs.isLink(u.path)) || (await fs.exists(u.path))) await fs.removeDir(u.path)
+    if (u.backupPath) await fs.move(u.backupPath, u.path)
   } else if (u.kind === 'restoreMemory') {
     if (u.backup === null) {
       await fs.removeFile(u.path)

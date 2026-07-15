@@ -15,6 +15,10 @@
   padding: 0 !important;
 }
 
+.layout {
+  height: min(670px, calc(100dvh - 118px));
+}
+
 .configStack {
   display: grid;
   align-content: start;
@@ -171,7 +175,6 @@
 }
 
 .directoryRow,
-.patternRow,
 .fieldPair {
   display: grid;
   gap: 8px;
@@ -179,11 +182,6 @@
 
 .directoryRow {
   grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.patternRow {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
 }
 
 .fieldPair {
@@ -198,6 +196,67 @@
 
 .scanAction {
   width: 100%;
+}
+
+.commitStatus {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--card) 68%, var(--bg));
+}
+
+.commitStatus > i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 14%, transparent);
+}
+
+.commitStatus > span {
+  display: grid;
+}
+
+.commitStatus strong,
+.commitStatus small {
+  font:
+    11px 'JetBrains Mono',
+    monospace;
+}
+
+.commitStatus small {
+  color: var(--muted);
+}
+
+.commitStatus > svg {
+  color: var(--success);
+}
+
+.sourceStats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.sourceStats span {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: 10px 4px;
+  color: var(--muted);
+  font:
+    9px 'JetBrains Mono',
+    monospace;
+}
+
+.sourceStats strong {
+  color: var(--bright);
+  font-size: 13px;
 }
 
 .error {
@@ -224,8 +283,11 @@
 }
 
 @media (max-width: 760px) {
-  .directoryRow,
-  .patternRow {
+  .layout {
+    height: calc(100dvh - 80px);
+  }
+
+  .directoryRow {
     grid-template-columns: minmax(0, 1fr);
   }
 }

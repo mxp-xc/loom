@@ -47,7 +47,7 @@ Implications:
 - 单个 target toggle 保存 manifest 后，会投影相关 scope。
 - Memory 页面全局 target chip 保存 repo-level targets 后，会自动运行 memory projection。
 - 批量 target 更新在所有 manifest 更新成功后投影。
-- 保存 source scan members 后，会投影 skills。
+- 保存 source members/resources selection 后，会投影 skills。
 - MCP target chip 和全局 target chip 只保存 desired target state，不自动投影；MCP projection 由 Project changes 显式触发。
 
 Safety:
@@ -59,7 +59,7 @@ Examples:
 
 - 点击某个 skill 的 OC chip，会更新 manifest targets，然后运行 skills projection。
 - 点击 Memory 页面的 OC chip，会更新 repo config targets，然后运行 memory projection。
-- 保存扫描出的 source members，会更新 source members，然后运行 skills projection。
+- 保存 source 内容选择，会更新 source members/resources，然后运行 skills projection。
 - 点击 MCP server 的 CX chip，只更新 manifest targets；用户点击 MCP 页面 Project changes 后才运行 MCP projection。
 
 Tests:
@@ -78,17 +78,18 @@ Rule:
 Implications:
 
 - 全局 skills 批量控制作用于全部 skills。
-- Source 级 skills 批量控制只作用于该 source 下 enabled members。
+- Source 级 skills 批量控制只作用于该 source 下 selected members。
 - Item 级控制只作用于该 item。
+- Source 内容选择与 target 应用是分离的操作；Add/Edit Source 内不提供 target controls。
 
 Safety:
 
 - Source 级批量操作不能更新 local skills 或其他 sources。
-- Disabled source members 不能因为批量操作而被投影。
+- 未选择的 source bundles 不能因为批量 target 操作而加入 manifest 或被投影。
 
 Examples:
 
-- superpowers source header 的 OC chip 只更新 enabled superpowers members。
+- superpowers source header 的 OC chip 只更新 selected superpowers members。
 - 顶部 skills 批量 OC chip 更新所有 source members 和 local skills。
 
 Tests:

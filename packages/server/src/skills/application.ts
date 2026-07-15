@@ -1,10 +1,11 @@
+import { randomUUID } from 'node:crypto'
 import { dirname, isAbsolute, join } from 'node:path'
 import {
   addLocalSkill as addLocalSkillMutation,
   addSource as addSourceMutation,
   deriveRepoId,
-  pinSourceCommit,
   normalizeOrder,
+  normalizeSourceResources,
   normalizeSkillGroupOrder,
   sameOrder,
   removeLocalSkill as removeLocalSkillMutation,
@@ -17,6 +18,9 @@ import {
   updateSourceMeta as updateSourceMetaMutation,
   type AgentId,
   type LocalSkill,
+  type SourceResources,
+  type SourceTree,
+  type SourceTreeNode,
   type SkillSource,
   type SkillsManifest,
 } from '@loom/core'
@@ -29,10 +33,10 @@ import {
   scanLocalSkills as scanLocalSkillDirs,
 } from '../projection/scan.js'
 import type { ScannedLocalSkill } from '../projection/scan.js'
-import { installSkill } from '../remote/install.js'
 import { readYaml, writeYaml } from '../api/repo-config.js'
 import { classifySkillMemberChanges } from './reconciliation.js'
 import { cacheDirFor } from '../remote/cache.js'
+import { scanSourceTree } from '../remote/source-tree.js'
 
 const skillsLogger = logger.child('skills-application')
 
@@ -62,26 +66,27 @@ export interface AddSourceCommand {
   url: string
   ref: string
   type?: 'branch' | 'tag'
-  scan?: string
+  members?: Array<{ name: string; entry: string }>
+  resources?: SourceResources
 }
 
-export interface UpdateSourceMetaCommand {
+interface SourceMetaFields {
   url: string
   name?: string
   ref?: string
   type?: 'branch' | 'tag'
-  scan?: string
 }
 
-export interface ReconcileSourceCommand extends UpdateSourceMetaCommand {
-  members: Array<{ name: string; path?: string }>
-  previousMembers?: Array<{ name: string; path?: string }>
+export interface ReconcileSourceCommand extends SourceMetaFields {
+  expected_commit?: string
+  members: Array<{ name: string; entry: string }>
+  resources?: SourceResources
   preserve?: string[]
 }
 
 export interface SetSkillTargetsCommand {
   sourceUrl: string
-  memberName: string
+  memberEntry: string
   targets: AgentId[]
 }
 
@@ -167,122 +172,191 @@ export class SkillsApplication {
     const sourceName = normalizeSourceName(command.name) || deriveRepoId(command.url)
     assertValidSourceName(sourceName)
     assertUniqueSource(manifest, { url: command.url, name: sourceName })
-    const sourceInput = {
-      name: sourceName,
-      url: command.url,
-      ref: command.ref,
-      ...(command.type === 'branch' || command.type === 'tag' ? { type: command.type } : {}),
-      ...(typeof command.scan === 'string' && command.scan.trim()
-        ? { scan: command.scan.trim() }
-        : {}),
-    }
-    const result = addSourceMutation(manifest, sourceInput)
-    if (result.changed) await this.writeManifest(repoPath, result.data)
-    let source = result.data.sources[result.data.sources.length - 1]!
-
-    try {
-      const installed = await installSkill(
-        this.git,
-        this.fs,
-        command.url,
-        command.ref,
-        repoPath,
-        deriveRepoId(command.url),
-      )
-      const pinned = pinSourceCommit(result.data, command.url, installed.pinned_commit)
-      if (pinned.changed) {
-        await this.writeManifest(repoPath, pinned.data)
-        source = pinned.data.sources.find((item) => item.url === command.url)!
-      }
-    } catch (err) {
-      this.log.error('auto-install failed for source', { err, url: command.url })
-    }
-
-    return { source }
-  }
-
-  async setSourceMembers(repoPath: string, url: string, members: unknown): Promise<void> {
-    const result = await this.updateManifest(repoPath, (manifest) =>
-      setSourceMembersMutation(manifest, url, Array.isArray(members) ? members : []),
+    const cacheId = deriveRepoId(command.url)
+    assertUniqueCacheId(manifest, cacheId)
+    const cacheDir = cacheDirFor(repoPath, cacheId)
+    assertNoResourceActionConflicts(command.resources)
+    const resources = normalizeSourceResources(command.resources)
+    const candidate = await this.prepareSourceCandidate(
+      repoPath,
+      command.url,
+      command.ref,
+      sourceName,
     )
-    if (!result.changed) throw sourceNotFound(url)
+    const backupDir = join(candidate.rootDir, 'previous-cache')
+    let cacheBackedUp = false
+    let cacheSwapped = false
+    let retainCandidateRoot = false
+    try {
+      validateSourceSelection(candidate.sourceTree, command.members ?? [], resources)
+      if (await this.fs.exists(cacheDir)) {
+        await this.fs.move(cacheDir, backupDir)
+        cacheBackedUp = true
+      }
+      await this.fs.move(candidate.candidateDir, cacheDir)
+      cacheSwapped = true
+      const currentManifest = await this.readManifest(repoPath)
+      assertUniqueSource(currentManifest, { url: command.url, name: sourceName })
+      assertUniqueCacheId(currentManifest, cacheId)
+      const result = addSourceMutation(currentManifest, {
+        name: sourceName,
+        url: command.url,
+        ref: command.ref,
+        pinned_commit: candidate.sourceTree.commit,
+        ...(command.type === 'branch' || command.type === 'tag' ? { type: command.type } : {}),
+        ...(command.members ? { members: command.members } : {}),
+        ...(command.resources ? { resources } : {}),
+      })
+      await this.writeManifest(repoPath, result.data)
+      return { source: result.data.sources[result.data.sources.length - 1]! }
+    } catch (err) {
+      this.log.error('source installation or manifest write failed', { err, url: command.url })
+      if (cacheSwapped) {
+        try {
+          await this.fs.removeDir(cacheDir)
+        } catch (cleanupError) {
+          retainCandidateRoot = true
+          this.log.error('failed to remove candidate cache after add failure', {
+            err: cleanupError,
+            url: command.url,
+            cacheDir,
+          })
+        }
+      }
+      if (cacheBackedUp) {
+        try {
+          await this.fs.move(backupDir, cacheDir)
+        } catch (restoreError) {
+          retainCandidateRoot = true
+          this.log.error('failed to restore source cache after add failure', {
+            err: restoreError,
+            url: command.url,
+            cacheDir,
+          })
+        }
+      }
+      throw err
+    } finally {
+      if (!retainCandidateRoot) await this.removeCandidateRoot(candidate.rootDir, command.url)
+    }
   }
 
   async removeSource(repoPath: string, url: string): Promise<void> {
     await this.updateManifest(repoPath, (manifest) => removeSourceMutation(manifest, url))
   }
 
-  async updateSourceMeta(repoPath: string, command: UpdateSourceMetaCommand): Promise<void> {
+  async reconcileSource(repoPath: string, command: ReconcileSourceCommand) {
     const manifest = await this.readManifest(repoPath)
-    const existing = manifest.sources.find((source) => source.url === command.url)
-    if (!existing) throw sourceNotFound(command.url)
-    const updates: { name?: string; ref?: string; type?: 'branch' | 'tag'; scan?: string | null } =
-      {}
-    if (typeof command.name === 'string') {
-      updates.name = command.name.trim()
-      assertValidSourceName(updates.name)
+    let originalManifest = structuredClone(manifest)
+    const source = manifest.sources.find((item) => item.url === command.url)
+    if (!source) throw sourceNotFound(command.url)
+    const desiredSourceName = normalizeSourceName(command.name) || effectiveSourceName(source)
+    if (command.name !== undefined) {
+      assertValidSourceName(desiredSourceName)
       assertUniqueSource(manifest, {
         url: command.url,
-        name: updates.name,
+        name: desiredSourceName,
         existingUrl: command.url,
       })
     }
-    if (typeof command.ref === 'string') updates.ref = command.ref
-    if (command.type === 'branch' || command.type === 'tag') updates.type = command.type
-    if (typeof command.scan === 'string') updates.scan = command.scan
-    const result = updateSourceMetaMutation(manifest, command.url, updates)
-    if (result.changed) await this.writeManifest(repoPath, result.data)
-    if (!result.changed) throw sourceNotFound(command.url)
-  }
-
-  async reconcileSource(repoPath: string, command: ReconcileSourceCommand) {
-    const manifest = await this.readManifest(repoPath)
-    const originalManifest = structuredClone(manifest)
-    const source = manifest.sources.find((item) => item.url === command.url)
-    if (!source) throw sourceNotFound(command.url)
-    if (command.name !== undefined) {
-      const nextName = command.name.trim()
-      assertValidSourceName(nextName)
-      assertUniqueSource(manifest, { url: command.url, name: nextName, existingUrl: command.url })
-    }
+    assertNoResourceActionConflicts(command.resources)
+    const requestedResources = normalizeSourceResources(command.resources ?? source.resources)
     const cacheDir = cacheDirFor(repoPath, deriveRepoId(source.url))
-    const previousPaths = new Map(
-      (command.previousMembers ?? []).map((member) => [member.name, member.path]),
-    )
-    const changes = await classifySkillMemberChanges(
-      this.fs,
-      cacheDir,
-      cacheDir,
-      (source.members ?? []).map((member) => ({
-        name: member.name,
-        path: previousPaths.get(member.name) ?? `skills/${member.name}/SKILL.md`,
-        targets: member.targets,
-      })),
-      command.members.map((member) => ({
-        name: member.name,
-        path: member.path ?? `skills/${member.name}/SKILL.md`,
-      })),
-    )
-    if (changes.removed.length > 0 && command.preserve === undefined) {
-      return { finalized: false, changes }
+    const cacheExists = await this.fs.exists(cacheDir)
+    const refUnchanged =
+      (command.ref ?? source.ref) === source.ref &&
+      (command.type ?? source.type ?? 'branch') === (source.type ?? 'branch')
+    const expectedCommit = command.expected_commit?.trim()
+    let candidate: { rootDir?: string; candidateDir: string; sourceTree: SourceTree }
+    if (refUnchanged) {
+      if (!cacheExists) throw sourceCacheUnavailable(source.url)
+      try {
+        const liveCandidate = {
+          candidateDir: cacheDir,
+          sourceTree: await scanSourceTree(
+            this.git,
+            cacheDir,
+            source.pinned_commit?.trim() || source.ref,
+            { ...source, name: desiredSourceName },
+          ),
+        }
+        candidate =
+          expectedCommit && liveCandidate.sourceTree.commit !== expectedCommit
+            ? await this.prepareSourceCandidate(
+                repoPath,
+                source.url,
+                command.ref ?? source.ref,
+                desiredSourceName,
+              )
+            : liveCandidate
+      } catch (err) {
+        this.log.error('pinned source cache scan failed', {
+          err,
+          url: source.url,
+          commit: source.pinned_commit,
+        })
+        throw sourceCacheUnavailable(source.url)
+      }
+    } else {
+      candidate = await this.prepareSourceCandidate(
+        repoPath,
+        source.url,
+        command.ref ?? source.ref,
+        desiredSourceName,
+      )
     }
-    const preserve = command.preserve ?? []
-    if (preserve.some((name) => !changes.removed.some((member) => member.name === name))) {
-      throw new SkillsApplicationError(400, 'invalid_preserve_members', '保留列表包含无效 skill')
-    }
+    const backupDir = candidate.rootDir ? join(candidate.rootDir, 'previous-cache') : ''
     const copied: string[] = []
     let manifestWritten = false
+    let cacheBackedUp = false
+    let cacheSwapped = false
+    let retainCandidateRoot = false
     try {
+      if (expectedCommit && candidate.sourceTree.commit !== expectedCommit) {
+        throw sourceCommitChanged(expectedCommit, candidate.sourceTree.commit)
+      }
+      const resources = requestedResources
+      validateSourceSelection(candidate.sourceTree, command.members, resources, source.resources)
+      const changes = await classifySkillMemberChanges(
+        this.fs,
+        cacheDir,
+        candidate.candidateDir,
+        (source.members ?? []).map((member) => ({
+          name: member.name,
+          path: member.entry,
+          entry: member.entry,
+          targets: member.targets,
+        })),
+        command.members.map((member) => ({
+          name: member.name,
+          path: member.entry,
+          entry: member.entry,
+        })),
+      )
+      if (changes.removed.length > 0 && command.preserve === undefined) {
+        return { finalized: false, changes }
+      }
+      const preserve = command.preserve ?? []
+      if (preserve.some((name) => !changes.removed.some((member) => member.name === name))) {
+        throw new SkillsApplicationError(400, 'invalid_preserve_members', '保留列表包含无效 skill')
+      }
+      const currentManifest = await this.readManifest(repoPath)
+      const currentSource = currentManifest.sources.find((item) => item.url === command.url)
+      if (!currentSource) throw sourceNotFound(command.url)
+      originalManifest = structuredClone(currentManifest)
       for (const name of preserve) {
         const dest = join(this.assetsSkillsDir(repoPath), name)
-        if (manifest.skills.some((skill) => skill.id === name) || (await this.fs.exists(dest))) {
+        if (
+          currentManifest.skills.some((skill) => skill.id === name) ||
+          (await this.fs.exists(dest))
+        ) {
           throw alreadyExists(name)
         }
       }
       for (const name of preserve) {
-        const previous = source.members?.find((member) => member.name === name)
-        const previousRuntime = command.previousMembers?.find((member) => member.name === name)
-        const skillFile = previousRuntime?.path ?? `skills/${name}/SKILL.md`
+        const previous = currentSource.members?.find((member) => member.name === name)
+        const skillFile = previous?.entry
+        if (!skillFile) throw new SkillsApplicationError(400, 'invalid_member_entry', name)
         const normalized = skillFile.replace(/\\/g, '/')
         if (isAbsolute(skillFile) || normalized.split('/').includes('..')) {
           throw new SkillsApplicationError(
@@ -298,24 +372,37 @@ export class SkillsApplication {
           dirname(normalized),
         )
         const dest = join(this.assetsSkillsDir(repoPath), name)
-        await this.fs.copyDir(sourceDir, dest)
+        if (dirname(normalized) === '.') await this.copyRootBundle(sourceDir, dest)
+        else await this.fs.copyDir(sourceDir, dest)
         copied.push(dest)
-        manifest.skills.push({
+        currentManifest.skills.push({
           id: name,
           ...(previous?.targets ? { targets: previous.targets } : {}),
         })
       }
-      const metaUpdates = updateSourceMetaMutation(manifest, command.url, {
+      const liveCacheMatchesCandidate =
+        candidate.candidateDir === cacheDir ||
+        (cacheExists && source.pinned_commit === candidate.sourceTree.commit)
+      if (!liveCacheMatchesCandidate) {
+        if (cacheExists) {
+          await this.fs.move(cacheDir, backupDir)
+          cacheBackedUp = true
+        }
+        await this.fs.move(candidate.candidateDir, cacheDir)
+        cacheSwapped = true
+      }
+      const metaUpdates = updateSourceMetaMutation(currentManifest, command.url, {
         ...(command.name !== undefined ? { name: command.name } : {}),
         ...(command.ref !== undefined ? { ref: command.ref } : {}),
         ...(command.type !== undefined ? { type: command.type } : {}),
-        ...(command.scan !== undefined ? { scan: command.scan } : {}),
       }).data
-      const next = setSourceMembersMutation(
-        metaUpdates,
-        command.url,
-        command.members.map(({ name }) => name),
-      ).data
+      const next = setSourceMembersMutation(metaUpdates, command.url, command.members).data
+      const sourceIndex = next.sources.findIndex((item) => item.url === command.url)
+      next.sources[sourceIndex] = {
+        ...next.sources[sourceIndex],
+        pinned_commit: candidate.sourceTree.commit,
+        resources,
+      }
       await this.writeManifest(repoPath, next)
       manifestWritten = true
       await this.projectSkills?.(repoPath)
@@ -329,8 +416,39 @@ export class SkillsApplication {
           this.log.error('source reconciliation cleanup failed', { err: cleanupError, path })
         }
       }
+      if (cacheSwapped) {
+        try {
+          await this.fs.removeDir(cacheDir)
+        } catch (cleanupError) {
+          retainCandidateRoot = true
+          this.log.error('source reconciliation candidate cleanup failed', {
+            err: cleanupError,
+            url: command.url,
+            cacheDir,
+          })
+        }
+      }
+      if (cacheBackedUp) {
+        try {
+          await this.fs.move(backupDir, cacheDir)
+        } catch (restoreError) {
+          retainCandidateRoot = true
+          this.log.error('source reconciliation cache rollback failed', {
+            err: restoreError,
+            url: command.url,
+            cacheDir,
+          })
+        }
+      }
       if (manifestWritten) {
-        await this.writeManifest(repoPath, originalManifest)
+        try {
+          await this.writeManifest(repoPath, originalManifest)
+        } catch (rollbackError) {
+          this.log.error('source reconciliation manifest rollback failed', {
+            err: rollbackError,
+            url: command.url,
+          })
+        }
         try {
           await this.projectSkills?.(repoPath)
         } catch (rollbackError) {
@@ -341,6 +459,10 @@ export class SkillsApplication {
         }
       }
       throw err
+    } finally {
+      if (candidate.rootDir && !retainCandidateRoot) {
+        await this.removeCandidateRoot(candidate.rootDir, command.url)
+      }
     }
   }
 
@@ -357,7 +479,7 @@ export class SkillsApplication {
 
   async setSkillTargets(repoPath: string, command: SetSkillTargetsCommand): Promise<void> {
     const result = await this.updateManifest(repoPath, (manifest) =>
-      setSkillTargetsMutation(manifest, command.sourceUrl, command.memberName, command.targets),
+      setSkillTargetsMutation(manifest, command.sourceUrl, command.memberEntry, command.targets),
     )
     if (!result.changed) throw sourceNotFound(command.sourceUrl)
   }
@@ -365,10 +487,10 @@ export class SkillsApplication {
   async setSourceMemberTargets(
     repoPath: string,
     sourceUrl: string,
-    updates: Array<{ memberName: string; targets: AgentId[] }>,
+    updates: Array<{ memberEntry: string; targets: AgentId[] }>,
   ): Promise<void> {
     const memberUpdates = updates.map((update) => ({
-      memberName: String(update?.memberName ?? ''),
+      memberEntry: String(update?.memberEntry ?? ''),
       targets: Array.isArray(update?.targets) ? update.targets : [],
     }))
     const result = await this.updateManifest(repoPath, (manifest) =>
@@ -398,6 +520,49 @@ export class SkillsApplication {
     return (await readYaml(this.fs, this.skillsYamlPath(repoPath))) ?? { sources: [], skills: [] }
   }
 
+  private async copyRootBundle(source: string, destination: string): Promise<void> {
+    await this.fs.mkdir(destination, true)
+    for (const name of await this.fs.readDir(source)) {
+      if (name === '.git') continue
+      const childSource = join(source, name)
+      const childDestination = join(destination, name)
+      if (await this.fs.isDirectory(childSource))
+        await this.fs.copyDir(childSource, childDestination)
+      else await this.fs.copyFile(childSource, childDestination)
+    }
+  }
+
+  private async prepareSourceCandidate(
+    repoPath: string,
+    url: string,
+    ref: string,
+    sourceName: string,
+  ): Promise<{ rootDir: string; candidateDir: string; sourceTree: SourceTree }> {
+    const rootDir = join(repoPath, 'temp', 'source-edits', randomUUID())
+    const candidateDir = join(rootDir, 'candidate')
+    try {
+      await this.git.clone(url, candidateDir, false)
+      await this.git.checkout(candidateDir, ref)
+      const sourceTree = await scanSourceTree(this.git, candidateDir, 'HEAD', {
+        name: sourceName,
+        url,
+      })
+      return { rootDir, candidateDir, sourceTree }
+    } catch (err) {
+      this.log.error('source candidate preparation failed', { err, url, ref })
+      await this.removeCandidateRoot(rootDir, url)
+      throw err
+    }
+  }
+
+  private async removeCandidateRoot(rootDir: string, url: string): Promise<void> {
+    try {
+      await this.fs.removeDir(rootDir)
+    } catch (err) {
+      this.log.error('failed to clean source candidate', { err, url, rootDir })
+    }
+  }
+
   private async writeManifest(repoPath: string, manifest: SkillsManifest): Promise<void> {
     await writeYaml(this.fs, this.skillsYamlPath(repoPath), {
       ...manifest,
@@ -423,6 +588,95 @@ export class SkillsApplication {
   }
 }
 
+function validateSourceSelection(
+  sourceTree: SourceTree,
+  members: readonly { name: string; entry: string }[],
+  resources: SourceResources,
+  previousResources?: SourceResources,
+): void {
+  if (sourceTree.diagnostics.length > 0) {
+    throw new SkillsApplicationError(
+      422,
+      'invalid_source_tree',
+      sourceTree.diagnostics.map(({ message }) => message).join('; '),
+    )
+  }
+  const bundles = new Map<string, string>()
+  const selectableResources = new Map<string, 'file' | 'directory'>()
+  for (const node of sourceTree.nodes) collectSelectableNodes(node, bundles, selectableResources)
+  const memberNames = new Set<string>()
+  const memberEntries = new Set<string>()
+  for (const member of members) {
+    if (
+      !SOURCE_NAME_REGEX.test(member.name) ||
+      memberNames.has(member.name) ||
+      memberEntries.has(member.entry) ||
+      bundles.get(member.entry) !== member.name
+    ) {
+      throw new SkillsApplicationError(
+        400,
+        'invalid_member_selection',
+        `Selected skill bundle does not exist: ${member.entry}`,
+      )
+    }
+    memberNames.add(member.name)
+    memberEntries.add(member.entry)
+  }
+  for (const action of ['include', 'exclude'] as const) {
+    const previousRules = new Set(
+      (previousResources?.[action] ?? []).map((rule) => `${rule.path}\0${rule.kind}`),
+    )
+    for (const rule of resources[action]) {
+      if (
+        selectableResources.get(rule.path) !== rule.kind &&
+        !previousRules.has(`${rule.path}\0${rule.kind}`)
+      ) {
+        throw new SkillsApplicationError(
+          400,
+          'invalid_resource_selection',
+          `Selected ${rule.kind} resource does not exist: ${rule.path}`,
+        )
+      }
+    }
+  }
+}
+
+function assertNoResourceActionConflicts(resources?: SourceResources): void {
+  if (!resources) return
+  const included = new Set(resources.include.map((rule) => rule.path))
+  const conflict = resources.exclude.find((rule) => included.has(rule.path))
+  if (conflict) {
+    throw new SkillsApplicationError(
+      400,
+      'invalid_resource_selection',
+      `Resource path cannot be both included and excluded: ${conflict.path}`,
+    )
+  }
+}
+
+function collectSelectableNodes(
+  node: SourceTreeNode,
+  bundles: Map<string, string>,
+  resources: Map<string, 'file' | 'directory'>,
+): { hasResource: boolean; unsafeDirectory: boolean } {
+  if (node.kind === 'bundle') {
+    bundles.set(node.entry, node.name)
+    return { hasResource: false, unsafeDirectory: false }
+  }
+  if (node.kind === 'resource') {
+    resources.set(node.path, 'file')
+    return { hasResource: true, unsafeDirectory: false }
+  }
+  if (node.kind === 'symlink' || node.kind === 'submodule') {
+    return { hasResource: false, unsafeDirectory: true }
+  }
+  const children = node.children.map((child) => collectSelectableNodes(child, bundles, resources))
+  const hasResource = children.some((child) => child.hasResource)
+  const unsafeDirectory = children.some((child) => child.unsafeDirectory)
+  if (hasResource && !unsafeDirectory) resources.set(node.path, 'directory')
+  return { hasResource, unsafeDirectory }
+}
+
 function normalizedPath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/, '')
 }
@@ -437,6 +691,22 @@ function alreadyExists(skillName: string): SkillsApplicationError {
 
 function sourceNotFound(url: string): SkillsApplicationError {
   return new SkillsApplicationError(404, 'not_found', `Source ${url} not found`)
+}
+
+function sourceCommitChanged(expectedCommit: string, actualCommit: string): SkillsApplicationError {
+  return new SkillsApplicationError(
+    409,
+    'source_commit_changed',
+    `Source changed from ${expectedCommit} to ${actualCommit}; refresh and retry`,
+  )
+}
+
+function sourceCacheUnavailable(url: string): SkillsApplicationError {
+  return new SkillsApplicationError(
+    409,
+    'source_cache_unavailable',
+    `Source cache unavailable: ${url}. Refresh or update the source before saving.`,
+  )
 }
 
 function normalizeSourceName(name: string | undefined): string {
@@ -477,6 +747,15 @@ function assertUniqueSource(
       )
     }
   }
+}
+
+function assertUniqueCacheId(manifest: SkillsManifest, cacheId: string): void {
+  if (!manifest.sources.some((source) => deriveRepoId(source.url) === cacheId)) return
+  throw new SkillsApplicationError(
+    409,
+    'source_cache_exists',
+    `Source cache id already exists: ${cacheId}`,
+  )
 }
 
 function assertUniqueSourceUrls(manifest: SkillsManifest): void {

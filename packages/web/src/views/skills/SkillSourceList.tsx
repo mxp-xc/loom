@@ -48,7 +48,14 @@ import {
   AlertTriangle,
   ChevronDown,
   Download,
+  Eye,
+  EyeOff,
   ExternalLink,
+  File,
+  FileMinus,
+  Folder,
+  FolderMinus,
+  PackageCheck,
   RefreshCw,
   Pencil,
   Trash2,
@@ -61,6 +68,7 @@ import type {
   SourceUpdateState,
 } from '@/hooks/useManifestOperations'
 import SkillReconciliationDialog from './SkillReconciliationDialog'
+import { skillFolderDisplayPath } from './source-paths'
 import styles from './SkillSourceList.module.css'
 
 interface Props {
@@ -265,7 +273,7 @@ const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
 )
 
 function sourceTargetState(src: SkillSource, agent: AgentId) {
-  const members = (src.members ?? []).filter((member) => member.enabled !== false)
+  const members = src.members ?? []
   const count = members.filter((member) => (member.targets ?? []).includes(agent)).length
   const state: 'off' | 'on' | 'mixed' =
     count === 0 ? 'off' : count === members.length ? 'on' : 'mixed'
@@ -276,11 +284,9 @@ type SourceSkillMember = NonNullable<SkillSource['members']>[number]
 type LocalSkillItem = Manifest['skills']['skills'][number]
 
 function sourceSkillRelativePath(member: SourceSkillMember): string {
-  const rawPath = member.path?.replace(/\\/g, '/')
+  const rawPath = member.entry?.replace(/\\/g, '/') ?? member.path?.replace(/\\/g, '/')
   if (!rawPath) return `skills/${member.name}/SKILL.md`
-  const skillsPathIndex = rawPath.lastIndexOf('/skills/')
-  const relativePath =
-    skillsPathIndex >= 0 ? rawPath.slice(skillsPathIndex + 1) : rawPath.replace(/^\/+/, '')
+  const relativePath = rawPath.replace(/^\.\/+/, '').replace(/^\/+/, '')
   return relativePath.endsWith('/SKILL.md')
     ? relativePath
     : relativePath.replace(/\/+$/, '') + '/SKILL.md'
@@ -291,10 +297,6 @@ function localSkillFilePath(skill: LocalSkillItem): string {
   const rawPath = skill.path?.replace(/\\/g, '/') ?? `assets/skills/${skill.id}`
   const relativePath = rawPath.replace(/^\.\/+/, '').replace(/\/+$/, '')
   return relativePath.endsWith('/SKILL.md') ? relativePath : relativePath + '/SKILL.md'
-}
-
-function skillFolderDisplayPath(skillFilePath: string): string {
-  return skillFilePath.replace(/\\/g, '/').replace(/\/SKILL\.md$/, '')
 }
 
 function localSkillDisplayPath(skillFilePath: string): string {
@@ -320,6 +322,7 @@ export default function SkillSourceList({
   const [reconciliation, setReconciliation] = useState<PreparedSkillReconciliation | null>(null)
   const [reconciliationBusy, setReconciliationBusy] = useState(false)
   const [reconciliationError, setReconciliationError] = useState<string | null>(null)
+  const [hiddenResourceSources, setHiddenResourceSources] = useState<Set<string>>(() => new Set())
 
   const agents = manifest.config?.targets ?? []
   const visibleAgents: AgentId[] = agents
@@ -328,11 +331,11 @@ export default function SkillSourceList({
 
   const handleChipToggle = async (
     sourceUrl: string,
-    memberName: string,
+    memberEntry: string,
     agent: AgentId,
     currentTargets: AgentId[],
   ) => {
-    await operations.toggleSourceSkillTarget(sourceUrl, memberName, agent, currentTargets)
+    await operations.toggleSourceSkillTarget(sourceUrl, memberEntry, agent, currentTargets)
   }
 
   const handleLocalChipToggle = async (id: string, agent: AgentId, currentTargets: AgentId[]) => {
@@ -355,12 +358,19 @@ export default function SkillSourceList({
     }
   }
 
-  const finalizeReconciliation = async (preserve: string[]) => {
+  const finalizeReconciliation = async (
+    preserve: string[],
+    resourceBoundaryDecisions: Array<{ entry: string; action: 'enable' | 'exclude' }>,
+  ) => {
     if (!reconciliation) return
     setReconciliationBusy(true)
     setReconciliationError(null)
     try {
-      const result = await operations.finalizeSourceUpdate(reconciliation.sessionId, preserve)
+      const result = await operations.finalizeSourceUpdate(
+        reconciliation.sessionId,
+        preserve,
+        resourceBoundaryDecisions,
+      )
       if (!result.ok) {
         setReconciliationError(result.message ?? '完成 source 更新失败')
         return
@@ -378,6 +388,15 @@ export default function SkillSourceList({
 
   const requestDeleteLocal = (id: string) => {
     setDeleteTarget({ kind: 'local', id, label: id })
+  }
+
+  const toggleSourceResources = (sourceUrl: string) => {
+    setHiddenResourceSources((current) => {
+      const next = new Set(current)
+      if (next.has(sourceUrl)) next.delete(sourceUrl)
+      else next.add(sourceUrl)
+      return next
+    })
   }
 
   const confirmDelete = async () => {
@@ -420,6 +439,15 @@ export default function SkillSourceList({
           const key = src.url + '-' + src.ref
           const isExpanded = expandedGroups.has(key)
           const sourceUpdate = updates[src.url]
+          const includedResources = [...(src.resources?.include ?? [])].sort((a, b) =>
+            a.path.localeCompare(b.path, 'en'),
+          )
+          const excludedResources = [...(src.resources?.exclude ?? [])].sort((a, b) =>
+            a.path.localeCompare(b.path, 'en'),
+          )
+          const resourceRuleCount = includedResources.length + excludedResources.length
+          const resourcesVisible = !hiddenResourceSources.has(src.url)
+          const resourceSectionId = `source-resources-${repoId}`
           const repositoryWebUrl = inferRepositoryWebUrl(src.url)
           return (
             <SortableSkillGroup key={key} id={`source:${src.url}`}>
@@ -513,6 +541,22 @@ export default function SkillSourceList({
                     {visibleAgents.length > 0 && (
                       <span className={styles['source-actions-divider']} />
                     )}
+                    {isExpanded && resourceRuleCount > 0 && (
+                      <IconButton
+                        label={`${resourcesVisible ? '隐藏' : '显示'} ${repoId} resources`}
+                        tooltip={`${resourcesVisible ? '隐藏' : '显示'} resources`}
+                        size="sm"
+                        aria-controls={resourceSectionId}
+                        aria-expanded={resourcesVisible}
+                        onClick={() => toggleSourceResources(src.url)}
+                      >
+                        {resourcesVisible ? (
+                          <EyeOff className="h-3.5 w-3.5" />
+                        ) : (
+                          <Eye className="h-3.5 w-3.5" />
+                        )}
+                      </IconButton>
+                    )}
                     <IconButton
                       label={`检查更新 source ${repoId}`}
                       tooltip={operations.pending.source.check(src) ? '检查中…' : '检查更新'}
@@ -568,8 +612,8 @@ export default function SkillSourceList({
                 </div>
                 {isExpanded &&
                   sortSkillMembers(src.members ?? []).map((m) => {
-                    const isEnabled = m.enabled !== false
                     const mTargets = (m.targets ?? []) as AgentId[]
+                    const memberEntry = typeof m.entry === 'string' ? m.entry : ''
                     const relativePath = sourceSkillRelativePath(m)
                     const displayPath = skillFolderDisplayPath(relativePath)
                     const repositoryFileWebUrl = inferRepositoryFileWebUrl(
@@ -579,30 +623,28 @@ export default function SkillSourceList({
                     )
                     return (
                       <div
-                        key={m.name}
+                        key={m.entry || `invalid:${m.name}`}
                         className={styles.skill}
                         data-testid={`source-skill-${m.name}`}
                         onClick={() =>
                           onOpenDetail({
                             skillId: formatSourceMemberSkillId(src, m.name, manifest.config),
                             source: src.url,
-                            path: m.path,
+                            path: (m.path ?? memberEntry) || undefined,
                             targets: mTargets,
                           })
                         }
                       >
-                        <span className={cn(styles.sdot, isEnabled ? styles.green : styles.dim)} />
+                        <span
+                          className={styles['bundle-skill-icon']}
+                          data-testid={`source-bundle-icon-${m.name}`}
+                          aria-hidden="true"
+                        >
+                          <PackageCheck size={12} />
+                        </span>
                         <span className={styles['skill-main']}>
                           <span className={styles['skill-name-line']}>
-                            <span
-                              className={cn(
-                                styles.sname,
-                                styles.clickable,
-                                !isEnabled && styles.dim,
-                              )}
-                            >
-                              {m.name}
-                            </span>
+                            <span className={cn(styles.sname, styles.clickable)}>{m.name}</span>
                             {repositoryFileWebUrl && (
                               <a
                                 href={repositoryFileWebUrl}
@@ -632,12 +674,15 @@ export default function SkillSourceList({
                         </span>
                         <span className={styles.chips} onClick={(e) => e.stopPropagation()}>
                           {visibleAgents.map((a) =>
-                            renderChip(a, isEnabled && mTargets.includes(a), () =>
-                              handleChipToggle(src.url, m.name, a, mTargets),
+                            renderChip(
+                              a,
+                              mTargets.includes(a),
+                              memberEntry
+                                ? () => handleChipToggle(src.url, memberEntry, a, mTargets)
+                                : undefined,
                             ),
                           )}
                         </span>
-                        {!isEnabled && <span className={styles['disabled-label']}>disabled</span>}
                       </div>
                     )
                   })}
@@ -651,6 +696,77 @@ export default function SkillSourceList({
                       {visibleAgents.map((a) => renderChip(a, false))}
                     </span>
                   </div>
+                )}
+                {isExpanded && resourceRuleCount > 0 && (
+                  <section
+                    id={resourceSectionId}
+                    className={styles['resource-section']}
+                    data-testid={`source-resources-${repoId}`}
+                  >
+                    <button
+                      type="button"
+                      className={styles['resource-section-head']}
+                      aria-controls={`${resourceSectionId}-list`}
+                      aria-expanded={resourcesVisible}
+                      onClick={() => toggleSourceResources(src.url)}
+                    >
+                      <span className={styles['resource-section-icon']} aria-hidden="true">
+                        <Folder size={14} />
+                      </span>
+                      <span className={styles['resource-section-title']}>Resources</span>
+                      <span className={styles['resource-summary']}>
+                        {includedResources.length} selected
+                        {excludedResources.length > 0 && ` · ${excludedResources.length} excluded`}
+                      </span>
+                      <span className={styles['resource-visibility-icon']} aria-hidden="true">
+                        {resourcesVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </span>
+                    </button>
+                    {resourcesVisible && (
+                      <div id={`${resourceSectionId}-list`} className={styles['resource-list']}>
+                        {includedResources.map((resource) => (
+                          <div
+                            key={`include:${resource.kind}:${resource.path}`}
+                            className={styles['resource-row']}
+                            data-testid={`source-resource-include-${resource.path}`}
+                          >
+                            <span className={styles['resource-row-icon']} aria-hidden="true">
+                              {resource.kind === 'directory' ? (
+                                <Folder size={14} />
+                              ) : (
+                                <File size={14} />
+                              )}
+                            </span>
+                            <span className={styles['resource-path']} title={resource.path}>
+                              {resource.path}
+                            </span>
+                            <span className={styles['resource-kind']}>{resource.kind}</span>
+                          </div>
+                        ))}
+                        {excludedResources.map((resource) => (
+                          <div
+                            key={`exclude:${resource.kind}:${resource.path}`}
+                            className={cn(styles['resource-row'], styles['resource-row-excluded'])}
+                            data-testid={`source-resource-exclude-${resource.path}`}
+                          >
+                            <span className={styles['resource-row-icon']} aria-hidden="true">
+                              {resource.kind === 'directory' ? (
+                                <FolderMinus size={14} />
+                              ) : (
+                                <FileMinus size={14} />
+                              )}
+                            </span>
+                            <span className={styles['resource-path']} title={resource.path}>
+                              {resource.path}
+                            </span>
+                            <span className={cn(styles['resource-kind'], styles.excluded)}>
+                              excluded · {resource.kind}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
                 )}
               </div>
             </SortableSkillGroup>
@@ -702,7 +818,16 @@ export default function SkillSourceList({
                       data-testid={`local-skill-${s.id}`}
                       onClick={missing ? undefined : openLocalDetail}
                     >
-                      <span className={cn(styles.sdot, missing ? styles.yellow : styles.green)} />
+                      <span
+                        className={cn(
+                          styles['bundle-skill-icon'],
+                          missing && styles['bundle-skill-icon-missing'],
+                        )}
+                        data-testid={`local-bundle-icon-${s.id}`}
+                        aria-hidden="true"
+                      >
+                        <PackageCheck size={12} />
+                      </span>
                       <span className={styles['skill-main']}>
                         <span className={styles['skill-name-line']}>
                           {missing ? (

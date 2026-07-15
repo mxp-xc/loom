@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
 import { registerRoutes } from '../../src/api/router'
-import { loadProjectionManifest, projectRepository } from '../../src/projection/workflow.js'
+import {
+  loadDisplayManifest,
+  loadProjectionManifest,
+  projectRepository,
+} from '../../src/projection/workflow.js'
 import { syncForcePush, syncPush } from '../../src/sync/push'
 
 const platformGit = vi.hoisted(() => ({
@@ -41,6 +45,14 @@ vi.mock('../../src/projection/executor.js', () => ({
   executeProjection: vi.fn(async () => ({ ok: true })),
 }))
 vi.mock('../../src/projection/workflow.js', () => ({
+  loadDisplayManifest: vi.fn(async () => ({
+    skills: { sources: [], skills: [] },
+    mcp: [],
+    vars: { default: {}, active: {} },
+    memory: { memories: [], active: null, activeContent: '' },
+    config: {},
+    errors: [],
+  })),
   loadProjectionManifest: vi.fn(async () => ({
     skills: { sources: [], skills: [] },
     mcp: [],
@@ -145,15 +157,28 @@ describe('API routes', () => {
     expect(await res.json()).toEqual({ ok: false, error: 'invalid_repo' })
     expect(projectRepository).not.toHaveBeenCalled()
   })
-  it('GET /api/manifest delegates manifest discovery to projection workflow', async () => {
+  it('GET /api/manifest delegates to the fast display manifest workflow', async () => {
     const res = await app.request('/api/manifest?repo=/tmp/r')
 
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ skills: { sources: [], skills: [] } })
-    expect(loadProjectionManifest).toHaveBeenCalledWith(
+    expect(loadDisplayManifest).toHaveBeenCalledWith(
       expect.objectContaining({ fs: expect.any(Object), git: expect.any(Object) }),
       '/tmp/r',
     )
+    expect(loadProjectionManifest).not.toHaveBeenCalled()
+  })
+  it('GET /api/skill/content uses the display manifest for remote member lookup', async () => {
+    vi.mocked(loadDisplayManifest).mockClear()
+    vi.mocked(loadProjectionManifest).mockClear()
+
+    const res = await app.request(
+      '/api/skill/content?repo=/tmp/r&skillId=skills--selected&sourceUrl=https%3A%2F%2Fexample.test%2Fskills.git',
+    )
+
+    expect(res.status).toBe(200)
+    expect(loadDisplayManifest).toHaveBeenCalledOnce()
+    expect(loadProjectionManifest).not.toHaveBeenCalled()
   })
   it('POST /api/sync/pull returns PullResult', async () => {
     const res = await app.request('/api/sync/pull', {

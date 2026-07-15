@@ -1,4 +1,5 @@
-import { join, dirname, isAbsolute } from 'node:path'
+import { join, dirname, isAbsolute, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 import { ClaudeCodeAdapter } from '../adapters/claude-code.js'
 import { CodexAdapter } from '../adapters/codex.js'
 import { OpenCodeAdapter } from '../adapters/opencode.js'
@@ -35,6 +36,7 @@ export function createProjectionDeps(
   }
   return {
     fs,
+    ownerRepo: sha256(resolve(repoPath)),
     adapters: {
       'claude-code': new ClaudeCodeAdapter(),
       codex: new CodexAdapter(),
@@ -45,6 +47,19 @@ export function createProjectionDeps(
       if (link.source === 'local') return join(repoPath, 'assets', 'skills', link.skillId)
       return resolveSourceSkillDir(repoPath, link.source)
     },
+    resolveSourceRoot: (sourcePlan) => cacheDirFor(repoPath, sourcePlan.cacheId),
+    resolveSourceFiles: async (sourcePlan) => {
+      const cacheDir = cacheDirFor(repoPath, sourcePlan.cacheId)
+      const checkedOutCommit = await platform.git.revParseHead(cacheDir)
+      if (checkedOutCommit !== sourcePlan.commit) {
+        throw new Error(
+          `Source cache checkout does not match planned commit: ${sourcePlan.cacheId}`,
+        )
+      }
+      return (await platform.git.readTree(cacheDir, sourcePlan.commit))
+        .filter((entry) => entry.type === 'blob' && entry.mode !== '120000')
+        .map((entry) => entry.path)
+    },
     logger: projectionLogger,
     getManagedMcpIds: async (agent) => new Set((await readState())[agent] ?? []),
     setManagedMcpIds: async (agent, ids) => {
@@ -53,6 +68,10 @@ export function createProjectionDeps(
       await writeState(data)
     },
   }
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
 }
 
 function resolveSourceSkillDir(

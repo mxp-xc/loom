@@ -30,17 +30,17 @@ Tests:
 - packages/server/test/api/routes-fixes.test.ts
 - packages/web/test/views.test.tsx
 
-## R-SKILLS-002 Source member 顺序与 scan 结果保持一致且稳定
+## R-SKILLS-002 Source member 顺序与 SourceTree 保持一致且稳定
 
 Status: active
 Applies to: source members
 
 Rule:
-已保存 source members 和 scan results 应使用同一套确定性展示顺序。
+已保存 source members 和 SourceTree 中派生的 bundle results 应使用同一套确定性展示顺序。
 
 Implications:
 
-- Source list 不应使用与 scan UI 不同的 member 排序。
+- Source list 不应使用与 Bundle/Tree 选择界面不同的 member 排序。
 - 排序应稳定，并且对 skill id 足够 locale-independent。
 
 Safety:
@@ -56,19 +56,19 @@ Tests:
 - packages/web/test/skill-member-order.test.ts
 - packages/web/test/views.test.tsx
 
-## R-SKILLS-003 Source-level target controls 只作用于 enabled members
+## R-SKILLS-003 Source-level target controls 只作用于 selected members
 
 Status: active
 Applies to: source members, skills UI
 
 Rule:
-Source 级 target chip 只作用于该 source 下 enabled members。
+Source 级 target chip 只作用于该 source 的 `members` 中已选择的 bundles。
 
 Implications:
 
-- 如果每个 enabled member 都已有该 target，点击 source chip 会从 enabled members 移除该 target。
-- 否则，点击 source chip 会把该 target 添加到 enabled members。
-- Disabled source members 不会因为 source-level bulk action 被投影。
+- 如果每个 selected member 都已有该 target，点击 source chip 会从 selected members 移除该 target。
+- 否则，点击 source chip 会把该 target 添加到 selected members。
+- 未写入 `members` 的 bundles 不会因为 source-level bulk action 被选择或投影。
 
 Safety:
 
@@ -77,7 +77,7 @@ Safety:
 
 Examples:
 
-- 点击 source header 中的 superpowers OC，只更新 enabled superpowers members。
+- 点击 source header 中的 superpowers OC，只更新 selected superpowers members。
 
 Tests:
 
@@ -111,31 +111,35 @@ Tests:
 
 - packages/web/test/views.test.tsx
 
-## R-SKILLS-005 Source scan 使用 ref-aware SKILL.md pattern
+## R-SKILLS-005 Remote source scan 生成完整 SourceTree
 
 Status: active
 Applies to: source scan, source members
 
 Rule:
-Source scan 默认使用 `**/SKILL.md`，并可由 source 的 `scan` pattern 缩小扫描范围。扫描必须基于该 source 当前选择的 ref。任意匹配到的 `SKILL.md` 所在目录都可成为 source member，member name 来自该目录 basename。
+Remote source scan 必须读取当前 ref 对应 commit 的完整 Git tree，并从同一棵 SourceTree 派生 Bundle 和 Tree 视图。Remote source 不提供或保存自定义 glob；manifest 出现遗留 `scan` 字段时必须明确报错。
 
 Implications:
 
-- `skills/<name>/SKILL.md`、`skills/<category>/<name>/SKILL.md` 和其他目录下的 `SKILL.md` 使用同一套发现规则。
-- 空 `scan` 表示使用默认 `**/SKILL.md`，不写入 manifest。
-- root-level `SKILL.md` 使用 source repo id 作为 member name。
-- Scan results 和保存后的 source members 必须保留 runtime `path`，以便 projection 和详情页读取真实 source member 目录。
+- 目录直接包含大小写精确的 `SKILL.md`，且后代不存在另一个 SkillBundle 时，该目录构成一个不可拆分的 SkillBundle。
+- 目录直接包含 `SKILL.md`，同时后代存在 SkillBundle 时，scan 必须报告所有冲突 entry paths，并阻止保存和投影。
+- SkillBundle 在 Tree 中作为单个节点展示；其内部文件不能单独选择。
+- SkillBundle 外的普通文件作为 resources 展示；结构目录作为 containers 展示。
+- Git symlink 和 submodule 不可选择；SkillBundle 内出现 symlink 或 submodule 时，该 bundle 无效。
+- Local skill discovery 继续使用其现有发现规则，不受 remote SourceTree 约束。
 
 Safety:
 
-- 同一 source 内如果多个 `SKILL.md` 派生出相同 member name，scan 必须失败并提示冲突路径，不能静默覆盖。
-- Member name 仍需满足 skill id 命名约束；无效目录名跳过并记录 warning。
-- `path` 只作为 source cache 内的相对 `SKILL.md` 路径使用，不能解析为任意绝对路径或父目录跳转。
+- SourceTree 只包含目标 commit 中受 Git 管理的 entries，不跟随 symlink、不拉取 submodule，也不包含 checkout 中的未跟踪内容。
+- 同一 source 内 member `entry` 和 `name` 分别唯一；冲突必须明确报错，不能静默覆盖。
+- `entry` 是规范化的 source-relative `SKILL.md` 路径，不能为绝对路径或包含父目录跳转。
+- Member name 仍需满足 skill id 命名约束。
+- Root-level `SKILL.md` 的 member name 使用 source name；其他 bundle 使用其所在目录 basename。
 
 Examples:
 
-- `skills/engineering/tdd/SKILL.md` 发现为 member `tdd`，runtime path 为 `skills/engineering/tdd/SKILL.md`。
-- `scan: skills/engineering/**/SKILL.md` 只发现 engineering 范围内的 source members。
+- `skills/engineering/tdd/SKILL.md` 发现为 member `tdd`，canonical entry 为 `skills/engineering/tdd/SKILL.md`。
+- 外层和内层目录都直接包含 `SKILL.md` 时，source 在结构修正前不能保存。
 
 Tests:
 
@@ -187,13 +191,20 @@ Status: active
 Applies to: remote source updates, source scan, source members, local skills
 
 Rule:
-远端更新或 source scan/member 选择变化导致已保存 member 缺失时，Loom 必须展示缺失项并让用户决定删除或保留为 local skill。缺失项默认选择保留；保留项复制到 assets/skills/<id>，并继承原 targets。
+远端更新或 SourceTree 变化导致已保存 member 缺失时，Loom 必须展示缺失项并让用户决定删除或保留为 local skill。缺失项默认选择保留；保留项复制到 assets/skills/<id>，并继承原 targets。
 
 Implications:
 
 - 更新结果分别展示新增、更新和远端已删除的 members。
 - 缺失项支持逐项选择、全选、取消全选和不保留。
-- 远端更新会更新 cache 内容、持久化最新 commit 和完整 member 集合。
+- 打开 Skills 页面和编辑现有 source 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。
+- Remote refs 只在用户首次打开 ref 选择或切换 branch/tag 时按需读取；同一编辑会话内复用结果。
+- 远端 SourceTree 只在用户选择其他 ref 或主动刷新时读取。
+- 初始编辑和未主动扫描的同 ref/type 保存必须基于当前 pinned commit，不得隐式拉取远端或替换 live cache。
+- 用户主动刷新或选择其他 ref 后，保存必须绑定当前展示的 SourceTree commit；如果该 ref 在扫描后再次移动，保存明确失败并要求刷新，不能静默写入其他 commit。
+- 远端更新先在隔离 candidate 中扫描和生成 preview；用户确认 finalize 前不能改变 live cache。
+- Finalize 同时更新 cache、最新 commit、selection 和 projection；任一步失败必须恢复更新前状态。
+- 更新前 cache 缺失或损坏时，recovery 不得依赖该 cache 重新生成旧 projection，也不能因此阻塞重试。
 - 最终选择保存后自动 reconcile skills projection。
 
 Safety:
@@ -205,7 +216,7 @@ Safety:
 Examples:
 
 - Source 更新后远端删除 alpha；用户保留 alpha 时，它复制到 assets/skills/alpha 并继续使用原 targets。
-- 修改 scan 后 beta 不再出现在选中视图；保存前同样要求用户决定保留或删除 beta。
+- SourceTree 更新后 beta 对应的 entry 缺失；保存前必须要求用户决定保留或删除 beta。
 
 Tests:
 
@@ -275,7 +286,44 @@ Tests:
 - packages/server/test/remote/update.test.ts
 - packages/core/test/derive-repo-id.test.ts
 
-## R-SKILLS-010 Source Web 链接不改变 Git remote
+## R-SKILLS-010 Source selection 只持久化不可推导的 desired state
+
+Status: active
+Applies to: remote sources, source members, source resources, skills UI
+
+Rule:
+完整 SourceTree 是运行时扫描结果，不写入 manifest。`members` 保存用户选择的 SkillBundles，source-global `resources.include/exclude` 保存 SkillBundle 外的普通资源选择；Bundle 和 Tree 视图共享同一份选择状态。
+
+Implications:
+
+- Member 使用 `{ name, entry, targets? }`；是否被选择由它是否存在于 `members` 表达，不存在独立 `enabled`。
+- `entry` 是 member identity；API 和 target mutation 必须按 `entry` 定位，`name` 只保存当前展示快照。
+- Resource rule 使用规范化的 source-relative `path` 和 `kind: file | directory`；路径优先采用最具体规则，相同路径下 exclude 优先。
+- Resource directory 的选择遇到 SkillBundle root 时停止，不会自动选择当前或以后新增的 bundles。
+- Bundle 视图默认打开，只展示 SkillBundles；Tree 视图同时展示 bundles、containers 和 resources。
+- 普通 resources 默认未选择；搜索只影响查找和祖先展开，不改变 desired state。
+- Add/Edit Source 内只编辑 source 内容选择，不配置 member targets；targets 由 Skills 外层 controls 管理。
+- Skills source 列表必须展示已保存的 resource include/exclude 规则，并允许独立折叠 resources，不与 SkillBundle 或 target 状态混淆。
+- Edit Source 可以从当前 live cache 内嵌只读预览 SkillBundle；隔离扫描但尚未保存的其他 commit 只提供对应远端文件链接，不能用旧 cache 内容冒充预览。
+
+Safety:
+
+- 新发现的 SkillBundle 必须由用户明确选择，不能因祖先 resource directory 已选择而自动加入 `members`。
+- Resource path 的实际类型与保存的 `kind` 不一致时标记 unavailable，不自动改变选择范围。
+- Resource 选择属于整个 source，不配置 targets；仅当某 target 至少有一个该 source member 时才向该 target 投影 resources。
+
+Examples:
+
+- 选择 `shared/prompts` directory 会选择其中普通资源，但不会选择其后新增的 `shared/prompts/new-skill/SKILL.md` bundle。
+- Bundle 视图选中一个 skill 后切换到 Tree，Tree 中同一 bundle 保持选中。
+
+Tests:
+
+- packages/core/test/manifest.test.ts
+- packages/core/test/source-tree.test.ts
+- packages/web/test/source-tree-selection.test.tsx
+
+## R-SKILLS-011 Source Web 链接不改变 Git remote
 
 Status: active
 Applies to: remote sources, source members, skills UI

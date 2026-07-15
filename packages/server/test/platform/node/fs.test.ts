@@ -13,6 +13,40 @@ afterEach(async () => {
 })
 
 describe('NodeFileSystem', () => {
+  it('retries transient Windows directory move failures', async () => {
+    let calls = 0
+    const fs = new NodeFileSystem({
+      platform: 'win32',
+      rename: async (from, to) => {
+        calls++
+        if (calls < 3) {
+          throw Object.assign(new Error('directory is temporarily locked'), { code: 'EPERM' })
+        }
+        await import('node:fs/promises').then((module) => module.rename(from, to))
+      },
+    })
+    const source = join(root, 'source')
+    const destination = join(root, 'destination')
+    await mkdir(source)
+    await writeFile(join(source, 'marker.txt'), 'kept')
+
+    await fs.move(source, destination)
+
+    expect(calls).toBe(3)
+    await expect(readFile(join(destination, 'marker.txt'), 'utf8')).resolves.toBe('kept')
+    expect(await fs.exists(source)).toBe(false)
+  })
+
+  it('distinguishes directories from files and missing paths', async () => {
+    const fs = new NodeFileSystem()
+    await mkdir(join(root, 'directory'))
+    await writeFile(join(root, 'file.txt'), 'content')
+
+    await expect(fs.isDirectory(join(root, 'directory'))).resolves.toBe(true)
+    await expect(fs.isDirectory(join(root, 'file.txt'))).resolves.toBe(false)
+    await expect(fs.isDirectory(join(root, 'missing'))).resolves.toBe(false)
+  })
+
   it('replaceFile replaces a target and consumes the temporary file', async () => {
     const fs = new NodeFileSystem()
     const target = join(root, 'target')
@@ -230,6 +264,29 @@ describe('NodeFileSystem', () => {
     await new NodeFileSystem().copyDir(src, dest)
     expect(await new NodeFileSystem().exists(join(dest, 'f.txt'))).toBe(true)
     expect(await new NodeFileSystem().exists(join(dest, 'sub', 'g.txt'))).toBe(true)
+  })
+
+  it('copyFile preserves binary contents and creates destination parents', async () => {
+    const src = join(root, 'image.bin')
+    const dest = join(root, 'nested', 'image.bin')
+    const bytes = Buffer.from([0, 255, 1, 128, 13, 10])
+    await writeFile(src, bytes)
+
+    await new NodeFileSystem().copyFile(src, dest)
+
+    expect(await readFile(dest)).toEqual(bytes)
+  })
+
+  it('createFileLink falls back to a binary-safe copy', async () => {
+    const target = join(root, 'asset.bin')
+    const link = join(root, 'nested', 'asset.bin')
+    const bytes = Buffer.from([0, 255, 42, 128])
+    await writeFile(target, bytes)
+    const fs = new NodeFileSystem({ forceLinkError: 'EXDEV' })
+
+    await expect(fs.createFileLink(target, link)).resolves.toEqual({ fallback: 'copy' })
+    expect(await readFile(link)).toEqual(bytes)
+    expect(await fs.isLink(link)).toBe(false)
   })
 
   it.skipIf(platform() === 'win32')(

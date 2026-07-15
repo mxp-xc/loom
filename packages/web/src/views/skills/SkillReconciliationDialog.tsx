@@ -9,7 +9,10 @@ interface Props {
   busy: boolean
   error?: string | null
   onClose: () => void
-  onConfirm: (preserve: string[]) => Promise<void>
+  onConfirm: (
+    preserve: string[],
+    resourceBoundaryDecisions: Array<{ entry: string; action: 'enable' | 'exclude' }>,
+  ) => Promise<void>
 }
 
 export default function SkillReconciliationDialog({
@@ -20,9 +23,11 @@ export default function SkillReconciliationDialog({
   onConfirm,
 }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [enabledBoundaries, setEnabledBoundaries] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     setSelected(new Set(state?.changes.removed.map(({ name }) => name) ?? []))
+    setEnabledBoundaries(new Set())
   }, [state?.sessionId])
 
   if (!state) return null
@@ -35,12 +40,64 @@ export default function SkillReconciliationDialog({
       return next
     })
   }
+  const boundaryDecisions = state.resourceBoundaryChanges.map(({ entry }) => ({
+    entry,
+    action: enabledBoundaries.has(entry) ? ('enable' as const) : ('exclude' as const),
+  }))
 
   return (
     <Modal open title="确认 skills 更新" width={620} busy={busy} onClose={onClose}>
       <div className={styles.summary}>
         <ChangeSection title="新增" names={state.changes.added.map(({ name }) => name)} />
         <ChangeSection title="更新" names={state.changes.updated.map(({ name }) => name)} />
+        {(state.pathMoves?.length ?? 0) > 0 && (
+          <section className={styles.section}>
+            <div className={styles.heading}>
+              <strong>投影路径变化</strong>
+              <span>{state.pathMoves!.length}</span>
+            </div>
+            <div className={styles.list}>
+              {state.pathMoves!.map((move) => (
+                <div key={`${move.target}:${move.kind}:${move.sourcePath}`} className={styles.row}>
+                  <span>{move.target}</span>
+                  <code>
+                    {move.previousTargetPath ?? 'new'} → {move.nextTargetPath ?? 'removed'}
+                  </code>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        {state.resourceBoundaryChanges.length > 0 && (
+          <section className={styles.section}>
+            <div className={styles.heading}>
+              <strong>新增 SkillBundle 边界</strong>
+              <span>{state.resourceBoundaryChanges.length}</span>
+            </div>
+            <p className={styles.hint}>选择要立即启用的 bundle；未选择项不再作为普通资源投影。</p>
+            <div className={styles.list}>
+              {state.resourceBoundaryChanges.map((change) => (
+                <label key={change.entry} className={styles.row}>
+                  <input
+                    type="checkbox"
+                    checked={enabledBoundaries.has(change.entry)}
+                    onChange={() =>
+                      setEnabledBoundaries((current) => {
+                        const next = new Set(current)
+                        if (next.has(change.entry)) next.delete(change.entry)
+                        else next.add(change.entry)
+                        return next
+                      })
+                    }
+                    aria-label={`启用 ${change.name}`}
+                  />
+                  <span>{change.name}</span>
+                  <code>{change.path}</code>
+                </label>
+              ))}
+            </div>
+          </section>
+        )}
         {removedNames.length > 0 && (
           <section className={styles.section}>
             <div className={styles.heading}>
@@ -83,11 +140,15 @@ export default function SkillReconciliationDialog({
       )}
       <div className={styles.actions}>
         {removedNames.length > 0 && (
-          <Button variant="destructive" disabled={busy} onClick={() => void onConfirm([])}>
+          <Button
+            variant="destructive"
+            disabled={busy}
+            onClick={() => void onConfirm([], boundaryDecisions)}
+          >
             不保留
           </Button>
         )}
-        <Button disabled={busy} onClick={() => void onConfirm([...selected])}>
+        <Button disabled={busy} onClick={() => void onConfirm([...selected], boundaryDecisions)}>
           {busy ? '处理中…' : removedNames.length > 0 ? '保留所选并继续' : '应用更新'}
         </Button>
       </div>

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, it, expect, vi } from 'vitest'
-import { useState, type ReactNode } from 'react'
+import { StrictMode, useState, type ReactNode } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { api } from '../src/lib/api'
@@ -11,7 +11,6 @@ import SkillSourceList from '../src/views/skills/SkillSourceList'
 import SkillDetailEditor from '../src/views/skills/SkillDetailEditor'
 import AddSkillModal from '../src/views/skills/AddSkillModal'
 import EditSourceModal from '../src/views/skills/EditSourceModal'
-import MemberScanModal from '../src/views/skills/MemberScanModal'
 import Sync from '../src/views/Sync'
 import Mcp from '../src/views/Mcp'
 import Memory from '../src/views/Memory'
@@ -64,6 +63,7 @@ vi.mock('../src/lib/api', () => ({
       sessionId: 'update-1',
       pinned_commit: 'bbb',
       changes: { added: [], updated: [], removed: [] },
+      resourceBoundaryChanges: [],
     })),
     finalizeSourceUpdate: vi.fn(async () => ({ ok: true, pinned_commit: 'bbb' })),
     syncPull: vi.fn(async () => ({ clean: true, files: [], textConflicts: [] })),
@@ -78,12 +78,20 @@ vi.mock('../src/lib/api', () => ({
     scanLocalSkills: vi.fn(async () => ({ ok: true, skills: [] })),
     importLocalSkills: vi.fn(async () => ({ ok: true, count: 1 })),
     writeLocalSkills: vi.fn(async () => ({ ok: true, count: 1 })),
-    scanSource: vi.fn(async () => ({ ok: true, members: [] })),
+    scanSource: vi.fn(async () => ({
+      ok: true,
+      tree: { commit: 'abc1234', nodes: [], diagnostics: [] },
+    })),
+    getCachedSourceTree: vi.fn(async () => ({
+      ok: true,
+      tree: { commit: 'abc1234', nodes: [], diagnostics: [] },
+    })),
     getSourceRefs: vi.fn(async () => ({ ok: true, branches: [], tags: [] })),
-    refreshSource: vi.fn(async () => ({ ok: true, members: [] })),
+    refreshSource: vi.fn(async () => ({
+      ok: true,
+      tree: { commit: 'abc1234', nodes: [], diagnostics: [] },
+    })),
     addSource: vi.fn(async () => ({ ok: true })),
-    setSourceMembers: vi.fn(async () => ({ ok: true })),
-    updateSourceMeta: vi.fn(async () => ({ ok: true })),
     reconcileSource: vi.fn(async () => ({
       ok: true,
       finalized: true,
@@ -159,9 +167,11 @@ vi.mock('../src/lib/api', () => ({
                     url: 'https://github.com/obra/superpowers.git',
                     ref: 'main',
                     type: 'branch',
+                    pinned_commit: 'abc123456789',
                     members: [
                       {
                         name: 'systematic-debugging',
+                        entry: 'skills/systematic-debugging/SKILL.md',
                         description: 'A disciplined debugging loop for bugs and regressions.',
                         path: 'skills/systematic-debugging/SKILL.md',
                         targets: ['claude-code', 'codex', 'opencode'],
@@ -253,7 +263,7 @@ function EditSourceSwitchHarness() {
             url: 'https://example.test/alpha.git',
             ref: 'main',
             type: 'branch',
-            scan: 'skills/engineering/**/SKILL.md',
+            pinned_commit: 'abc123456789',
             members: [],
           })
         }
@@ -268,6 +278,7 @@ function EditSourceSwitchHarness() {
             url: 'https://example.test/beta.git',
             ref: 'main',
             type: 'branch',
+            pinned_commit: 'def123456789',
             members: [],
           })
         }
@@ -285,16 +296,22 @@ function EditSourceSwitchHarness() {
   )
 }
 
-function MemberScanModalHarness({ source, repoPath }: { source: any; repoPath: string }) {
-  const operations = useManifestOperations(repoPath)
-  return (
-    <MemberScanModal
-      source={source}
-      operations={operations}
-      onClose={vi.fn()}
-      onConfirm={vi.fn()}
-    />
-  )
+function sourceTreeResponse(names: string[], commit = 'abc123456789') {
+  return {
+    ok: true as const,
+    tree: {
+      commit,
+      diagnostics: [],
+      nodes: names.map((name, index) => ({
+        kind: 'bundle' as const,
+        name,
+        path: name,
+        entry: `${name}/SKILL.md`,
+        mode: '040000',
+        oid: `bundle-${index}`,
+      })),
+    },
+  }
 }
 
 describe('MCP view', () => {
@@ -941,6 +958,11 @@ describe('Skills view', () => {
     expect(screen.getByText('systematic-debugging')).toBeDefined()
 
     const sourceRow = screen.getByTestId('source-skill-systematic-debugging')
+    const sourceBundleIcon = screen
+      .getByTestId('source-bundle-icon-systematic-debugging')
+      .querySelector('svg')
+    expect(sourceBundleIcon).not.toBeNull()
+    expect(sourceBundleIcon?.getAttribute('width')).toBe('12')
     expect(within(sourceRow).getByText('skills/systematic-debugging')).toBeDefined()
     expect(within(sourceRow).queryByText('skills/systematic-debugging/SKILL.md')).toBeNull()
     expect(
@@ -954,6 +976,11 @@ describe('Skills view', () => {
     )
 
     const localRow = screen.getByTestId('local-skill-test-qa-skill')
+    const localBundleIcon = screen
+      .getByTestId('local-bundle-icon-test-qa-skill')
+      .querySelector('svg')
+    expect(localBundleIcon).not.toBeNull()
+    expect(localBundleIcon?.getAttribute('width')).toBe('12')
     const localGroupHead = screen.getByTestId('skill-group-head-local')
     expect(within(localGroupHead).getByText('assets/skills')).toBeDefined()
     expect(within(localRow).getByText('ref')).toBeDefined()
@@ -1036,9 +1063,9 @@ describe('Skills view', () => {
             ref: 'v6.1.1',
             type: 'tag',
             members: [
-              { name: 'brainstorming', targets: ['codex'] },
-              { name: 'executing-plans', targets: [] },
-              { name: 'disabled-skill', enabled: false, targets: [] },
+              { name: 'brainstorming', entry: 'brainstorming/SKILL.md', targets: ['codex'] },
+              { name: 'executing-plans', entry: 'executing-plans/SKILL.md', targets: [] },
+              { name: 'disabled-skill', entry: 'disabled-skill/SKILL.md', targets: [] },
             ],
           },
         ],
@@ -1077,8 +1104,9 @@ describe('Skills view', () => {
       repo: '/tmp/skills-layout',
       sourceUrl: 'https://github.com/obra/superpowers.git',
       updates: [
-        { memberName: 'brainstorming', targets: ['codex'] },
-        { memberName: 'executing-plans', targets: ['codex'] },
+        { memberEntry: 'brainstorming/SKILL.md', targets: ['codex'] },
+        { memberEntry: 'executing-plans/SKILL.md', targets: ['codex'] },
+        { memberEntry: 'disabled-skill/SKILL.md', targets: ['codex'] },
       ],
     })
     expect(api.updateSkillTargets).toHaveBeenCalledTimes(updateCallsBefore)
@@ -1139,8 +1167,8 @@ describe('Add Skill modal', () => {
     fireEvent.click(sourceMode)
     expect(localMode.getAttribute('aria-pressed')).toBe('false')
     expect(sourceMode.getAttribute('aria-pressed')).toBe('true')
-    expect(within(dialog).getByRole('heading', { name: 'Source' })).toBeDefined()
-    expect(within(dialog).getByRole('button', { name: 'Scan repository' })).toBeDefined()
+    expect(within(dialog).getByRole('heading', { name: 'New source' })).toBeDefined()
+    expect(within(dialog).getByRole('button', { name: 'Refresh repository tree' })).toBeDefined()
     expect(within(dialog).queryByRole('combobox')).toBeNull()
     expect(within(dialog).getByRole('button', { name: 'Repository ref' })).toBeDefined()
   })
@@ -1158,16 +1186,138 @@ describe('Add Skill modal', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Source' }))
     const url = within(dialog).getByPlaceholderText('https://host.example/org/repo.git')
     fireEvent.change(url, { target: { value: 'https://example.test/skills.git' } })
-    fireEvent.blur(url)
     const trigger = await within(dialog).findByRole('button', { name: 'Repository ref' })
-    await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(trigger)
-    const option = within(dialog).getByRole('option', { name: 'main' })
+    const option = await within(dialog).findByRole('option', { name: 'main' })
     fireEvent.keyDown(option, { key: 'Escape' })
 
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: 'Add Skill or Source' })).toBeDefined()
+  })
+
+  it('ignores refs returned for an earlier repository URL', async () => {
+    let resolveFirst!: (value: unknown) => void
+    vi.mocked(api.getSourceRefs)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          }) as never,
+      )
+      .mockResolvedValueOnce({ ok: true, branches: ['repo-b'], tags: [] } as never)
+
+    render(<AddSkillModal open repoPath="/tmp/add-refs-race" onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    const url = screen.getByPlaceholderText('https://host.example/org/repo.git')
+
+    fireEvent.change(url, { target: { value: 'https://example.test/repo-a.git' } })
+    const refButton = screen.getByRole('button', { name: 'Repository ref' })
+    fireEvent.click(refButton)
+    fireEvent.keyDown(refButton, { key: 'Escape' })
+    fireEvent.change(url, { target: { value: 'https://example.test/repo-b.git' } })
+    fireEvent.click(refButton)
+
+    await waitFor(() => expect(refButton.textContent).toContain('repo-b'))
+
+    resolveFirst({ ok: true, branches: ['repo-a'], tags: [] })
+    await act(async () => await Promise.resolve())
+
+    expect(refButton.textContent).toContain('repo-b')
+    expect(refButton.textContent).not.toContain('repo-a')
+  })
+
+  it('loads refs again when Add Source is reopened while refs are pending', async () => {
+    vi.mocked(api.getSourceRefs)
+      .mockImplementationOnce(
+        () =>
+          new Promise(() => {
+            // Keep the first editing session pending.
+          }) as never,
+      )
+      .mockResolvedValueOnce({ ok: true, branches: ['main'], tags: [] } as never)
+    const refsCallCount = vi.mocked(api.getSourceRefs).mock.calls.length
+    const onClose = vi.fn()
+    const rendered = render(
+      <AddSkillModal open repoPath="/tmp/add-refs-reopen" onClose={onClose} />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
+      target: { value: 'https://example.test/pending.git' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Repository ref' }))
+    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 1))
+
+    rendered.rerender(
+      <AddSkillModal open={false} repoPath="/tmp/add-refs-reopen" onClose={onClose} />,
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Add Skill or Source' })).toBeNull(),
+    )
+    rendered.rerender(<AddSkillModal open repoPath="/tmp/add-refs-reopen" onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
+      target: { value: 'https://example.test/pending.git' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Repository ref' }))
+
+    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 2))
+    expect(await screen.findByRole('option', { name: 'main' })).toBeDefined()
+  })
+
+  it('does not load refs when the Add Source URL loses focus', async () => {
+    const refsCallCount = vi.mocked(api.getSourceRefs).mock.calls.length
+    render(<AddSkillModal open repoPath="/tmp/add-refs-lazy" onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    const url = screen.getByPlaceholderText('https://host.example/org/repo.git')
+    fireEvent.change(url, { target: { value: 'https://example.test/lazy.git' } })
+    fireEvent.blur(url)
+    fireEvent.click(screen.getByRole('button', { name: 'branch' }))
+    await act(async () => await Promise.resolve())
+
+    expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount)
+    expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('lazy')
+  })
+
+  it('ignores a source scan returned after its repository configuration changed', async () => {
+    let resolveScan!: (value: unknown) => void
+    vi.mocked(api.scanSource).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveScan = resolve
+        }) as never,
+    )
+
+    render(<AddSkillModal open repoPath="/tmp/add-scan-race" onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    const url = screen.getByPlaceholderText('https://host.example/org/repo.git')
+    fireEvent.change(url, { target: { value: 'https://example.test/repo-a.git' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh repository tree' }))
+    fireEvent.change(url, { target: { value: 'https://example.test/repo-b.git' } })
+
+    resolveScan({
+      ok: true,
+      tree: {
+        commit: 'stale123',
+        diagnostics: [],
+        nodes: [
+          {
+            kind: 'bundle',
+            name: 'stale',
+            path: 'stale',
+            entry: 'stale/SKILL.md',
+            mode: '040000',
+            oid: 'stale-bundle',
+          },
+        ],
+      },
+    })
+    await act(async () => await Promise.resolve())
+
+    expect(screen.queryByRole('checkbox', { name: 'Select stale' })).toBeNull()
   })
 
   it('scans ~/.agents/skills when opened', async () => {
@@ -1207,23 +1357,24 @@ describe('Add Skill modal', () => {
     )
   })
 
-  it('keeps installed source members disabled in Add Source scan results', async () => {
-    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
-      ok: true,
-      branches: ['main'],
-      tags: [],
-    } as never)
+  it('selects discovered bundles without exposing target controls in Add Source', async () => {
     vi.mocked(api.scanSource).mockResolvedValueOnce({
       ok: true,
-      members: [
-        {
-          name: 'fresh',
-          description: 'Fresh skill description',
-          path: 'fresh/SKILL.md',
-          installed: false,
-        },
-        { name: 'installed', description: '', path: 'installed/SKILL.md', installed: true },
-      ],
+      tree: {
+        commit: 'abc123456789',
+        diagnostics: [],
+        nodes: [
+          {
+            kind: 'bundle',
+            name: 'fresh',
+            path: 'fresh',
+            entry: 'fresh/SKILL.md',
+            description: 'Fresh skill description',
+            mode: '040000',
+            oid: 'bundle-1',
+          },
+        ],
+      },
     } as never)
 
     render(<AddSkillModal open repoPath="/tmp/add-source-disabled" onClose={vi.fn()} />)
@@ -1232,18 +1383,43 @@ describe('Add Skill modal', () => {
     fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
       target: { value: 'https://example.test/source.git' },
     })
-    fireEvent.blur(screen.getByPlaceholderText('https://host.example/org/repo.git'))
-    fireEvent.click(screen.getByRole('button', { name: 'Scan repository' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh repository tree' }))
 
-    await screen.findByText('fresh')
+    await screen.findByRole('checkbox', { name: 'Select fresh' })
     expect(screen.getByText('Fresh skill description')).toBeDefined()
-    expect(screen.getByText('fresh/SKILL.md')).toBeDefined()
-    expect(within(screen.getByTestId('skill-result-fresh')).getByText('new')).toBeDefined()
-    const installed = screen.getByRole('checkbox', { name: 'installed' })
-    expect((installed as HTMLInputElement).disabled).toBe(true)
+    expect(screen.getByTitle('fresh/SKILL.md').textContent).toBe('fresh')
+    expect(
+      (screen.getByRole('checkbox', { name: 'Select fresh' }) as HTMLInputElement).checked,
+    ).toBe(true)
+    expect(screen.queryByText('Projection targets')).toBeNull()
   })
 
-  it('scans and adds a source using the selected ref/type and scan pattern', async () => {
+  it('clears an Add Source scan error when the repository configuration changes', async () => {
+    vi.mocked(api.scanSource).mockResolvedValueOnce({
+      ok: false,
+      message: 'repository tree unavailable',
+    } as never)
+
+    render(<AddSkillModal open repoPath="/tmp/add-source-error" onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    const url = screen.getByPlaceholderText('https://host.example/org/repo.git')
+    fireEvent.change(url, {
+      target: { value: 'https://example.test/source.git' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh repository tree' }))
+
+    expect(await screen.findByText('repository tree unavailable')).toBeDefined()
+    expect(screen.getAllByText('repository tree unavailable')).toHaveLength(1)
+
+    fireEvent.change(url, {
+      target: { value: 'https://example.test/other.git' },
+    })
+
+    expect(screen.queryByText('repository tree unavailable')).toBeNull()
+  })
+
+  it('scans a source after switching ref type and atomically adds the tree selection', async () => {
     vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
       ok: true,
       branches: ['main'],
@@ -1251,7 +1427,20 @@ describe('Add Skill modal', () => {
     } as never)
     vi.mocked(api.scanSource).mockResolvedValueOnce({
       ok: true,
-      members: [{ name: 'tdd', description: '', path: 'skills/engineering/tdd/SKILL.md' }],
+      tree: {
+        commit: 'def5678',
+        diagnostics: [],
+        nodes: [
+          {
+            kind: 'bundle',
+            name: 'tdd',
+            path: 'skills/engineering/tdd',
+            entry: 'skills/engineering/tdd/SKILL.md',
+            mode: '040000',
+            oid: 'bundle-2',
+          },
+        ],
+      },
     } as never)
 
     render(<AddSkillModal open repoPath="/tmp/add-source-ref-scan" onClose={vi.fn()} />)
@@ -1260,23 +1449,22 @@ describe('Add Skill modal', () => {
     fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
       target: { value: 'https://github.com/mattpocock/skills' },
     })
-    fireEvent.blur(screen.getByPlaceholderText('https://host.example/org/repo.git'))
     await waitFor(() =>
       expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('skills'),
     )
-    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalled())
     fireEvent.click(screen.getByRole('button', { name: 'tag' }))
-    fireEvent.change(screen.getByLabelText('scan pattern'), {
-      target: { value: 'skills/engineering/**/SKILL.md' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Scan repository' }))
+    await waitFor(() =>
+      expect(api.getSourceRefs).toHaveBeenCalledWith('https://github.com/mattpocock/skills'),
+    )
 
-    expect(await screen.findByText('tdd')).toBeDefined()
+    expect(
+      await screen.findByRole('checkbox', { name: 'Select skills/engineering/tdd' }),
+    ).toBeDefined()
     expect(api.scanSource).toHaveBeenCalledWith({
+      name: 'skills',
       url: 'https://github.com/mattpocock/skills',
       type: 'tag',
       ref: 'v1.0.1',
-      scan: 'skills/engineering/**/SKILL.md',
     })
 
     fireEvent.click(screen.getByRole('button', { name: '添加 Source' }))
@@ -1288,7 +1476,86 @@ describe('Add Skill modal', () => {
         url: 'https://github.com/mattpocock/skills',
         type: 'tag',
         ref: 'v1.0.1',
-        scan: 'skills/engineering/**/SKILL.md',
+        members: [{ name: 'tdd', entry: 'skills/engineering/tdd/SKILL.md' }],
+        resources: { include: [], exclude: [] },
+      }),
+    )
+  })
+
+  it('keeps a scanned root bundle aligned with an edited Add Source name', async () => {
+    vi.mocked(api.scanSource).mockResolvedValueOnce({
+      ok: true,
+      tree: {
+        commit: 'root-commit',
+        diagnostics: [],
+        nodes: [
+          {
+            kind: 'bundle',
+            name: 'root-skill',
+            path: '',
+            entry: 'SKILL.md',
+            mode: '040000',
+            oid: 'root-bundle',
+          },
+        ],
+      },
+    } as never)
+
+    render(<AddSkillModal open repoPath="/tmp/add-root-source" onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
+      target: { value: 'https://example.test/my_skills.git' },
+    })
+    const sourceName = screen.getByLabelText('source name')
+    fireEvent.change(sourceName, { target: { value: 'root-skill' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh repository tree' }))
+    await screen.findByRole('checkbox', { name: 'Select SKILL.md' })
+
+    fireEvent.change(sourceName, { target: { value: 'renamed-root' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加 Source' }))
+
+    await waitFor(() =>
+      expect(api.addSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'renamed-root',
+          members: [{ name: 'renamed-root', entry: 'SKILL.md' }],
+        }),
+      ),
+    )
+  })
+
+  it('keeps an Add Source default-branch scan pinned to HEAD after refs load', async () => {
+    vi.mocked(api.scanSource).mockResolvedValueOnce(sourceTreeResponse(['fresh']) as never)
+    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
+      ok: true,
+      branches: ['trunk'],
+      tags: [],
+    } as never)
+
+    render(<AddSkillModal open repoPath="/tmp/add-source-head" onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+    fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
+      target: { value: 'https://example.test/default-branch.git' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh repository tree' }))
+    await screen.findByRole('checkbox', { name: 'Select fresh' })
+
+    const refButton = screen.getByRole('button', { name: 'Repository ref' })
+    fireEvent.click(refButton)
+    await screen.findByRole('option', { name: 'trunk' })
+    await waitFor(() => expect(refButton.textContent).toContain('HEAD'))
+    fireEvent.keyDown(refButton, { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: '添加 Source' }))
+
+    await waitFor(() =>
+      expect(api.addSource).toHaveBeenCalledWith({
+        repo: '/tmp/add-source-head',
+        name: 'default-branch',
+        url: 'https://example.test/default-branch.git',
+        ref: 'HEAD',
+        type: 'branch',
+        members: [{ name: 'fresh', entry: 'fresh/SKILL.md' }],
+        resources: { include: [], exclude: [] },
       }),
     )
   })
@@ -1303,10 +1570,7 @@ describe('Add Skill modal', () => {
     fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
       target: { value: 'https://github.com/org/repo-one' },
     })
-    fireEvent.blur(screen.getByPlaceholderText('https://host.example/org/repo.git'))
-    await waitFor(() =>
-      expect(api.getSourceRefs).toHaveBeenCalledWith('https://github.com/org/repo-one'),
-    )
+    await act(async () => await Promise.resolve())
 
     expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('custom-skills')
   })
@@ -1318,7 +1582,6 @@ describe('Add Skill modal', () => {
     fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
       target: { value: 'https://github.com/org/repo-one' },
     })
-    fireEvent.blur(screen.getByPlaceholderText('https://host.example/org/repo.git'))
     await waitFor(() =>
       expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('repo-one'),
     )
@@ -1326,25 +1589,36 @@ describe('Add Skill modal', () => {
     fireEvent.change(screen.getByPlaceholderText('https://host.example/org/repo.git'), {
       target: { value: 'https://github.com/org/repo-two' },
     })
-    fireEvent.blur(screen.getByPlaceholderText('https://host.example/org/repo.git'))
 
     await waitFor(() =>
       expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('repo-two'),
     )
   })
 
-  it('keeps the source modal open when members fail after source creation', async () => {
+  it('keeps the source modal open when the atomic source write fails', async () => {
     const onClose = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     const getManifestCallsBefore = vi.mocked(api.getManifest).mock.calls.length
     vi.mocked(api.scanSource).mockResolvedValueOnce({
       ok: true,
-      members: [{ name: 'alpha', path: 'alpha/SKILL.md' }],
+      tree: {
+        commit: 'abc1234',
+        diagnostics: [],
+        nodes: [
+          {
+            kind: 'bundle',
+            name: 'alpha',
+            path: 'alpha',
+            entry: 'alpha/SKILL.md',
+            mode: '040000',
+            oid: 'bundle-3',
+          },
+        ],
+      },
     } as never)
-    vi.mocked(api.addSource).mockResolvedValueOnce({ ok: true } as never)
-    vi.mocked(api.setSourceMembers).mockResolvedValueOnce({
+    vi.mocked(api.addSource).mockResolvedValueOnce({
       ok: false,
-      message: 'members write failed',
+      message: 'source write failed',
     } as never)
 
     try {
@@ -1355,14 +1629,13 @@ describe('Add Skill modal', () => {
       fireEvent.change(within(dialog).getByPlaceholderText('https://host.example/org/repo.git'), {
         target: { value: 'https://example.test/skills.git' },
       })
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Scan repository' }))
-      expect(await within(dialog).findByText('alpha')).toBeDefined()
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh repository tree' }))
+      expect(await within(dialog).findByRole('checkbox', { name: 'Select alpha' })).toBeDefined()
 
       fireEvent.click(within(dialog).getByRole('button', { name: '添加 Source' }))
 
-      expect(await within(dialog).findByText(/members write failed/)).toBeDefined()
-      await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(getManifestCallsBefore + 1))
-      expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
+      expect((await within(dialog).findAllByText(/source write failed/)).length).toBeGreaterThan(0)
+      expect(api.getManifest).toHaveBeenCalledTimes(getManifestCallsBefore)
       expect(onClose).not.toHaveBeenCalled()
       expect(screen.getByRole('dialog', { name: 'Add Skill or Source' })).toBeDefined()
       expect(consoleError).toHaveBeenCalledWith(
@@ -1594,6 +1867,7 @@ describe('Skill source updates', () => {
                   members: [
                     {
                       name: 'systematic-debugging',
+                      entry: 'skills/engineering/systematic-debugging/SKILL.md',
                       targets: ['codex'],
                       path: 'skills/engineering/systematic-debugging/SKILL.md',
                     },
@@ -1626,6 +1900,99 @@ describe('Skill source updates', () => {
     })
   })
 
+  it('keeps an expanded source list stable when invalid manifest members have no entry', () => {
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/invalid-source-member"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  url: 'https://github.com/obra/superpowers.git',
+                  ref: 'v6.1.1',
+                  members: [{ name: 'brainstorming', targets: [] }],
+                },
+              ],
+              skills: [],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: ['codex'] },
+            errors: ['source[0].members.0.entry: Required'],
+          } as never
+        }
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set(['https://github.com/obra/superpowers.git-v6.1.1'])}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('source-skill-brainstorming')).toBeDefined()
+    expect(screen.getByTestId('source-skill-path-brainstorming').textContent).toBe(
+      'skills/brainstorming',
+    )
+  })
+
+  it('shows saved source resources separately and toggles them without collapsing skills', () => {
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/source-resources"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  name: 'plm-harness',
+                  url: 'git@gitcode.com:HarnessPlatform/Marketplace.git',
+                  ref: 'main',
+                  members: [
+                    {
+                      name: 'so-apply',
+                      entry: 'plugins/plm-harness/skills/so-apply/SKILL.md',
+                      targets: [],
+                    },
+                  ],
+                  resources: {
+                    include: [
+                      { path: 'plugins/plm-harness/_shared', kind: 'directory' },
+                      { path: 'plugins/plm-harness/README.md', kind: 'file' },
+                    ],
+                    exclude: [{ path: 'plugins/plm-harness/_shared/private', kind: 'directory' }],
+                  },
+                },
+              ],
+              skills: [],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: [] },
+            errors: [],
+          } as never
+        }
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set(['git@gitcode.com:HarnessPlatform/Marketplace.git-main'])}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('source-resource-include-plugins/plm-harness/_shared')).toBeDefined()
+    expect(screen.getByText('plugins/plm-harness/README.md')).toBeDefined()
+    expect(screen.getByText('excluded · directory')).toBeDefined()
+    expect(screen.getByTestId('source-skill-path-so-apply').textContent).toBe(
+      'plugins/plm-harness/skills/so-apply',
+    )
+    fireEvent.click(screen.getByRole('button', { name: '隐藏 plm-harness resources' }))
+
+    expect(screen.queryByText('plugins/plm-harness/_shared')).toBeNull()
+    expect(screen.getByTestId('source-skill-so-apply')).toBeDefined()
+    expect(screen.getByRole('button', { name: '显示 plm-harness resources' })).toBeDefined()
+  })
+
   it('uses persisted DOM group order and never starts sorting from a member row', () => {
     const onReorderGroups = vi.fn()
     render(
@@ -1638,7 +2005,7 @@ describe('Skill source updates', () => {
                 {
                   url: 'https://example.test/source',
                   ref: 'main',
-                  members: [{ name: 'member', targets: [] }],
+                  members: [{ name: 'member', entry: 'member/SKILL.md', targets: [] }],
                 },
               ],
               skills: [{ id: 'local-skill', targets: [] }],
@@ -1682,9 +2049,9 @@ describe('Skill source updates', () => {
                   url: 'https://github.com/obra/superpowers.git',
                   ref: 'main',
                   members: [
-                    { name: 'writing-plans', targets: [] },
-                    { name: 'brainstorming', targets: [] },
-                    { name: 'executing-plans', targets: [] },
+                    { name: 'writing-plans', entry: 'writing-plans/SKILL.md', targets: [] },
+                    { name: 'brainstorming', entry: 'brainstorming/SKILL.md', targets: [] },
+                    { name: 'executing-plans', entry: 'executing-plans/SKILL.md', targets: [] },
                   ],
                 },
               ],
@@ -1927,18 +2294,49 @@ describe('Skill source updates', () => {
     )
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '删除 source' })).toBeNull())
   })
-  it('lets Edit Source select all and clear all scanned members', async () => {
-    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
+  it('loads Edit Source into the shared SourceTree selector', async () => {
+    const refsCallCount = vi.mocked(api.getSourceRefs).mock.calls.length
+    const scanCallCount = vi.mocked(api.scanSource).mock.calls.length
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(
+      sourceTreeResponse(['brainstorming', 'systematic-debugging']) as never,
+    )
+
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-layout" />
+      </TestRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 source superpowers' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Source · superpowers' })
+    await within(dialog).findByRole('checkbox', { name: 'Select brainstorming' })
+
+    expect(within(dialog).getByTestId('skills-config-pane')).toBeDefined()
+    expect(within(dialog).getByTestId('skills-results-pane')).toBeDefined()
+    expect(within(dialog).getByRole('button', { name: 'Refresh repository tree' })).toBeDefined()
+    expect(within(dialog).queryByText('Membership is up to date')).toBeNull()
+
+    expect(dialog.className).toContain('dialog')
+    expect(within(dialog).getByRole('tab', { name: 'Bundles' }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    expect(within(dialog).queryByText('Projection targets')).toBeNull()
+    expect(api.getCachedSourceTree).toHaveBeenCalledWith({
+      repo: '/tmp/skills-layout',
+      url: 'https://github.com/obra/superpowers.git',
+      pinned_commit: 'abc123456789',
+    })
+    expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount)
+    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount)
+  })
+
+  it('previews an Edit Source bundle without losing its selection', async () => {
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(
+      sourceTreeResponse(['brainstorming', 'systematic-debugging']) as never,
+    )
+    vi.mocked(api.getSkillContent).mockResolvedValueOnce({
       ok: true,
-      branches: ['main'],
-      tags: [],
-    } as never)
-    vi.mocked(api.scanSource).mockResolvedValueOnce({
-      ok: true,
-      members: [
-        { name: 'brainstorming', path: 'brainstorming/SKILL.md' },
-        { name: 'systematic-debugging', path: 'systematic-debugging/SKILL.md' },
-      ],
+      content: '# Preview skill',
     } as never)
 
     render(
@@ -1949,59 +2347,279 @@ describe('Skill source updates', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑 source superpowers' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit Source · superpowers' })
-    await within(dialog).findByText('brainstorming')
+    const checkbox = await within(dialog).findByRole('checkbox', { name: 'Select brainstorming' })
+    fireEvent.click(checkbox)
+    expect(within(dialog).queryByRole('region', { name: 'Preview brainstorming' })).toBeNull()
 
-    expect(within(dialog).getByTestId('skills-config-pane')).toBeDefined()
-    expect(within(dialog).getByTestId('skills-results-pane')).toBeDefined()
-    expect(within(dialog).getByRole('button', { name: 'Scan members' })).toBeDefined()
-    expect(within(dialog).queryByText('Membership is up to date')).toBeNull()
+    const bundleLink = within(dialog).getByRole('link', { name: 'brainstorming' })
+    const bundleRow = bundleLink.closest('[role="listitem"]')
+    expect(bundleRow).not.toBeNull()
+    fireEvent.click(bundleRow!)
 
-    expect(dialog.className).toContain('dialog')
     expect(
-      within(dialog).getByRole('list', { name: 'Edit Source · superpowers' }).parentElement
-        ?.className,
-    ).toContain('skillList')
-    expect(within(dialog).getByRole('button', { name: 'Scan members' }).className).toContain(
-      'scanButton',
+      await within(dialog).findByRole('region', { name: 'Preview brainstorming' }),
+    ).toBeDefined()
+    expect(await within(dialog).findByRole('heading', { name: 'Preview skill' })).toBeDefined()
+    expect(api.getSkillContent).toHaveBeenCalledWith(
+      '/tmp/skills-layout',
+      'superpowers-brainstorming',
+      'https://github.com/obra/superpowers.git',
+      'brainstorming/SKILL.md',
     )
 
-    fireEvent.click(within(dialog).getByRole('button', { name: '全选' }))
-    expect(within(dialog).getByTestId('skill-selection-summary').textContent).toBe(
-      '2 found · 2 selected',
-    )
-
-    fireEvent.click(within(dialog).getByRole('button', { name: '全不选' }))
-    expect(within(dialog).getByTestId('skill-selection-summary').textContent).toBe(
-      '2 found · 0 selected',
-    )
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Back' }))
+    expect(
+      (await within(dialog).findByRole('checkbox', {
+        name: 'Select brainstorming',
+      })) as HTMLInputElement,
+    ).toHaveProperty('checked', true)
   })
 
-  it('Edit Source scans and saves with the source scan pattern', async () => {
+  it('keeps the locked repository URL scrolled to its beginning when focused', async () => {
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
+
+    render(<EditSourceSwitchHarness />)
+    fireEvent.click(screen.getByText('open alpha'))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    const url = within(dialog).getByDisplayValue(
+      'https://example.test/alpha.git',
+    ) as HTMLInputElement
+    url.scrollLeft = 120
+    url.setSelectionRange(url.value.length, url.value.length)
+
+    fireEvent.focus(url)
+
+    expect(url.scrollLeft).toBe(0)
+    expect(url.selectionStart).toBe(0)
+  })
+
+  it('opens the Edit Source ref menu immediately while refs are loading', async () => {
+    let resolveRefs!: (value: unknown) => void
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
+    vi.mocked(api.getSourceRefs).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRefs = resolve
+        }) as never,
+    )
+
+    render(<EditSourceSwitchHarness />)
+    fireEvent.click(screen.getByText('open alpha'))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
+
+    const refButton = within(dialog).getByRole('button', { name: 'Repository ref' })
+    fireEvent.click(refButton)
+
+    const listbox = within(dialog).getByRole('listbox', { name: 'Repository ref' })
+    expect(refButton.getAttribute('aria-expanded')).toBe('true')
+    expect((refButton as HTMLButtonElement).disabled).toBe(false)
+    expect(listbox.getAttribute('aria-busy')).toBe('true')
+    const loadingStatus = within(listbox).getByRole('status')
+    expect(loadingStatus.textContent).toBe('Loading refs…')
+    expect(loadingStatus.querySelector('svg')).not.toBeNull()
+
+    await act(async () => {
+      resolveRefs({ ok: true, branches: ['main', 'release'], tags: [] })
+      await Promise.resolve()
+    })
+
+    expect(await within(listbox).findByRole('option', { name: 'release' })).toBeDefined()
+    expect(within(listbox).queryByRole('status')).toBeNull()
+  })
+
+  it('loads Edit Source refs on first dropdown open and scans only after another ref is selected', async () => {
+    const refsCallCount = vi.mocked(api.getSourceRefs).mock.calls.length
+    const scanCallCount = vi.mocked(api.scanSource).mock.calls.length
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
+    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
+      ok: true,
+      branches: ['main', 'release'],
+      tags: [],
+    } as never)
+    vi.mocked(api.scanSource).mockResolvedValueOnce(sourceTreeResponse(['release-skill']) as never)
+
+    render(<EditSourceSwitchHarness />)
+    fireEvent.click(screen.getByText('open alpha'))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
+
+    expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount)
+    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'branch' }))
+    expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Repository ref' }))
+    await within(dialog).findByRole('option', { name: 'release' })
+    expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 1)
+    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount)
+
+    fireEvent.click(within(dialog).getByRole('option', { name: 'main' }))
+    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Repository ref' }))
+    const release = await within(dialog).findByRole('option', { name: 'release' })
+
+    fireEvent.click(release)
+
+    await waitFor(() =>
+      expect(api.scanSource).toHaveBeenCalledWith({
+        name: 'alpha-source',
+        url: 'https://example.test/alpha.git',
+        ref: 'release',
+        type: 'branch',
+      }),
+    )
+    expect(
+      await within(dialog).findByRole('checkbox', { name: 'Select release-skill' }),
+    ).toBeDefined()
+  })
+
+  it('keeps the latest Edit Source ref scan when the previous ref is still pending', async () => {
+    let resolveRelease!: (value: unknown) => void
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
+    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
+      ok: true,
+      branches: ['main', 'release', 'next'],
+      tags: [],
+    } as never)
+    vi.mocked(api.scanSource)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRelease = resolve
+          }) as never,
+      )
+      .mockResolvedValueOnce(sourceTreeResponse(['next-skill'], 'next-commit') as never)
+
+    render(<EditSourceSwitchHarness />)
+    fireEvent.click(screen.getByText('open alpha'))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
+
+    const refButton = within(dialog).getByRole('button', { name: 'Repository ref' })
+    fireEvent.click(refButton)
+    fireEvent.click(await within(dialog).findByRole('option', { name: 'release' }))
+    fireEvent.click(refButton)
+    fireEvent.click(await within(dialog).findByRole('option', { name: 'next' }))
+
+    expect(await within(dialog).findByRole('checkbox', { name: 'Select next-skill' })).toBeDefined()
+    await act(async () => {
+      resolveRelease(sourceTreeResponse(['release-skill'], 'release-commit'))
+      await Promise.resolve()
+    })
+    expect(within(dialog).queryByRole('checkbox', { name: 'Select release-skill' })).toBeNull()
+    expect(within(dialog).getByRole('checkbox', { name: 'Select next-skill' })).toBeDefined()
+  })
+
+  it('applies Edit Source refs using the type currently selected by the user', async () => {
+    let resolveRefs!: (value: unknown) => void
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
+    vi.mocked(api.getSourceRefs).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRefs = resolve
+        }) as never,
+    )
+    vi.mocked(api.scanSource).mockResolvedValueOnce(
+      sourceTreeResponse(['tag-skill'], 'tag-commit') as never,
+    )
+
+    render(<EditSourceSwitchHarness />)
+    fireEvent.click(screen.getByText('open alpha'))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
+    const scanCallCount = vi.mocked(api.scanSource).mock.calls.length
+    fireEvent.click(within(dialog).getByRole('button', { name: 'tag' }))
+
+    expect(within(dialog).getByText('Loading commit…')).toBeDefined()
+    expect(within(dialog).getByText('Reading repository tree')).toBeDefined()
+
+    await waitFor(() =>
+      expect(api.getSourceRefs).toHaveBeenCalledWith('https://example.test/alpha.git'),
+    )
+    await act(async () => {
+      resolveRefs({ ok: true, branches: ['main'], tags: ['v1.0.0'] })
+      await Promise.resolve()
+    })
+
+    const refButton = within(dialog).getByRole('button', { name: 'Repository ref' })
+    await waitFor(() => expect(refButton.textContent).toContain('v1.0.0'))
+    expect(refButton.textContent).not.toContain('main')
+    await waitFor(() =>
+      expect(api.scanSource).toHaveBeenCalledWith({
+        name: 'alpha-source',
+        url: 'https://example.test/alpha.git',
+        ref: 'v1.0.0',
+        type: 'tag',
+      }),
+    )
+    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount + 1)
+    expect(await within(dialog).findByRole('checkbox', { name: 'Select tag-skill' })).toBeDefined()
+    expect(within(dialog).getByText('tag-com')).toBeDefined()
+  })
+
+  it('ignores an Edit Source scan returned after the selected type changed', async () => {
+    let resolveScan!: (value: unknown) => void
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
     vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
       ok: true,
       branches: ['main'],
-      tags: [],
+      tags: ['v1.0.0'],
     } as never)
+    vi.mocked(api.scanSource).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveScan = resolve
+        }) as never,
+    )
+
+    render(<EditSourceSwitchHarness />)
+    fireEvent.click(screen.getByText('open alpha'))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'tag' }))
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Repository ref' }).textContent).toContain(
+        'v1.0.0',
+      ),
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh repository tree' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'branch' }))
+
+    resolveScan(sourceTreeResponse(['stale']))
+    await act(async () => await Promise.resolve())
+
+    expect(within(dialog).queryByRole('checkbox', { name: 'Select stale' })).toBeNull()
+  })
+
+  it('shows an Edit Source scan error only in the results pane', async () => {
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
     vi.mocked(api.scanSource).mockResolvedValueOnce({
-      ok: true,
-      members: [{ name: 'alpha', path: 'skills/engineering/alpha/SKILL.md', installed: false }],
+      ok: false,
+      message: 'repository tree unavailable',
     } as never)
+
+    render(<EditSourceSwitchHarness />)
+    fireEvent.click(screen.getByText('open alpha'))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh repository tree' }))
+
+    expect(await within(dialog).findAllByText('repository tree unavailable')).toHaveLength(1)
+    expect(within(dialog).getByRole('alert')).toBeDefined()
+  })
+
+  it('Edit Source saves member entries and resources without a scan pattern', async () => {
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
 
     render(<EditSourceSwitchHarness />)
 
     fireEvent.click(screen.getByText('open alpha'))
     const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
-    await within(dialog).findByText('alpha')
+    await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
 
-    expect(api.scanSource).toHaveBeenCalledWith({
-      url: 'https://example.test/alpha.git',
-      ref: 'main',
-      type: 'branch',
-      scan: 'skills/engineering/**/SKILL.md',
-    })
-    fireEvent.change(within(dialog).getByLabelText('scan pattern'), {
-      target: { value: '' },
-    })
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Select alpha' }))
     fireEvent.change(within(dialog).getByLabelText('source name'), {
       target: { value: 'renamed-alpha' },
     })
@@ -2014,40 +2632,121 @@ describe('Skill source updates', () => {
         name: 'renamed-alpha',
         ref: 'main',
         type: 'branch',
-        scan: '',
-        members: [],
-        previousMembers: [],
+        expected_commit: 'abc123456789',
+        members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
+        resources: { include: [], exclude: [] },
       }),
     )
   })
 
-  it('keeps hidden selected source members while filtering Edit Source members', async () => {
-    vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
+  it('keeps a cached root bundle aligned with an edited source name', async () => {
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce({
       ok: true,
-      branches: ['main'],
-      tags: [],
+      tree: {
+        commit: 'abc123456789',
+        diagnostics: [],
+        nodes: [
+          {
+            kind: 'bundle',
+            name: 'alpha-source',
+            path: '',
+            entry: 'SKILL.md',
+            mode: '040000',
+            oid: 'root-bundle',
+          },
+        ],
+      },
     } as never)
-    vi.mocked(api.scanSource).mockResolvedValueOnce({
-      ok: true,
-      members: [
-        { name: 'alpha', path: 'alpha/SKILL.md', installed: false },
-        { name: 'beta', path: 'beta/SKILL.md', installed: false },
-      ],
-    } as never)
+
+    render(<EditSourceSwitchHarness />)
+    fireEvent.click(screen.getByText('open alpha'))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    const rootBundle = await within(dialog).findByRole('checkbox', { name: 'Select SKILL.md' })
+    fireEvent.click(rootBundle)
+    fireEvent.change(within(dialog).getByLabelText('source name'), {
+      target: { value: 'renamed-root' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: /保存/ }))
+
+    await waitFor(() =>
+      expect(api.reconcileSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'renamed-root',
+          members: [{ name: 'renamed-root', entry: 'SKILL.md' }],
+        }),
+      ),
+    )
+  })
+
+  it('saves Edit Source against the actively refreshed tree commit', async () => {
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
+    vi.mocked(api.scanSource).mockResolvedValueOnce(
+      sourceTreeResponse(['alpha'], 'refreshed-commit') as never,
+    )
+
+    render(<EditSourceSwitchHarness />)
+    fireEvent.click(screen.getByText('open alpha'))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh repository tree' }))
+    await waitFor(() => expect(within(dialog).getByText('refresh')).toBeDefined())
+    fireEvent.click(within(dialog).getByRole('button', { name: /保存/ }))
+
+    await waitFor(() =>
+      expect(api.reconcileSource).toHaveBeenCalledWith(
+        expect.objectContaining({ expected_commit: 'refreshed-commit' }),
+      ),
+    )
+  })
+
+  it('Edit Source can save an empty desired selection', async () => {
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
+
+    render(<EditSourceSwitchHarness />)
+
+    fireEvent.click(screen.getByText('open alpha'))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
+
+    const save = (await within(dialog).findByRole('button', {
+      name: '保存 (0)',
+    })) as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+    fireEvent.click(save)
+
+    await waitFor(() =>
+      expect(api.reconcileSource).toHaveBeenCalledWith({
+        repo: '/tmp/edit-switch',
+        url: 'https://example.test/alpha.git',
+        name: 'alpha-source',
+        ref: 'main',
+        type: 'branch',
+        expected_commit: 'abc123456789',
+        members: [],
+        resources: { include: [], exclude: [] },
+      }),
+    )
+  })
+
+  it('keeps bundle selection while filtering Edit Source contents', async () => {
+    vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(
+      sourceTreeResponse(['alpha', 'beta']) as never,
+    )
 
     render(<EditSourceSwitchHarness />)
 
     fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
     const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
 
-    fireEvent.change(within(dialog).getByRole('searchbox', { name: '搜索 skill…' }), {
+    await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Search source contents' }), {
       target: { value: 'alpha' },
     })
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'alpha' }))
-    fireEvent.change(within(dialog).getByRole('searchbox', { name: '搜索 skill…' }), {
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Select alpha' }))
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Search source contents' }), {
       target: { value: 'beta' },
     })
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'beta' }))
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Select beta' }))
     fireEvent.click(within(dialog).getByRole('button', { name: /保存/ }))
 
     await waitFor(() =>
@@ -2057,43 +2756,20 @@ describe('Skill source updates', () => {
         name: 'alpha-source',
         ref: 'main',
         type: 'branch',
-        scan: 'skills/engineering/**/SKILL.md',
+        expected_commit: 'abc123456789',
         members: [
-          { name: 'alpha', path: 'alpha/SKILL.md' },
-          { name: 'beta', path: 'beta/SKILL.md' },
+          { name: 'alpha', entry: 'alpha/SKILL.md' },
+          { name: 'beta', entry: 'beta/SKILL.md' },
         ],
-        previousMembers: [],
+        resources: { include: [], exclude: [] },
       }),
     )
-  })
-
-  it('selects and clears all scanned members in MemberScanModal through the shared list', async () => {
-    const source = {
-      url: 'https://example.test/source.git',
-      ref: 'main',
-      members: [{ name: 'alpha', targets: ['codex'] }],
-    } as any
-    vi.mocked(api.refreshSource).mockResolvedValueOnce({
-      ok: true,
-      members: [
-        { name: 'alpha', path: 'alpha/SKILL.md' },
-        { name: 'beta', path: 'beta/SKILL.md' },
-      ],
-    } as never)
-
-    render(<MemberScanModalHarness source={source} repoPath="/tmp/member-scan-shared-list" />)
-
-    const dialog = await screen.findByRole('dialog', { name: 'Scan · source' })
-    expect(within(dialog).getByText('已选 1 / 2')).toBeDefined()
-    fireEvent.click(within(dialog).getByRole('button', { name: '全选' }))
-    expect(within(dialog).getByText('已选 2 / 2')).toBeDefined()
-    fireEvent.click(within(dialog).getByRole('button', { name: '全不选' }))
-    expect(within(dialog).getByText('已选 0 / 2')).toBeDefined()
   })
 
   it('does not show stale Edit Source errors after switching source', async () => {
     let rejectAlphaRefs!: (error: Error) => void
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(api.getCachedSourceTree).mockResolvedValue(sourceTreeResponse(['alpha']) as never)
     vi.mocked(api.getSourceRefs)
       .mockImplementationOnce(
         () =>
@@ -2115,9 +2791,15 @@ describe('Skill source updates', () => {
       const openBeta = screen.getByRole('button', { name: 'open beta' })
 
       fireEvent.click(openAlpha)
-      expect(await screen.findByRole('dialog', { name: /Edit Source/ })).toBeDefined()
+      let dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+      await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Repository ref' }))
+      await waitFor(() => expect(rejectAlphaRefs).toBeTypeOf('function'))
 
       fireEvent.click(openBeta)
+      dialog = await screen.findByRole('dialog', { name: 'Edit Source · beta-source' })
+      await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Repository ref' }))
       await waitFor(() =>
         expect(api.getSourceRefs).toHaveBeenCalledWith('https://example.test/beta.git'),
       )
@@ -2140,28 +2822,25 @@ describe('Skill source updates', () => {
     }
   })
 
-  it('starts a fresh Edit Source scan after closing and reopening the same source', async () => {
-    let resolveFirstScan!: (value: { ok: true; members: [] }) => void
-    vi.mocked(api.getSourceRefs).mockResolvedValue({
-      ok: true,
-      branches: ['main'],
-      tags: [],
-    } as never)
-    vi.mocked(api.scanSource)
+  it('starts a fresh cached tree read after closing and reopening the same source', async () => {
+    let resolveFirstTree!: (value: ReturnType<typeof sourceTreeResponse>) => void
+    vi.mocked(api.getCachedSourceTree)
       .mockImplementationOnce(
         () =>
           new Promise((resolve) => {
-            resolveFirstScan = resolve as typeof resolveFirstScan
+            resolveFirstTree = resolve as typeof resolveFirstTree
           }) as never,
       )
-      .mockResolvedValueOnce({ ok: true, members: [] } as never)
+      .mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
+    const treeCallCount = vi.mocked(api.getCachedSourceTree).mock.calls.length
     const scanCallCount = vi.mocked(api.scanSource).mock.calls.length
 
     render(<EditSourceSwitchHarness />)
 
     fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
     const firstDialog = await screen.findByRole('dialog', { name: /Edit Source/ })
-    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount + 1)
+    expect(api.getCachedSourceTree).toHaveBeenCalledTimes(treeCallCount + 1)
+    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount)
 
     fireEvent.click(within(firstDialog).getByRole('button', { name: '关闭' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /Edit Source/ })).toBeNull())
@@ -2169,45 +2848,48 @@ describe('Skill source updates', () => {
     fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
     const secondDialog = await screen.findByRole('dialog', { name: /Edit Source/ })
 
-    await waitFor(() => expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount + 2))
+    await waitFor(() => expect(api.getCachedSourceTree).toHaveBeenCalledTimes(treeCallCount + 2))
+    await within(secondDialog).findByRole('checkbox', { name: 'Select alpha' })
     expect(within(secondDialog).queryByText('扫描失败')).toBeNull()
 
     await act(async () => {
-      resolveFirstScan({ ok: true, members: [] })
+      resolveFirstTree(sourceTreeResponse(['stale']))
       await Promise.resolve()
     })
     expect(within(secondDialog).queryByText('扫描失败')).toBeNull()
+    expect(within(secondDialog).queryByRole('checkbox', { name: 'Select stale' })).toBeNull()
   })
 
-  it('does not show scan failure when an Edit Source auto-scan is already pending', async () => {
-    vi.mocked(api.getSourceRefs).mockResolvedValue({
-      ok: true,
-      branches: ['main'],
-      tags: [],
-    } as never)
-    vi.mocked(api.scanSource).mockImplementation(
+  it('reads the initial cached tree once during a StrictMode effect replay', async () => {
+    let resolveTree!: (value: ReturnType<typeof sourceTreeResponse>) => void
+    vi.mocked(api.getCachedSourceTree).mockImplementationOnce(
       () =>
-        new Promise(() => {
-          // Keep the first scan pending so the second auto-scan is skipped by the operation guard.
+        new Promise((resolve) => {
+          resolveTree = resolve as typeof resolveTree
         }) as never,
     )
+    const treeCallCount = vi.mocked(api.getCachedSourceTree).mock.calls.length
 
-    render(<EditSourceSwitchHarness />)
-
+    render(
+      <StrictMode>
+        <EditSourceSwitchHarness />
+      </StrictMode>,
+    )
     fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
     const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
-    fireEvent.click(screen.getByText('open alpha'))
 
-    await waitFor(() =>
-      expect(
-        (within(dialog).getByRole('button', { name: 'Scan members' }) as HTMLButtonElement)
-          .disabled,
-      ).toBe(true),
-    )
-    expect(within(dialog).queryByText('扫描失败')).toBeNull()
+    await waitFor(() => expect(api.getCachedSourceTree).toHaveBeenCalledTimes(treeCallCount + 1))
+    await act(async () => {
+      resolveTree(sourceTreeResponse(['alpha']))
+      await Promise.resolve()
+    })
+
+    expect(await within(dialog).findByRole('checkbox', { name: 'Select alpha' })).toBeDefined()
+    expect(api.getCachedSourceTree).toHaveBeenCalledTimes(treeCallCount + 1)
   })
 
   it('loads refs again when Edit Source is reopened while refs are pending', async () => {
+    vi.mocked(api.getCachedSourceTree).mockResolvedValue(sourceTreeResponse(['alpha']) as never)
     vi.mocked(api.getSourceRefs)
       .mockImplementationOnce(
         () =>
@@ -2220,18 +2902,25 @@ describe('Skill source updates', () => {
         branches: ['main'],
         tags: ['v1.0.0'],
       } as never)
-    vi.mocked(api.scanSource).mockResolvedValue({ ok: true, members: [] } as never)
     const refsCallCount = vi.mocked(api.getSourceRefs).mock.calls.length
 
     render(<EditSourceSwitchHarness />)
 
     fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
-    const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
-    fireEvent.click(screen.getByText('open alpha'))
+    const firstDialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    await within(firstDialog).findByRole('checkbox', { name: 'Select alpha' })
+    fireEvent.click(within(firstDialog).getByRole('button', { name: 'Repository ref' }))
+    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 1))
+
+    fireEvent.click(within(firstDialog).getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Edit Source/ })).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
+    const secondDialog = await screen.findByRole('dialog', { name: /Edit Source/ })
+    await within(secondDialog).findByRole('checkbox', { name: 'Select alpha' })
+    fireEvent.click(within(secondDialog).getByRole('button', { name: 'Repository ref' }))
 
     await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 2))
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Repository ref' }))
-    expect(within(dialog).getByRole('option', { name: 'main' })).toBeDefined()
+    expect(await within(secondDialog).findByRole('option', { name: 'main' })).toBeDefined()
   })
 })
 

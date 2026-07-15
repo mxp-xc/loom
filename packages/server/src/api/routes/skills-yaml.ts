@@ -49,35 +49,47 @@ const WriteLocalSkillsBody = z.object({
   skills: z.array(LocalSkillWriteItem),
 })
 
-const AddSourceBody = z.object({
-  repo: RepoField,
-  name: z.string().optional(),
-  url: NonEmptyString,
-  ref: NonEmptyString,
-  type: z.enum(['branch', 'tag']).optional(),
-  scan: z.string().optional(),
+const SourceMemberBody = z.object({
+  name: NonEmptyString,
+  entry: NonEmptyString,
 })
+
+const SourceResourceRuleBody = z.object({
+  path: NonEmptyString,
+  kind: z.enum(['file', 'directory']),
+})
+
+const SourceResourcesBody = z.object({
+  include: z.array(SourceResourceRuleBody),
+  exclude: z.array(SourceResourceRuleBody),
+})
+
+const AddSourceBody = z
+  .object({
+    repo: RepoField,
+    name: z.string().optional(),
+    url: NonEmptyString,
+    ref: NonEmptyString,
+    type: z.enum(['branch', 'tag']).optional(),
+    members: z.array(SourceMemberBody).default([]),
+    resources: SourceResourcesBody.optional(),
+  })
+  .strict()
 
 const SourceUrlBody = z.object({
   repo: RepoField,
   url: NonEmptyString,
 })
 
-const SetSourceMembersBody = SourceUrlBody.extend({
-  members: z.array(NonEmptyString).optional(),
-})
-
 const UpdateSourceBody = SourceUrlBody.extend({
   name: z.string().optional(),
   ref: z.string().optional(),
   type: z.enum(['branch', 'tag']).optional(),
-  scan: z.string().optional(),
-})
+}).strict()
 const ReconcileSourceBody = UpdateSourceBody.extend({
-  members: z.array(z.object({ name: NonEmptyString, path: z.string().optional() })),
-  previousMembers: z
-    .array(z.object({ name: NonEmptyString, path: z.string().optional() }))
-    .optional(),
+  expected_commit: NonEmptyString.optional(),
+  members: z.array(SourceMemberBody),
+  resources: SourceResourcesBody.optional(),
   preserve: z.array(NonEmptyString).optional(),
 })
 
@@ -89,7 +101,7 @@ const DeleteLocalSkillBody = z.object({
 const SetSkillTargetsBody = z.object({
   repo: RepoField,
   sourceUrl: NonEmptyString,
-  memberName: NonEmptyString,
+  memberEntry: NonEmptyString,
   targets: z.array(AgentIdSchema),
 })
 
@@ -98,7 +110,7 @@ const SetSourceMemberTargetsBody = z.object({
   sourceUrl: NonEmptyString,
   updates: z.array(
     z.object({
-      memberName: NonEmptyString,
+      memberEntry: NonEmptyString,
       targets: z.array(AgentIdSchema),
     }),
   ),
@@ -191,9 +203,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post('/sources', jsonValidator(AddSourceBody, { error: sourceError }), async (c) => {
     try {
-      const { repo, name, url, ref, type, scan } = c.req.valid('json')
+      const { repo, name, url, ref, type, members, resources } = c.req.valid('json')
       const repoPath = await resolveRequestRepo(deps, repo)
-      const result = await skills.addSource(repoPath, { name, url, ref, type, scan })
+      const result = await skills.addSource(repoPath, {
+        name,
+        url,
+        ref,
+        type,
+        members,
+        resources,
+      })
       return c.json({ ok: true, source: result.source })
     } catch (e) {
       if (isInvalidRepo(e)) return invalidRepo(c, e)
@@ -202,22 +221,6 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       return c.json(errorBody(e, 'write_failed', 'failed to add source'))
     }
   })
-
-  app.post(
-    '/sources/members',
-    jsonValidator(SetSourceMembersBody, { error: sourceMembersError }),
-    async (c) => {
-      try {
-        const { repo, url, members } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.setSourceMembers(repoPath, url, members)
-        return c.json({ ok: true })
-      } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'write_failed', 'failed to set source members'))
-      }
-    },
-  )
 
   app.delete('/sources', jsonValidator(SourceUrlBody, { error: 'invalid_url' }), async (c) => {
     try {
@@ -250,24 +253,6 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     },
   )
 
-  app.post(
-    '/sources/update',
-    jsonValidator(UpdateSourceBody, { error: updateSourceError }),
-    async (c) => {
-      try {
-        const { repo, url, name, ref, type, scan } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.updateSourceMeta(repoPath, { url, name, ref, type, scan })
-        return c.json({ ok: true })
-      } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        if (e instanceof SkillsApplicationError)
-          return c.json(errorBody(e, 'update_failed', 'failed to update source metadata'), e.status)
-        return c.json(errorBody(e, 'update_failed', 'failed to update source metadata'))
-      }
-    },
-  )
-
   app.delete(
     '/skills/local',
     jsonValidator(DeleteLocalSkillBody, { error: 'invalid_id' }),
@@ -289,9 +274,9 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     jsonValidator(SetSkillTargetsBody, { error: skillTargetsError }),
     async (c) => {
       try {
-        const { repo, sourceUrl, memberName, targets } = c.req.valid('json')
+        const { repo, sourceUrl, memberEntry, targets } = c.req.valid('json')
         const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.setSkillTargets(repoPath, { sourceUrl, memberName, targets })
+        await skills.setSkillTargets(repoPath, { sourceUrl, memberEntry, targets })
         return c.json({ ok: true })
       } catch (e) {
         if (isInvalidRepo(e)) return invalidRepo(c, e)
@@ -395,14 +380,10 @@ function updateSourceError(issues: z.ZodIssue[]): string {
   return 'invalid_url'
 }
 
-function sourceMembersError(issues: z.ZodIssue[]): string {
-  return issues[0]?.path[0] === 'members' ? 'invalid_members' : 'invalid_url'
-}
-
 function skillTargetsError(issues: z.ZodIssue[]): string {
   const field = issues[0]?.path[0]
   if (field === 'sourceUrl') return 'invalid_source_url'
-  if (field === 'memberName') return 'invalid_member_name'
+  if (field === 'memberEntry') return 'invalid_member_entry'
   return 'invalid_targets'
 }
 

@@ -1,9 +1,8 @@
 import { Hono } from 'hono'
-import { join, dirname, basename as pathBasename, isAbsolute } from 'node:path'
-import { glob } from 'tinyglobby'
+import { join, dirname, isAbsolute } from 'node:path'
 import { deriveRepoId, parseSourceMemberSkillId, sourceIdentity } from '@loom/core'
 import { z } from 'zod'
-import { loadProjectionManifest, projectRepository } from '../../projection/workflow.js'
+import { loadDisplayManifest, projectRepository } from '../../projection/workflow.js'
 import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
 import { jsonValidator, queryValidator } from '../request-validation.js'
@@ -80,7 +79,7 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
         400,
       )
     }
-    const manifest = await loadProjectionManifest(deps, repoPath)
+    const manifest = await loadDisplayManifest(deps, repoPath)
     return c.json(manifest)
   })
 
@@ -102,7 +101,7 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
         }
         let skillDir: string | null = null
         if (sourceUrl) {
-          const manifest = await loadProjectionManifest(deps, repoPath)
+          const manifest = await loadDisplayManifest(deps, repoPath)
           const source = manifest.skills.sources.find((item) => item.url === sourceUrl)
           const identity = sourceIdentity(source ?? sourceUrl)
           const cacheId = deriveRepoId(sourceUrl)
@@ -113,17 +112,10 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
             if (requested) {
               skillDir = requested
             } else {
-              const memberPath = source?.members?.find((member) => member.name === memberName)?.path
-              skillDir = memberPath ? sourceSkillDirFromPath(cacheDir, memberPath) : null
-              if (!skillDir) {
-                const matches = await glob('**/SKILL.md', {
-                  cwd: cacheDir,
-                  ignore: ['**/.git/**', '**/node_modules/**'],
-                  onlyFiles: true,
-                })
-                const found = matches.find((m) => pathBasename(dirname(m)) === memberName)
-                if (found) skillDir = join(cacheDir, dirname(found))
-              }
+              const memberEntry = source?.members?.find(
+                (member) => member.name === memberName,
+              )?.entry
+              skillDir = memberEntry ? sourceSkillDirFromPath(cacheDir, memberEntry) : null
             }
           }
         } else if (localPath) {

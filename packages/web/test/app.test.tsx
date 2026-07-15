@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { ThemeProvider } from '../src/theme'
 import App from '../src/App'
+import { api } from '../src/lib/api'
 
 const routerFuture = { v7_startTransition: true, v7_relativeSplatPath: true } as const
 
@@ -81,6 +83,22 @@ describe('App', () => {
     expect(screen.getByRole('link', { name: 'Variables' })).toBeDefined()
     expect(screen.getByRole('link', { name: 'Sync' })).toBeDefined()
     expect(screen.getByRole('link', { name: 'Settings' })).toBeDefined()
+  })
+
+  it('initializes once during StrictMode effect replay', async () => {
+    const callsBefore = vi.mocked(api.init).mock.calls.length
+    render(
+      <StrictMode>
+        <ThemeProvider defaultTheme="light">
+          <MemoryRouter future={routerFuture} initialEntries={['/skills']}>
+            <App />
+          </MemoryRouter>
+        </ThemeProvider>
+      </StrictMode>,
+    )
+
+    await screen.findByRole('link', { name: 'Skills' })
+    expect(api.init).toHaveBeenCalledTimes(callsBefore + 1)
   })
 
   it.each([

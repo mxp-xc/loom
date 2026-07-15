@@ -15,12 +15,15 @@ vi.mock('../src/lib/api', () => ({
     })),
     putConfig: vi.fn(async () => ({ ok: true })),
     project: vi.fn(async () => ({ ok: true })),
+    update: vi.fn(async () => ({ updates: [{ hasUpdate: false }] })),
     getSourceRefs: vi.fn(async () => ({ ok: true, branches: [], tags: [] })),
+    getCachedSourceTree: vi.fn(async () => ({
+      ok: true,
+      tree: { commit: 'abc', nodes: [], diagnostics: [] },
+    })),
     scanSource: vi.fn(async () => ({ ok: true, members: [] })),
     refreshSource: vi.fn(async () => ({ ok: true, members: [] })),
     addSource: vi.fn(async () => ({ ok: true })),
-    setSourceMembers: vi.fn(async () => ({ ok: true })),
-    updateSourceMeta: vi.fn(async () => ({ ok: true })),
     reconcileSource: vi.fn(async () => ({
       ok: true,
       finalized: true,
@@ -31,6 +34,7 @@ vi.mock('../src/lib/api', () => ({
       sessionId: 'update-1',
       pinned_commit: 'bbb',
       changes: { added: [], updated: [], removed: [] },
+      resourceBoundaryChanges: [],
     })),
     finalizeSourceUpdate: vi.fn(async () => ({ ok: true, pinned_commit: 'bbb' })),
     importLocalSkills: vi.fn(async () => ({ ok: true })),
@@ -67,7 +71,6 @@ function Harness({
 describe('useManifestOperations', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(api.setSourceMembers).mockResolvedValue({ ok: true })
     vi.mocked(api.reconcileSource).mockResolvedValue({
       ok: true,
       finalized: true,
@@ -197,15 +200,14 @@ describe('useManifestOperations', () => {
     }
   })
 
-  it('returns failure and refreshes when source member save returns ok:false after source creation', async () => {
+  it('returns an atomic source creation failure without writing members separately', async () => {
     const onError = vi.fn()
     const onSuccess = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     let result: Awaited<ReturnType<Operations['addSource']>> | undefined
-    vi.mocked(api.addSource).mockResolvedValueOnce({ ok: true } as never)
-    vi.mocked(api.setSourceMembers).mockResolvedValueOnce({
+    vi.mocked(api.addSource).mockResolvedValueOnce({
       ok: false,
-      message: 'members write failed',
+      message: 'source write failed',
     } as never)
 
     try {
@@ -217,7 +219,8 @@ describe('useManifestOperations', () => {
             result = await ops.addSource({
               url: 'https://example.test/skills.git',
               ref: 'main',
-              members: ['alpha'],
+              members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
+              resources: { include: [], exclude: [] },
             })
           }}
         />,
@@ -225,11 +228,10 @@ describe('useManifestOperations', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
-      await waitFor(() => expect(api.setSourceMembers).toHaveBeenCalled())
       await waitFor(() => expect(result?.ok).toBe(false))
-      expect(result?.message).toContain('members write failed')
-      expect(onError).toHaveBeenCalledWith(expect.stringContaining('members write failed'))
-      expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
+      expect(result?.message).toContain('source write failed')
+      expect(onError).toHaveBeenCalledWith(expect.stringContaining('source write failed'))
+      expect(api.getManifest).not.toHaveBeenCalled()
       expect(onSuccess).not.toHaveBeenCalled()
       expect(consoleError).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -243,14 +245,14 @@ describe('useManifestOperations', () => {
     }
   })
 
-  it('scans source members with selected ref/type and custom scan pattern', async () => {
+  it('scans the selected source ref without a glob pattern', async () => {
     render(
       <Harness
         action={(ops) =>
-          ops.scanSourceMembers('https://example.test/skills.git', {
+          ops.scanSourceTree('https://example.test/skills.git', {
+            name: 'custom-skills',
             ref: 'v1.0.1',
             type: 'tag',
-            scan: 'skills/engineering/**/SKILL.md',
           })
         }
       />,
@@ -260,23 +262,97 @@ describe('useManifestOperations', () => {
 
     await waitFor(() =>
       expect(api.scanSource).toHaveBeenCalledWith({
+        name: 'custom-skills',
         url: 'https://example.test/skills.git',
         ref: 'v1.0.1',
         type: 'tag',
-        scan: 'skills/engineering/**/SKILL.md',
       }),
     )
   })
 
-  it('refreshes an existing source with its ref and scan pattern', async () => {
+  it('allows scans for different refs to run concurrently', async () => {
+    let resolveFirst!: (value: unknown) => void
+    vi.mocked(api.scanSource)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          }) as never,
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        tree: { commit: 'next', nodes: [], diagnostics: [] },
+      } as never)
+    const scanCallCount = vi.mocked(api.scanSource).mock.calls.length
+
+    render(
+      <Harness
+        action={async (ops) => {
+          const first = ops.scanSourceTree('https://example.test/skills.git', {
+            ref: 'release',
+            type: 'branch',
+          })
+          const second = ops.scanSourceTree('https://example.test/skills.git', {
+            ref: 'next',
+            type: 'branch',
+          })
+          await second
+          resolveFirst({
+            ok: true,
+            tree: { commit: 'release', nodes: [], diagnostics: [] },
+          })
+          await first
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() => expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount + 2))
+  })
+
+  it('loads an existing source tree from its pinned cache without remote discovery', async () => {
     render(
       <Harness
         action={(ops) =>
-          ops.refreshSourceMembers({
+          ops.loadCachedSourceTree({
+            url: 'https://example.test/skills.git',
+            ref: 'main',
+            pinned_commit: 'abc123456789',
+          })
+        }
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() =>
+      expect(api.getCachedSourceTree).toHaveBeenCalledWith({
+        repo: '/tmp/r',
+        url: 'https://example.test/skills.git',
+        pinned_commit: 'abc123456789',
+      }),
+    )
+    expect(api.getSourceRefs).not.toHaveBeenCalled()
+    expect(api.scanSource).not.toHaveBeenCalled()
+  })
+
+  it('refreshes an existing source tree at its ref', async () => {
+    render(
+      <Harness
+        action={(ops) =>
+          ops.refreshSourceTree({
             url: 'https://example.test/skills.git',
             ref: 'v1.0.1',
             type: 'tag',
-            scan: 'skills/engineering/**/SKILL.md',
+            members: [
+              {
+                name: 'alpha',
+                entry: 'alpha/SKILL.md',
+                description: 'runtime description',
+              },
+            ],
+            sourceTree: { commit: 'abc', nodes: [], diagnostics: [] },
           })
         }
       />,
@@ -289,12 +365,45 @@ describe('useManifestOperations', () => {
         url: 'https://example.test/skills.git',
         ref: 'v1.0.1',
         type: 'tag',
-        scan: 'skills/engineering/**/SKILL.md',
       }),
     )
   })
 
-  it('passes type and scan when adding a source', async () => {
+  it('strips runtime source fields before checking for updates', async () => {
+    render(
+      <Harness
+        action={(ops) =>
+          ops.checkSourceUpdate({
+            url: 'https://example.test/skills.git',
+            ref: 'main',
+            members: [
+              {
+                name: 'alpha',
+                entry: 'alpha/SKILL.md',
+                targets: ['codex'],
+                description: 'runtime description',
+              },
+            ],
+            sourceTree: { commit: 'abc', nodes: [], diagnostics: [] },
+          })
+        }
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() =>
+      expect(api.update).toHaveBeenCalledWith('/tmp/r', [
+        {
+          url: 'https://example.test/skills.git',
+          ref: 'main',
+          members: [{ name: 'alpha', entry: 'alpha/SKILL.md', targets: ['codex'] }],
+        },
+      ]),
+    )
+  })
+
+  it('passes type, members, and resources when adding a source', async () => {
     render(
       <Harness
         action={(ops) =>
@@ -303,8 +412,8 @@ describe('useManifestOperations', () => {
             url: 'https://example.test/skills.git',
             ref: 'v1.0.1',
             type: 'tag',
-            scan: 'skills/engineering/**/SKILL.md',
-            members: [],
+            members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
+            resources: { include: [{ path: 'shared', kind: 'directory' }], exclude: [] },
           })
         }
       />,
@@ -319,7 +428,8 @@ describe('useManifestOperations', () => {
         url: 'https://example.test/skills.git',
         ref: 'v1.0.1',
         type: 'tag',
-        scan: 'skills/engineering/**/SKILL.md',
+        members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
+        resources: { include: [{ path: 'shared', kind: 'directory' }], exclude: [] },
       }),
     )
   })
@@ -336,13 +446,14 @@ describe('useManifestOperations', () => {
               url: 'https://example.test/skills.git',
               ref: 'main',
               type: 'branch',
-              members: [{ name: 'alpha' }],
+              members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
             },
             name: 'new-name',
             ref: 'main',
             type: 'branch',
-            scan: '',
-            members: ['alpha'],
+            expected_commit: 'abc123456789',
+            members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
+            resources: { include: [], exclude: [] },
           })
         }}
       />,
@@ -357,21 +468,19 @@ describe('useManifestOperations', () => {
         name: 'new-name',
         ref: 'main',
         type: 'branch',
-        scan: '',
-        members: [{ name: 'alpha' }],
-        previousMembers: [{ name: 'alpha', path: undefined }],
+        members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
+        resources: { include: [], exclude: [] },
       }),
     )
     await waitFor(() => expect(result?.ok).toBe(true))
     expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
   })
 
-  it('returns failure and refreshes when source member save throws after source creation', async () => {
+  it('returns failure when the atomic source creation request throws', async () => {
     const onError = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     let result: Awaited<ReturnType<Operations['addSource']>> | undefined
-    vi.mocked(api.addSource).mockResolvedValueOnce({ ok: true } as never)
-    vi.mocked(api.setSourceMembers).mockRejectedValueOnce(new Error('members exploded') as never)
+    vi.mocked(api.addSource).mockRejectedValueOnce(new Error('source write exploded') as never)
 
     try {
       render(
@@ -381,7 +490,8 @@ describe('useManifestOperations', () => {
             result = await ops.addSource({
               url: 'https://example.test/skills.git',
               ref: 'main',
-              members: ['alpha'],
+              members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
+              resources: { include: [], exclude: [] },
             })
           }}
         />,
@@ -389,11 +499,10 @@ describe('useManifestOperations', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
-      await waitFor(() => expect(api.setSourceMembers).toHaveBeenCalled())
       await waitFor(() => expect(result?.ok).toBe(false))
-      expect(result?.message).toContain('members exploded')
-      expect(onError).toHaveBeenCalledWith(expect.stringContaining('members exploded'))
-      expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
+      expect(result?.message).toContain('source write exploded')
+      expect(onError).toHaveBeenCalledWith(expect.stringContaining('source write exploded'))
+      expect(api.getManifest).not.toHaveBeenCalled()
       expect(consoleError).toHaveBeenCalledWith(
         expect.objectContaining({
           key: 'source:add',
@@ -425,12 +534,11 @@ describe('useManifestOperations', () => {
                 url: 'https://example.test/skills.git',
                 ref: 'main',
                 type: 'branch',
-                scan: 'skills/**/SKILL.md',
               },
               ref: 'develop',
               type: 'branch',
-              scan: '',
-              members: ['alpha'],
+              members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
+              resources: { include: [], exclude: [] },
             })
           }}
         />,
@@ -448,9 +556,8 @@ describe('useManifestOperations', () => {
         name: 'skills',
         ref: 'develop',
         type: 'branch',
-        scan: '',
-        members: [{ name: 'alpha' }],
-        previousMembers: [],
+        members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
+        resources: { include: [], exclude: [] },
       })
       expect(api.getManifest).not.toHaveBeenCalled()
       expect(consoleError).toHaveBeenCalledWith(
@@ -463,33 +570,6 @@ describe('useManifestOperations', () => {
     } finally {
       consoleError.mockRestore()
     }
-  })
-
-  it('projects skills after source scan member selection is saved', async () => {
-    let result: Awaited<ReturnType<Operations['saveSourceMembers']>> | undefined
-
-    render(
-      <Harness
-        action={async (ops) => {
-          result = await ops.saveSourceMembers(
-            { url: 'https://example.test/skills.git', ref: 'main' },
-            ['alpha'],
-          )
-        }}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: 'run' }))
-
-    await waitFor(() =>
-      expect(api.setSourceMembers).toHaveBeenCalledWith({
-        repo: '/tmp/r',
-        url: 'https://example.test/skills.git',
-        members: ['alpha'],
-      }),
-    )
-    await waitFor(() => expect(result?.ok).toBe(true))
-    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/r', scope: 'skills' })
   })
 
   it('returns failure and refreshes when skill bulk target update fails after an earlier update', async () => {
@@ -595,9 +675,9 @@ describe('useManifestOperations', () => {
               url: 'https://example.test/skills.git',
               ref: 'main',
               members: [
-                { name: 'alpha', targets: [] },
-                { name: 'beta', enabled: false, targets: [] },
-                { name: 'gamma', targets: ['claude-code'] },
+                { name: 'alpha', entry: 'alpha/SKILL.md', targets: [] },
+                { name: 'beta', entry: 'beta/SKILL.md', targets: [] },
+                { name: 'gamma', entry: 'gamma/SKILL.md', targets: ['claude-code'] },
               ],
             },
             'codex',
@@ -613,8 +693,9 @@ describe('useManifestOperations', () => {
       repo: '/tmp/r',
       sourceUrl: 'https://example.test/skills.git',
       updates: [
-        { memberName: 'alpha', targets: ['codex'] },
-        { memberName: 'gamma', targets: ['claude-code', 'codex'] },
+        { memberEntry: 'alpha/SKILL.md', targets: ['codex'] },
+        { memberEntry: 'beta/SKILL.md', targets: ['codex'] },
+        { memberEntry: 'gamma/SKILL.md', targets: ['claude-code', 'codex'] },
       ],
     })
     expect(api.updateSkillTargets).not.toHaveBeenCalled()
@@ -735,5 +816,62 @@ describe('useManifestOperations', () => {
     } finally {
       consoleError.mockRestore()
     }
+  })
+
+  it('sends only persisted source fields when preparing an update', async () => {
+    render(
+      <Harness
+        action={(ops) =>
+          ops.performSourceUpdate(
+            {
+              name: 'source-name',
+              url: 'https://example.test/skills.git',
+              ref: 'main',
+              pinned_commit: 'abc',
+              members: [
+                {
+                  name: 'alpha',
+                  entry: 'skills/alpha/SKILL.md',
+                  targets: ['codex'],
+                  description: 'runtime member description',
+                },
+              ],
+              resources: {
+                include: [{ path: 'shared', kind: 'directory' }],
+                exclude: [],
+              },
+              sourceTree: { commit: 'abc', nodes: [], diagnostics: [] },
+            },
+            'repair',
+          )
+        }
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() =>
+      expect(api.prepareSourceUpdate).toHaveBeenCalledWith({
+        repo: '/tmp/r',
+        newRef: 'main',
+        source: {
+          name: 'source-name',
+          url: 'https://example.test/skills.git',
+          ref: 'main',
+          pinned_commit: 'abc',
+          members: [
+            {
+              name: 'alpha',
+              entry: 'skills/alpha/SKILL.md',
+              targets: ['codex'],
+            },
+          ],
+          resources: {
+            include: [{ path: 'shared', kind: 'directory' }],
+            exclude: [],
+          },
+        },
+      }),
+    )
   })
 })

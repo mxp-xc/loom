@@ -16,7 +16,7 @@
 }
 
 .layout {
-  height: min(618px, calc(100dvh - 130px));
+  height: min(670px, calc(100dvh - 118px));
 }
 
 .fields {
@@ -124,28 +124,78 @@
   gap: 10px;
 }
 
-.scanRow {
+.commitStatus {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: end;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--card) 68%, var(--bg));
 }
 
-.scanButton {
-  min-width: 136px;
+.commitStatus > i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 14%, transparent);
 }
 
-.skillList {
-  height: 100%;
-  min-height: 0;
+.commitStatus > span {
+  display: grid;
 }
 
-.skillList > :global([role='list']) {
-  min-height: 0;
+.commitStatus strong,
+.commitStatus small {
+  font:
+    11px 'JetBrains Mono',
+    monospace;
+}
+
+.commitStatus small {
+  color: var(--muted);
+}
+
+.commitStatus > svg {
+  color: var(--success);
+}
+
+.commitStatus[data-loading='true'] > i {
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
+.commitStatus[data-loading='true'] > svg {
+  color: var(--primary);
+}
+
+.sourceStats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.sourceStats span {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: 10px 4px;
+  color: var(--muted);
+  font:
+    9px 'JetBrains Mono',
+    monospace;
+}
+
+.sourceStats strong {
+  color: var(--bright);
+  font-size: 13px;
 }
 
 @media (max-width: 760px) {
-  .scanRow {
-    grid-template-columns: minmax(0, 1fr);
+  .layout {
+    height: calc(100dvh - 80px);
   }
 }

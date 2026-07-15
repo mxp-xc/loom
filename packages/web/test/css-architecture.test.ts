@@ -159,12 +159,27 @@ describe('web CSS architecture', () => {
   })
 
   it('keeps Skills modal workbenches inside the mobile modal height', async () => {
-    const [workbenchCss, editSourceCss, detailCss] = await Promise.all([
+    const [workbenchCss, sourceTreeCss, editSourceCss, detailCss] = await Promise.all([
       readCss('../src/views/skills/SkillWorkbench.module.css'),
+      readCss('../src/views/skills/SourceTreeSelection.module.css'),
       readCss('../src/views/skills/EditSourceModal.module.css'),
       readCss('../src/views/skills/SkillDetailEditor.module.css'),
     ])
 
+    expect(workbenchCss).toMatch(/\.workbench\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s)
+    expect(sourceTreeCss).toMatch(
+      /\.selectionToolbar\[data-view='tree'\] \.searchControl\s*\{[^}]*grid-row:\s*3;/s,
+    )
+    expect(sourceTreeCss).toMatch(
+      /@media \(max-width: 760px\)[\s\S]*\.treeActions\s*\{[^}]*grid-column:\s*1 \/ -1;/,
+    )
+    expect(sourceTreeCss).toMatch(
+      /\.bundleList\[data-empty='true'\] \.emptyResult\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;/s,
+    )
+    expect(sourceTreeCss).toMatch(/\.viewSwitch button\s*\{[^}]*cursor:\s*pointer;/s)
+    expect(sourceTreeCss).toMatch(
+      /\.treeRow\[data-expandable='true'\]\s*\{[^}]*cursor:\s*pointer;/s,
+    )
     expect(workbenchCss).toContain('height: calc(92dvh - 72px);')
     expect(editSourceCss).not.toContain('height: calc(100dvh - 76px);')
     expect(detailCss).not.toContain('height: calc(100dvh - 76px);')

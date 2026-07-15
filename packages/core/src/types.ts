@@ -5,12 +5,82 @@ export type McpType = 'stdio' | 'sse' | 'http'
 
 export interface SkillMemberOverride {
   name: string
-  enabled?: boolean
+  entry: string
   targets?: AgentId[]
   /** Runtime-only source SKILL.md path relative to the source repository root. */
   path?: string
   /** Runtime-only source SKILL.md frontmatter description. */
   description?: string
+}
+
+export type SourceResourceKind = 'file' | 'directory'
+
+export interface SourceResourceRule {
+  path: string
+  kind: SourceResourceKind
+}
+
+export interface SourceResources {
+  include: SourceResourceRule[]
+  exclude: SourceResourceRule[]
+}
+
+interface SourceTreeNodeBase {
+  name: string
+  path: string
+  mode: string
+  oid: string
+}
+
+export interface SourceTreeBundleNode extends SourceTreeNodeBase {
+  kind: 'bundle'
+  entry: string
+  description?: string
+}
+
+export interface SourceTreeContainerNode extends SourceTreeNodeBase {
+  kind: 'container'
+  children: SourceTreeNode[]
+}
+
+export interface SourceTreeResourceNode extends SourceTreeNodeBase {
+  kind: 'resource'
+}
+
+export interface SourceTreeSymlinkNode extends SourceTreeNodeBase {
+  kind: 'symlink'
+}
+
+export interface SourceTreeSubmoduleNode extends SourceTreeNodeBase {
+  kind: 'submodule'
+}
+
+export type SourceTreeNode =
+  | SourceTreeBundleNode
+  | SourceTreeContainerNode
+  | SourceTreeResourceNode
+  | SourceTreeSymlinkNode
+  | SourceTreeSubmoduleNode
+
+export interface SourceTreeDiagnostic {
+  code: 'invalid-nested-bundle' | 'bundle-symlink' | 'bundle-submodule'
+  path: string
+  relatedPaths?: string[]
+  message: string
+}
+
+export interface SourceTree {
+  commit: string
+  nodes: SourceTreeNode[]
+  diagnostics: SourceTreeDiagnostic[]
+}
+
+export interface SourceTreeSummary {
+  bundles: number
+  containers: number
+  resources: number
+  symlinks: number
+  submodules: number
 }
 
 export interface SkillSource {
@@ -19,8 +89,10 @@ export interface SkillSource {
   ref: string
   type?: 'branch' | 'tag'
   pinned_commit?: string
-  scan?: string
   members?: SkillMemberOverride[]
+  resources?: SourceResources
+  /** Runtime-only tree read from pinned_commit. Never serialized to skills.yaml. */
+  sourceTree?: SourceTree
 }
 
 export interface LocalSkill {

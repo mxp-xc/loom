@@ -114,9 +114,11 @@ describe('source skill target routes', () => {
           '    ref: main',
           '    members:',
           '      - name: alpha',
+          '        entry: skills/alpha/SKILL.md',
           '        targets:',
           '          - claude-code',
           '      - name: beta',
+          '        entry: skills/beta/SKILL.md',
           '        targets: []',
           'skills: []',
           '',
@@ -145,8 +147,8 @@ describe('source skill target routes', () => {
         repo: 'demo',
         sourceUrl: 'https://example.test/skills.git',
         updates: [
-          { memberName: 'alpha', targets: ['codex'] },
-          { memberName: 'beta', targets: ['codex', 'opencode'] },
+          { memberEntry: 'skills/alpha/SKILL.md', targets: ['codex'] },
+          { memberEntry: 'skills/beta/SKILL.md', targets: ['codex', 'opencode'] },
         ],
       }),
     })

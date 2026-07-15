@@ -100,6 +100,76 @@ describe('validateManifest (zod discriminatedUnion)', () => {
       validateManifest(m).some((e) => e.includes('duplicate source url: github:a/shared')),
     ).toBe(true)
   })
+  it('rejects the removed source scan field instead of silently stripping it', () => {
+    const m = loadRepoManifest({
+      'skills.yaml':
+        'sources:\n  - url: github:x/y\n    ref: main\n    scan: "skills/**/SKILL.md"\nskills: []\n',
+      'mcp.yaml': '[]\n',
+    })
+    expect(validateManifest(m).some((e) => e.includes('source[0]') && e.includes('scan'))).toBe(
+      true,
+    )
+  })
+  it('rejects removed member fields and requires canonical entry identity', () => {
+    const m = loadRepoManifest({
+      'skills.yaml':
+        'sources:\n  - url: github:x/y\n    ref: main\n    members:\n      - name: skill-a\n        enabled: true\nskills: []\n',
+      'mcp.yaml': '[]\n',
+    })
+    const errors = validateManifest(m)
+    expect(errors.some((e) => e.includes('entry'))).toBe(true)
+    expect(errors.some((e) => e.includes('enabled'))).toBe(true)
+  })
+  it('rejects duplicate member names and entries independently', () => {
+    const m = loadRepoManifest({
+      'skills.yaml':
+        'sources:\n  - url: github:x/y\n    ref: main\n    members:\n      - name: skill-a\n        entry: a/SKILL.md\n      - name: skill-a\n        entry: b/SKILL.md\n      - name: skill-c\n        entry: a/SKILL.md\nskills: []\n',
+      'mcp.yaml': '[]\n',
+    })
+    const errors = validateManifest(m)
+    expect(errors.some((e) => e.includes('duplicate member name: skill-a'))).toBe(true)
+    expect(errors.some((e) => e.includes('duplicate member entry: a/SKILL.md'))).toBe(true)
+  })
+  it('validates resource paths and kinds', () => {
+    const m = loadRepoManifest({
+      'skills.yaml':
+        'sources:\n  - url: github:x/y\n    ref: main\n    resources:\n      include:\n        - path: ../outside\n          kind: directory\n      exclude:\n        - path: shared/file.md\n          kind: blob\nskills: []\n',
+      'mcp.yaml': '[]\n',
+    })
+    const errors = validateManifest(m)
+    expect(errors.some((e) => e.includes('resources.include.0.path'))).toBe(true)
+    expect(errors.some((e) => e.includes('resources.exclude.0.kind'))).toBe(true)
+  })
+  it('rejects non-normalized source paths', () => {
+    for (const path of ['shared/', 'shared//prompt.md', './shared/prompt.md']) {
+      const manifest = loadRepoManifest({
+        'skills.yaml': `sources:\n  - url: github:x/y\n    ref: main\n    resources:\n      include:\n        - path: ${path}\n          kind: directory\n      exclude: []\nskills: []\n`,
+        'mcp.yaml': '[]\n',
+      })
+      expect(validateManifest(manifest)).toEqual(
+        expect.arrayContaining([expect.stringContaining('path must be normalized')]),
+      )
+    }
+  })
+  it('rejects conflicting, redundant, or unstably ordered resource rules', () => {
+    const conflicting = loadRepoManifest({
+      'skills.yaml':
+        'sources:\n  - url: github:x/y\n    ref: main\n    resources:\n      include:\n        - path: shared\n          kind: directory\n      exclude:\n        - path: shared\n          kind: directory\nskills: []\n',
+      'mcp.yaml': '[]\n',
+    })
+    expect(validateManifest(conflicting)).toEqual(
+      expect.arrayContaining([expect.stringContaining('resource path conflicts')]),
+    )
+
+    const nonCanonical = loadRepoManifest({
+      'skills.yaml':
+        'sources:\n  - url: github:x/y\n    ref: main\n    resources:\n      include:\n        - path: z.md\n          kind: file\n        - path: shared\n          kind: directory\n        - path: shared/prompt.md\n          kind: file\n      exclude: []\nskills: []\n',
+      'mcp.yaml': '[]\n',
+    })
+    expect(validateManifest(nonCanonical)).toEqual(
+      expect.arrayContaining([expect.stringContaining('normalized and stably sorted')]),
+    )
+  })
 })
 
 describe('mergeConfig (two-level, deep merge)', () => {

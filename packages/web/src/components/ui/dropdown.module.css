@@ -57,6 +57,29 @@
   box-shadow: var(--shadow-popover);
 }
 
+.menuStatus {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  color: var(--muted);
+  font:
+    11px 'JetBrains Mono',
+    monospace;
+}
+
+.statusSpinner {
+  flex: none;
+  animation: status-spin 0.8s linear infinite;
+}
+
+@keyframes status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .menu button {
   display: flex;
   width: 100%;
@@ -84,4 +107,10 @@
 .menu button[aria-selected='true'] {
   background: color-mix(in srgb, var(--primary) 13%, var(--card));
   color: var(--primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusSpinner {
+    animation: none;
+  }
 }

@@ -1,4 +1,5 @@
-import type { Manifest, AgentId, Config, Memory, SkillSource } from './types.js'
+import type { Manifest, AgentId, Config, Memory, SkillSource, SourceTreeNode } from './types.js'
+import { normalizeSourceResources, projectionBase, resourceSelectionState } from './source-tree.js'
 
 export interface LinkPlan {
   skillId: string
@@ -14,8 +15,23 @@ export interface MemoryPlan {
   content: string | null
   targets: AgentId[]
 }
+export interface SourceProjectionEntry {
+  kind: 'bundle' | 'resource-file' | 'resource-directory'
+  sourcePath: string
+  targetPath: string
+}
+export interface SourceProjectionPlan {
+  sourceName: string
+  sourceUrl: string
+  cacheId: string
+  commit: string
+  target: AgentId
+  projectionBase: string
+  entries: SourceProjectionEntry[]
+}
 export interface ProjectionPlan {
   links: LinkPlan[]
+  sourcePlans: SourceProjectionPlan[]
   mcpEntries: McpPlanEntry[]
   memoryPlan: MemoryPlan
   skippedAgents: AgentId[]
@@ -70,7 +86,10 @@ export function planProjection(
   const skippedAgents: AgentId[] = []
   const activeTargets = (ts: AgentId[]): AgentId[] => {
     const out: AgentId[] = []
+    const seen = new Set<AgentId>()
     for (const a of ts) {
+      if (seen.has(a)) continue
+      seen.add(a)
       if (!globalTargetSet.has(a)) continue
       if (installedAgents.has(a)) out.push(a)
       else skippedAgents.push(a)
@@ -82,19 +101,10 @@ export function planProjection(
   for (const s of manifest.skills.skills) {
     links.push({ skillId: s.id, source: 'local', targets: activeTargets(s.targets ?? []) })
   }
-  for (const src of manifest.skills.sources) {
-    const { repoId } = sourceIdentity(src)
-    const cacheId = deriveRepoId(src.url)
-    const members = src.members?.length ? src.members : []
-    for (const m of members) {
-      const ts = activeTargets(m.enabled === false ? [] : (m.targets ?? []))
-      links.push({
-        skillId: formatSourceMemberSkillId({ repoId }, m.name, effectiveConfig),
-        source: { repoId, cacheId, memberName: m.name, ...(m.path ? { path: m.path } : {}) },
-        targets: ts,
-      })
-    }
-  }
+  const sourcePlans = manifest.skills.sources.flatMap((source) =>
+    planSourceProjection(source, activeTargets),
+  )
+  assertSkillDestinationCollisions(links, sourcePlans)
 
   const mcpEntries: McpPlanEntry[] = manifest.mcp.map((m) => ({
     id: m.id,
@@ -111,11 +121,204 @@ export function planProjection(
 
   return {
     links,
+    sourcePlans,
     mcpEntries,
     memoryPlan,
     skippedAgents: [...new Set(skippedAgents)],
     strategy: effectiveConfig.projection?.strategy ?? 'link',
   }
+}
+
+function assertSkillDestinationCollisions(
+  links: LinkPlan[],
+  sourcePlans: SourceProjectionPlan[],
+): void {
+  const namespacesByTarget = new Map<AgentId, SourceProjectionPlan[]>()
+  for (const sourcePlan of sourcePlans) {
+    const plans = namespacesByTarget.get(sourcePlan.target) ?? []
+    plans.push(sourcePlan)
+    namespacesByTarget.set(sourcePlan.target, plans)
+  }
+
+  for (const link of links) {
+    const localPath = normalizeProjectionDestination(link.skillId)
+    for (const target of link.targets) {
+      for (const sourcePlan of namespacesByTarget.get(target) ?? []) {
+        const namespace = normalizeProjectionDestination(sourcePlan.sourceName)
+        if (
+          localPath === namespace ||
+          localPath.startsWith(`${namespace}/`) ||
+          namespace.startsWith(`${localPath}/`)
+        ) {
+          throw new Error(
+            `Local skill destination "${link.skillId}" overlaps source namespace "${sourcePlan.sourceName}" for ${target}`,
+          )
+        }
+      }
+    }
+  }
+}
+
+function normalizeProjectionDestination(path: string): string {
+  return path
+    .replace(/\\/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+    .toLowerCase()
+}
+
+function planSourceProjection(
+  source: SkillSource,
+  activeTargets: (targets: AgentId[]) => AgentId[],
+): SourceProjectionPlan[] {
+  const sourceTree = source.sourceTree
+  const members = source.members ?? []
+  if (members.length === 0) return []
+  if (!sourceTree) throw new Error(`SourceTree unavailable for ${source.url}`)
+  if (sourceTree.diagnostics.length > 0) {
+    throw new Error(sourceTree.diagnostics.map((diagnostic) => diagnostic.message).join('; '))
+  }
+
+  const nodes = flattenSourceTree(sourceTree.nodes)
+  const bundles = new Map(
+    nodes.filter((node) => node.kind === 'bundle').map((node) => [node.entry, node]),
+  )
+  const resources = normalizeSourceResources(source.resources)
+  const selectedResourceNodes = nodes.filter(
+    (node) =>
+      node.kind === 'resource' && resourceSelectionState(node.path, 'file', resources).selected,
+  )
+  const targets = new Map<AgentId, typeof members>()
+  for (const member of members) {
+    if (!bundles.has(member.entry)) throw new Error(`Selected bundle unavailable: ${member.entry}`)
+    for (const target of activeTargets(member.targets ?? [])) {
+      const current = targets.get(target) ?? []
+      current.push(member)
+      targets.set(target, current)
+    }
+  }
+
+  const sourceName = sourceIdentity(source).repoId
+  const cacheId = deriveRepoId(source.url)
+  return [...targets.entries()].map(([target, targetMembers]) => {
+    const bundleEntries: SourceProjectionEntry[] = targetMembers.map((member) => {
+      const bundle = bundles.get(member.entry)!
+      return { kind: 'bundle', sourcePath: bundle.path, targetPath: '' }
+    })
+    const resourceEntries = planResourceEntries(nodes, selectedResourceNodes, resources)
+    const rootPaths = [
+      ...bundleEntries.map((entry) => entry.sourcePath),
+      ...selectedResourceRoots(resources, nodes, selectedResourceNodes),
+    ]
+    const base = rootPaths.includes('') ? '' : projectionBase(rootPaths)
+    const entries = [...bundleEntries, ...resourceEntries]
+      .map((entry) => ({ ...entry, targetPath: relativeToProjectionBase(entry.sourcePath, base) }))
+      .sort(
+        (left, right) =>
+          left.targetPath.localeCompare(right.targetPath, 'en') ||
+          left.kind.localeCompare(right.kind),
+      )
+    assertProjectionDestinations(entries)
+    return {
+      sourceName,
+      sourceUrl: source.url,
+      cacheId,
+      commit: sourceTree.commit,
+      target,
+      projectionBase: base,
+      entries,
+    }
+  })
+}
+
+export function planSourceProjectionForTargets(
+  source: SkillSource,
+  targets: ReadonlySet<AgentId>,
+): SourceProjectionPlan[] {
+  return planSourceProjection(source, (requested) =>
+    requested.filter((target) => targets.has(target)),
+  )
+}
+
+function planResourceEntries(
+  nodes: SourceTreeNode[],
+  selected: SourceTreeNode[],
+  resources: ReturnType<typeof normalizeSourceResources>,
+): SourceProjectionEntry[] {
+  const entries: SourceProjectionEntry[] = []
+  const covered = new Set<string>()
+  for (const include of resources.include) {
+    if (include.kind !== 'directory') continue
+    const container = nodes.find((node) => node.kind === 'container' && node.path === include.path)
+    if (!container) continue
+    const hasBoundary = nodes.some(
+      (node) => node.kind === 'bundle' && isDescendant(node.path, include.path),
+    )
+    const hasExclusion = resources.exclude.some((rule) =>
+      isSameOrDescendant(rule.path, include.path),
+    )
+    if (hasBoundary || hasExclusion) continue
+    const descendants = selected.filter((node) => isDescendant(node.path, include.path))
+    if (descendants.length === 0) continue
+    entries.push({ kind: 'resource-directory', sourcePath: include.path, targetPath: '' })
+    for (const node of descendants) covered.add(node.path)
+  }
+  for (const node of selected) {
+    if (!covered.has(node.path)) {
+      entries.push({ kind: 'resource-file', sourcePath: node.path, targetPath: '' })
+    }
+  }
+  return entries
+}
+
+function selectedResourceRoots(
+  resources: ReturnType<typeof normalizeSourceResources>,
+  nodes: SourceTreeNode[],
+  selected: SourceTreeNode[],
+): string[] {
+  return resources.include
+    .filter((rule) => {
+      const exists = nodes.some(
+        (node) =>
+          node.path === rule.path &&
+          (rule.kind === 'directory' ? node.kind === 'container' : node.kind === 'resource'),
+      )
+      return exists && selected.some((node) => isSameOrDescendant(node.path, rule.path))
+    })
+    .map((rule) => rule.path)
+}
+
+function flattenSourceTree(nodes: SourceTreeNode[]): SourceTreeNode[] {
+  return nodes.flatMap((node) => [
+    node,
+    ...(node.kind === 'container' ? flattenSourceTree(node.children) : []),
+  ])
+}
+
+function relativeToProjectionBase(path: string, base: string): string {
+  if (!path) return ''
+  if (!base) return path
+  const prefix = `${base}/`
+  if (!path.startsWith(prefix)) throw new Error(`Projection root ${path} is outside base ${base}`)
+  return path.slice(prefix.length)
+}
+
+function assertProjectionDestinations(entries: SourceProjectionEntry[]): void {
+  const roots = new Set<string>()
+  for (const entry of entries) {
+    const destination = entry.targetPath.toLowerCase()
+    if (roots.has(destination)) {
+      throw new Error(`Projection destination collision: ${entry.targetPath || '.'}`)
+    }
+    roots.add(destination)
+  }
+}
+
+function isDescendant(path: string, ancestor: string): boolean {
+  return Boolean(path) && path.startsWith(`${ancestor}/`)
+}
+
+function isSameOrDescendant(path: string, ancestor: string): boolean {
+  return path === ancestor || isDescendant(path, ancestor)
 }
 
 export function deriveRepoId(url: string): string {

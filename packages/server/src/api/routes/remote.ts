@@ -1,10 +1,11 @@
 import { Hono } from 'hono'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import { installSkill, isValidGitRepo } from '../../remote/install.js'
-import { checkUpdates, performUpdate } from '../../remote/update.js'
-import { scanSourceMembers } from '../../projection/scan.js'
-import { SkillMemberOverrideSchema, deriveRepoId, pinSourceCommit } from '@loom/core'
+import { cacheDirFor } from '../../remote/cache.js'
+import { checkUpdates } from '../../remote/update.js'
+import { scanSourceTree } from '../../remote/source-tree.js'
+import { SkillSourceSchema, deriveRepoId, summarizeSourceTree } from '@loom/core'
 import { readYaml, writeYaml } from '../repo-config.js'
 import { resolveRepoPath } from '../repo.js'
 import { logger } from '../../lib/logger.js'
@@ -17,53 +18,51 @@ import { projectRepository } from '../../projection/workflow.js'
 const remoteLogger = logger.child('remote')
 const NonEmptyString = z.string().min(1)
 const SourceType = z.enum(['branch', 'tag'])
-const UpdateOldMember = SkillMemberOverrideSchema.extend({
-  path: z.string().optional(),
-  description: z.string().optional(),
-}).passthrough()
-const SkillSource = z
-  .object({
-    name: z.string().optional(),
-    url: NonEmptyString,
-    ref: NonEmptyString,
-    type: SourceType.optional(),
-    pinned_commit: z.string().optional(),
-    scan: z.string().optional(),
-    members: z.array(UpdateOldMember).optional(),
-  })
-  .passthrough()
-const InstallBody = z.object({
-  url: NonEmptyString,
-  ref: NonEmptyString,
-  repo: NonEmptyString,
-  sourceId: NonEmptyString,
-})
+const SkillSource = SkillSourceSchema
 const UpdateCheckBody = z.object({
   sources: z.array(SkillSource),
   repo: z.string().optional(),
 })
-const PerformUpdateBody = z.object({
-  repo: NonEmptyString,
-  source: SkillSource,
-  newRef: NonEmptyString,
-  sourceId: NonEmptyString,
-  oldMembers: z.array(UpdateOldMember).default([]),
-})
-const PrepareUpdateBody = PerformUpdateBody
+const PrepareUpdateBody = z
+  .object({
+    repo: NonEmptyString,
+    source: SkillSource,
+    newRef: NonEmptyString,
+  })
+  .strict()
 const FinalizeUpdateBody = z.object({
   repo: NonEmptyString,
   sessionId: z.string().uuid(),
   preserve: z.array(NonEmptyString).default([]),
+  resourceBoundaryDecisions: z
+    .array(
+      z.object({
+        entry: NonEmptyString,
+        action: z.enum(['enable', 'exclude']),
+      }),
+    )
+    .default([]),
 })
-const ScanSourceBody = z.object({
-  url: NonEmptyString,
-  ref: z.string().optional(),
-  type: SourceType.optional(),
-  scan: z.string().optional(),
-})
+const ScanSourceBody = z
+  .object({
+    name: NonEmptyString.optional(),
+    url: NonEmptyString,
+    ref: z.string().optional(),
+    type: SourceType.optional(),
+  })
+  .strict()
 const RefreshSourceBody = ScanSourceBody.extend({
   repo: NonEmptyString,
 })
+const CachedSourceTreeBody = z
+  .object({
+    repo: NonEmptyString,
+    name: NonEmptyString.optional(),
+    url: NonEmptyString,
+    pinned_commit: NonEmptyString.optional(),
+    ref: NonEmptyString.optional(),
+  })
+  .strict()
 const SourceRefsBody = z.object({
   url: NonEmptyString,
 })
@@ -71,33 +70,6 @@ const SourceRefsBody = z.object({
 export function createRemoteRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
   const updateSessions = new SourceUpdateSessionStore(deps.fs)
-
-  app.post('/install', jsonValidator(InstallBody, { error: remoteSourceError }), async (c) => {
-    const { url, ref, repo, sourceId } = c.req.valid('json')
-    const cacheId = deriveRepoId(url)
-    let repoPath: string
-    try {
-      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-    } catch (e) {
-      return c.json(
-        { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
-        400,
-      )
-    }
-    remoteLogger.info('install skill', { url, ref, repoPath, sourceId, cacheId })
-    try {
-      const res = await installSkill(deps.git, deps.fs, url, ref, repoPath, cacheId)
-      remoteLogger.info('install completed', { url, sourceId, cacheId, commit: res.pinned_commit })
-      return c.json(res)
-    } catch (e) {
-      remoteLogger.error('install failed', { err: e, url, sourceId, cacheId })
-      return c.json({
-        ok: false,
-        error: 'install_failed',
-        message: String((e as Error)?.message ?? e),
-      })
-    }
-  })
 
   app.post('/update', jsonValidator(UpdateCheckBody, { error: updateCheckError }), async (c) => {
     const { sources, repo } = c.req.valid('json')
@@ -112,8 +84,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
       )
     }
     const updates = await checkUpdates(sources, deps.git)
-    // Detect corrupt/missing local caches so the UI can surface an update
-    // button to repair them (scan only globs files, it won't fix a broken .git).
+    // Detect corrupt or missing local caches so the UI can offer a repair update.
     if (repoPath) {
       for (const u of updates) {
         const sourceId = deriveRepoId(u.source.url)
@@ -129,7 +100,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
 
   app.post(
     '/update/prepare',
-    jsonValidator(PrepareUpdateBody, { error: performUpdateError }),
+    jsonValidator(PrepareUpdateBody, { error: prepareUpdateError }),
     async (c) => {
       const body = c.req.valid('json')
       try {
@@ -141,10 +112,10 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
           body.source,
           body.newRef,
           repoPath,
-          deriveRepoId(body.source.url),
           (body.source.members ?? []).map((member) => ({
             name: member.name,
-            path: member.path ?? `skills/${member.name}/SKILL.md`,
+            entry: member.entry,
+            path: member.entry,
             targets: member.targets,
           })),
         )
@@ -163,6 +134,8 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
             updated: session.changes.updated,
             removed: session.changes.removed,
           },
+          resourceBoundaryChanges: session.resourceBoundaryChanges,
+          pathMoves: session.pathMoves,
         })
       } catch (e) {
         remoteLogger.error('source update prepare failed', { err: e, source: body.source.url })
@@ -179,7 +152,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
     '/update/finalize',
     jsonValidator(FinalizeUpdateBody, { error: 'invalid_update_session' }),
     async (c) => {
-      const { repo, sessionId, preserve } = c.req.valid('json')
+      const { repo, sessionId, preserve, resourceBoundaryDecisions } = c.req.valid('json')
       let repoPath: string
       try {
         repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
@@ -196,21 +169,90 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
           { ok: false, error: 'invalid_update_session', message: '更新会话不存在或已过期' },
           404,
         )
+      if (session.completed) {
+        try {
+          await updateSessions.discard(sessionId)
+        } catch (cleanupError) {
+          remoteLogger.warn('completed source update retry cleanup failed', {
+            err: cleanupError,
+            sessionId,
+            stagingDir: session.stagingDir,
+          })
+        }
+        return c.json({
+          ok: true,
+          pinned_commit: session.pinned_commit,
+          changes: session.changes,
+          preserved: session.completed.preserved,
+          deleted: session.completed.deleted,
+        })
+      }
+      try {
+        const recovery = await updateSessions.recoverFinalize(session)
+        if (recovery.projectionRequired) {
+          const projected = await projectRepository(deps, session.repoPath, { scope: 'skills' })
+          if (!projected.ok) throw projected.failure.originalError
+        }
+        if (session.finalize) await updateSessions.completeFinalizeRecovery(session)
+      } catch (e) {
+        remoteLogger.error('source update finalize recovery failed', {
+          err: e,
+          sessionId,
+          source: session.source.url,
+        })
+        return c.json(
+          {
+            ok: false,
+            error: 'update_recovery_failed',
+            message: String((e as Error).message),
+          },
+          500,
+        )
+      }
       const removable = new Set(session.changes.removed.map(({ name }) => name))
       if (preserve.some((name) => !removable.has(name)))
         return c.json(
           { ok: false, error: 'invalid_preserve_members', message: '保留列表包含无效 skill' },
           400,
         )
-      const copied: string[] = []
-      let originalData: any
-      let manifestWritten = false
+      const boundaryEntries = new Set(session.resourceBoundaryChanges.map(({ entry }) => entry))
+      const decisionEntries = resourceBoundaryDecisions.map(({ entry }) => entry)
+      if (
+        new Set(decisionEntries).size !== decisionEntries.length ||
+        decisionEntries.some((entry) => !boundaryEntries.has(entry))
+      )
+        return c.json(
+          {
+            ok: false,
+            error: 'invalid_resource_boundary_confirmation',
+            message: '资源边界确认包含无效 bundle',
+          },
+          400,
+        )
+      const acceptedBoundaries = new Set(decisionEntries)
+      const unconfirmedBoundaries = session.resourceBoundaryChanges.filter(
+        ({ entry }) => !acceptedBoundaries.has(entry),
+      )
+      if (unconfirmedBoundaries.length > 0)
+        return c.json(
+          {
+            ok: false,
+            error: 'resource_boundary_confirmation_required',
+            message: '更新产生新的 SkillBundle 边界，需要明确确认',
+            resourceBoundaryChanges: unconfirmedBoundaries,
+          },
+          409,
+        )
+      const liveCacheDir = cacheDirFor(session.repoPath, deriveRepoId(session.source.url))
+      const backupCacheDir = join(dirname(session.stagingDir), 'live-backup')
       try {
         const filePath = join(session.repoPath, 'skills.yaml')
+        const originalManifest = await deps.fs.readFile(filePath)
         const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
+        const hadLiveCache = await deps.fs.exists(liveCacheDir)
+        const rollbackProjectionRequired = await isValidGitRepo(deps.fs, liveCacheDir)
         data.sources ??= []
         data.skills ??= []
-        originalData = structuredClone(data)
         const sourceIndex = data.sources.findIndex((item: any) => item.url === session.source.url)
         if (sourceIndex < 0) throw new Error(`Source not found: ${session.source.url}`)
         for (const name of preserve) {
@@ -226,30 +268,56 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
             )
           }
         }
+        await updateSessions.beginFinalize(session, {
+          manifestPath: filePath,
+          originalManifest,
+          liveCacheDir,
+          backupCacheDir,
+          hadLiveCache,
+          rollbackProjectionRequired,
+          preservedDestinations: preserve.map((name) =>
+            join(session.repoPath, 'assets', 'skills', name),
+          ),
+        })
+        const currentSource = data.sources[sourceIndex]
         const nextSource = {
-          ...data.sources[sourceIndex],
+          ...currentSource,
           ref: session.newRef,
           pinned_commit: session.pinned_commit,
-          members: persistedMembers(session.source, session.newMembers),
+          members: persistedMembers(
+            currentSource,
+            session.newMembers,
+            new Set(
+              resourceBoundaryDecisions
+                .filter(({ action }) => action === 'enable')
+                .map(({ entry }) => entry),
+            ),
+          ),
         }
         data.sources[sourceIndex] = nextSource
         for (const name of preserve) {
           const dest = join(session.repoPath, 'assets', 'skills', name)
-          await deps.fs.copyDir(join(session.stagingDir, name), dest)
-          copied.push(dest)
           const removed = session.changes.removed.find((member) => member.name === name)
+          if (!removed?.previousPath) throw new Error(`Removed skill path not found: ${name}`)
+          await deps.fs.copyDir(join(session.stagingDir, dirname(removed.previousPath)), dest)
           data.skills.push({ id: name, ...(removed?.targets ? { targets: removed.targets } : {}) })
         }
+        if (hadLiveCache) {
+          await deps.fs.move(liveCacheDir, backupCacheDir)
+        }
+        await deps.fs.move(session.candidateDir, liveCacheDir)
         await writeYaml(deps.fs, filePath, data)
-        manifestWritten = true
         const projected = await projectRepository(deps, session.repoPath, { scope: 'skills' })
         if (!projected.ok) throw projected.failure.originalError
-        updateSessions.delete(sessionId)
+        const completed = {
+          preserved: preserve,
+          deleted: session.changes.removed
+            .map(({ name }) => name)
+            .filter((name) => !preserve.includes(name)),
+        }
+        await updateSessions.markCompleted(session, completed)
         try {
-          await deps.fs.removeDir(session.stagingDir)
-          await deps.fs.removeFile(
-            join(session.repoPath, 'temp', 'source-updates', `${sessionId}.json`),
-          )
+          await updateSessions.discard(sessionId)
         } catch (cleanupError) {
           remoteLogger.warn('completed source update cleanup failed', {
             err: cleanupError,
@@ -261,10 +329,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
           ok: true,
           pinned_commit: session.pinned_commit,
           changes: session.changes,
-          preserved: preserve,
-          deleted: session.changes.removed
-            .map(({ name }) => name)
-            .filter((name) => !preserve.includes(name)),
+          ...completed,
         })
       } catch (e) {
         remoteLogger.error('source update finalize failed', {
@@ -272,31 +337,21 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
           sessionId,
           source: session.source.url,
         })
-        for (const path of copied) {
-          try {
-            await deps.fs.removeDir(path)
-          } catch (cleanupError) {
-            remoteLogger.error('source update local rollback failed', {
-              err: cleanupError,
-              sessionId,
-              path,
-            })
-          }
-        }
-        if (manifestWritten && originalData) {
-          try {
-            await writeYaml(deps.fs, join(session.repoPath, 'skills.yaml'), originalData)
+        try {
+          const recovery = await updateSessions.recoverFinalize(session)
+          if (recovery.projectionRequired) {
             const rollbackProjection = await projectRepository(deps, session.repoPath, {
               scope: 'skills',
             })
             if (!rollbackProjection.ok) throw rollbackProjection.failure.originalError
-          } catch (rollbackError) {
-            remoteLogger.error('source update manifest rollback failed', {
-              err: rollbackError,
-              sessionId,
-              source: session.source.url,
-            })
           }
+          if (session.finalize) await updateSessions.completeFinalizeRecovery(session)
+        } catch (rollbackError) {
+          remoteLogger.error('source update finalize rollback failed', {
+            err: rollbackError,
+            sessionId,
+            source: session.source.url,
+          })
         }
         return c.json({
           ok: false,
@@ -308,65 +363,56 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
   )
 
   app.post(
-    '/update/perform',
-    jsonValidator(PerformUpdateBody, { error: performUpdateError }),
+    '/sources/tree',
+    jsonValidator(CachedSourceTreeBody, { error: cachedSourceTreeError }),
     async (c) => {
-      const body = c.req.valid('json')
+      const { repo, name, url, pinned_commit, ref } = c.req.valid('json')
       let repoPath: string
       try {
-        repoPath = await resolveRepoPath(deps.fs, body.repo, deps.home)
-      } catch (e) {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (err) {
+        remoteLogger.error('cached source tree repo resolution failed', { err, repo, url })
         return c.json(
-          { ok: false, error: 'invalid_repo', message: String((e as Error).message) },
+          { ok: false, error: 'invalid_repo', message: String((err as Error).message) },
           400,
         )
       }
-      remoteLogger.info('perform update', {
-        source: body.source?.url,
-        newRef: body.newRef,
-        repoPath,
-      })
+
+      const cacheDir = cacheDirFor(repoPath, deriveRepoId(url))
+      if (!(await isValidGitRepo(deps.fs, cacheDir))) {
+        const err = new Error(`Source cache is missing or invalid: ${cacheDir}`)
+        remoteLogger.error('cached source tree unavailable', { err, repo: repoPath, url, cacheDir })
+        return c.json({ ok: false, error: 'source_cache_unavailable', message: err.message }, 404)
+      }
+
       try {
-        const sourceId = deriveRepoId(body.source.url)
-        const res = await performUpdate(
-          deps.git,
-          deps.fs,
-          body.source,
-          body.newRef,
-          repoPath,
-          sourceId,
-          body.oldMembers,
-        )
-        // Persist the new pinned_commit (and ref if it changed) back to skills.yaml
-        try {
-          const filePath = join(repoPath, 'skills.yaml')
-          const data = (await readYaml(deps.fs, filePath)) ?? { sources: [], skills: [] }
-          const result = pinSourceCommit(
-            data,
-            body.source?.url,
-            res.pinned_commit,
-            body.newRef || undefined,
-          )
-          if (result.changed) await writeYaml(deps.fs, filePath, result.data)
-        } catch (err) {
-          remoteLogger.warn('failed to persist pinned source commit', {
-            err,
-            source: body.source?.url,
-          })
-          /* best-effort: cache is updated even if yaml write fails */
-        }
-        remoteLogger.info('update completed', {
-          source: body.source?.url,
-          commit: res.pinned_commit,
+        const tree = await scanSourceTree(deps.git, cacheDir, pinned_commit ?? ref ?? 'HEAD', {
+          ...(name ? { name } : {}),
+          url,
         })
-        return c.json(res)
-      } catch (e) {
-        remoteLogger.error('update failed', { err: e, source: body.source?.url })
         return c.json({
-          ok: false,
-          error: 'update_failed',
-          message: String((e as Error)?.message ?? e),
+          ok: true,
+          commit: tree.commit,
+          tree,
+          summary: summarizeSourceTree(tree.nodes),
+          diagnostics: tree.diagnostics,
         })
+      } catch (err) {
+        remoteLogger.error('cached source tree scan failed', {
+          err,
+          repo: repoPath,
+          url,
+          cacheDir,
+          ref: pinned_commit ?? ref ?? 'HEAD',
+        })
+        return c.json(
+          {
+            ok: false,
+            error: 'cached_tree_failed',
+            message: String((err as Error)?.message ?? err),
+          },
+          500,
+        )
       }
     },
   )
@@ -376,15 +422,21 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
     jsonValidator(ScanSourceBody, { error: scanSourceError }),
     async (c) => {
       try {
-        const { url, ref, type, scan } = c.req.valid('json')
-        const { discoverSkills } = await import('../../remote/discover.js')
-        const members = await discoverSkills(deps.git, deps.fs, {
+        const { name, url, ref, type } = c.req.valid('json')
+        const { discoverSourceTree } = await import('../../remote/discover.js')
+        const tree = await discoverSourceTree(deps.git, {
+          ...(name ? { name } : {}),
           url,
           ...(typeof ref === 'string' && ref.trim() ? { ref: ref.trim() } : {}),
           ...(type === 'branch' || type === 'tag' ? { type } : {}),
-          ...(typeof scan === 'string' && scan.trim() ? { scan: scan.trim() } : {}),
         })
-        return c.json({ members })
+        return c.json({
+          ok: true,
+          commit: tree.commit,
+          tree,
+          summary: summarizeSourceTree(tree.nodes),
+          diagnostics: tree.diagnostics,
+        })
       } catch (e) {
         remoteLogger.error('source scan failed', { err: e })
         return c.json({
@@ -404,7 +456,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
     jsonValidator(RefreshSourceBody, { error: refreshSourceError }),
     async (c) => {
       try {
-        const { repo, url, ref, type, scan } = c.req.valid('json')
+        const { repo, name, url, ref, type } = c.req.valid('json')
         let repoPath: string
         try {
           repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
@@ -416,23 +468,19 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
           )
         }
         const sourceId = deriveRepoId(url)
-        // Pure-local scan: glob the existing cache for SKILL.md without hitting
-        // the network. Only clones as a fallback when the cache directory doesn't
-        // exist yet (e.g. user deleted it). Corrupt caches (.git missing) are
-        // left as-is and repaired via the "update" button instead.
+        // Read the tracked commit tree from the local cache. Clone only when the
+        // cache was removed; corrupt caches are repaired through the update flow.
         const cacheDir = join(repoPath, 'remote-cache', sourceId)
         if (!(await deps.fs.exists(cacheDir))) {
           await installSkill(deps.git, deps.fs, url, ref ?? 'main', repoPath, sourceId)
         }
-        const scanned = await scanSourceMembers(cacheDir, {
+        const tree = await scanSourceTree(deps.git, cacheDir, ref ?? 'HEAD', {
+          ...(name ? { name } : {}),
           url,
-          ref: ref ?? 'main',
-          ...(type === 'branch' || type === 'tag' ? { type } : {}),
-          ...(typeof scan === 'string' && scan.trim() ? { scan: scan.trim() } : {}),
         })
         return c.json({
           ok: true,
-          members: scanned.map((m) => ({ name: m.name, path: m.relativePath ?? 'SKILL.md' })),
+          tree,
         })
       } catch (e) {
         remoteLogger.error('source refresh failed', { err: e })
@@ -467,25 +515,16 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
   return app
 }
 
-function remoteSourceError(issues: z.ZodIssue[]): string {
-  const field = issues[0]?.path[0]
-  if (field === 'repo') return 'invalid_repo'
-  if (field === 'ref') return 'invalid_ref'
-  if (field === 'sourceId') return 'invalid_source_id'
-  return 'invalid_url'
-}
-
 function updateCheckError(issues: z.ZodIssue[]): string {
   return issues[0]?.path[0] === 'sources' ? 'invalid_sources' : 'invalid_repo'
 }
 
-function performUpdateError(issues: z.ZodIssue[]): string {
+function prepareUpdateError(issues: z.ZodIssue[]): string {
   const field = issues[0]?.path[0]
   if (field === 'repo') return 'invalid_repo'
   if (field === 'source') return 'invalid_source'
   if (field === 'newRef') return 'invalid_ref'
-  if (field === 'sourceId') return 'invalid_source_id'
-  return 'invalid_members'
+  return 'invalid_update_request'
 }
 
 function scanSourceError(issues: z.ZodIssue[]): string {
@@ -497,4 +536,12 @@ function refreshSourceError(issues: z.ZodIssue[]): string {
   if (field === 'repo') return 'invalid_repo'
   if (field === 'type') return 'invalid_type'
   return 'invalid_url'
+}
+
+function cachedSourceTreeError(issues: z.ZodIssue[]): string {
+  const field = issues[0]?.path[0]
+  if (field === 'repo') return 'invalid_repo'
+  if (field === 'pinned_commit' || field === 'ref') return 'invalid_ref'
+  if (field === 'url') return 'invalid_url'
+  return 'invalid_source_tree_request'
 }

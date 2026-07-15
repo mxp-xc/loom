@@ -1,6 +1,15 @@
 export type GitPushResult =
   { ok: true } | { ok: false; nonFastForward?: boolean; message?: string; cause?: unknown }
 
+export type GitTreeEntryType = 'blob' | 'tree' | 'commit'
+
+export interface GitTreeEntry {
+  mode: string
+  type: GitTreeEntryType
+  oid: string
+  path: string
+}
+
 export interface IGit {
   init(repoPath: string): Promise<void>
   fetch(repoPath: string): Promise<void>
@@ -21,6 +30,7 @@ export interface IGit {
   revParseHead(repoPath: string): Promise<string>
   revParse(repoPath: string, ref: string): Promise<string>
   lsTree(repoPath: string, ref: string, dir: string): Promise<string[]>
+  readTree(repoPath: string, ref: string): Promise<GitTreeEntry[]>
   // Create a merge commit with two parents (HEAD + mergeHead) over the given tree.
   // Used by syncPull so the result is a real descendant of the remote tip (pushable).
   commitTree(repoPath: string, tree: string, parents: string[], message: string): Promise<string>

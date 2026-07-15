@@ -10,7 +10,14 @@ import type {
   AgentAwareVarsResolution,
   VarOverride,
 } from './vars'
-import type { AgentId, McpServer } from '@loom/core'
+import type {
+  AgentId,
+  McpServer,
+  SourceResources,
+  SourceTree,
+  SourceTreeDiagnostic,
+  SourceTreeSummary,
+} from '@loom/core'
 
 const base = '/api'
 
@@ -287,7 +294,6 @@ export const api = {
   syncForcePush: (repo: string) => post('/sync/force-push', { repo }).then(json),
   syncForcePull: (repo: string) =>
     post('/sync/force-pull', { repo }).then(json) as Promise<SyncPullResponse>,
-  install: (body: unknown) => post('/install', body).then(json),
   update: (repo: string, sources: unknown[]) => post('/update', { repo, sources }).then(json),
   prepareSourceUpdate: (body: unknown) =>
     post('/update/prepare', body).then(json) as Promise<{
@@ -299,8 +305,21 @@ export const api = {
         updated: Array<{ name: string }>
         removed: Array<{ name: string; targets?: string[] }>
       }
+      resourceBoundaryChanges: Array<{ name: string; entry: string; path: string }>
+      pathMoves: Array<{
+        target: AgentId
+        kind: 'bundle' | 'resource-file' | 'resource-directory'
+        sourcePath: string
+        previousTargetPath?: string
+        nextTargetPath?: string
+      }>
     }>,
-  finalizeSourceUpdate: (body: { repo: string; sessionId: string; preserve: string[] }) =>
+  finalizeSourceUpdate: (body: {
+    repo: string
+    sessionId: string
+    preserve: string[]
+    resourceBoundaryDecisions: Array<{ entry: string; action: 'enable' | 'exclude' }>
+  }) =>
     post('/update/finalize', body).then(json) as Promise<{
       ok: boolean
       pinned_commit: string
@@ -365,7 +384,8 @@ export const api = {
     url: string
     ref: string
     type?: 'branch' | 'tag'
-    scan?: string
+    members: Array<{ name: string; entry: string }>
+    resources: SourceResources
   }) => post('/sources', body).then(json),
   addMcpServer: (body: {
     repo: string
@@ -430,9 +450,29 @@ export const api = {
     }>,
   setSyncRemote: (body: { repo: string; remoteUrl: string }) =>
     post('/sync/remote', body).then(json),
-  scanSource: (body: { url: string; ref?: string; type?: 'branch' | 'tag'; scan?: string }) =>
+  scanSource: (body: { name?: string; url: string; ref?: string; type?: 'branch' | 'tag' }) =>
     post('/sources/scan', body).then(json) as Promise<{
-      members: Array<{ name: string; description: string; path: string; installed: boolean }>
+      ok: boolean
+      commit?: string
+      tree?: SourceTree
+      summary?: SourceTreeSummary
+      diagnostics?: SourceTreeDiagnostic[]
+      error?: string
+      message?: string
+    }>,
+  getCachedSourceTree: (body: {
+    repo: string
+    name?: string
+    url: string
+    pinned_commit: string
+  }) =>
+    post('/sources/tree', body).then(json) as Promise<{
+      ok: boolean
+      tree?: SourceTree
+      summary?: SourceTreeSummary
+      diagnostics?: SourceTreeDiagnostic[]
+      error?: string
+      message?: string
     }>,
   getSourceRefs: (url: string) =>
     post('/sources/refs', { url }).then(json) as Promise<{
@@ -444,30 +484,11 @@ export const api = {
     }>,
   refreshSource: (
     repo: string,
-    source: { url: string; ref: string; type?: 'branch' | 'tag'; scan?: string },
+    source: { name?: string; url: string; ref: string; type?: 'branch' | 'tag' },
   ) =>
     post('/sources/refresh', { repo, ...source }).then(json) as Promise<{
       ok: boolean
-      members?: Array<{ name: string; path: string }>
-      error?: string
-      message?: string
-    }>,
-  setSourceMembers: (body: { repo: string; url: string; members: string[] }) =>
-    post('/sources/members', body).then(json) as Promise<{
-      ok: boolean
-      error?: string
-      message?: string
-    }>,
-  updateSourceMeta: (body: {
-    repo: string
-    url: string
-    name?: string
-    ref?: string
-    type?: 'branch' | 'tag'
-    scan?: string
-  }) =>
-    post('/sources/update', body).then(json) as Promise<{
-      ok: boolean
+      tree?: SourceTree
       error?: string
       message?: string
     }>,
@@ -487,13 +508,13 @@ export const api = {
   updateSkillTargets: (body: {
     repo: string
     sourceUrl: string
-    memberName: string
+    memberEntry: string
     targets: string[]
   }) => post('/skills/targets', body).then(json),
   updateSourceSkillTargets: (body: {
     repo: string
     sourceUrl: string
-    updates: Array<{ memberName: string; targets: string[] }>
+    updates: Array<{ memberEntry: string; targets: string[] }>
   }) => post('/skills/source-targets', body).then(json),
   updateLocalSkillTargets: (body: { repo: string; id: string; targets: string[] }) =>
     post('/skills/local/targets', body).then(json),

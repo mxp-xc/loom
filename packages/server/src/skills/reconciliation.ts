@@ -7,6 +7,7 @@ import type { IFileSystem } from '../ports/fs.js'
 export interface SkillMemberSnapshot {
   name: string
   path: string
+  entry?: string
   targets?: readonly AgentId[]
 }
 
@@ -31,15 +32,15 @@ export async function classifySkillMemberChanges(
   previousMembers: readonly SkillMemberSnapshot[],
   nextMembers: readonly SkillMemberSnapshot[],
 ): Promise<SkillMemberChangeSet> {
-  const previous = new Map(previousMembers.map((member) => [member.name, member]))
-  const next = new Map(nextMembers.map((member) => [member.name, member]))
+  const previous = new Map(previousMembers.map((member) => [member.entry ?? member.name, member]))
+  const next = new Map(nextMembers.map((member) => [member.entry ?? member.name, member]))
   const changes: SkillMemberChangeSet = { added: [], updated: [], removed: [], unchanged: [] }
 
   for (const member of previousMembers) {
-    if (!next.has(member.name)) changes.removed.push(toChange(member, undefined))
+    if (!next.has(member.entry ?? member.name)) changes.removed.push(toChange(member, undefined))
   }
   for (const member of nextMembers) {
-    const old = previous.get(member.name)
+    const old = previous.get(member.entry ?? member.name)
     if (!old) {
       changes.added.push(toChange(undefined, member))
       continue
@@ -78,9 +79,9 @@ async function fingerprintDirectory(
   fs: Pick<IFileSystem, 'readFile'>,
   directory: string,
 ): Promise<string> {
-  const files = (await glob('**/*', { cwd: directory, onlyFiles: true, dot: true })).sort((a, b) =>
-    a.localeCompare(b, 'en'),
-  )
+  const files = (
+    await glob('**/*', { cwd: directory, onlyFiles: true, dot: true, ignore: ['**/.git/**'] })
+  ).sort((a, b) => a.localeCompare(b, 'en'))
   const hash = createHash('sha256')
   for (const file of files) {
     hash.update(file.replace(/\\/g, '/'))

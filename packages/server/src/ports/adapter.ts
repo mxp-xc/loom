@@ -13,6 +13,7 @@ export interface McpFragment {
 }
 export type UndoAction =
   | { kind: 'unlink'; path: string }
+  | { kind: 'restoreNamespace'; path: string; backupPath: string | null }
   | { kind: 'restoreMcp'; path: string; backup: string | null }
   | { kind: 'restoreMemory'; path: string; backup: string | null }
 export interface ProjectionJournal {

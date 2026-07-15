@@ -5,6 +5,7 @@ import { deriveRepoId } from './projection.js'
 import { parseVarsEnvironment } from './vars-codec.js'
 import type { VarsEnvironment, VarEntry } from './vars-types.js'
 import { normalizeOrder, normalizeSkillGroupOrder } from './order.js'
+import { normalizeSourcePath, normalizeSourceResources } from './source-tree.js'
 
 export function loadRepoManifest(files: Record<string, string>): RepoManifest {
   const parse = (p: string, fallback: unknown): unknown => {
@@ -34,6 +35,8 @@ export function loadRepoManifest(files: Record<string, string>): RepoManifest {
 
 export const AgentIdSchema = z.enum(['claude-code', 'codex', 'opencode'])
 export const SOURCE_NAME_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/
+export const SKILL_NAME_REGEX = SOURCE_NAME_REGEX
+const SOURCE_PATH_REGEX = /^(?!\/)(?![A-Za-z]:\/)(?!.*(?:^|\/)\.\.?(?:\/|$))[^\\]+$/
 export const McpServerSchema = z.discriminatedUnion('type', [
   z.object({
     id: z.string().min(1),
@@ -60,20 +63,108 @@ export const McpServerSchema = z.discriminatedUnion('type', [
     targets: z.array(AgentIdSchema).optional(),
   }),
 ])
-export const SkillMemberOverrideSchema = z.object({
-  name: z.string().min(1),
-  enabled: z.boolean().optional(),
-  targets: z.array(AgentIdSchema).optional(),
-})
-export const SkillSourceSchema = z.object({
-  name: z.string().regex(SOURCE_NAME_REGEX).optional(),
-  url: z.string().min(1),
-  ref: z.string().min(1),
-  type: z.enum(['branch', 'tag']).optional(),
-  pinned_commit: z.string().optional(),
-  scan: z.string().optional(),
-  members: z.array(SkillMemberOverrideSchema).optional(),
-})
+const SourcePathSchema = z
+  .string()
+  .min(1)
+  .regex(SOURCE_PATH_REGEX)
+  .refine((path) => {
+    try {
+      return normalizeSourcePath(path) === path
+    } catch {
+      return false
+    }
+  }, 'path must be normalized source-relative path')
+const SourceResourceRuleSchema = z
+  .object({
+    path: SourcePathSchema,
+    kind: z.enum(['file', 'directory']),
+  })
+  .strict()
+export const SkillMemberOverrideSchema = z
+  .object({
+    name: z.string().regex(SKILL_NAME_REGEX),
+    entry: SourcePathSchema.refine(
+      (entry) => entry === 'SKILL.md' || entry.endsWith('/SKILL.md'),
+      'entry must identify a SKILL.md file',
+    ),
+    targets: z.array(AgentIdSchema).optional(),
+  })
+  .strict()
+export const SkillSourceSchema = z
+  .object({
+    name: z.string().regex(SOURCE_NAME_REGEX).optional(),
+    url: z.string().min(1),
+    ref: z.string().min(1),
+    type: z.enum(['branch', 'tag']).optional(),
+    pinned_commit: z.string().optional(),
+    members: z.array(SkillMemberOverrideSchema).optional(),
+    resources: z
+      .object({
+        include: z.array(SourceResourceRuleSchema),
+        exclude: z.array(SourceResourceRuleSchema),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .superRefine((source, ctx) => {
+    const names = new Set<string>()
+    const entries = new Set<string>()
+    for (const [index, member] of (source.members ?? []).entries()) {
+      if (names.has(member.name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['members', index, 'name'],
+          message: `duplicate member name: ${member.name}`,
+        })
+      }
+      if (entries.has(member.entry)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['members', index, 'entry'],
+          message: `duplicate member entry: ${member.entry}`,
+        })
+      }
+      names.add(member.name)
+      entries.add(member.entry)
+    }
+    if (source.resources) {
+      const seen = new Map<string, { action: 'include' | 'exclude'; index: number }>()
+      for (const action of ['include', 'exclude'] as const) {
+        for (const [index, rule] of source.resources[action].entries()) {
+          const previous = seen.get(rule.path)
+          if (previous) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['resources', action, index, 'path'],
+              message: `resource path conflicts with ${previous.action}[${previous.index}]: ${rule.path}`,
+            })
+          } else {
+            seen.set(rule.path, { action, index })
+          }
+        }
+      }
+      let normalized = false
+      try {
+        normalized =
+          JSON.stringify(normalizeSourceResources(source.resources)) ===
+          JSON.stringify(source.resources)
+      } catch {
+        // Child schemas report malformed paths at their precise locations.
+        return
+      }
+      if (
+        seen.size === source.resources.include.length + source.resources.exclude.length &&
+        !normalized
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['resources'],
+          message: 'resource rules must be normalized and stably sorted',
+        })
+      }
+    }
+  })
 
 export function validateManifest(m: RepoManifest): string[] {
   const errs: string[] = []

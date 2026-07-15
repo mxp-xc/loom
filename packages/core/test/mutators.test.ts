@@ -95,7 +95,9 @@ describe('updateSourceMeta', () => {
           name: 'old-name',
           url: 'https://github.com/test/repo',
           ref: 'main',
-          members: [{ name: 'skill-a', targets: ['codex' as AgentId] }],
+          members: [
+            { name: 'skill-a', entry: 'skills/skill-a/SKILL.md', targets: ['codex' as AgentId] },
+          ],
         },
       ],
       skills: [],
@@ -107,7 +109,7 @@ describe('updateSourceMeta', () => {
       name: 'new-name',
       url: 'https://github.com/test/repo',
       ref: 'main',
-      members: [{ name: 'skill-a', targets: ['codex'] }],
+      members: [{ name: 'skill-a', entry: 'skills/skill-a/SKILL.md', targets: ['codex'] }],
     })
   })
 })
@@ -134,21 +136,30 @@ describe('removeSource', () => {
 })
 
 describe('setSourceMembers', () => {
-  it('preserves existing member targets for retained names', () => {
+  it('preserves existing member targets for retained entries and refreshes names', () => {
     const skills: SkillsManifest = {
       sources: [
         {
           url: 'https://github.com/test/repo',
           ref: 'main',
-          members: [{ name: 'skill-a', targets: ['codex' as AgentId] }],
+          members: [
+            { name: 'old-name', entry: 'skills/skill-a/SKILL.md', targets: ['codex' as AgentId] },
+          ],
         },
       ],
       skills: [],
     }
-    const result = setSourceMembers(skills, 'https://github.com/test/repo', ['skill-a', 'skill-b'])
+    const result = setSourceMembers(skills, 'https://github.com/test/repo', [
+      { name: 'skill-a', entry: 'skills/skill-a/SKILL.md' },
+      { name: 'skill-b', entry: 'skills/skill-b/SKILL.md' },
+    ])
     const members = result.data.sources[0].members!
-    expect(members[0]).toEqual({ name: 'skill-a', targets: ['codex'] })
-    expect(members[1]).toEqual({ name: 'skill-b' })
+    expect(members[0]).toEqual({
+      name: 'skill-a',
+      entry: 'skills/skill-a/SKILL.md',
+      targets: ['codex'],
+    })
+    expect(members[1]).toEqual({ name: 'skill-b', entry: 'skills/skill-b/SKILL.md' })
   })
   it('drops members not in the new selection', () => {
     const skills: SkillsManifest = {
@@ -156,17 +167,22 @@ describe('setSourceMembers', () => {
         {
           url: 'https://github.com/test/repo',
           ref: 'main',
-          members: [{ name: 'skill-a', targets: ['codex' as AgentId] }, { name: 'skill-b' }],
+          members: [
+            { name: 'skill-a', entry: 'skills/skill-a/SKILL.md', targets: ['codex' as AgentId] },
+            { name: 'skill-b', entry: 'skills/skill-b/SKILL.md' },
+          ],
         },
       ],
       skills: [],
     }
-    const result = setSourceMembers(skills, 'https://github.com/test/repo', ['skill-a'])
+    const result = setSourceMembers(skills, 'https://github.com/test/repo', [
+      { name: 'skill-a', entry: 'skills/skill-a/SKILL.md' },
+    ])
     expect(result.data.sources[0].members!).toHaveLength(1)
     expect(result.data.sources[0].members![0].name).toBe('skill-a')
   })
   it('returns changed=false when source not found', () => {
-    const result = setSourceMembers(emptySkills, 'missing', ['a'])
+    const result = setSourceMembers(emptySkills, 'missing', [{ name: 'a', entry: 'a/SKILL.md' }])
     expect(result.changed).toBe(false)
     expect(result.data).toBe(emptySkills)
   })
@@ -179,39 +195,38 @@ describe('setSkillTargets', () => {
         {
           url: 'https://github.com/test/repo',
           ref: 'main',
-          members: [{ name: 'skill-a' }],
+          members: [{ name: 'skill-a', entry: 'skills/skill-a/SKILL.md' }],
         },
       ],
       skills: [],
     }
-    const result = setSkillTargets(skills, 'https://github.com/test/repo', 'skill-a', [
-      'codex' as AgentId,
-    ])
+    const result = setSkillTargets(
+      skills,
+      'https://github.com/test/repo',
+      'skills/skill-a/SKILL.md',
+      ['codex' as AgentId],
+    )
     expect(result.changed).toBe(true)
     expect(result.data.sources[0].members![0].targets).toEqual(['codex'])
   })
-  it('creates the member when it does not exist', () => {
+  it('does not create an unknown member entry', () => {
     const skills: SkillsManifest = {
       sources: [{ url: 'https://github.com/test/repo', ref: 'main' }],
       skills: [],
     }
-    const result = setSkillTargets(skills, 'https://github.com/test/repo', 'skill-a', [
-      'codex' as AgentId,
-    ])
-    expect(result.data.sources[0].members!).toHaveLength(1)
-    expect(result.data.sources[0].members![0]).toEqual({ name: 'skill-a', targets: ['codex'] })
-  })
-  it('sets source-level targets when memberName is empty', () => {
-    const skills: SkillsManifest = {
-      sources: [{ url: 'https://github.com/test/repo', ref: 'main' }],
-      skills: [],
-    }
-    const result = setSkillTargets(skills, 'https://github.com/test/repo', '', ['codex' as AgentId])
-    expect(result.changed).toBe(true)
-    expect((result.data.sources[0] as any).targets).toEqual(['codex'])
+    const result = setSkillTargets(
+      skills,
+      'https://github.com/test/repo',
+      'skills/skill-a/SKILL.md',
+      ['codex' as AgentId],
+    )
+    expect(result.changed).toBe(false)
+    expect(result.data).toBe(skills)
   })
   it('returns changed=false when source not found', () => {
-    const result = setSkillTargets(emptySkills, 'missing', 'skill-a', ['codex' as AgentId])
+    const result = setSkillTargets(emptySkills, 'missing', 'skills/skill-a/SKILL.md', [
+      'codex' as AgentId,
+    ])
     expect(result.changed).toBe(false)
     expect(result.data).toBe(emptySkills)
   })
@@ -225,9 +240,9 @@ describe('setSourceMemberTargets', () => {
           url: 'https://github.com/test/repo',
           ref: 'main',
           members: [
-            { name: 'skill-a', targets: ['claude-code' as AgentId] },
-            { name: 'skill-b', enabled: false, targets: [] },
-            { name: 'skill-c', targets: [] },
+            { name: 'skill-a', entry: 'a/SKILL.md', targets: ['claude-code' as AgentId] },
+            { name: 'skill-b', entry: 'b/SKILL.md', targets: [] },
+            { name: 'skill-c', entry: 'c/SKILL.md', targets: [] },
           ],
         },
       ],
@@ -235,21 +250,21 @@ describe('setSourceMemberTargets', () => {
     }
 
     const result = setSourceMemberTargets(skills, 'https://github.com/test/repo', [
-      { memberName: 'skill-a', targets: ['codex' as AgentId] },
-      { memberName: 'skill-c', targets: ['codex' as AgentId, 'opencode' as AgentId] },
+      { memberEntry: 'a/SKILL.md', targets: ['codex' as AgentId] },
+      { memberEntry: 'c/SKILL.md', targets: ['codex' as AgentId, 'opencode' as AgentId] },
     ])
 
     expect(result.changed).toBe(true)
     expect(result.data.sources[0].members).toEqual([
-      { name: 'skill-a', targets: ['codex'] },
-      { name: 'skill-b', enabled: false, targets: [] },
-      { name: 'skill-c', targets: ['codex', 'opencode'] },
+      { name: 'skill-a', entry: 'a/SKILL.md', targets: ['codex'] },
+      { name: 'skill-b', entry: 'b/SKILL.md', targets: [] },
+      { name: 'skill-c', entry: 'c/SKILL.md', targets: ['codex', 'opencode'] },
     ])
   })
 
   it('returns changed=false when source not found', () => {
     const result = setSourceMemberTargets(emptySkills, 'missing', [
-      { memberName: 'skill-a', targets: ['codex' as AgentId] },
+      { memberEntry: 'a/SKILL.md', targets: ['codex' as AgentId] },
     ])
 
     expect(result.changed).toBe(false)

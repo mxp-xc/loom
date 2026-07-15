@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown, LoaderCircle } from 'lucide-react'
 import styles from './dropdown.module.css'
 
 export interface DropdownOption<T extends string> {
@@ -12,7 +12,10 @@ interface DropdownProps<T extends string> {
   value: T
   options: DropdownOption<T>[]
   onChange: (value: T) => void
+  onOpen?: () => void
   disabled?: boolean
+  loading?: boolean
+  loadingLabel?: ReactNode
   placeholder?: string
 }
 
@@ -21,13 +24,22 @@ export function Dropdown<T extends string>({
   value,
   options,
   onChange,
+  onOpen,
   disabled = false,
+  loading = false,
+  loadingLabel = 'Loading…',
   placeholder = '—',
 }: DropdownProps<T>) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const active = options.find((option) => option.value === value)
+
+  const openMenu = () => {
+    if (open) return
+    onOpen?.()
+    setOpen(true)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -71,11 +83,14 @@ export function Dropdown<T extends string>({
         aria-haspopup="listbox"
         aria-expanded={open}
         disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (open) setOpen(false)
+          else openMenu()
+        }}
         onKeyDown={(event) => {
           if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
           event.preventDefault()
-          setOpen(true)
+          openMenu()
           focusOption(event.key === 'ArrowDown' ? 0 : options.length - 1)
         }}
       >
@@ -83,7 +98,18 @@ export function Dropdown<T extends string>({
         <ChevronDown size={14} aria-hidden="true" />
       </button>
       {open && (
-        <div className={styles.menu} role="listbox" aria-label={ariaLabel}>
+        <div
+          className={styles.menu}
+          role="listbox"
+          aria-label={ariaLabel}
+          aria-busy={loading || undefined}
+        >
+          {loading && (
+            <div className={styles.menuStatus} role="status">
+              <LoaderCircle className={styles.statusSpinner} size={13} aria-hidden="true" />
+              {loadingLabel}
+            </div>
+          )}
           {options.map((option, index) => (
             <button
               key={option.value}

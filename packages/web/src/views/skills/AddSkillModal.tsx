@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
+import { IconButton } from '@/components/ui/IconButton'
 import { Dropdown } from '@/components/ui/dropdown'
-import { Folder, FolderOpen, GitFork, RefreshCw } from 'lucide-react'
-import { deriveRepoId } from '@loom/core'
+import { Check, Folder, FolderOpen, GitFork, RefreshCw } from 'lucide-react'
+import {
+  deriveRepoId,
+  type SourceResources,
+  type SourceTree,
+  type SourceTreeNode,
+} from '@loom/core'
 import { Segmented } from './Segmented'
-import type { ScanMember, LocalScanResult } from './types'
+import type { LocalScanResult } from './types'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
 import styles from './AddSkillModal.module.css'
 import SkillWorkbench, { SkillWorkbenchTitle } from './SkillWorkbench'
 import SkillSelectionList, { type SkillSelectionItem } from './SkillSelectionList'
+import SourceTreeSelection, { type SourceTreeSelectionValue } from './SourceTreeSelection'
 
 interface Props {
   open: boolean
@@ -20,12 +27,26 @@ interface Props {
 // Repository assets are auto-discovered separately; adding starts from the
 // user's shared cross-agent skill directory.
 const DEFAULT_LOCAL_DIR = '~/.agents/skills'
-const mono = "'JetBrains Mono', monospace"
+const emptyResources: SourceResources = { include: [], exclude: [] }
+
+function flattenSourceTree(nodes: readonly SourceTreeNode[]): SourceTreeNode[] {
+  return nodes.flatMap((node) => [
+    node,
+    ...(node.kind === 'container' ? flattenSourceTree(node.children) : []),
+  ])
+}
+
+function renameRootBundle(tree: SourceTree | null, name: string): SourceTree | null {
+  if (!tree || !name) return tree
+  const nodes = tree.nodes.map((node) =>
+    node.kind === 'bundle' && node.path === '' ? { ...node, name } : node,
+  )
+  return nodes.some((node, index) => node !== tree.nodes[index]) ? { ...tree, nodes } : tree
+}
 
 export default function AddSkillModal({ open, repoPath, onClose }: Props) {
   const operations = useManifestOperations(repoPath)
-  const { scanLocalSkills, loadSourceRefs, scanSourceMembers, addLocalSkills, addSource } =
-    operations
+  const { scanLocalSkills, loadSourceRefs, scanSourceTree, addLocalSkills, addSource } = operations
   const [addTab, setAddTab] = useState<'local' | 'source'>('local')
   const [addBusy, setAddBusy] = useState(false)
   const [addErr, setAddErr] = useState<string | null>(null)
@@ -53,14 +74,21 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
   const [srcNameTouched, setSrcNameTouched] = useState(false)
   const [srcType, setSrcType] = useState<'branch' | 'tag'>('branch')
   const [srcRef, setSrcRef] = useState('')
-  const [srcScan, setSrcScan] = useState('')
   const [srcBranches, setSrcBranches] = useState<string[]>([])
   const [srcTags, setSrcTags] = useState<string[]>([])
+  const [srcRefsLoaded, setSrcRefsLoaded] = useState(false)
   const [srcRefsLoading, setSrcRefsLoading] = useState(false)
   const [srcScanning, setSrcScanning] = useState(false)
-  const [srcScanned, setSrcScanned] = useState(false)
-  const [srcMembers, setSrcMembers] = useState<ScanMember[]>([])
-  const [srcSelected, setSrcSelected] = useState<Set<string>>(new Set())
+  const [srcScanError, setSrcScanError] = useState<string | null>(null)
+  const [srcTree, setSrcTree] = useState<SourceTree | null>(null)
+  const srcRefsGeneration = useRef(0)
+  const srcScanGeneration = useRef(0)
+  const srcTypeRef = useRef(srcType)
+  const srcScanAfterRefsRef = useRef(false)
+  const [srcSelection, setSrcSelection] = useState<SourceTreeSelectionValue>({
+    memberEntries: new Set(),
+    resources: emptyResources,
+  })
 
   const scanLocal = useCallback(
     async (dir: string) => {
@@ -145,6 +173,8 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
   // Reset every field and kick off the initial local scan each time the
   // modal opens.
   useEffect(() => {
+    srcRefsGeneration.current++
+    srcScanGeneration.current++
     if (!open) return
     setAddErr(null)
     setAddBusy(false)
@@ -159,68 +189,105 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     setSrcNameTouched(false)
     setSrcType('branch')
     setSrcRef('')
-    setSrcScan('')
     setSrcBranches([])
     setSrcTags([])
-    setSrcMembers([])
-    setSrcSelected(new Set())
-    setSrcScanned(false)
+    setSrcRefsLoaded(false)
+    setSrcRefsLoading(false)
+    setSrcScanning(false)
+    setSrcScanError(null)
+    setSrcTree(null)
+    srcTypeRef.current = 'branch'
+    srcScanAfterRefsRef.current = false
+    setSrcSelection({ memberEntries: new Set(), resources: emptyResources })
     void scanLocal(DEFAULT_LOCAL_DIR)
   }, [open, scanLocal])
 
   const fetchRefs = async (url: string) => {
-    if (!url) return
-    if (!srcNameTouched) setSrcName(deriveRepoId(url))
+    if (!url || srcRefsLoaded || srcRefsLoading) return
+    const generation = ++srcRefsGeneration.current
     setSrcRefsLoading(true)
     setAddErr(null)
     try {
-      const res = await loadSourceRefs(url)
+      const res = await loadSourceRefs(url, {
+        shouldNotify: () => generation === srcRefsGeneration.current,
+        allowConcurrent: true,
+      })
+      if (generation !== srcRefsGeneration.current || res.skipped) return
       if (res.ok) {
         const branches = res.result?.branches ?? []
         const tags = res.result?.tags ?? []
         setSrcBranches(branches)
         setSrcTags(tags)
-        const list = srcType === 'tag' ? tags : branches
-        setSrcRef(list[0] ?? '')
+        setSrcRefsLoaded(true)
+        const currentType = srcTypeRef.current
+        const list = currentType === 'tag' ? tags : branches
+        const nextRef = srcScanAfterRefsRef.current ? (list[0] ?? '') : srcRef || list[0] || ''
+        setSrcRef(nextRef)
+        if (srcScanAfterRefsRef.current) {
+          srcScanAfterRefsRef.current = false
+          if (nextRef) void handleScanSource(nextRef, currentType)
+        }
       } else {
+        srcScanAfterRefsRef.current = false
         setAddErr(res.message || '获取 refs 失败')
       }
     } finally {
-      setSrcRefsLoading(false)
+      if (generation === srcRefsGeneration.current) setSrcRefsLoading(false)
     }
   }
 
   const handleTypeChange = (t: 'branch' | 'tag') => {
+    if (t === srcTypeRef.current) return
     setSrcType(t)
+    srcTypeRef.current = t
     const list = t === 'tag' ? srcTags : srcBranches
     setSrcRef(list[0] ?? '')
+    srcScanGeneration.current++
+    setSrcScanning(false)
+    setSrcScanError(null)
+    setSrcTree(null)
+    if (!srcRefsLoaded) {
+      srcScanAfterRefsRef.current = true
+      if (srcUrl.trim()) void fetchRefs(srcUrl.trim())
+      return
+    }
+    if (list[0]) void handleScanSource(list[0], t)
   }
 
-  const handleScanSource = async () => {
+  const handleScanSource = async (nextRef = srcRef, nextType = srcType) => {
     if (!srcUrl.trim()) {
       setAddErr('url 不能为空')
       return
     }
+    const generation = ++srcScanGeneration.current
     setSrcScanning(true)
-    setSrcScanned(true)
     setAddErr(null)
-    setSrcMembers([])
+    setSrcScanError(null)
+    setSrcTree(null)
     try {
-      const res = await scanSourceMembers(srcUrl.trim(), {
-        ref: srcRef.trim() || undefined,
-        type: srcType,
-        scan: srcScan,
+      const res = await scanSourceTree(srcUrl.trim(), {
+        name: srcName.trim() || undefined,
+        ref: nextRef.trim() || undefined,
+        type: nextType,
       })
-      if (res.ok && Array.isArray(res.result?.members)) {
-        const members = res.result.members as ScanMember[]
-        setSrcMembers(members)
-        // Pre-select not-yet-installed members; installed ones stay locked.
-        setSrcSelected(new Set(members.filter((m) => !m.installed).map((m) => m.name)))
+      if (generation !== srcScanGeneration.current) return
+      if (res.ok && res.result?.tree) {
+        const tree = res.result.tree
+        setSrcRef(nextRef.trim() || 'HEAD')
+        setSrcTree(tree)
+        setSrcSelection({
+          memberEntries: new Set(
+            flattenSourceTree(tree.nodes)
+              .filter((node) => node.kind === 'bundle')
+              .map((node) => (node.kind === 'bundle' ? node.entry : '')),
+          ),
+          resources: emptyResources,
+        })
       } else {
-        setAddErr(res.message || '扫描失败')
+        setSrcScanError(res.message || '扫描失败')
       }
     } finally {
-      setSrcScanning(false)
+      if (generation === srcScanGeneration.current) setSrcScanning(false)
     }
   }
 
@@ -255,10 +322,15 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
       const res = await addSource({
         name: srcName.trim() || deriveRepoId(srcUrl.trim()),
         url: srcUrl.trim(),
-        ref: srcRef.trim() || 'main',
+        ref: srcRef.trim() || 'HEAD',
         type: srcType,
-        scan: srcScan,
-        members: [...srcSelected],
+        members: flattenSourceTree(srcTree?.nodes ?? [])
+          .filter((node) => node.kind === 'bundle' && srcSelection.memberEntries.has(node.entry))
+          .map((node) => ({
+            name: node.name,
+            entry: node.kind === 'bundle' ? node.entry : '',
+          })),
+        resources: srcSelection.resources,
       })
       if (res.ok) onClose()
       else setAddErr(res.message || '添加 source 失败')
@@ -271,13 +343,17 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     id: skill.name,
     path: skill.path.endsWith('SKILL.md') ? skill.path : `${skill.path}/SKILL.md`,
   }))
-  const refOptions = srcType === 'tag' ? srcTags : srcBranches
-  const sourceListItems: SkillSelectionItem[] = srcMembers.map((member) => ({
-    id: member.name,
-    description: member.description,
-    path: member.path,
-    installed: member.installed,
-  }))
+  const availableRefOptions = srcType === 'tag' ? srcTags : srcBranches
+  const refOptions =
+    srcRef && !availableRefOptions.includes(srcRef)
+      ? [srcRef, ...availableRefOptions]
+      : availableRefOptions
+  const sourceNodes = flattenSourceTree(srcTree?.nodes ?? [])
+  const sourceBundleCount = sourceNodes.filter((node) => node.kind === 'bundle').length
+  const sourceResourceCount = sourceNodes.filter((node) => node.kind === 'resource').length
+  const sourceUnavailableCount = sourceNodes.filter(
+    (node) => node.kind === 'symlink' || node.kind === 'submodule',
+  ).length
 
   const configuration = (
     <div className={styles.configStack}>
@@ -366,8 +442,22 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
               <GitFork size={15} aria-hidden="true" />
               <input
                 value={srcUrl}
-                onChange={(e) => setSrcUrl(e.target.value)}
-                onBlur={() => srcUrl.trim() && void fetchRefs(srcUrl.trim())}
+                onChange={(e) => {
+                  const nextUrl = e.target.value
+                  setSrcUrl(nextUrl)
+                  if (!srcNameTouched) setSrcName(deriveRepoId(nextUrl.trim()))
+                  srcRefsGeneration.current++
+                  srcScanGeneration.current++
+                  setSrcBranches([])
+                  setSrcTags([])
+                  setSrcRefsLoaded(false)
+                  setSrcRef('')
+                  setSrcRefsLoading(false)
+                  setSrcScanning(false)
+                  setSrcScanError(null)
+                  setSrcTree(null)
+                  srcScanAfterRefsRef.current = false
+                }}
                 placeholder="https://host.example/org/repo.git"
               />
             </div>
@@ -379,8 +469,12 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
               aria-label="source name"
               value={srcName}
               onChange={(e) => {
-                setSrcName(e.target.value)
+                const nextName = e.target.value
+                setSrcName(nextName)
                 setSrcNameTouched(true)
+                setSrcTree((current) =>
+                  renameRootBundle(current, nextName.trim() || deriveRepoId(srcUrl.trim())),
+                )
               }}
               placeholder="openai-skills"
               className={styles.control}
@@ -403,63 +497,77 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
               <Dropdown
                 ariaLabel="Repository ref"
                 value={srcRef}
-                onChange={setSrcRef}
+                onChange={(nextRef) => {
+                  if (nextRef === srcRef && (srcTree || srcScanning)) return
+                  srcScanAfterRefsRef.current = false
+                  setSrcRef(nextRef)
+                  void handleScanSource(nextRef, srcType)
+                }}
+                onOpen={() => void fetchRefs(srcUrl.trim())}
                 options={refOptions.map((item) => ({ value: item, label: item }))}
-                disabled={srcRefsLoading || refOptions.length === 0}
+                disabled={srcRefsLoading || !srcUrl.trim()}
                 placeholder={srcRefsLoading ? '加载中…' : '—'}
               />
             </div>
           </div>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Scan pattern</span>
-            <div className={styles.patternRow}>
-              <input
-                id="add-source-scan-pattern"
-                aria-label="scan pattern"
-                value={srcScan}
-                onChange={(e) => setSrcScan(e.target.value)}
-                placeholder="**/SKILL.md"
-                className={styles.control}
-              />
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleScanSource}
-                disabled={srcScanning || !srcUrl.trim()}
-              >
-                <RefreshCw className={srcScanning ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
-                Scan repository
-              </Button>
-            </div>
-            <small>留空使用 {<code style={{ fontFamily: mono }}>**/SKILL.md</code>}</small>
-          </label>
+          {srcTree && (
+            <>
+              <div className={styles.commitStatus}>
+                <i />
+                <span>
+                  <strong>{srcTree.commit.slice(0, 7)}</strong>
+                  <small>{sourceNodes.length} tracked entries</small>
+                </span>
+                <Check size={14} />
+              </div>
+              <div className={styles.sourceStats}>
+                <span>
+                  <strong>{sourceBundleCount}</strong> bundles
+                </span>
+                <span>
+                  <strong>{sourceResourceCount}</strong> resources
+                </span>
+                <span>
+                  <strong>{sourceUnavailableCount}</strong> unavailable
+                </span>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>
   )
 
-  const listItems = addTab === 'local' ? localListItems : sourceListItems
-  const selected = addTab === 'local' ? localSelected : srcSelected
-  const results = (addTab === 'local' ? localScanning : srcScanning) ? (
-    <div className={styles.resultState}>正在扫描 SKILL.md…</div>
-  ) : (
-    <SkillSelectionList
-      ariaLabel={addTab === 'local' ? 'Local Skill' : 'Source members'}
-      items={listItems}
-      selectedIds={selected}
-      onSelectedIdsChange={addTab === 'local' ? setLocalSelected : setSrcSelected}
-      repositoryLabel={
-        addTab === 'local'
-          ? localPath
-          : `${deriveRepoId(srcUrl) || 'repository'} · ${srcRef || 'ref'}`
-      }
-      emptyMessage={
-        addTab === 'source' && !srcScanned
-          ? 'Scan the repository to discover skills'
-          : 'No skills found'
-      }
-    />
-  )
+  const selectedCount =
+    addTab === 'local'
+      ? localSelected.size
+      : srcSelection.memberEntries.size + srcSelection.resources.include.length
+  const results =
+    addTab === 'source' ? (
+      <SourceTreeSelection
+        nodes={srcTree?.nodes ?? []}
+        diagnostics={srcTree?.diagnostics}
+        sourceName={srcName.trim() || deriveRepoId(srcUrl) || 'source'}
+        sourceUrl={srcUrl}
+        sourceRef={srcRef}
+        value={srcSelection}
+        onChange={setSrcSelection}
+        loading={srcScanning || (srcRefsLoading && srcScanAfterRefsRef.current)}
+        error={srcScanError}
+        onRetry={handleScanSource}
+      />
+    ) : localScanning ? (
+      <div className={styles.resultState}>正在扫描 SKILL.md…</div>
+    ) : (
+      <SkillSelectionList
+        ariaLabel="Local Skill"
+        items={localListItems}
+        selectedIds={localSelected}
+        onSelectedIdsChange={setLocalSelected}
+        repositoryLabel={localPath}
+        emptyMessage="No skills found"
+      />
+    )
 
   return (
     <Modal
@@ -469,20 +577,37 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
       title={
         <SkillWorkbenchTitle
           icon={addTab === 'local' ? <FolderOpen size={17} /> : <GitFork size={17} />}
-          eyebrow="Add"
-          title={addTab === 'local' ? 'Skills' : 'Source'}
+          eyebrow={addTab === 'local' ? 'Add' : 'Remote source'}
+          title={
+            addTab === 'local' ? 'Skills' : srcName.trim() || deriveRepoId(srcUrl) || 'New source'
+          }
         />
       }
-      width={1040}
+      width={1120}
       className={styles.dialog}
       bodyClassName={styles.body}
       headerClassName={styles.header}
       titleClassName={styles.modalTitle}
+      headerActions={
+        addTab === 'source' ? (
+          <IconButton
+            label="Refresh repository tree"
+            tooltip="Refresh tree"
+            onClick={() => void handleScanSource()}
+            disabled={srcScanning || !srcUrl.trim()}
+          >
+            <RefreshCw className={srcScanning ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+          </IconButton>
+        ) : null
+      }
     >
       <SkillWorkbench
+        className={styles.layout}
         configuration={configuration}
         results={results}
-        resultCount={selected.size}
+        resultCount={selectedCount}
+        configurationLabel={addTab === 'local' ? 'Configuration' : 'Source'}
+        resultsLabel={addTab === 'local' ? 'Skills' : 'Contents'}
         footer={
           <>
             <Button variant="ghost" onClick={onClose}>
@@ -492,13 +617,18 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
               variant="primary"
               aria-label={addTab === 'local' ? '添加 Local Skill' : '添加 Source'}
               onClick={addTab === 'local' ? handleAddLocal : handleAddSource}
-              disabled={addBusy || (addTab === 'local' ? selected.size === 0 : !srcUrl.trim())}
+              disabled={
+                addBusy ||
+                (addTab === 'local'
+                  ? selectedCount === 0
+                  : !srcUrl.trim() || !srcTree || srcSelection.memberEntries.size === 0)
+              }
             >
               {addBusy
                 ? '添加中…'
                 : addTab === 'local'
-                  ? `Import ${selected.size} skills`
-                  : `Add source (${selected.size})`}
+                  ? `Import ${selectedCount} skills`
+                  : `Add source (${srcSelection.memberEntries.size})`}
             </Button>
           </>
         }

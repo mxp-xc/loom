@@ -5,6 +5,8 @@ import {
   type AgentId,
   type Manifest,
   type McpServer,
+  type SourceResources,
+  type SourceTree,
   type SkillSource,
 } from '@loom/core'
 import { api } from '@/lib/api'
@@ -32,9 +34,9 @@ export interface OperationNotificationOptions {
 }
 
 export interface SourceScanOptions extends OperationNotificationOptions {
+  name?: string
   ref?: string
   type?: 'branch' | 'tag'
-  scan?: string
 }
 
 interface RunOptions<T> extends OperationNotificationOptions {
@@ -58,10 +60,24 @@ export interface SkillMemberChanges {
   removed: Array<{ name: string; targets?: string[] }>
 }
 
+export interface ResourceBoundaryChange {
+  name: string
+  entry: string
+  path: string
+}
+
 export interface PreparedSkillReconciliation {
   sessionId: string
   pinned_commit: string
   changes: SkillMemberChanges
+  resourceBoundaryChanges: ResourceBoundaryChange[]
+  pathMoves?: Array<{
+    target: AgentId
+    kind: 'bundle' | 'resource-file' | 'resource-directory'
+    sourcePath: string
+    previousTargetPath?: string
+    nextTargetPath?: string
+  }>
 }
 
 export interface LocalSkillCandidate {
@@ -72,18 +88,6 @@ export interface LocalSkillCandidate {
 export interface LocalSkillFileInput {
   path: string
   content: string
-}
-
-export interface SourceScanMember {
-  name: string
-  description?: string
-  path: string
-  installed?: boolean
-}
-
-export interface SourceRefreshMember {
-  name: string
-  path: string
 }
 
 export interface SourceUpdateCheck {
@@ -99,18 +103,23 @@ const pendingKey = {
   config: (level: 'repo' | 'local', field: string) => 'config:' + level + ':' + field,
   scanLocalSkills: (dir: string) => 'skills:scan-local:' + dir,
   loadSourceRefs: (url: string) => 'source:refs:' + url,
-  scanSourceMembers: (url: string) => 'source:scan:' + url,
-  refreshSourceMembers: (url: string) => 'source:refresh:' + url,
+  loadCachedSourceTree: (url: string) => 'source:tree:' + url,
+  scanSourceTree: (
+    url: string,
+    name: string | undefined,
+    ref: string | undefined,
+    type: string | undefined,
+  ) => 'source:scan:' + JSON.stringify([url, name ?? '', type ?? '', ref ?? 'HEAD']),
+  refreshSourceTree: (url: string) => 'source:refresh:' + url,
   addLocalSkills: () => 'skills:add-local',
   addSource: () => 'source:add',
   saveSource: (url: string) => 'source:save:' + url,
-  saveSourceMembers: (url: string) => 'source:members:' + url,
   checkSourceUpdate: (url: string) => 'source:check:' + url,
   performSourceUpdate: (url: string) => 'source:update:' + url,
   deleteSource: (url: string) => 'source:delete:' + url,
   deleteLocalSkill: (id: string) => 'skills:delete-local:' + id,
-  sourceSkillTarget: (sourceUrl: string, memberName: string) =>
-    'skills:target:' + sourceUrl + ':' + memberName,
+  sourceSkillTarget: (sourceUrl: string, memberEntry: string) =>
+    'skills:target:' + sourceUrl + ':' + memberEntry,
   localSkillTarget: (id: string) => 'skills:local-target:' + id,
   allSkillTargets: (agent: AgentId) => 'skills:all-targets:' + agent,
   sourceSkillTargets: (sourceUrl: string, agent: AgentId) =>
@@ -163,8 +172,33 @@ function sourceRef(source: SkillSource | string): string {
   return typeof source === 'string' ? source : source.url
 }
 
-function normalizedScanPattern(scan: string | undefined): string {
-  return scan?.trim() ?? ''
+function persistedSourceDto(source: SkillSource): SkillSource {
+  return {
+    ...(source.name ? { name: source.name } : {}),
+    url: source.url,
+    ref: source.ref,
+    ...(source.type ? { type: source.type } : {}),
+    ...(source.pinned_commit ? { pinned_commit: source.pinned_commit } : {}),
+    ...(source.members
+      ? {
+          members: source.members.map(({ name, entry, targets }) => ({
+            name,
+            entry,
+            ...(targets ? { targets } : {}),
+          })),
+        }
+      : {}),
+    ...(source.resources ? { resources: source.resources } : {}),
+  }
+}
+
+function sourceScanDto(source: SkillSource): Pick<SkillSource, 'name' | 'url' | 'ref' | 'type'> {
+  return {
+    ...(source.name?.trim() ? { name: source.name.trim() } : {}),
+    url: source.url,
+    ref: source.ref,
+    ...(source.type ? { type: source.type } : {}),
+  }
 }
 
 function successMessageFor<T>(
@@ -339,44 +373,64 @@ export function useManifestOperations(
     [run],
   )
 
-  const scanSourceMembers = useCallback(
-    (url: string, options: SourceScanOptions = {}) =>
-      run(
-        pendingKey.scanSourceMembers(url),
+  const scanSourceTree = useCallback(
+    (url: string, options: SourceScanOptions = {}) => {
+      const name = options.name?.trim()
+      const ref = options.ref?.trim()
+      return run(
+        pendingKey.scanSourceTree(url, name, ref, options.type),
         async () => {
-          const scan = normalizedScanPattern(options.scan)
-          const ref = options.ref?.trim()
           const result = (await api.scanSource({
+            ...(name ? { name } : {}),
             url,
             ...(ref ? { ref } : {}),
             ...(options.type ? { type: options.type } : {}),
-            ...(scan ? { scan } : {}),
           })) as {
             ok?: boolean
-            members?: SourceScanMember[]
+            tree?: SourceTree
             message?: string
             error?: string
           }
-          if (Array.isArray(result.members)) result.members = sortByName(result.members)
           return result
         },
         { ...options, reload: false, failureMessage: '扫描失败' },
-      ),
+      )
+    },
     [run],
   )
 
-  const refreshSourceMembers = useCallback(
+  const loadCachedSourceTree = useCallback(
     (source: SkillSource, options: OperationNotificationOptions = {}) =>
       run(
-        pendingKey.refreshSourceMembers(source.url),
-        async () => {
-          const result = (await api.refreshSource(repoPath, source)) as {
+        pendingKey.loadCachedSourceTree(source.url),
+        () =>
+          api.getCachedSourceTree({
+            repo: repoPath,
+            ...(source.name?.trim() ? { name: source.name.trim() } : {}),
+            url: source.url,
+            pinned_commit: source.pinned_commit?.trim() || source.ref,
+          }) as Promise<{
             ok?: boolean
-            members?: SourceRefreshMember[]
+            tree?: SourceTree
+            message?: string
+            error?: string
+          }>,
+        { ...options, reload: false, failureMessage: '读取 source 缓存失败' },
+      ),
+    [repoPath, run],
+  )
+
+  const refreshSourceTree = useCallback(
+    (source: SkillSource, options: OperationNotificationOptions = {}) =>
+      run(
+        pendingKey.refreshSourceTree(source.url),
+        async () => {
+          const result = (await api.refreshSource(repoPath, sourceScanDto(source))) as {
+            ok?: boolean
+            tree?: SourceTree
             message?: string
             error?: string
           }
-          if (Array.isArray(result.members)) result.members = sortByName(result.members)
           return result
         },
         { ...options, reload: false, failureMessage: '扫描失败' },
@@ -419,10 +473,9 @@ export function useManifestOperations(
       url: string
       ref: string
       type?: 'branch' | 'tag'
-      scan?: string
-      members: string[]
+      members: Array<{ name: string; entry: string }>
+      resources: SourceResources
     }) => {
-      let sourceCreated = false
       return run(
         pendingKey.addSource(),
         async () => {
@@ -432,38 +485,12 @@ export function useManifestOperations(
             url: input.url,
             ref: input.ref,
             ...(input.type ? { type: input.type } : {}),
-            ...(normalizedScanPattern(input.scan)
-              ? { scan: normalizedScanPattern(input.scan) }
-              : {}),
+            members: input.members,
+            resources: input.resources,
           })) as MaybeOkResponse
-          if (responseFailureMessage(created, '添加 source 失败')) return created
-          sourceCreated = true
-          if (input.members.length > 0) {
-            try {
-              const memberResult = (await api.setSourceMembers({
-                repo: repoPath,
-                url: input.url,
-                members: input.members,
-              })) as MaybeOkResponse
-              const memberError = responseFailureMessage(memberResult, '保存 source members 失败')
-              if (memberError) {
-                return {
-                  ok: false,
-                  message: 'source 已添加,但保存 members 失败: ' + memberError,
-                  source: created,
-                  members: memberResult,
-                }
-              }
-            } catch (err) {
-              const message =
-                'source 已添加,但保存 members 失败: ' +
-                normalizeManifestOperationError(err, '保存 source members 失败')
-              throw Object.assign(new Error(message), { cause: err })
-            }
-          }
           return created
         },
-        { failureMessage: '添加 source 失败', reloadOnFailure: () => sourceCreated },
+        { failureMessage: '添加 source 失败' },
       )
     },
     [repoPath, run],
@@ -475,8 +502,9 @@ export function useManifestOperations(
       name?: string
       ref: string
       type: 'branch' | 'tag'
-      scan?: string
-      members: Array<string | { name: string; path?: string }>
+      expectedCommit?: string
+      members: Array<{ name: string; entry: string }>
+      resources: SourceResources
       preserve?: string[]
     }) => {
       let sourceMetaUpdated = false
@@ -489,11 +517,9 @@ export function useManifestOperations(
             name: input.name?.trim() || sourceIdentity(input.source).repoId,
             ref: input.ref,
             type: input.type,
-            scan: normalizedScanPattern(input.scan),
-            members: input.members.map((member) =>
-              typeof member === 'string' ? { name: member } : member,
-            ),
-            previousMembers: (input.source.members ?? []).map(({ name, path }) => ({ name, path })),
+            ...(input.expectedCommit ? { expected_commit: input.expectedCommit } : {}),
+            members: input.members,
+            resources: input.resources,
             ...(input.preserve !== undefined ? { preserve: input.preserve } : {}),
           })
           if (result.finalized) {
@@ -530,34 +556,12 @@ export function useManifestOperations(
     [repoPath],
   )
 
-  const saveSourceMembers = useCallback(
-    (source: SkillSource, members: string[]) =>
-      run(
-        pendingKey.saveSourceMembers(source.url),
-        () =>
-          projectSkillsAfterManifestUpdate(
-            () =>
-              api.setSourceMembers({
-                repo: repoPath,
-                url: source.url,
-                members,
-              }) as Promise<MaybeOkResponse>,
-            '保存失败',
-          ),
-        {
-          failureMessage: '保存失败',
-          successMessage: () => sourceIdentity(source).repoId + ': ' + members.length + ' members',
-        },
-      ),
-    [projectSkillsAfterManifestUpdate, repoPath, run],
-  )
-
   const checkSourceUpdate = useCallback(
     (source: SkillSource) =>
       run(
         pendingKey.checkSourceUpdate(source.url),
         async (): Promise<SourceUpdateCheck> => {
-          const result = (await api.update(repoPath, [source])) as {
+          const result = (await api.update(repoPath, [persistedSourceDto(source)])) as {
             updates?: Array<{
               hasUpdate?: boolean
               needsRepair?: boolean
@@ -598,11 +602,9 @@ export function useManifestOperations(
         pendingKey.performSourceUpdate(source.url),
         () =>
           api.prepareSourceUpdate({
-            source,
+            source: persistedSourceDto(source),
             newRef: update && update !== 'repair' ? (update.newRef ?? source.ref) : source.ref,
             repo: repoPath,
-            sourceId: deriveRepoId(source.url),
-            oldMembers: source.members ?? [],
           }) as Promise<MaybeOkResponse & PreparedSkillReconciliation>,
         {
           reload: false,
@@ -613,10 +615,20 @@ export function useManifestOperations(
   )
 
   const finalizeSourceUpdate = useCallback(
-    (sessionId: string, preserve: string[]) =>
+    (
+      sessionId: string,
+      preserve: string[],
+      resourceBoundaryDecisions: Array<{ entry: string; action: 'enable' | 'exclude' }>,
+    ) =>
       run(
         `source:update-finalize:${sessionId}`,
-        () => api.finalizeSourceUpdate({ repo: repoPath, sessionId, preserve }),
+        () =>
+          api.finalizeSourceUpdate({
+            repo: repoPath,
+            sessionId,
+            preserve,
+            resourceBoundaryDecisions,
+          }),
         { failureMessage: '完成 source 更新失败', successMessage: 'source 已更新并完成投影' },
       ),
     [repoPath, run],
@@ -643,16 +655,16 @@ export function useManifestOperations(
   )
 
   const toggleSourceSkillTarget = useCallback(
-    (sourceUrl: string, memberName: string, agent: AgentId, currentTargets: readonly AgentId[]) =>
+    (sourceUrl: string, memberEntry: string, agent: AgentId, currentTargets: readonly AgentId[]) =>
       run(
-        pendingKey.sourceSkillTarget(sourceUrl, memberName),
+        pendingKey.sourceSkillTarget(sourceUrl, memberEntry),
         () =>
           projectSkillsAfterManifestUpdate(
             () =>
               api.updateSkillTargets({
                 repo: repoPath,
                 sourceUrl,
-                memberName,
+                memberEntry,
                 targets: toggleTarget(currentTargets, agent),
               }) as Promise<MaybeOkResponse>,
             '保存 targets 失败',
@@ -709,7 +721,7 @@ export function useManifestOperations(
               const result = (await api.updateSkillTargets({
                 repo: repoPath,
                 sourceUrl: item.source.url,
-                memberName: item.member.name,
+                memberEntry: item.member.entry,
                 targets: next,
               })) as MaybeOkResponse
               if (responseFailureMessage(result, '批量更新 targets 失败')) return result
@@ -740,7 +752,7 @@ export function useManifestOperations(
   const setSourceSkillTargets = useCallback(
     (source: SkillSource, agent: AgentId) => {
       let targetsUpdated = false
-      const members = (source.members ?? []).filter((member) => member.enabled !== false)
+      const members = source.members ?? []
       const allOn =
         members.length > 0 && members.every((member) => (member.targets ?? []).includes(agent))
       return run(
@@ -751,7 +763,7 @@ export function useManifestOperations(
             const next = allOn
               ? targets.filter((target) => target !== agent)
               : AGENTS.filter((target) => target === agent || targets.includes(target))
-            return { memberName: member.name, targets: next }
+            return { memberEntry: member.entry, targets: next }
           })
           const result = (await api.updateSourceSkillTargets({
             repo: repoPath,
@@ -903,12 +915,12 @@ export function useManifestOperations(
       saveConfig,
       scanLocalSkills,
       loadSourceRefs,
-      scanSourceMembers,
-      refreshSourceMembers,
+      loadCachedSourceTree,
+      scanSourceTree,
+      refreshSourceTree,
       addLocalSkills,
       addSource,
       saveSource,
-      saveSourceMembers,
       checkSourceUpdate,
       performSourceUpdate,
       finalizeSourceUpdate,
@@ -932,12 +944,12 @@ export function useManifestOperations(
       saveConfig,
       scanLocalSkills,
       loadSourceRefs,
-      scanSourceMembers,
-      refreshSourceMembers,
+      loadCachedSourceTree,
+      scanSourceTree,
+      refreshSourceTree,
       addLocalSkills,
       addSource,
       saveSource,
-      saveSourceMembers,
       checkSourceUpdate,
       performSourceUpdate,
       finalizeSourceUpdate,

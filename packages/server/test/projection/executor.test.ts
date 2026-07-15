@@ -6,7 +6,13 @@ import { executeProjection } from '../../src/projection/executor'
 import { createProjectionDeps } from '../../src/projection/deps'
 import { NodeFileSystem } from '../../src/platform/node/fs'
 import { ClaudeCodeAdapter } from '../../src/adapters/claude-code'
-import { resolveLayeredVars, type ProjectionPlan, type Manifest, type AgentId } from '@loom/core'
+import {
+  resolveLayeredVars,
+  type ProjectionPlan,
+  type SourceProjectionPlan,
+  type Manifest,
+  type AgentId,
+} from '@loom/core'
 
 let home: string
 let srcDir: string
@@ -339,6 +345,69 @@ describe('executeProjection', () => {
         join(home, '.claude', 'skills', 'openai-skills', 'brainstorming', 'SKILL.md'),
       ),
     ).toBe(true)
+  })
+  it('projection deps read regular tracked files from the planned source commit', async () => {
+    const fs = new NodeFileSystem()
+    const repoPath = join(srcDir, 'repo-with-tracked-source')
+    const revParseHead = vi.fn(async () => 'planned-commit')
+    const readTree = vi.fn(async () => [
+      { mode: '040000', type: 'tree' as const, oid: 'tree', path: 'skill' },
+      { mode: '100644', type: 'blob' as const, oid: 'skill', path: 'skill/SKILL.md' },
+      { mode: '120000', type: 'blob' as const, oid: 'link', path: 'skill/link.md' },
+    ])
+    const projectionDeps = createProjectionDeps(
+      { fs, git: { revParseHead, readTree } as never, proc: {} as never },
+      repoPath,
+      installed,
+      home,
+    )
+    const sourcePlan: SourceProjectionPlan = {
+      sourceName: 'openai-skills',
+      sourceUrl: 'https://example.test/superpowers.git',
+      cacheId: 'superpowers',
+      commit: 'planned-commit',
+      target: 'claude-code',
+      projectionBase: '',
+      entries: [],
+    }
+
+    await expect(projectionDeps.resolveSourceFiles?.(sourcePlan)).resolves.toEqual([
+      'skill/SKILL.md',
+    ])
+    expect(readTree).toHaveBeenCalledWith(
+      join(repoPath, 'remote-cache', 'superpowers'),
+      'planned-commit',
+    )
+    expect(revParseHead).toHaveBeenCalledWith(join(repoPath, 'remote-cache', 'superpowers'))
+  })
+  it('projection deps reject a cache checkout that differs from the planned commit', async () => {
+    const fs = new NodeFileSystem()
+    const repoPath = join(srcDir, 'repo-with-stale-source')
+    const readTree = vi.fn()
+    const projectionDeps = createProjectionDeps(
+      {
+        fs,
+        git: { revParseHead: vi.fn(async () => 'other-commit'), readTree } as never,
+        proc: {} as never,
+      },
+      repoPath,
+      installed,
+      home,
+    )
+    const sourcePlan: SourceProjectionPlan = {
+      sourceName: 'openai-skills',
+      sourceUrl: 'https://example.test/superpowers.git',
+      cacheId: 'superpowers',
+      commit: 'planned-commit',
+      target: 'claude-code',
+      projectionBase: '',
+      entries: [],
+    }
+
+    await expect(projectionDeps.resolveSourceFiles?.(sourcePlan)).rejects.toThrow(
+      'Source cache checkout does not match planned commit: superpowers',
+    )
+    expect(readTree).not.toHaveBeenCalled()
   })
   it('strategy:copy keeps unmarked source-member directories during cleanup', async () => {
     const fs = new NodeFileSystem()

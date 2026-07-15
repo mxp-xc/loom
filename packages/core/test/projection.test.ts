@@ -8,6 +8,18 @@ import {
 } from '../src/projection'
 import type { Manifest } from '../src/types'
 
+function sourceTreeFor(entries: string[]) {
+  return {
+    commit: 'aaa',
+    diagnostics: [],
+    nodes: entries.map((entry) => {
+      const path = entry === 'SKILL.md' ? '' : entry.slice(0, -'/SKILL.md'.length)
+      const name = path.split('/').pop() || 'superpowers'
+      return { kind: 'bundle' as const, name, path, entry, mode: '040000', oid: entry }
+    }),
+  }
+}
+
 const manifest: Manifest = {
   skills: {
     sources: [
@@ -16,10 +28,15 @@ const manifest: Manifest = {
         ref: 'v5.1.4',
         pinned_commit: 'aaa',
         members: [
-          { name: 'brainstorming' },
-          { name: 'tdd', enabled: false },
-          { name: 'writing', targets: ['codex'] },
+          { name: 'brainstorming', entry: 'skills/brainstorming/SKILL.md' },
+          { name: 'tdd', entry: 'skills/tdd/SKILL.md' },
+          { name: 'writing', entry: 'skills/writing/SKILL.md', targets: ['codex'] },
         ],
+        sourceTree: sourceTreeFor([
+          'skills/brainstorming/SKILL.md',
+          'skills/tdd/SKILL.md',
+          'skills/writing/SKILL.md',
+        ]),
       },
     ],
     skills: [{ id: 'frontend-design' }],
@@ -54,15 +71,24 @@ describe('planProjection', () => {
     const fd = p.links.find((l) => l.skillId === 'frontend-design')!
     expect(fd.targets).toEqual([])
   })
-  it('source member (explicit members override) gets namespace prefix', () => {
+  it('source member is planned inside its source namespace', () => {
     const p = planProjection(
       manifest,
       manifest.config,
       new Set(['claude-code', 'codex', 'opencode']),
     )
-    expect(p.links.some((l) => l.skillId === 'superpowers-brainstorming')).toBe(true)
+    expect(p.links.some((link) => link.source !== 'local')).toBe(false)
+    expect(p.sourcePlans).toEqual([
+      expect.objectContaining({
+        sourceName: 'superpowers',
+        commit: 'aaa',
+        target: 'codex',
+        projectionBase: 'skills',
+        entries: [{ kind: 'bundle', sourcePath: 'skills/writing', targetPath: 'writing' }],
+      }),
+    ])
   })
-  it('carries source member runtime SKILL.md path into link source metadata', () => {
+  it('uses canonical entry to locate a nested bundle root', () => {
     const m: Manifest = {
       ...manifest,
       skills: {
@@ -73,22 +99,28 @@ describe('planProjection', () => {
             members: [
               {
                 name: 'diagnosing-bugs',
-                path: 'skills/engineering/diagnosing-bugs/SKILL.md',
+                entry: 'skills/engineering/diagnosing-bugs/SKILL.md',
                 targets: ['codex'],
               },
             ],
+            sourceTree: sourceTreeFor(['skills/engineering/diagnosing-bugs/SKILL.md']),
           },
         ],
       },
     }
     const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
-    const link = p.links.find((l) => l.skillId === 'superpowers-diagnosing-bugs')!
-    expect(link.source).toEqual({
-      repoId: 'superpowers',
-      cacheId: 'superpowers',
-      memberName: 'diagnosing-bugs',
-      path: 'skills/engineering/diagnosing-bugs/SKILL.md',
-    })
+    expect(p.sourcePlans[0]).toEqual(
+      expect.objectContaining({
+        projectionBase: 'skills/engineering',
+        entries: [
+          {
+            kind: 'bundle',
+            sourcePath: 'skills/engineering/diagnosing-bugs',
+            targetPath: 'diagnosing-bugs',
+          },
+        ],
+      }),
+    )
   })
   it('uses source name for projected skill id but keeps URL-derived cache id', () => {
     const m: Manifest = {
@@ -99,28 +131,33 @@ describe('planProjection', () => {
           {
             ...manifest.skills.sources[0],
             name: 'openai-skills',
-            members: [{ name: 'brainstorming', targets: ['codex'] }],
+            members: [
+              {
+                name: 'brainstorming',
+                entry: 'skills/brainstorming/SKILL.md',
+                targets: ['codex'],
+              },
+            ],
+            sourceTree: sourceTreeFor(['skills/brainstorming/SKILL.md']),
           },
         ],
       },
       config: { ...manifest.config, skill_naming: 'dir' },
     }
     const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
-    const link = p.links.find((l) => l.skillId === 'openai-skills/brainstorming')!
-    expect(link.source).toEqual({
-      repoId: 'openai-skills',
-      cacheId: 'superpowers',
-      memberName: 'brainstorming',
-    })
+    expect(p.sourcePlans[0]).toEqual(
+      expect.objectContaining({ sourceName: 'openai-skills', cacheId: 'superpowers' }),
+    )
   })
-  it('enabled:false member -> empty targets', () => {
+  it('member without targets is not projected', () => {
     const p = planProjection(
       manifest,
       manifest.config,
       new Set(['claude-code', 'codex', 'opencode']),
     )
-    const tdd = p.links.find((l) => l.skillId === 'superpowers-tdd')!
-    expect(tdd.targets).toEqual([])
+    expect(
+      p.sourcePlans.some((plan) => plan.entries.some((entry) => entry.sourcePath.endsWith('/tdd'))),
+    ).toBe(false)
   })
   it('member override targets生效', () => {
     const p = planProjection(
@@ -128,8 +165,11 @@ describe('planProjection', () => {
       manifest.config,
       new Set(['claude-code', 'codex', 'opencode']),
     )
-    const writing = p.links.find((l) => l.skillId === 'superpowers-writing')!
-    expect(writing.targets).toEqual(['codex'])
+    expect(p.sourcePlans.find((plan) => plan.target === 'codex')?.entries).toContainEqual({
+      kind: 'bundle',
+      sourcePath: 'skills/writing',
+      targetPath: 'writing',
+    })
   })
   it('mcp server projected to its own targets, not global', () => {
     const p = planProjection(manifest, manifest.config, new Set(['claude-code', 'codex']))
@@ -171,7 +211,14 @@ describe('planProjection', () => {
         sources: [
           {
             ...manifest.skills.sources[0],
-            members: [{ name: 'writing', targets: ['claude-code', 'opencode'] }],
+            members: [
+              {
+                name: 'writing',
+                entry: 'skills/writing/SKILL.md',
+                targets: ['claude-code', 'opencode'],
+              },
+            ],
+            sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
           },
         ],
         skills: [],
@@ -181,10 +228,90 @@ describe('planProjection', () => {
     }
     const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
 
-    expect(p.links[0].targets).toEqual(['claude-code'])
+    expect(p.sourcePlans.map((plan) => plan.target)).toEqual(['claude-code'])
     expect(p.mcpEntries[0].targets).toEqual(['codex'])
     expect(m.skills.sources[0].members?.[0].targets).toEqual(['claude-code', 'opencode'])
     expect(m.mcp[0].targets).toEqual(['codex', 'opencode'])
+  })
+  it('deduplicates repeated targets before building source projection entries', () => {
+    const m: Manifest = {
+      ...manifest,
+      skills: {
+        ...manifest.skills,
+        sources: [
+          {
+            ...manifest.skills.sources[0],
+            members: [
+              {
+                name: 'writing',
+                entry: 'skills/writing/SKILL.md',
+                targets: ['codex', 'codex'],
+              },
+            ],
+            sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
+          },
+        ],
+      },
+    }
+
+    const p = planProjection(m, m.config, new Set(['codex']))
+
+    expect(p.sourcePlans).toHaveLength(1)
+    expect(p.sourcePlans[0].entries).toEqual([
+      { kind: 'bundle', sourcePath: 'skills/writing', targetPath: 'writing' },
+    ])
+  })
+  it.each(['superpowers', 'superpowers/custom'])(
+    'rejects local skill destination %s overlapping a source namespace on the same target',
+    (localSkillId) => {
+      const m: Manifest = {
+        ...manifest,
+        skills: {
+          sources: [
+            {
+              ...manifest.skills.sources[0],
+              members: [
+                {
+                  name: 'writing',
+                  entry: 'skills/writing/SKILL.md',
+                  targets: ['codex'],
+                },
+              ],
+              sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
+            },
+          ],
+          skills: [{ id: localSkillId, targets: ['codex'] }],
+        },
+      }
+
+      expect(() => planProjection(m, m.config, new Set(['codex']))).toThrow(
+        `Local skill destination "${localSkillId}" overlaps source namespace "superpowers" for codex`,
+      )
+    },
+  )
+
+  it('allows matching local and source names when their targets do not overlap', () => {
+    const m: Manifest = {
+      ...manifest,
+      skills: {
+        sources: [
+          {
+            ...manifest.skills.sources[0],
+            members: [
+              {
+                name: 'writing',
+                entry: 'skills/writing/SKILL.md',
+                targets: ['codex'],
+              },
+            ],
+            sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
+          },
+        ],
+        skills: [{ id: 'superpowers', targets: ['claude-code'] }],
+      },
+    }
+
+    expect(() => planProjection(m, m.config, new Set(['claude-code', 'codex']))).not.toThrow()
   })
   it('strategy: copy透传;无 projection 默认 link', () => {
     const pCopy = planProjection(
@@ -200,32 +327,112 @@ describe('planProjection', () => {
     )
     expect(pDefault.strategy).toBe('link')
   })
+
+  it('keeps selected roots relative while omitting their common unselected parent', () => {
+    const source = {
+      name: 'workflow-kit',
+      url: 'https://example.test/workflow-kit.git',
+      ref: 'main',
+      members: [
+        { name: 'skill-a', entry: 'folder/skill-a/SKILL.md', targets: ['codex' as const] },
+        { name: 'skill-b', entry: 'folder/skill-b/SKILL.md', targets: ['codex' as const] },
+      ],
+      resources: {
+        include: [{ path: 'folder/shared', kind: 'directory' as const }],
+        exclude: [{ path: 'folder/shared/archive', kind: 'directory' as const }],
+      },
+      sourceTree: {
+        commit: 'abc',
+        diagnostics: [],
+        nodes: [
+          ...sourceTreeFor(['folder/skill-a/SKILL.md', 'folder/skill-b/SKILL.md']).nodes,
+          {
+            kind: 'container' as const,
+            name: 'shared',
+            path: 'folder/shared',
+            mode: '040000',
+            oid: 'shared',
+            children: [
+              {
+                kind: 'resource' as const,
+                name: 'workflow.md',
+                path: 'folder/shared/workflow.md',
+                mode: '100644',
+                oid: 'workflow',
+              },
+              {
+                kind: 'container' as const,
+                name: 'archive',
+                path: 'folder/shared/archive',
+                mode: '040000',
+                oid: 'archive',
+                children: [
+                  {
+                    kind: 'resource' as const,
+                    name: 'old.md',
+                    path: 'folder/shared/archive/old.md',
+                    mode: '100644',
+                    oid: 'old',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const planned = planProjection(
+      { ...manifest, skills: { sources: [source], skills: [] } },
+      manifest.config,
+      new Set(['codex']),
+    ).sourcePlans[0]
+
+    expect(planned.projectionBase).toBe('folder')
+    expect(planned.entries).toEqual([
+      {
+        kind: 'resource-file',
+        sourcePath: 'folder/shared/workflow.md',
+        targetPath: 'shared/workflow.md',
+      },
+      { kind: 'bundle', sourcePath: 'folder/skill-a', targetPath: 'skill-a' },
+      { kind: 'bundle', sourcePath: 'folder/skill-b', targetPath: 'skill-b' },
+    ])
+  })
+
+  it('maps a root-level bundle to the source namespace root', () => {
+    const source = {
+      name: 'root-skill',
+      url: 'https://example.test/root-skill.git',
+      ref: 'main',
+      members: [{ name: 'root-skill', entry: 'SKILL.md', targets: ['codex' as const] }],
+      sourceTree: sourceTreeFor(['SKILL.md']),
+    }
+    const planned = planProjection(
+      { ...manifest, skills: { sources: [source], skills: [] } },
+      manifest.config,
+      new Set(['codex']),
+    ).sourcePlans[0]
+
+    expect(planned.projectionBase).toBe('')
+    expect(planned.entries).toEqual([{ kind: 'bundle', sourcePath: '', targetPath: '' }])
+  })
 })
 describe('planProjection skill_naming', () => {
-  it('dir format produces repoId/memberName skillId', () => {
+  it('does not change source namespace planning for dir format', () => {
     const m = { ...manifest, config: { ...manifest.config, skill_naming: 'dir' as const } }
     const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
-    const link = p.links.find(
-      (l) => l.source !== 'local' && (l.source as any).memberName === 'brainstorming',
-    )
-    expect(link!.skillId).toBe('superpowers/brainstorming')
+    expect(p.sourcePlans[0].sourceName).toBe('superpowers')
   })
-  it('hyphen format produces repoId-memberName skillId', () => {
+  it('does not flatten source namespace for hyphen format', () => {
     const m = { ...manifest, config: { ...manifest.config, skill_naming: 'hyphen' as const } }
     const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
-    const link = p.links.find(
-      (l) => l.source !== 'local' && (l.source as any).memberName === 'brainstorming',
-    )
-    expect(link!.skillId).toBe('superpowers-brainstorming')
+    expect(p.sourcePlans[0].sourceName).toBe('superpowers')
   })
   it('defaults to dir format when unset', () => {
     const m = { ...manifest, config: { ...manifest.config } }
     delete (m.config as any).skill_naming
     const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
-    const link = p.links.find(
-      (l) => l.source !== 'local' && (l.source as any).memberName === 'brainstorming',
-    )
-    expect(link!.skillId).toBe('superpowers/brainstorming')
+    expect(p.sourcePlans[0].sourceName).toBe('superpowers')
   })
 })
 

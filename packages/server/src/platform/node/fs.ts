@@ -13,6 +13,7 @@ import {
   rmdir,
 } from 'node:fs/promises'
 import { join, isAbsolute, dirname } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import type { IFileSystem } from '../../ports/fs.js'
 
 export interface FsOptions {
@@ -55,6 +56,30 @@ export class NodeFileSystem implements IFileSystem {
     }
   }
 
+  async createFileLink(targetFile: string, linkPath: string): Promise<{ fallback: 'copy' | null }> {
+    if (await this.isLink(linkPath)) {
+      await this.removeLink(linkPath)
+    } else if (await this.exists(linkPath)) {
+      throw new Error(`refuse to overwrite real file: ${linkPath}`)
+    }
+    const absTarget = resolveAbs(targetFile)
+    const absLink = resolveAbs(linkPath)
+    await fsMkdir(dirname(absLink), { recursive: true })
+    try {
+      if (this.opts.forceLinkError) {
+        throw Object.assign(new Error('simulated'), { code: this.opts.forceLinkError })
+      }
+      await symlink(absTarget, absLink, 'file')
+      return { fallback: null }
+    } catch (error: any) {
+      if (error.code === 'EXDEV' || error.code === 'EPERM' || error.code === 'ENOSYS') {
+        await copyFile(absTarget, absLink)
+        return { fallback: 'copy' }
+      }
+      throw error
+    }
+  }
+
   async removeLink(linkPath: string): Promise<void> {
     if (!(await this.isLink(linkPath))) return
     // Bun on Windows returns EFAULT for rm(..., { recursive: false }) on junctions.
@@ -79,6 +104,14 @@ export class NodeFileSystem implements IFileSystem {
     try {
       await stat(path)
       return true
+    } catch {
+      return false
+    }
+  }
+
+  async isDirectory(path: string): Promise<boolean> {
+    try {
+      return (await stat(path)).isDirectory()
     } catch {
       return false
     }
@@ -114,10 +147,27 @@ export class NodeFileSystem implements IFileSystem {
     }
   }
 
-  async move(src: string, dest: string): Promise<void> {
-    // Ensure parent dir exists
+  async copyFile(src: string, dest: string): Promise<void> {
     await fsMkdir(dirname(dest), { recursive: true })
-    await rename(src, dest)
+    await copyFile(src, dest)
+  }
+
+  async move(src: string, dest: string): Promise<void> {
+    await fsMkdir(dirname(dest), { recursive: true })
+    const move = this.opts.rename ?? rename
+    const attempts = (this.opts.platform ?? process.platform) === 'win32' ? 5 : 1
+    let lastError: unknown
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        await move(src, dest)
+        return
+      } catch (error) {
+        lastError = error
+        if (!isTransientWindowsFileLock(error) || attempt === attempts - 1) throw error
+        await delay(300 * (attempt + 1))
+      }
+    }
+    throw lastError
   }
 
   async removeDir(path: string): Promise<void> {
@@ -175,6 +225,11 @@ export class NodeFileSystem implements IFileSystem {
 
 function isMissing(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
+}
+
+function isTransientWindowsFileLock(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false
+  return error.code === 'EBUSY' || error.code === 'EPERM' || error.code === 'ENOTEMPTY'
 }
 
 function resolveAbs(p: string): string {

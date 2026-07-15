@@ -22,12 +22,15 @@ export function removeLocalSkill(
 
 export function addSource(
   skills: SkillsManifest,
-  source: Pick<SkillSource, 'url' | 'ref'> & Partial<Pick<SkillSource, 'name' | 'type' | 'scan'>>,
+  source: Pick<SkillSource, 'url' | 'ref'> &
+    Partial<Pick<SkillSource, 'name' | 'type' | 'pinned_commit' | 'members' | 'resources'>>,
 ): MutationResult<SkillsManifest> {
   const next: SkillSource = { url: source.url, ref: source.ref }
   if (source.name?.trim()) next.name = source.name.trim()
   if (source.type) next.type = source.type
-  if (source.scan?.trim()) next.scan = source.scan.trim()
+  if (source.pinned_commit) next.pinned_commit = source.pinned_commit
+  if (source.members) next.members = source.members
+  if (source.resources) next.resources = source.resources
   return { changed: true, data: { ...skills, sources: [...skills.sources, next] } }
 }
 
@@ -41,7 +44,7 @@ export function removeSource(skills: SkillsManifest, url: string): MutationResul
 export function updateSourceMeta(
   skills: SkillsManifest,
   url: string,
-  updates: { name?: string; ref?: string; type?: 'branch' | 'tag'; scan?: string | null },
+  updates: { name?: string; ref?: string; type?: 'branch' | 'tag' },
 ): MutationResult<SkillsManifest> {
   const idx = skills.sources.findIndex((s) => s.url === url)
   if (idx === -1) return { changed: false, data: skills }
@@ -50,28 +53,25 @@ export function updateSourceMeta(
   if (updates.name !== undefined) next.name = updates.name.trim()
   if (updates.ref !== undefined) next.ref = updates.ref
   if (updates.type !== undefined) next.type = updates.type
-  if (updates.scan !== undefined) {
-    const scan = updates.scan?.trim() ?? ''
-    if (scan) next.scan = scan
-    else delete next.scan
-  }
   const sources = skills.sources.slice()
   sources[idx] = next
   return { changed: true, data: { ...skills, sources } }
 }
 
-// Keep existing member config (targets/enabled) for names that remain;
-// drop members not in the new selection. New names get { name } only.
+// Keep targets for retained entries; names are snapshots refreshed by the latest scan.
 export function setSourceMembers(
   skills: SkillsManifest,
   url: string,
-  memberNames: string[],
+  selectedMembers: Array<Pick<NonNullable<SkillSource['members']>[number], 'name' | 'entry'>>,
 ): MutationResult<SkillsManifest> {
   const idx = skills.sources.findIndex((s) => s.url === url)
   if (idx === -1) return { changed: false, data: skills }
   const source = skills.sources[idx]
-  const prev = new Map((source.members ?? []).map((m) => [m.name, m]))
-  const members = memberNames.map((name) => prev.get(name) ?? { name })
+  const prev = new Map((source.members ?? []).map((member) => [member.entry, member]))
+  const members = selectedMembers.map((member) => ({
+    ...member,
+    ...(prev.get(member.entry)?.targets ? { targets: prev.get(member.entry)!.targets } : {}),
+  }))
   const sources = skills.sources.slice()
   sources[idx] = { ...source, members }
   return { changed: true, data: { ...skills, sources } }
@@ -80,26 +80,17 @@ export function setSourceMembers(
 export function setSkillTargets(
   skills: SkillsManifest,
   sourceUrl: string,
-  memberName: string,
+  memberEntry: string,
   targets: AgentId[],
 ): MutationResult<SkillsManifest> {
   const idx = skills.sources.findIndex((s) => s.url === sourceUrl)
   if (idx === -1) return { changed: false, data: skills }
   const source = skills.sources[idx]
-  let next: typeof source
-  if (!memberName || !memberName.trim()) {
-    // Source-level targets (applies to all members without explicit targets)
-    next = { ...source, targets } as typeof source
-  } else {
-    const members = source.members ? source.members.slice() : []
-    const memberIdx = members.findIndex((m) => m.name === memberName)
-    if (memberIdx === -1) {
-      members.push({ name: memberName, targets })
-    } else {
-      members[memberIdx] = { ...members[memberIdx], targets }
-    }
-    next = { ...source, members }
-  }
+  const members = source.members ? source.members.slice() : []
+  const memberIdx = members.findIndex((member) => member.entry === memberEntry)
+  if (memberIdx === -1) return { changed: false, data: skills }
+  members[memberIdx] = { ...members[memberIdx], targets }
+  const next: typeof source = { ...source, members }
   const sources = skills.sources.slice()
   sources[idx] = next
   return { changed: true, data: { ...skills, sources } }
@@ -108,7 +99,7 @@ export function setSkillTargets(
 export function setSourceMemberTargets(
   skills: SkillsManifest,
   sourceUrl: string,
-  updates: Array<{ memberName: string; targets: AgentId[] }>,
+  updates: Array<{ memberEntry: string; targets: AgentId[] }>,
 ): MutationResult<SkillsManifest> {
   const idx = skills.sources.findIndex((s) => s.url === sourceUrl)
   if (idx === -1) return { changed: false, data: skills }
@@ -116,12 +107,10 @@ export function setSourceMemberTargets(
   const members = source.members ? source.members.slice() : []
 
   for (const update of updates) {
-    const memberName = update.memberName.trim()
-    if (!memberName) continue
-    const memberIdx = members.findIndex((m) => m.name === memberName)
-    if (memberIdx === -1) {
-      members.push({ name: memberName, targets: update.targets })
-    } else {
+    const memberEntry = update.memberEntry.trim()
+    if (!memberEntry) continue
+    const memberIdx = members.findIndex((member) => member.entry === memberEntry)
+    if (memberIdx !== -1) {
       members[memberIdx] = { ...members[memberIdx], targets: update.targets }
     }
   }

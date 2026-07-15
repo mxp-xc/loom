@@ -1,4 +1,4 @@
-import { isAbsolute, join, relative } from 'node:path'
+import { dirname, isAbsolute, join, relative } from 'node:path'
 import {
   buildManifest,
   deriveRepoId,
@@ -11,6 +11,7 @@ import {
   type Manifest,
   type ProjectionPlan,
   type SkillSource,
+  type SourceTreeNode,
   type VarsContext,
 } from '@loom/core'
 import type { IFileSystem } from '../ports/fs.js'
@@ -18,13 +19,13 @@ import type { IGit } from '../ports/git.js'
 import type { IProcess } from '../ports/process.js'
 import { logger } from '../lib/logger.js'
 import { cacheDirFor } from '../remote/cache.js'
-import { installSkill } from '../remote/install.js'
 import { readLocalConfig, readRepoFiles } from '../api/repo-config.js'
 import { executeProjection, type ProjectionResult, type ProjectionScope } from './executor.js'
 import { resolveAgentAwareVars } from '../vars/agent-aware.js'
 import { createProjectionDeps } from './deps.js'
-import { mergeLocalSkills, scanSourceMembers, type ScannedMember } from './scan.js'
+import { mergeLocalSkills } from './scan.js'
 import { parseSkillMeta } from '../remote/frontmatter.js'
+import { scanSourceTree } from '../remote/source-tree.js'
 
 const workflowLogger = logger.child('projection.workflow')
 const DEFAULT_AGENTS: AgentId[] = ['claude-code', 'codex', 'opencode']
@@ -49,9 +50,14 @@ export async function projectRepository(
   repoPath: string,
   input: ProjectRepositoryInput,
 ): Promise<ProjectionResult> {
+  const scope = input.scope ?? 'all'
   const installed = await resolveInstalledAgents(deps.proc, input.installedAgents)
-  const manifest = input.manifest ?? (await loadProjectionManifest(deps, repoPath))
-  const plan = input.plan ?? planProjection(manifest, manifest.config, installed)
+  const manifest = input.manifest ?? (await loadProjectionManifest(deps, repoPath, scope))
+  const planningManifest =
+    scope === 'mcp' || scope === 'memory'
+      ? { ...manifest, skills: { ...manifest.skills, sources: [] } }
+      : manifest
+  const plan = input.plan ?? planProjection(planningManifest, manifest.config, installed)
   const varsCtx =
     input.varsCtx ??
     ({
@@ -69,24 +75,91 @@ export async function projectRepository(
     installed,
     deps.home,
   )
-  return executeProjection(plan, manifest, varsCtx, projectionDeps, input.scope ?? 'all')
+  return executeProjection(plan, manifest, varsCtx, projectionDeps, scope)
 }
 
 export async function loadProjectionManifest(
   deps: ProjectionWorkflowDeps,
   repoPath: string,
+  scope: ProjectionScope = 'all',
 ): Promise<Manifest> {
+  const manifest = await loadBaseManifest(deps, repoPath)
+  if (scope === 'skills' || scope === 'all') {
+    await ensureSourceTrees(deps, repoPath, manifest.skills.sources ?? [])
+  }
+  await annotateLocalSkillAvailability(deps.fs, repoPath, manifest.skills.skills)
+  return manifest
+}
+
+export async function loadDisplayManifest(
+  deps: ProjectionWorkflowDeps,
+  repoPath: string,
+): Promise<Manifest> {
+  const manifest = await loadBaseManifest(deps, repoPath)
+  await Promise.all([
+    annotateSourceMemberMetadata(deps.fs, repoPath, manifest.skills.sources ?? []),
+    annotateLocalSkillAvailability(deps.fs, repoPath, manifest.skills.skills),
+  ])
+  return manifest
+}
+
+async function loadBaseManifest(deps: ProjectionWorkflowDeps, repoPath: string): Promise<Manifest> {
   const files = await readRepoFiles(deps.fs, repoPath)
   const repoManifest = loadRepoManifest(files)
-  await ensureSourceMembers(deps, repoPath, repoManifest.skills.sources ?? [])
   repoManifest.skills.skills = await mergeLocalSkills(
     deps.fs,
     repoPath,
     repoManifest.skills.skills ?? [],
   )
-  await annotateLocalSkillAvailability(deps.fs, repoPath, repoManifest.skills.skills)
   const localConfig = await readLocalConfig(deps.fs, deps.home)
   return buildManifest(repoManifest, localConfig as Config)
+}
+
+async function annotateSourceMemberMetadata(
+  fs: Pick<IFileSystem, 'exists' | 'readFile'>,
+  repoPath: string,
+  sources: SkillSource[],
+): Promise<void> {
+  await Promise.all(
+    sources.map(async (source) => {
+      const cacheId = deriveRepoId(source.url)
+      const cacheDir = cacheDirFor(repoPath, cacheId)
+      const cacheAvailable = await fs.exists(cacheDir)
+      source.members = await Promise.all(
+        (source.members ?? []).map(async (member) => {
+          const enriched = { ...member, path: member.entry }
+          if (!cacheAvailable || !isSafeSkillEntry(member.entry)) return enriched
+          const skillFile = join(cacheDir, member.entry)
+          if (!(await fs.exists(skillFile))) return enriched
+          try {
+            const content = await fs.readFile(skillFile)
+            const metadata = parseSkillMeta(content, member.name, dirname(skillFile))
+            return metadata?.description
+              ? { ...enriched, description: metadata.description }
+              : enriched
+          } catch (err) {
+            workflowLogger.error('source member metadata read failed', {
+              err,
+              source: source.url,
+              entry: member.entry,
+              path: skillFile,
+            })
+            return enriched
+          }
+        }),
+      )
+    }),
+  )
+}
+
+function isSafeSkillEntry(entry: string): boolean {
+  if (!entry || isAbsolute(entry) || /^[A-Za-z]:[/\\]/.test(entry)) return false
+  const normalized = entry.replace(/\\/g, '/').replace(/^\/+/, '')
+  return (
+    normalized === entry.replace(/\\/g, '/') &&
+    !normalized.split('/').includes('..') &&
+    (normalized === 'SKILL.md' || normalized.endsWith('/SKILL.md'))
+  )
 }
 
 export async function annotateLocalSkillAvailability(
@@ -133,62 +206,60 @@ async function resolveInstalledAgents(
   return installed
 }
 
-async function ensureSourceMembers(
+async function ensureSourceTrees(
   deps: ProjectionWorkflowDeps,
   repoPath: string,
   sources: SkillSource[],
 ): Promise<void> {
   for (const source of sources) {
-    const hasConfiguredMembers = (source.members?.length ?? 0) > 0
     const { repoId } = sourceIdentity(source)
     const cacheId = deriveRepoId(source.url)
     const cacheDir = cacheDirFor(repoPath, cacheId)
     if (!(await deps.fs.exists(cacheDir))) {
-      try {
-        await installSkill(deps.git, deps.fs, source.url, source.ref, repoPath, cacheId)
-      } catch (err) {
-        workflowLogger.error('auto-install failed for source', {
-          err,
+      const err = new Error(`Source cache unavailable: ${source.url}`)
+      workflowLogger.error('source cache unavailable during projection', {
+        err,
+        url: source.url,
+        repoId,
+        cacheId,
+      })
+      throw err
+    }
+    try {
+      const tree = await scanSourceTree(deps.git, cacheDir, source.pinned_commit ?? 'HEAD', source)
+      const checkedOutCommit = await deps.git.revParseHead(cacheDir)
+      if (checkedOutCommit !== tree.commit) {
+        workflowLogger.warn('source cache checkout differs from pinned commit; realigning', {
           url: source.url,
           repoId,
           cacheId,
+          checkedOutCommit,
+          pinnedCommit: tree.commit,
         })
-        continue
+        await deps.git.checkout(cacheDir, tree.commit)
       }
-    }
-    if (!(await deps.fs.exists(cacheDir))) continue
-    try {
-      const scanned = await scanSourceMembers(cacheDir, source)
-      if (hasConfiguredMembers) {
-        const metadataByName = new Map(scanned.map((member) => [member.name, member]))
-        source.members = (source.members ?? []).map((member) => ({
-          ...member,
-          ...sourceMemberMetadata(metadataByName.get(member.name)),
-        }))
-        continue
-      }
-      if (scanned.length > 0) {
-        const targets = (source as SkillSource & { targets?: AgentId[] }).targets ?? []
-        source.members = scanned.map((member) => ({
-          name: member.name,
-          targets,
-          ...sourceMemberMetadata(member),
-        }))
-      }
+      source.sourceTree = tree
+      const metadataByEntry = new Map<string, { path: string; description?: string }>(
+        flattenSourceTree(tree.nodes)
+          .filter((node) => node.kind === 'bundle')
+          .map((node) => [node.entry, { path: node.entry, description: node.description }]),
+      )
+      source.members = (source.members ?? []).map((member) => {
+        const metadata = metadataByEntry.get(member.entry)
+        return metadata ? { ...member, ...metadata } : member
+      })
     } catch (err) {
-      workflowLogger.error('source member scan failed', { err, url: source.url, repoId, cacheId })
+      workflowLogger.error('source tree scan failed', { err, url: source.url, repoId, cacheId })
+      throw err
     }
   }
 }
 
-function sourceMemberMetadata(
-  member: ScannedMember | undefined,
-): Partial<NonNullable<SkillSource['members']>[number]> {
-  if (!member) return {}
-  return {
-    ...(member.relativePath ? { path: member.relativePath } : {}),
-    ...(member.description ? { description: member.description } : {}),
-  }
+function flattenSourceTree(nodes: SourceTreeNode[]): SourceTreeNode[] {
+  return nodes.flatMap((node) => [
+    node,
+    ...(node.kind === 'container' ? flattenSourceTree(node.children) : []),
+  ])
 }
 
 function resolveLocalSkillDir(skill: LocalSkill, repoPath: string): string {

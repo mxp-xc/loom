@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent,
@@ -386,6 +387,7 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
 }
 
 export default function App() {
+  const initStarted = useRef(false)
   const [repoPath, setRepoPath] = useState<string | null>(null)
   const [activeRepo, setActiveRepo] = useState<string>('')
   const [loading, setLoading] = useState(true)
@@ -396,6 +398,8 @@ export default function App() {
   })
 
   useEffect(() => {
+    if (initStarted.current) return
+    initStarted.current = true
     api
       .init()
       .then((res) => {

@@ -4,65 +4,68 @@ import { tmpdir } from 'node:os'
 import type { IGit } from '../ports/git.js'
 import type { IFileSystem } from '../ports/fs.js'
 import type { SkillMeta } from './frontmatter.js'
-import { formatSourceMemberSkillId, type SkillSource } from '@loom/core'
-import { logger } from '../lib/logger.js'
-import { scanSourceMembers } from '../projection/scan.js'
-
-const discoverLogger = logger.child('remote.discover')
+import {
+  formatSourceMemberSkillId,
+  type SkillSource,
+  type SourceTree,
+  type SourceTreeNode,
+} from '@loom/core'
+import { scanSourceTree } from './source-tree.js'
 
 type DiscoverSkillSource = Pick<SkillSource, 'url'> &
-  Partial<Pick<SkillSource, 'ref' | 'type' | 'scan'>>
+  Partial<Pick<SkillSource, 'name' | 'ref' | 'type'>>
 
-export async function discoverSkills(
+export async function discoverSourceTree(
   git: IGit,
-  fs: IFileSystem,
   sourceInput: string | DiscoverSkillSource,
-  installed: Set<string> = new Set(),
-): Promise<(SkillMeta & { installed: boolean })[]> {
+): Promise<SourceTree> {
   const source = normalizeDiscoverSource(sourceInput)
   const tmp = await mkdtemp(join(tmpdir(), 'discover-'))
   try {
     await git.clone(source.url, tmp, !source.ref)
     if (source.ref) await git.checkout(tmp, source.ref)
-    const scanned = await scanSourceMembers(tmp, {
-      url: source.url,
-      ref: source.ref ?? 'HEAD',
-      ...(source.type ? { type: source.type } : {}),
-      ...(source.scan ? { scan: source.scan } : {}),
-    })
-    const out: (SkillMeta & { installed: boolean })[] = []
-    for (const member of scanned) {
-      const relativePath = member.relativePath ?? 'SKILL.md'
-      if (member.frontmatterName && member.frontmatterName !== member.name) {
-        discoverLogger.warn('source skill frontmatter name differs from path member name', {
-          url: source.url,
-          path: relativePath,
-          frontmatterName: member.frontmatterName,
-          memberName: member.name,
-        })
-      }
-      out.push({
-        name: member.name,
-        description: member.description ?? '',
-        path: relativePath,
-        ...(member.frontmatterName ? { frontmatterName: member.frontmatterName } : {}),
-        installed: installed.has(formatSourceMemberSkillId(source.url, member.name, 'hyphen')),
-      })
-    }
-    return out
+    return await scanSourceTree(git, tmp, source.ref ?? 'HEAD', source)
   } finally {
     await rm(tmp, { recursive: true, force: true })
   }
 }
 
+export async function discoverSkills(
+  git: IGit,
+  _fs: IFileSystem,
+  sourceInput: string | DiscoverSkillSource,
+  installed: Set<string> = new Set(),
+): Promise<(SkillMeta & { installed: boolean })[]> {
+  const source = normalizeDiscoverSource(sourceInput)
+  const tree = await discoverSourceTree(git, source)
+  return flattenBundles(tree.nodes).map((member) => ({
+    name: member.name,
+    description: member.description ?? '',
+    path: member.entry,
+    installed: installed.has(formatSourceMemberSkillId(source, member.name, 'hyphen')),
+  }))
+}
+
 function normalizeDiscoverSource(input: string | DiscoverSkillSource): DiscoverSkillSource {
   if (typeof input === 'string') return { url: input }
   const ref = input.ref?.trim()
-  const scan = input.scan?.trim()
+  const name = input.name?.trim()
   return {
     url: input.url,
+    ...(name ? { name } : {}),
     ...(ref ? { ref } : {}),
     ...(input.type ? { type: input.type } : {}),
-    ...(scan ? { scan } : {}),
   }
+}
+
+function flattenBundles(
+  nodes: readonly SourceTreeNode[],
+): Array<Extract<SourceTreeNode, { kind: 'bundle' }>> {
+  return nodes.flatMap((node) =>
+    node.kind === 'bundle'
+      ? [node]
+      : node.kind === 'container'
+        ? flattenBundles(node.children)
+        : [],
+  )
 }

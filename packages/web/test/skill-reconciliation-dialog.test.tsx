@@ -16,6 +16,7 @@ describe('SkillReconciliationDialog', () => {
             updated: [{ name: 'updated' }],
             removed: [{ name: 'removed-a' }, { name: 'removed-b' }],
           },
+          resourceBoundaryChanges: [],
         }}
         busy={false}
         onClose={vi.fn()}
@@ -33,9 +34,43 @@ describe('SkillReconciliationDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '全选' }))
     fireEvent.click(screen.getByLabelText('保留 removed-b'))
     fireEvent.click(screen.getByRole('button', { name: '保留所选并继续' }))
-    expect(onConfirm).toHaveBeenLastCalledWith(['removed-a'])
+    expect(onConfirm).toHaveBeenLastCalledWith(['removed-a'], [])
 
     fireEvent.click(screen.getByRole('button', { name: '不保留' }))
-    expect(onConfirm).toHaveBeenLastCalledWith([])
+    expect(onConfirm).toHaveBeenLastCalledWith([], [])
+  })
+
+  it('chooses whether new resource boundaries stay excluded or become enabled bundles', () => {
+    const onConfirm = vi.fn(async () => {})
+    render(
+      <SkillReconciliationDialog
+        state={{
+          sessionId: 'session-boundary',
+          pinned_commit: 'def',
+          changes: { added: [], updated: [], removed: [] },
+          resourceBoundaryChanges: [
+            {
+              name: 'new-skill',
+              entry: 'shared/new-skill/SKILL.md',
+              path: 'shared/new-skill',
+            },
+          ],
+        }}
+        busy={false}
+        onClose={vi.fn()}
+        onConfirm={onConfirm}
+      />,
+    )
+
+    expect(screen.getByText('新增 SkillBundle 边界')).toBeTruthy()
+    expect(screen.getByText('new-skill')).toBeTruthy()
+    expect(screen.getByText('shared/new-skill')).toBeTruthy()
+    expect(screen.getByText(/不再作为普通资源投影/)).toBeTruthy()
+    fireEvent.click(screen.getByLabelText('启用 new-skill'))
+    fireEvent.click(screen.getByRole('button', { name: '应用更新' }))
+    expect(onConfirm).toHaveBeenCalledWith(
+      [],
+      [{ entry: 'shared/new-skill/SKILL.md', action: 'enable' }],
+    )
   })
 })
