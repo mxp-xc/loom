@@ -97,6 +97,69 @@ describe('VarsApplication', () => {
     expect(result.resolution.values.count.value).toBe(2)
   })
 
+  it('returns a default matrix with only base and local layers', async () => {
+    await mkdir(join(repoPath, 'vars', 'agents'), { recursive: true })
+    await mkdir(join(home, '.loom', 'local', 'repos', 'default', 'vars', 'agents'), {
+      recursive: true,
+    })
+    await writeFile(join(repoPath, 'vars', 'base.yaml'), 'name:\n  type: string\n  value: Base\n')
+    await writeFile(join(repoPath, 'vars', 'agents', 'codex.yaml'), 'name:\n  value: Codex\n')
+    await writeFile(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml'),
+      'name:\n  value: Local\n',
+    )
+    await writeFile(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'agents', 'codex.yaml'),
+      'name:\n  value: Local Codex\n',
+    )
+
+    const result = await app.matrix(repoPath, 'default')
+
+    expect(result.agent).toBe('default')
+    expect(result.builtinKeys).toEqual([])
+    expect(result.snapshot.baseAgent).toEqual({})
+    expect(result.snapshot.localAgent).toEqual({})
+    expect(result.resolution.ok).toBe(true)
+    if (!result.resolution.ok) throw new Error('expected default matrix resolution to succeed')
+    expect(result.resolution.values.name.value).toBe('Local')
+    expect(result.resolution.values).not.toHaveProperty('LOOM_AGENT')
+  })
+
+  it('masks secrets and secret-tainted values in the agent-aware matrix', async () => {
+    await writeFile(
+      join(repoPath, 'vars', 'base.yaml'),
+      [
+        'API_KEY:',
+        '  type: secret',
+        '  value: top-secret',
+        'AUTH_HEADER:',
+        '  type: string',
+        '  value: Bearer ${API_KEY}',
+        '',
+      ].join('\n'),
+    )
+    await mkdir(join(home, '.loom', 'local', 'repos', 'default', 'vars'), { recursive: true })
+    await writeFile(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml'),
+      'API_KEY:\n  value: local-secret\n',
+    )
+
+    const result = await app.matrix(repoPath, 'codex')
+
+    expect(result.snapshot.base.API_KEY).toEqual({
+      type: 'secret',
+      value: '••••••••',
+      masked: true,
+    })
+    expect(result.snapshot.local.API_KEY).toEqual({ value: '••••••••', masked: true })
+    expect(result.resolution.ok).toBe(true)
+    if (!result.resolution.ok) throw new Error('expected matrix resolution to succeed')
+    expect(result.resolution.values.API_KEY).toMatchObject({ value: '••••••••', masked: true })
+    expect(result.resolution.values.AUTH_HEADER).toMatchObject({ value: '••••••••', masked: true })
+    expect(JSON.stringify(result)).not.toContain('top-secret')
+    expect(JSON.stringify(result)).not.toContain('local-secret')
+  })
+
   it('writes a valid local override through the module interface', async () => {
     await writeFile(
       join(repoPath, 'vars', 'base.yaml'),

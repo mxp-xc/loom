@@ -1,5 +1,7 @@
 import type { AgentId } from '../../lib/agents'
 import type {
+  ResolvedVarEntry,
+  StringFormat,
   VarEntryInput,
   VarOverride,
   VarsDiagnostic,
@@ -14,7 +16,7 @@ export type VarsProfileEntryState = 'readonly' | 'configured' | 'available'
 export type VarsProfileEntry = {
   key: string
   type: VarEntryInput['type']
-  format?: string
+  format?: StringFormat
   valuePreview: string
   state: VarsProfileEntryState
   agentSlots: AgentId[]
@@ -34,7 +36,7 @@ export type VarsProfileSummary = {
 export type VarsResolvedRow = {
   key: string
   type: VarEntryInput['type']
-  format?: string
+  format?: StringFormat
   valuePreview: string
   sourceLabel: string
   diagnostics: VarsDiagnostic[]
@@ -59,7 +61,9 @@ export type BuildVarsProfileStateInput = {
 
 const agents: AgentId[] = ['claude-code', 'codex', 'opencode']
 
-export function entryValuePreview(entry: VarEntryInput | VarOverride | undefined): string {
+export function entryValuePreview(
+  entry: VarEntryInput | VarOverride | ResolvedVarEntry | undefined,
+): string {
   if (!entry) return ''
   if (typeof entry.value === 'string') return entry.value
   if (typeof entry.value === 'number' || typeof entry.value === 'boolean')
@@ -120,8 +124,8 @@ function agentSlotsFor(
   return agents.filter((agent) => Boolean(matricesByAgent[agent].snapshot[layer][key]))
 }
 
-function formatFor(entry: VarEntryInput): string | undefined {
-  return entry.type === 'string' ? entry.format : undefined
+function formatFor(entry: VarEntryInput | ResolvedVarEntry): StringFormat | undefined {
+  return entry.type === 'string' && 'format' in entry ? entry.format : undefined
 }
 
 function buildBuiltinEntries(activeMatrix: VarsMatrixResponse): VarsProfileEntry[] {

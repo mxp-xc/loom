@@ -549,6 +549,54 @@ describe('Vars view', () => {
     )
   })
 
+  it('does not overwrite an existing masked secret when saved unchanged', async () => {
+    vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => {
+      const response = matrix(agent)
+      return {
+        ...response,
+        userKeys: [...response.userKeys, 'api_secret'],
+        snapshot: {
+          ...response.snapshot,
+          base: {
+            ...response.snapshot.base,
+            api_secret: { type: 'secret' as const, value: '••••••••' as const, masked: true },
+          },
+        },
+        resolution: {
+          ...response.resolution,
+          values: {
+            ...response.resolution.values,
+            api_secret: { type: 'secret' as const, value: '••••••••' as const, masked: true },
+          },
+          sources: {
+            ...response.resolution.sources,
+            api_secret: { locality: 'synced' as const, layer: 'base' as const },
+          },
+          overrideChains: {
+            ...response.resolution.overrideChains,
+            api_secret: [{ locality: 'synced' as const, layer: 'base' as const }],
+          },
+          dependencies: {
+            ...response.resolution.dependencies,
+            api_secret: [],
+          },
+        },
+      }
+    })
+
+    render(<Vars repoPath="/repo" />)
+    await screen.findByText('api_secret')
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 api_secret' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
+    expect((within(dialog).getByLabelText(/配置值/) as HTMLInputElement).value).toBe('••••••••')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑配置' })).toBeNull())
+    expect(api.vars.setBaseKey).not.toHaveBeenCalled()
+  })
+
   it('keeps an edited secret config on password input and saves without Monaco', async () => {
     vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => {
       const response = matrix(agent)
@@ -559,14 +607,14 @@ describe('Vars view', () => {
           ...response.snapshot,
           base: {
             ...response.snapshot.base,
-            api_secret: { type: 'secret' as const, value: 'existing-secret' },
+            api_secret: { type: 'secret' as const, value: '••••••••' as const, masked: true },
           },
         },
         resolution: {
           ...response.resolution,
           values: {
             ...response.resolution.values,
-            api_secret: { type: 'secret' as const, value: 'existing-secret' },
+            api_secret: { type: 'secret' as const, value: '••••••••' as const, masked: true },
           },
           sources: {
             ...response.resolution.sources,

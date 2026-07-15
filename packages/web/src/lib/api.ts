@@ -65,13 +65,15 @@ export interface McpDebugTool {
   inputSchema?: unknown
 }
 
+export type McpDebugPreviewTarget = 'default' | AgentId
+
 export type CreateMcpDebugSessionResponse =
   | {
       ok: true
       sessionId: string
       source: 'saved' | 'draft'
       serverFingerprint: string
-      previewTarget: AgentId
+      previewTarget: McpDebugPreviewTarget
       tools: McpDebugTool[]
       createdAt: string
       idleExpiresAt: string
@@ -412,8 +414,8 @@ export const api = {
     post('/mcp/import/apply', body).then(json) as Promise<McpImportApplyResponse>,
   createMcpDebugSession: (
     body:
-      | { repo: string; source: 'saved'; serverId: string; previewTarget: AgentId }
-      | { repo: string; source: 'draft'; draft: McpServer; previewTarget: AgentId },
+      | { repo: string; source: 'saved'; serverId: string; previewTarget: McpDebugPreviewTarget }
+      | { repo: string; source: 'draft'; draft: McpServer; previewTarget: McpDebugPreviewTarget },
   ) => post('/mcp/debug/sessions', body).then(json) as Promise<CreateMcpDebugSessionResponse>,
   callMcpDebugTool: (
     sessionId: string,

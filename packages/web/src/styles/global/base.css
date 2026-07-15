@@ -45,9 +45,22 @@ body {
     sans-serif;
   background: var(--bg);
   color: var(--text);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+button:not(:disabled),
+[role='button']:not([aria-disabled='true']):not([aria-roledescription='可排序项']) {
+  cursor: pointer;
+}
+
+[role='button'][aria-roledescription='可排序项']:not([aria-disabled='true']) {
+  cursor: grab;
+}
+
+[role='button'][aria-roledescription='可排序项']:not([aria-disabled='true']):active {
+  cursor: grabbing;
 }
 
 .loom-button:focus-visible {

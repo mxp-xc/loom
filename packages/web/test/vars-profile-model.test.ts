@@ -121,6 +121,35 @@ describe('profile vars view model', () => {
     })
   })
 
+  it('keeps masked resolved values displayable without assuming a string format', () => {
+    const maskedMatrix = matrix('codex')
+    maskedMatrix.builtinKeys.push('LOOM_SECRET_DERIVED')
+    if (maskedMatrix.resolution.ok) {
+      maskedMatrix.resolution.values.LOOM_SECRET_DERIVED = {
+        type: 'json',
+        value: '••••••••',
+        masked: true,
+      }
+      maskedMatrix.resolution.sources.LOOM_SECRET_DERIVED = {
+        locality: 'builtin',
+        layer: 'runtime',
+      }
+    }
+    const state = buildVarsProfileState({
+      matricesByAgent: { ...matricesByAgent, codex: maskedMatrix },
+      activeAgent: 'codex',
+      definitionAgent: 'codex',
+      definitionScope: 'default',
+      showAvailable: false,
+    })
+
+    expect(state.resolvedRows.find((row) => row.key === 'LOOM_SECRET_DERIVED')).toMatchObject({
+      type: 'json',
+      format: undefined,
+      valuePreview: '••••••••',
+    })
+  })
+
   it('shows default local values in profile entries instead of the selected agent override', () => {
     const state = buildVarsProfileState({
       matricesByAgent,

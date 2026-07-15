@@ -60,29 +60,32 @@ Tests:
 - packages/web/test/views.test.tsx
 - packages/server/test/projection/mcp-merge.test.ts
 
-## R-MCP-003 Preview target 是只读解析上下文
+## R-MCP-003 配置视图是只读解析上下文
 
 Status: active
 Applies to: MCP detail, MCP editor, vars rendering
 
 Rule:
-Preview target 用于查看某个 agent 视角下的 transport、env、headers 和 settings preview。它只影响变量解析和预览格式，不改变 desired state。
+配置视图用于查看原始定义、默认解析结果或某个 agent 视角下的 transport、env、headers 和 settings preview。它只影响变量解析和预览格式，不改变 desired state。
 
 Implications:
 
-- Detail header 提供 CC/CX/OC preview switch。
-- Editor 下方 preview card 使用当前 draft 和 preview target 实时展示写入形态。
+- Detail 和 Editor header 提供 RAW、Default、CC、CX、OC 配置视图。
+- RAW 保留 \`\${...}\`；Default 只按 Base → Local 解析，不应用 agent override 或 builtin runtime。
+- Editor 下方 preview card 使用当前 draft 和配置视图实时展示对应形态。
 - Claude Code 预览为 \`mcpServers\` JSON，Codex 预览为 \`mcp_servers\` TOML-like，OpenCode 预览为 \`mcp\` JSON。
-- \`\${var}\` 解析使用所选 target 的 per-agent vars 结果。
+- \`\${var}\` 在 Default 中使用中性结果，在 agent 视图中使用对应 per-agent vars 结果。
+- Tools 从 RAW 进入时自动切换到 Default；Default 和 agent 视图都可以创建真实调试连接。
 
 Safety:
 
-- Preview target 切换不能触发保存、target 应用或 projection。
+- 配置视图切换不能触发保存、target 应用或 projection。
 - 缺失变量、默认值、JSON 插值等诊断必须在 preview 中可见。
 
 Examples:
 
 - 同一个 \`\${browsers_path}\` 在 CC 与 CX 下可显示不同 resolved value，但 server 的 targets 不变化。
+- Default 调试连接使用 Base → Local 的值，不把任意 agent 当作隐式 fallback。
 
 Tests:
 
@@ -100,7 +103,7 @@ Rule:
 Implications:
 
 - Reorder 只重排当前仍存在的 server；请求遗漏的 server 按当前顺序追加。
-- 搜索或 transport filter 生效时 UI 禁止排序，避免把局部结果误写成全局顺序。
+- 搜索生效时 UI 禁止排序，避免把局部结果误写成全局顺序。
 - 顺序未变化时不写文件。
 
 Safety:

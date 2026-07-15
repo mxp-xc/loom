@@ -3,15 +3,19 @@ import { api } from '@/lib/api'
 import { AGENTS, type AgentId } from '@/lib/agents'
 import type { VarsMatrixResponse } from '@/lib/vars'
 
+export type McpResolveContext = 'default' | AgentId
+
 export function useMcpPreviewVars(repoPath: string) {
-  const [matrices, setMatrices] = useState<Partial<Record<AgentId, VarsMatrixResponse>>>({})
+  const [matrices, setMatrices] = useState<Partial<Record<McpResolveContext, VarsMatrixResponse>>>(
+    {},
+  )
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     Promise.all(
-      AGENTS.map(async (agent) => {
+      (['default', ...AGENTS] as const).map(async (agent) => {
         try {
           const matrix = await api.vars.getMatrix(repoPath, agent)
           return [agent, matrix] as const
@@ -25,7 +29,9 @@ export function useMcpPreviewVars(repoPath: string) {
         if (cancelled) return
         setMatrices(
           Object.fromEntries(
-            entries.filter((entry): entry is [AgentId, VarsMatrixResponse] => Boolean(entry[1])),
+            entries.filter((entry): entry is [McpResolveContext, VarsMatrixResponse] =>
+              Boolean(entry[1]),
+            ),
           ),
         )
       })

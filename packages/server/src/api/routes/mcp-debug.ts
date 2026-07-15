@@ -4,7 +4,6 @@ import {
   AgentIdSchema,
   McpServerSchema,
   renderTextWithResolvedVars,
-  type AgentId,
   type McpServer,
   type VarsDiagnostic,
 } from '@loom/core'
@@ -14,6 +13,7 @@ import {
   McpDebugSessionError,
   McpDebugSessionManager,
   type McpDebugCallResult,
+  type McpDebugPreviewTarget,
   type McpDebugSessionSnapshot,
 } from '../../mcp/debug-session.js'
 import { VarsApplication, VarsApplicationError } from '../../vars/application.js'
@@ -26,7 +26,7 @@ export interface McpDebugSessionManagerLike {
   createSession(input: {
     source: 'saved' | 'draft'
     server: McpServer
-    previewTarget: AgentId
+    previewTarget: McpDebugPreviewTarget
   }): Promise<McpDebugSessionSnapshot>
   callTool(
     sessionId: string,
@@ -42,18 +42,19 @@ export interface McpDebugRouteDeps extends RouteDeps {
 const mcpDebugLogger = logger.child('mcp-debug-route')
 const NonEmptyString = z.string().min(1)
 const RepoField = z.unknown()
+const McpDebugPreviewTargetSchema = z.union([z.literal('default'), AgentIdSchema])
 const CreateMcpDebugSessionBody = z.discriminatedUnion('source', [
   z.object({
     repo: RepoField,
     source: z.literal('saved'),
     serverId: NonEmptyString,
-    previewTarget: AgentIdSchema,
+    previewTarget: McpDebugPreviewTargetSchema,
   }),
   z.object({
     repo: RepoField,
     source: z.literal('draft'),
     draft: McpServerSchema,
-    previewTarget: AgentIdSchema,
+    previewTarget: McpDebugPreviewTargetSchema,
   }),
 ])
 const SessionParams = z.object({ id: NonEmptyString })
@@ -185,15 +186,15 @@ async function resolveMcpServerForDebug(
   deps: RouteDeps,
   repoPath: string,
   server: McpServer,
-  previewTarget: AgentId,
+  previewTarget: McpDebugPreviewTarget,
 ): Promise<McpServer> {
   if (!serverHasVariables(server)) return connectionOnlyServer(server)
 
   try {
-    const resolution = await new VarsApplication(deps.fs, deps.home).preview(
-      repoPath,
-      previewTarget,
-    )
+    const resolution = await new VarsApplication(
+      deps.fs,
+      deps.home,
+    ).resolveUnmaskedForInterpolation(repoPath, previewTarget)
     const diagnostics: VarsDiagnostic[] = []
     const render = (value: string | undefined): string | undefined => {
       if (value === undefined) return undefined

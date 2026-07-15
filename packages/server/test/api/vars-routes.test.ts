@@ -121,6 +121,70 @@ describe('vars HTTP API', () => {
     ])
   })
 
+  it('returns the default matrix without agent overrides or builtin runtime', async () => {
+    await mkdir(join(root, 'vars', 'agents'), { recursive: true })
+    await mkdir(join(home, '.loom', 'local', 'repos', 'default', 'vars'), { recursive: true })
+    await writeFile(join(root, 'vars', 'base.yaml'), 'agent_name:\n  type: string\n  value: Base\n')
+    await writeFile(join(root, 'vars', 'agents', 'codex.yaml'), 'agent_name:\n  value: Codex\n')
+    await writeFile(
+      join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml'),
+      'agent_name:\n  value: Local\n',
+    )
+
+    const result = await json(`/vars/matrix?repoPath=${encodeURIComponent(root)}&agent=default`)
+
+    expect(result.response.status).toBe(200)
+    expect(result.body.agent).toBe('default')
+    expect(result.body.builtinKeys).toEqual([])
+    expect(result.body.snapshot.baseAgent).toEqual({})
+    expect(result.body.snapshot.localAgent).toEqual({})
+    expect(result.body.resolution.values.agent_name.value).toBe('Local')
+    expect(result.body.resolution.values).not.toHaveProperty('LOOM_AGENT')
+  })
+
+  it('masks secrets and secret-tainted values in the public vars preview', async () => {
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      [
+        'API_KEY:',
+        '  type: secret',
+        '  value: top-secret-preview',
+        'AUTH_HEADER:',
+        '  type: string',
+        '  value: Bearer ${API_KEY}',
+        '',
+      ].join('\n'),
+    )
+
+    const result = await json(`/vars/preview?repoPath=${encodeURIComponent(root)}&agent=default`)
+
+    expect(result.response.status).toBe(200)
+    expect(result.body.values.API_KEY).toEqual({
+      type: 'secret',
+      value: '••••••••',
+      masked: true,
+    })
+    expect(result.body.values.AUTH_HEADER).toEqual({
+      type: 'string',
+      value: '••••••••',
+      masked: true,
+    })
+    expect(result.body.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'API_KEY',
+          value: { type: 'secret', value: '••••••••', masked: true },
+        }),
+        expect.objectContaining({
+          key: 'AUTH_HEADER',
+          value: { type: 'string', value: '••••••••', masked: true },
+        }),
+      ]),
+    )
+    expect(JSON.stringify(result.body)).not.toContain('top-secret-preview')
+    expect(JSON.stringify(result.body)).not.toContain('Bearer top-secret-preview')
+  })
+
   it('sets base definitions and local overrides in their semantic layers', async () => {
     const created = await json('/vars/base-key', {
       method: 'PUT',

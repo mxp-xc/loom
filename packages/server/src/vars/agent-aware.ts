@@ -270,6 +270,39 @@ export async function resolveAgentAwareVars(
   })
 }
 
+export async function readDefaultVarsWithDiagnostics(
+  fs: IFileSystem,
+  home: string,
+  repoPath: string,
+): Promise<AgentAwareVarsReadResult> {
+  const diagnostics: VarsDiagnostic[] = []
+  const basePath = syncedVarsPath(repoPath)
+  const localPath = localVarsPath(home, repoPath)
+  const [baseSource, localSource] = await Promise.all([
+    readOptional(fs, basePath),
+    readOptional(fs, localPath),
+  ])
+  return {
+    snapshot: {
+      base: parseBaseLayer(baseSource, 'base', basePath, diagnostics),
+      baseAgent: {},
+      local: parseOverrideLayer(localSource, 'local', localPath, diagnostics),
+      localAgent: {},
+    },
+    diagnostics,
+  }
+}
+
+export async function resolveDefaultVars(
+  fs: IFileSystem,
+  home: string,
+  repoPath: string,
+): Promise<LayeredVarsResolution> {
+  const { snapshot, diagnostics } = await readDefaultVarsWithDiagnostics(fs, home, repoPath)
+  if (diagnostics.length > 0) return { ok: false, diagnostics }
+  return resolveLayeredVars({ base: snapshot.base, local: snapshot.local })
+}
+
 export async function renderAgentAwareText(
   fs: IFileSystem,
   home: string,

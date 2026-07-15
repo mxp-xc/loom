@@ -67,18 +67,19 @@ export type VarsLayerRef =
   | { locality: 'builtin'; layer: 'runtime'; agent?: string }
 
 export type VarOverride = { value: string | number | boolean | JsonValue }
+export type PresentedVarOverride = VarOverride | { value: '••••••••'; masked: true }
 
 export interface AgentAwareVarsSnapshot {
-  base: Record<string, VarEntryInput>
-  baseAgent: Record<string, VarOverride>
-  local: Record<string, VarOverride>
-  localAgent: Record<string, VarOverride>
+  base: Record<string, VarEntry>
+  baseAgent: Record<string, PresentedVarOverride>
+  local: Record<string, PresentedVarOverride>
+  localAgent: Record<string, PresentedVarOverride>
 }
 
 export type AgentAwareVarsResolution =
   | {
       ok: true
-      values: Record<string, VarEntryInput>
+      values: Record<string, ResolvedVarEntry>
       sources: Record<string, VarsLayerRef>
       overrideChains: Record<string, VarsLayerRef[]>
       dependencies: Record<string, string[]>

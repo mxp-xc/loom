@@ -50,6 +50,7 @@ function fakeMonacoModel(line: string) {
 
 beforeEach(() => {
   monacoEditorMock.reset()
+  window.history.replaceState({}, '', '/mcp')
 })
 
 vi.mock('../src/lib/api', () => ({
@@ -326,12 +327,19 @@ describe('MCP view', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Add server' }).at(-1)!)
     expect(screen.queryByRole('dialog', { name: /MCP Server/ })).toBeNull()
     expect(screen.getByRole('heading', { name: '新增 MCP server' })).toBeDefined()
-    expect(screen.getByLabelText('env file')).toBeDefined()
-    expect(
-      monacoEditorMock.props.some(
-        (props) => props.language === 'plaintext' && props.height === '150px',
-      ),
-    ).toBe(true)
+    expect(screen.getByLabelText('env key 1')).toBeDefined()
+    expect(screen.getByRole('tab', { name: 'JSON' })).toBeDefined()
+    const envModes = screen.getByRole('tablist', { name: 'env 编辑方式' })
+    expect(within(envModes).getByRole('tab', { name: '切换 env 为 key value 编辑' })).toBeDefined()
+    expect(within(envModes).getByRole('tab', { name: '切换 env 为 env file 编辑' })).toBeDefined()
+    expect(screen.getByText('KEY')).toBeDefined()
+    expect(screen.getByText('VALUE')).toBeDefined()
+    expect(screen.getByRole('button', { name: '新增 env 行' }).textContent).toContain(
+      '添加环境变量',
+    )
+    expect(screen.getByLabelText('server id').parentElement?.querySelector('svg')).not.toBeNull()
+    expect(screen.getByLabelText('command').parentElement?.querySelector('svg')).not.toBeNull()
+    expect(screen.getByText('小写字母、数字与连字符。')).toBeDefined()
   })
 
   it('loads MCP vars and suggests variables inside env files', async () => {
@@ -357,6 +365,7 @@ describe('MCP view', () => {
     expect(await screen.findByRole('heading', { name: '编辑 MCP server' })).toBeDefined()
 
     await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledWith('/tmp/mcp-layout', 'codex'))
+    fireEvent.click(screen.getByRole('tab', { name: 'JSON' }))
     await waitFor(() => expect(monacoEditorMock.providers.length).toBeGreaterThan(0))
 
     const provider = monacoEditorMock.providers[0] as {
@@ -378,21 +387,13 @@ describe('MCP view', () => {
     const idInput = screen.getByLabelText('server id') as HTMLInputElement
     expect(idInput.value).toBe('test-mcp')
     expect(idInput.disabled).toBe(true)
+    expect(screen.getByText('ID 已锁定，保存后不可修改')).toBeDefined()
 
     fireEvent.change(screen.getByLabelText('command'), { target: { value: 'node' } })
     expect(screen.queryByText('targets')).toBeNull()
 
-    const envEditor = screen.getByRole('textbox', { name: 'env file' })
-    expect(
-      monacoEditorMock.props.some(
-        (props) =>
-          props.language === 'plaintext' && props.height === '150px' && props.value === 'FOO=bar',
-      ),
-    ).toBe(true)
-    fireEvent.change(envEditor, {
-      target: { value: 'FOO=baz' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Save server' }))
+    fireEvent.change(screen.getByLabelText('env value 1'), { target: { value: 'baz' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() =>
       expect(api.updateMcpServer).toHaveBeenCalledWith({
@@ -417,19 +418,10 @@ describe('MCP view', () => {
     fireEvent.click(await screen.findByRole('button', { name: '编辑 remote-mcp' }))
     expect(await screen.findByRole('heading', { name: '编辑 MCP server' })).toBeDefined()
 
-    const headersEditor = screen.getByRole('textbox', { name: 'headers file' })
-    expect(
-      monacoEditorMock.props.some(
-        (props) =>
-          props.language === 'plaintext' &&
-          props.height === '150px' &&
-          props.value === 'Authorization=Bearer token',
-      ),
-    ).toBe(true)
-    fireEvent.change(headersEditor, {
-      target: { value: 'Authorization=Bearer ${API_TOKEN}' },
+    fireEvent.change(screen.getByLabelText('headers value 1'), {
+      target: { value: 'Bearer ${API_TOKEN}' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Save server' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() =>
       expect(api.updateMcpServer).toHaveBeenCalledWith({
@@ -451,14 +443,13 @@ describe('MCP view', () => {
     fireEvent.click(await screen.findByRole('button', { name: '编辑 test-mcp' }))
     expect(await screen.findByRole('heading', { name: '编辑 MCP server' })).toBeDefined()
 
-    fireEvent.click(screen.getByRole('button', { name: '切换 env 为 key value 编辑' }))
     fireEvent.change(screen.getByLabelText('env key 1'), { target: { value: 'FOO' } })
     fireEvent.change(screen.getByLabelText('env value 1'), { target: { value: 'baz' } })
     fireEvent.click(screen.getByRole('button', { name: '新增 env 行' }))
     fireEvent.change(screen.getByLabelText('env key 2'), { target: { value: 'TOKEN' } })
     fireEvent.change(screen.getByLabelText('env value 2'), { target: { value: 'abc 123' } })
     fireEvent.click(screen.getByRole('button', { name: '删除 env 行 1' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Save server' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() =>
       expect(api.updateMcpServer).toHaveBeenCalledWith({
@@ -481,7 +472,7 @@ describe('MCP view', () => {
 
       await screen.findByRole('region', { name: 'MCP workbench' })
       fireEvent.click(screen.getAllByRole('button', { name: 'Add server' }).at(-1)!)
-      fireEvent.click(screen.getByRole('button', { name: 'Save server' }))
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
       expect(await screen.findByText('id 不能为空')).toBeDefined()
       expect(api.addMcpServer).toHaveBeenCalledTimes(callsBefore)
@@ -533,7 +524,7 @@ describe('MCP view', () => {
     vi.mocked(api.updateMcpTargets).mockResolvedValue({ ok: true } as never)
   })
 
-  it('keeps selection while reordering to the end and disables sorting while filtered', async () => {
+  it('keeps selection while reordering to the end and disables sorting while searching', async () => {
     render(<Mcp repoPath="/tmp/mcp-layout" />)
 
     const first = await screen.findByLabelText('调整 test-mcp 顺序')
@@ -541,8 +532,14 @@ describe('MCP view', () => {
     ;[first, second].forEach((element, index) => {
       element.getBoundingClientRect = () =>
         DOMRect.fromRect({ x: 0, y: index * 100, width: 320, height: 92 })
+      const sortableItem = element.parentElement?.parentElement?.parentElement
+      if (sortableItem) {
+        sortableItem.getBoundingClientRect = () =>
+          DOMRect.fromRect({ x: 0, y: index * 100, width: 700, height: 92 })
+      }
     })
     fireEvent.click(screen.getAllByRole('button', { name: '选择 remote-mcp' })[0])
+    expect(await screen.findByRole('heading', { name: 'remote-mcp' })).toBeDefined()
 
     first.focus()
     fireEvent.keyDown(first, { key: ' ', code: 'Space' })
@@ -556,9 +553,7 @@ describe('MCP view', () => {
         ids: ['remote-mcp', 'test-mcp'],
       }),
     )
-    expect(
-      screen.getAllByRole('button', { name: '选择 remote-mcp' })[0].getAttribute('data-selected'),
-    ).toBe('true')
+    expect(await screen.findByRole('heading', { name: 'remote-mcp' })).toBeDefined()
 
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'remote' } })
     expect(screen.getByLabelText('调整 remote-mcp 顺序').getAttribute('aria-disabled')).toBe('true')

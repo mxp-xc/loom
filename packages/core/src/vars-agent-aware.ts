@@ -15,7 +15,7 @@ export interface BuiltinVarsRuntime {
 }
 
 export interface LayeredVarsInput {
-  agent: AgentId
+  agent?: AgentId
   base: Record<string, VarDefinition>
   baseAgent?: Record<string, VarOverride>
   local?: Record<string, VarOverride>
@@ -159,15 +159,16 @@ export function resolveLayeredVars(input: LayeredVarsInput): LayeredVarsResoluti
     overrideChains[key] = [baseLayer]
   }
 
-  applyOverrideLayer(
-    merged,
-    sources,
-    overrideChains,
-    input.base,
-    input.baseAgent,
-    baseAgentLayer(input.agent),
-    diagnostics,
-  )
+  if (input.agent)
+    applyOverrideLayer(
+      merged,
+      sources,
+      overrideChains,
+      input.base,
+      input.baseAgent,
+      baseAgentLayer(input.agent),
+      diagnostics,
+    )
   applyOverrideLayer(
     merged,
     sources,
@@ -177,19 +178,20 @@ export function resolveLayeredVars(input: LayeredVarsInput): LayeredVarsResoluti
     localLayer,
     diagnostics,
   )
-  applyOverrideLayer(
-    merged,
-    sources,
-    overrideChains,
-    input.base,
-    input.localAgent,
-    localAgentLayer(input.agent),
-    diagnostics,
-  )
+  if (input.agent)
+    applyOverrideLayer(
+      merged,
+      sources,
+      overrideChains,
+      input.base,
+      input.localAgent,
+      localAgentLayer(input.agent),
+      diagnostics,
+    )
 
-  const builtin = input.builtin ?? createBuiltinVars({ agent: input.agent })
+  const builtin = input.builtin ?? (input.agent ? createBuiltinVars({ agent: input.agent }) : {})
   for (const [key, definition] of Object.entries(builtin)) {
-    const layer = builtinLayer(input.agent)
+    const layer = builtinLayer(input.agent ?? 'default')
     merged[key] = cloneDefinition(definition)
     sources[key] = layer
     overrideChains[key] = [layer]

@@ -214,10 +214,14 @@ function SortableItem<T extends { id: string }>({
       },
     ]),
   ) as HTMLAttributes<HTMLElement>
+  const activatorListeners =
+    activator === 'item'
+      ? filteredListeners
+      : (listeners as HTMLAttributes<HTMLElement> | undefined)
   const activatorProps = {
     ref: setActivatorNodeRef as RefCallback<HTMLElement>,
     ...attributes,
-    ...filteredListeners,
+    ...activatorListeners,
     'aria-label': `调整 ${label} 顺序`,
     'aria-roledescription': '可排序项',
   } as SortableRenderState['activatorProps']

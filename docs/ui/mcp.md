@@ -1,69 +1,72 @@
 # MCP Workbench
 
-MCP 页面用于管理仓库级 MCP server、target 应用和显式 Project changes。页面采用 workbench 布局，不使用新增/编辑 modal。
+MCP 页面管理仓库级 MCP server 定义、desired targets 和显式 Project changes。定义保存不自动投影配置，也不改写现有 targets。
 
-## 布局
+## 页面结构
 
-桌面端为左右两栏：
+页面主体由 server inventory 和右侧抽屉组成。抽屉状态写入 URL：
 
-- Page head 下方显示页面级全局 target bar，用于批量更新所有 server 的 desired targets。
-- 左侧 inventory 固定宽度，包含 Add server、Project changes、搜索、transport filter 和 server rows。
-- 右侧 detail/editor 固定卡片宽度，内容高度受 workbench 限制，超出后在卡片内部滚动。
+- `?view=detail&server=<id>`：查看已保存 Server。
+- `?view=edit&server=<id>`：编辑已保存 Server。
+- `?view=create`：创建 Server。
 
-窄屏下两栏纵向排列，inventory 与 detail/editor 都占满宽度。切换 preview target 只能影响内容高度，不应改变卡片宽度或造成 horizontal overflow。
+Detail 抽屉宽度为 `680–740px`，Edit/Create 为 `760–880px`。抽屉挂载时从右侧滑入；窄屏下全屏显示。抽屉 header 和 Editor footer 固定，正文独立滚动；`配置 / Tools` tabs 固定在正文顶部。所有视口不得产生页面级横向滚动。
 
 ## Inventory
 
-Inventory 顶部的 Add server 与 Project changes 靠近 server 列表主操作区。全局 target chips 表示“应用到全部 server”，row target chips 表示单个 server 的 desired targets。
+页面 header 的动作从左到右为 Add server、Project changes。Inventory header 使用两层布局：第一层显示“所有 Servers”、数量和列表操作，第二层显示 Apply all targets；列表不提供 transport filter。列表使用 `Server / Targets / 操作` 三列，表头和内容水平、垂直对齐。每行使用等宽字体展示 Server ID 和连接摘要，并展示 transport 色点、transport 标签、CC/CX/OC desired target chips、编辑和删除操作。
 
-Import 按钮与 Add server、Project changes 同属 inventory 主操作区。点击后打开导入 dialog，扫描 CC/CX/OC 原生 MCP 配置并展示候选项。Dialog 需要显示来源、最终 id、targets、改名状态、ignored fields 和 disabled 原因；默认选中可导入项，不选 unchanged 项，disabled 项不可选。确认导入只刷新 desired state，不自动运行 Project changes。
+- 点击行进入 Detail；键盘可使用 Enter 或 Space 打开。
+- `GripVertical` 是唯一排序把手，支持鼠标、触摸和键盘排序。
+- 搜索生效时禁用排序。
+- 排序使用乐观更新；保存期间锁定，失败时恢复服务端顺序。
+- 行 target chips 只更新单个 Server；Apply all 只批量更新 desired targets。
+- 删除必须确认，且不会自动运行 Project changes。
 
-Target chip 使用 CC/CX/OC 短标签与品牌色状态区分：
-
-- off：低对比边框与 muted 文本。
-- mixed：半强调状态，仅用于全局 target chip。
-- on：填充或高亮状态。
-
-Row actions 使用有间距的图标按钮，edit 与 delete 不挤压 target chips。删除必须先确认。
+Import dialog 扫描 CC/CX/OC 原生配置并展示来源、最终 ID、targets、改名状态、ignored fields 和 disabled 原因。默认选中可导入项，不选 unchanged 项；stale preview 必须重新扫描后才能 apply。
 
 ## Detail
 
-Detail header 显示 selected server、描述、transport 和全局 Preview as CC/CX/OC switch。Preview target 是只读上下文，用于 transport/env/headers/settings preview 的变量解析，不改变 targets。
+Detail header 显示 Server ID、transport、配置视图和常用操作。配置与 Tools tabs 使用图标、明确的 active surface 和 pointer cursor。配置视图包括：
 
-字段展示规则：
+- `RAW`：保留 `${...}` 变量引用。
+- `Default`：按 Base → Local 解析，展示解析后的 Loom Server 定义。
+- `CC / CX / OC`：按对应 agent 的真实变量矩阵解析 connection、env、headers 和写入配置。
 
-- \`stdio\` 展示 command、args、env 和 settings preview，不显示 headers。
-- \`sse\`/\`http\` 的 env 与 headers 分开展示。
-- 不展示 projection paths 等和列表或 Project changes 冗余的信息。
+配置定义按 Connection、Environment 和 Headers 分组。`stdio` 展示 command 与 arguments；`sse`/`http` 展示 endpoint URL。写入预览默认展开，header 与正文使用独立 surface 和分隔边框，并按目标格式显示 JSON 或 TOML 高亮。
 
-\`\${var}\` token 使用可点击高亮样式，hover 时呈现可交互光标。点击后打开变量信息弹窗。
+RAW 中的变量 token 可打开 Variable Inspector，查看 mask 后的值、来源和 trace。已解析视图只显示解析结果，不再渲染变量按钮。
 
-## Embedded editor
+## Editor
 
-Create/Edit 在 workbench 右侧内嵌显示。表单只编辑 server definition，不显示 target/projection 控件。
+Editor 只编辑完整 Server 定义，不包含 targets。Edit 保存时保留 persisted targets，Create 默认不应用到任何 target。
 
-- Create 保存时默认不应用到任何 target。
-- Edit 保存时保留原 server targets。
-- Cancel 与 Save server 使用圆角、分层按钮样式，并与表单内容保持足够间距。
-- 表单下方展示 settings preview，随 draft 与 preview target 更新。
+- Command 独占一行。
+- Arguments 的权威值为 `string[]`，使用独立拖拽把手排序，不显示冗余上下箭头，并支持增删、多行粘贴、空字符串和保留空格。
+- Environment 与 Headers 使用边框和 active surface 明确的 Key/value、raw text segmented control；Key/value 模式显示 KEY/VALUE 列标题、字段图标和带文字的新增操作，多行模式使用 Monaco。
+- 空 value 合法；空 key 或重复 key 就地报错并禁用保存。
+- Visual 与 JSON 使用带图标的 segmented control，并双向同步完整定义。
+- 非法 JSON 保留原始文本、锁定 Visual 和 Tools，并禁用保存。
+- 配置视图只改变 Preview；编辑字段始终保留原始 `${...}`。
 
-## Settings preview
+保存状态、错误和 partial success 在固定 footer 中反馈，不通过临时草稿概念表达。
 
-Settings preview 以当前 preview target 展示 agent-native 写入形态：
+## Tools
 
-- Claude Code：\`mcpServers\` JSON。
-- Codex：\`mcp_servers\` TOML-like preview。
-- OpenCode：\`mcp\` JSON。
+Tools 是 Detail、Edit 和 Create 中的次级路径，只调试已持久化 Server。
 
-Preview 需要展示变量解析后的值和诊断。缺失变量、默认值、JSON interpolation 等状态应在 preview 中可辨识。
+- Detail 直接连接当前已保存 Server。
+- Edit 使用“保存并连接”，Create 使用“创建并连接”。持久化失败时不创建 session。
+- 保存成功后保持当前 Editor/Tools，不自动跳回 Detail。
+- 从 RAW 进入 Tools 时自动切换到 Default；Default 使用 Base → Local，CC/CX/OC 使用对应 agent 解析环境。
+- 修改连接字段或离开 Tools 后立即 disconnect。
+- 连接请求期间切换解析环境、修改连接或离开 Tools 会使请求失效；迟到的 session 会立即断开。
+- Web 只发送 `source: 'saved'`。
 
-## 变量信息弹窗
+连接后显示 tools 列表、JSON Schema 参数编辑器、reset、call、duration、result、parse error 和 session expiry。Tools 列表支持按名称和描述进行多关键词搜索，筛选不改变当前工具、参数或调用结果。桌面工作区填满抽屉剩余高度，列表、参数和结果在各自区域内滚动；窄屏恢复单列自然内容流。
 
-变量信息弹窗沿用 Vars modal 的视觉语言：暗色浮层、柔和边框、分区卡片、清晰关闭控件。Trace 使用 Base → Base/agent → Local → Local/agent → Runtime 语义，不显示 “MCP env” 这类消费位置作为变量来源。
+## 弹窗与状态
 
-## 状态
+Delete、dirty-close、Variable Inspector 和 Import 使用统一 scrim、surface、边框、圆角、字号和按钮层级。Toast、loading、saving、connecting、calling、empty、invalid JSON 和错误状态应保持稳定布局。
 
-- Loading：保持 workbench 骨架稳定，避免布局跳动。
-- Empty：在 inventory 中提示新增 server，并保留 Add server 主操作。
-- Error：展示可恢复错误信息，不覆盖用户已输入 draft。
-- Long text：路径、command、header value 和 preview code 应换行或内部滚动，不撑破页面。
+默认使用亮色主题；暗色主题降低背景和高亮对比度，避免高亮区域刺眼。长 command、arguments、URL、header value 和 preview code 必须换行或在局部滚动，不得撑破抽屉。

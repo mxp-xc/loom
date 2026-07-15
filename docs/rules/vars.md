@@ -45,6 +45,7 @@ Implications:
 - Agent、local、local-agent 层不能用 typed definition 新增 key。
 - Override value 必须符合 base definition 的类型。
 - Builtin runtime vars 不写入磁盘，且用户不能定义 `LOOM_*` key。
+- Default 解析上下文只合并 base 与 local，不包含 agent override 或 builtin runtime。
 
 Safety:
 

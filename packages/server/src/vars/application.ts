@@ -26,8 +26,10 @@ import {
   deleteAgentAwareBaseKey,
   readAgentAwareVars,
   readAgentAwareVarsWithDiagnostics,
+  readDefaultVarsWithDiagnostics,
   renameAgentAwareBaseKey,
   resolveAgentAwareVars,
+  resolveDefaultVars,
   validateAgentAwareBaseDefinitions,
   writeAgentAwareBase,
   writeAgentAwareOverride,
@@ -52,24 +54,45 @@ export class VarsApplicationError extends Error {
 
 export interface VarsMatrix {
   ok: true
-  agent: AgentId
+  agent: AgentId | 'default'
   builtinKeys: string[]
   userKeys: string[]
-  snapshot: AgentAwareVarsSnapshot
-  resolution: LayeredVarsResolution
+  snapshot: PresentedAgentAwareVarsSnapshot
+  resolution: PresentedLayeredVarsResolution | Extract<LayeredVarsResolution, { ok: false }>
 }
 
 export type MaskedVarEntry = VarEntry | { type: 'secret'; value: string; masked: true }
+export type PresentedVarOverride = VarOverride | { value: string; masked: true }
+export interface PresentedAgentAwareVarsSnapshot {
+  base: Record<string, MaskedVarEntry>
+  baseAgent: Record<string, PresentedVarOverride>
+  local: Record<string, PresentedVarOverride>
+  localAgent: Record<string, PresentedVarOverride>
+}
 export type PresentedResolvedValues = Record<
   string,
   VarEntry | { type: VarEntry['type']; value: string; masked: true }
 >
+export type PresentedLayeredVarsEntry = Omit<
+  Extract<LayeredVarsResolution, { ok: true }>['entries'][number],
+  'value'
+> & { value: PresentedResolvedValues[string] }
 
 export interface PresentedVarsResolution {
   ok: true
   values: PresentedResolvedValues
   sources: Extract<VarsLifecycleResolution, { ok: true }>['sources']
   dependencies: Extract<VarsLifecycleResolution, { ok: true }>['dependencies']
+  diagnostics: VarsDiagnostic[]
+}
+
+export interface PresentedLayeredVarsResolution {
+  ok: true
+  values: PresentedResolvedValues
+  sources: Extract<LayeredVarsResolution, { ok: true }>['sources']
+  overrideChains: Extract<LayeredVarsResolution, { ok: true }>['overrideChains']
+  dependencies: Extract<LayeredVarsResolution, { ok: true }>['dependencies']
+  entries: PresentedLayeredVarsEntry[]
   diagnostics: VarsDiagnostic[]
 }
 
@@ -222,18 +245,32 @@ export class VarsApplication {
 
   async preview(
     repoPath: string,
-    agent: AgentId,
+    context: AgentId | 'default',
+  ): Promise<PresentedLayeredVarsResolution> {
+    return presentLayeredResolution(await this.resolveUnmaskedForInterpolation(repoPath, context))
+  }
+
+  async resolveUnmaskedForInterpolation(
+    repoPath: string,
+    context: AgentId | 'default',
   ): Promise<Extract<LayeredVarsResolution, { ok: true }>> {
-    const result = await resolveAgentAwareVars(this.fs, this.home, repoPath, agent)
+    const result =
+      context === 'default'
+        ? await resolveDefaultVars(this.fs, this.home, repoPath)
+        : await resolveAgentAwareVars(this.fs, this.home, repoPath, context)
     if (!result.ok)
       throw new VarsApplicationError(422, 'resolution_failed', '变量解析失败', result.diagnostics)
     return result
   }
 
-  async matrix(repoPath: string, agent: AgentId): Promise<VarsMatrix> {
+  async matrix(repoPath: string, agent: AgentId | 'default'): Promise<VarsMatrix> {
     const [readResult, resolution] = await Promise.all([
-      readAgentAwareVarsWithDiagnostics(this.fs, this.home, repoPath, agent),
-      resolveAgentAwareVars(this.fs, this.home, repoPath, agent),
+      agent === 'default'
+        ? readDefaultVarsWithDiagnostics(this.fs, this.home, repoPath)
+        : readAgentAwareVarsWithDiagnostics(this.fs, this.home, repoPath, agent),
+      agent === 'default'
+        ? resolveDefaultVars(this.fs, this.home, repoPath)
+        : resolveAgentAwareVars(this.fs, this.home, repoPath, agent),
     ])
     const snapshot = readResult.snapshot
     const mergedDiagnostics = [
@@ -247,7 +284,9 @@ export class VarsApplication {
               ([key]) => resolution.sources[key]?.locality === 'builtin',
             ),
           )
-        : builtinForAgent(agent),
+        : agent === 'default'
+          ? {}
+          : builtinForAgent(agent),
     ).sort()
     const userKeys = [
       ...new Set([
@@ -263,8 +302,10 @@ export class VarsApplication {
       agent,
       builtinKeys,
       userKeys,
-      snapshot,
-      resolution: resolution.ok ? resolution : { ok: false, diagnostics: mergedDiagnostics },
+      snapshot: presentAgentAwareSnapshot(snapshot),
+      resolution: resolution.ok
+        ? presentLayeredResolution(resolution)
+        : { ok: false, diagnostics: mergedDiagnostics },
     }
   }
 
@@ -420,6 +461,61 @@ function maskEnvironment(
     entries: Object.fromEntries(
       Object.entries(environment.entries).map(([key, entry]) => [key, maskEntry(entry)]),
     ),
+  }
+}
+
+function presentAgentAwareSnapshot(
+  snapshot: AgentAwareVarsSnapshot,
+): PresentedAgentAwareVarsSnapshot {
+  const secretKeys = new Set(
+    Object.entries(snapshot.base)
+      .filter(([, entry]) => entry.type === 'secret')
+      .map(([key]) => key),
+  )
+  const maskOverrides = (overrides: Record<string, VarOverride>) =>
+    Object.fromEntries(
+      Object.entries(overrides).map(([key, override]) => [
+        key,
+        secretKeys.has(key) ? { value: MASK, masked: true } : override,
+      ]),
+    )
+  return {
+    base: Object.fromEntries(
+      Object.entries(snapshot.base).map(([key, entry]) => [key, maskEntry(entry)]),
+    ),
+    baseAgent: maskOverrides(snapshot.baseAgent),
+    local: maskOverrides(snapshot.local),
+    localAgent: maskOverrides(snapshot.localAgent),
+  }
+}
+
+function presentLayeredResolution(
+  resolution: Extract<LayeredVarsResolution, { ok: true }>,
+): PresentedLayeredVarsResolution {
+  const tainted = new Set(
+    Object.entries(resolution.values)
+      .filter(([, entry]) => entry.type === 'secret')
+      .map(([key]) => key),
+  )
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const [key, dependencies] of Object.entries(resolution.dependencies)) {
+      if (!tainted.has(key) && dependencies.some((dependency) => tainted.has(dependency))) {
+        tainted.add(key)
+        changed = true
+      }
+    }
+  }
+  const values = presentResolvedValues(resolution.values, [...tainted])
+  return {
+    ok: true,
+    values,
+    sources: resolution.sources,
+    overrideChains: resolution.overrideChains,
+    dependencies: resolution.dependencies,
+    entries: resolution.entries.map((entry) => ({ ...entry, value: values[entry.key] })),
+    diagnostics: resolution.diagnostics,
   }
 }
 

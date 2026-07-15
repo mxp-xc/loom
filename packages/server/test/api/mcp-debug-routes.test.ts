@@ -30,11 +30,11 @@ const memFs = {
 }
 
 const debugManager = {
-  createSession: vi.fn(async () => ({
+  createSession: vi.fn(async (input: { previewTarget: 'default' | 'codex' }) => ({
     sessionId: 'debug-1',
     source: 'saved',
     serverFingerprint: 'abc123',
-    previewTarget: 'codex',
+    previewTarget: input.previewTarget,
     tools: [{ name: 'capture_live_filter', inputSchema: { type: 'object' } }],
     createdAt: '2026-07-13T00:00:00.000Z',
     idleExpiresAt: '2026-07-13T00:05:00.000Z',
@@ -131,6 +131,34 @@ describe('MCP debug routes', () => {
       source: 'draft',
       previewTarget: 'codex',
       server: { id: 'draft-browser', type: 'http', url: 'https://example.test/mcp' },
+    })
+  })
+
+  it('resolves an unmasked saved secret for a default-context debug session', async () => {
+    files['/repo/mcp.yaml'] = yaml.dump([
+      { id: 'default-server', type: 'stdio', command: '${command}' },
+    ])
+    files['/repo/vars/base.yaml'] = 'command:\n  type: secret\n  value: base-command\n'
+    files['/home/tester/.loom/local/repos/repo/vars/local.yaml'] =
+      'command:\n  value: local-command\n'
+    files['/repo/vars/agents/codex.yaml'] = 'command:\n  value: codex-command\n'
+
+    const res = await app().request('/api/mcp/debug/sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: '/repo',
+        source: 'saved',
+        serverId: 'default-server',
+        previewTarget: 'default',
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(debugManager.createSession).toHaveBeenCalledWith({
+      source: 'saved',
+      previewTarget: 'default',
+      server: { id: 'default-server', type: 'stdio', command: 'local-command' },
     })
   })
 

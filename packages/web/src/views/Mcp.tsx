@@ -10,20 +10,32 @@ import {
 import { normalizeOrder, type McpServer, type McpType } from '@loom/core'
 import {
   Activity,
+  ArrowLeft,
   Braces,
   Check,
-  CircleStop,
+  CircleAlert,
+  Cloud,
+  Command,
   Copy,
   Download,
   Edit3,
+  FileJson2,
+  FileText,
+  GripVertical,
+  KeyRound,
+  LayoutList,
   LoaderCircle,
+  LockKeyhole,
   Play,
   Plus,
   RefreshCw,
   Search,
   Send,
+  Server,
+  Settings2,
   Trash2,
   Unplug,
+  Variable,
   Wrench,
   X,
 } from 'lucide-react'
@@ -41,7 +53,12 @@ import {
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
 import { ErrorState, FieldError } from '@/components/ErrorFeedback'
-import { api, type CreateMcpDebugSessionResponse, type McpDebugTool } from '@/lib/api'
+import {
+  api,
+  type CreateMcpDebugSessionResponse,
+  type McpDebugPreviewTarget,
+  type McpDebugTool,
+} from '@/lib/api'
 import { AGENTS, agentColor, agentName, agentShort, type AgentId } from '@/lib/agents'
 import type { VarsLayerRef, VarsMatrixResponse } from '@/lib/vars'
 import {
@@ -51,29 +68,51 @@ import {
   getMcpVariableTokens,
 } from './mcp/mcp-preview'
 import McpImportDialog from './mcp/McpImportDialog'
-import { useMcpPreviewVars } from './mcp/useMcpPreviewVars'
-import styles from './Mcp.module.css'
+import { useMcpPreviewVars, type McpResolveContext } from './mcp/useMcpPreviewVars'
+import styles from './mcp/McpWorkbench.module.css'
 
 const MCP_TYPES: McpType[] = ['stdio', 'sse', 'http']
-const MCP_FILTERS = ['all', 'local', 'remote'] as const
 
 interface McpServerFormState {
   id: string
   type: McpType
   command: string
-  args: string
+  args: string[]
   url: string
   env: string
   headers: string
-  targets: AgentId[]
 }
 
 type EditorMode = 'create' | 'edit' | null
+type EditorViewMode = 'visual' | 'json'
 type RecordEditMode = 'file' | 'pairs'
-type McpFilter = (typeof MCP_FILTERS)[number]
-type McpDebugSource = 'saved' | 'draft'
-type McpDebugConnectionState = 'idle' | 'connecting' | 'connected' | 'stale'
+type McpDebugConnectionState = 'idle' | 'connecting' | 'connected'
 type McpDetailTab = 'config' | 'debug'
+type McpConfigView = 'raw' | McpResolveContext
+
+function isAgentConfigView(view: McpConfigView): view is AgentId {
+  return AGENTS.includes(view as AgentId)
+}
+
+function drawerLocation(): { selected: string | null; editorMode: EditorMode } {
+  if (typeof window === 'undefined') return { selected: null, editorMode: null }
+  const params = new URLSearchParams(window.location.search)
+  const view = params.get('view')
+  const server = params.get('server')
+  if (view === 'create') return { selected: null, editorMode: 'create' }
+  if (view === 'edit' && server) return { selected: server, editorMode: 'edit' }
+  if (view === 'detail' && server) return { selected: server, editorMode: null }
+  return { selected: null, editorMode: null }
+}
+
+function writeDrawerLocation(view: 'detail' | 'edit' | 'create' | null, server?: string) {
+  const url = new URL(window.location.href)
+  if (view) url.searchParams.set('view', view)
+  else url.searchParams.delete('view')
+  if (server) url.searchParams.set('server', server)
+  else url.searchParams.delete('server')
+  window.history.pushState({}, '', url)
+}
 
 interface RecordRow {
   id: string
@@ -179,11 +218,10 @@ function emptyMcpForm(): McpServerFormState {
     id: '',
     type: 'stdio',
     command: '',
-    args: '',
+    args: [],
     url: '',
     env: '',
     headers: '',
-    targets: [],
   }
 }
 
@@ -294,11 +332,10 @@ function serverToForm(server: McpServer | undefined): McpServerFormState {
     id: server.id,
     type: server.type,
     command: server.command ?? '',
-    args: server.args?.join(' ') ?? '',
+    args: [...(server.args ?? [])],
     url: server.url ?? '',
     env: recordToLines(server.env),
     headers: recordToLines(server.headers),
-    targets: (server.targets ?? []) as AgentId[],
   }
 }
 
@@ -321,9 +358,19 @@ function parseRecordLines(value: string, label: string): Record<string, string> 
     if (equalsAt === -1) throw new Error(label + ' 第 ' + (index + 1) + ' 行需要 KEY=value')
     const key = line.slice(0, equalsAt).trim()
     if (!key) throw new Error(label + ' 第 ' + (index + 1) + ' 行缺少 key')
+    if (Object.hasOwn(record, key)) throw new Error(label + ' 包含重复 key: ' + key)
     record[key] = unquoteRecordValue(line.slice(equalsAt + 1).trim())
   })
   return Object.keys(record).length > 0 ? record : undefined
+}
+
+function recordValidationError(value: string, label: string): string | null {
+  try {
+    parseRecordLines(value, label)
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : `${label} 格式无效`
+  }
 }
 
 function buildServerFromForm(
@@ -341,7 +388,7 @@ function buildServerFromForm(
       id,
       type: form.type,
       command: form.command.trim(),
-      args: form.args.trim() ? form.args.trim().split(/\s+/) : undefined,
+      args: form.args.length > 0 ? [...form.args] : undefined,
       env,
       targets,
     }
@@ -356,11 +403,11 @@ function buildServerFromForm(
   }
 }
 
-function formToDraftServer(form: McpServerFormState, fallbackId = 'draft'): McpServer {
+function formToPreviewServer(form: McpServerFormState, fallbackId = 'new-server'): McpServer {
   const server: McpServer = { id: form.id.trim() || fallbackId, type: form.type }
   if (form.type === 'stdio') {
     server.command = form.command.trim() || 'npx'
-    server.args = form.args.trim() ? form.args.trim().split(/\s+/) : undefined
+    server.args = form.args.length > 0 ? [...form.args] : undefined
   } else {
     server.url = form.url.trim() || 'https://example.test/sse'
   }
@@ -371,22 +418,72 @@ function formToDraftServer(form: McpServerFormState, fallbackId = 'draft'): McpS
   return server
 }
 
+function formToSource(form: McpServerFormState): string {
+  const definition: Record<string, unknown> = { id: form.id, type: form.type }
+  if (form.type === 'stdio') {
+    definition.command = form.command
+    if (form.args.length > 0) definition.args = form.args
+  } else {
+    definition.url = form.url
+  }
+  const env = parseRecordLines(form.env, 'env')
+  if (env) definition.env = env
+  if (form.type !== 'stdio') {
+    const headers = parseRecordLines(form.headers, 'headers')
+    if (headers) definition.headers = headers
+  }
+  return JSON.stringify(definition, null, 2)
+}
+
+function formFromSource(source: string, expectedId?: string): McpServerFormState {
+  const value: unknown = JSON.parse(source)
+  if (!isPlainRecord(value)) throw new Error('Server JSON 必须是对象')
+  if ('targets' in value) throw new Error('targets 只能在列表中配置')
+  if (typeof value.id !== 'string') throw new Error('id 必须是字符串')
+  if (!MCP_TYPES.includes(value.type as McpType)) throw new Error('type 必须是 stdio、sse 或 http')
+  if (expectedId !== undefined && value.id !== expectedId) throw new Error('已保存的 id 不可修改')
+  const type = value.type as McpType
+  const allowedKeys = new Set(
+    type === 'stdio'
+      ? ['id', 'type', 'command', 'args', 'env']
+      : ['id', 'type', 'url', 'env', 'headers'],
+  )
+  const unsupportedKeys = Object.keys(value).filter((key) => !allowedKeys.has(key))
+  if (unsupportedKeys.length > 0)
+    throw new Error(`${type} 不支持字段: ${unsupportedKeys.join(', ')}`)
+  if (
+    value.args !== undefined &&
+    (!Array.isArray(value.args) || value.args.some((arg) => typeof arg !== 'string'))
+  )
+    throw new Error('args 必须是 string[]')
+  for (const key of ['env', 'headers'] as const) {
+    const record = value[key]
+    if (record === undefined) continue
+    if (!isPlainRecord(record) || Object.values(record).some((item) => typeof item !== 'string'))
+      throw new Error(`${key} 必须是 string record`)
+  }
+  if (type === 'stdio' && typeof value.command !== 'string') throw new Error('stdio 需要 command')
+  if (type !== 'stdio' && typeof value.url !== 'string') throw new Error(`${type} 需要 url`)
+  return serverToForm({
+    id: value.id,
+    type,
+    command: typeof value.command === 'string' ? value.command : undefined,
+    args: value.args as string[] | undefined,
+    url: typeof value.url === 'string' ? value.url : undefined,
+    env: value.env as Record<string, string> | undefined,
+    headers: value.headers as Record<string, string> | undefined,
+  })
+}
+
 function serverSubtitle(server: McpServer): string {
   return server.type === 'stdio'
     ? [server.command, ...(server.args ?? [])].filter(Boolean).join(' ')
     : (server.url ?? '')
 }
 
-function serverProjectionState(server: McpServer, visibleAgents: AgentId[]) {
-  const active = (server.targets ?? []).filter((agent) => visibleAgents.includes(agent)).length
-  if (active === 0) return { tone: 'draft', label: 'draft' }
-  if (active === visibleAgents.length) return { tone: 'projected', label: 'projected' }
-  return { tone: 'partial', label: 'partial' }
-}
-
-function TypeBadge({ type, large }: { type: McpType; large?: boolean }) {
+function TypeBadge({ type }: { type: McpType }) {
   return (
-    <span className={large ? styles.typeBadgeLarge : styles.typeBadge} data-type={type}>
+    <span className={styles.transport} data-type={type} data-transport={type}>
       {type}
     </span>
   )
@@ -397,25 +494,41 @@ function PreviewTargetSwitch({
   agents,
   onChange,
 }: {
-  value: AgentId
+  value: McpConfigView
   agents: AgentId[]
-  onChange: (agent: AgentId) => void
+  onChange: (view: McpConfigView) => void
 }) {
   return (
-    <div className={styles.previewSwitch} aria-label="preview target">
-      <span>Preview as</span>
+    <div className={styles.configViewOptions} aria-label="preview target">
+      <button
+        type="button"
+        className={styles.rawModeButton}
+        data-active={value === 'raw'}
+        aria-pressed={value === 'raw'}
+        onClick={() => onChange('raw')}
+      >
+        <Braces className="h-3.5 w-3.5" />
+        RAW
+      </button>
+      <button
+        type="button"
+        className={styles.defaultModeButton}
+        data-active={value === 'default'}
+        aria-pressed={value === 'default'}
+        onClick={() => onChange('default')}
+      >
+        Default
+      </button>
+      <span className={styles.configViewDivider} aria-hidden="true" />
       {(agents.length ? agents : AGENTS).map((agent) => (
-        <button
+        <TargetChip
           key={agent}
-          type="button"
-          className={styles.previewPill}
-          style={{ '--c': agentColor[agent] } as CSSProperties}
-          data-active={value === agent}
-          aria-label={'Preview as ' + agentShort[agent]}
+          agent={agent}
+          state={value === agent ? 'on' : 'off'}
+          label={'Preview as ' + agentShort[agent]}
+          tooltip={'使用 ' + agentName[agent] + ' 解析配置'}
           onClick={() => onChange(agent)}
-        >
-          {agentShort[agent]}
-        </button>
+        />
       ))}
     </div>
   )
@@ -449,72 +562,6 @@ function renderValueWithTokens(
   return nodes
 }
 
-function RecordPreview({
-  record,
-  resolved,
-  empty,
-  onInspect,
-}: {
-  record: Record<string, string> | undefined
-  resolved?: Record<string, string> | undefined
-  empty: string
-  onInspect: (key: string) => void
-}) {
-  const entries = Object.entries(record ?? {})
-  if (entries.length === 0) return <div className={styles.emptyLine}>{empty}</div>
-  return (
-    <div className={styles.recordList}>
-      {entries.map(([key, value]) => (
-        <div className={styles.recordRow} key={key}>
-          <span>{key}</span>
-          <code>
-            {renderValueWithTokens(value, onInspect, '查看字段变量 ')}
-            {resolved?.[key] && resolved[key] !== value && (
-              <small className={styles.recordResolved}>
-                <span>解析预览</span>
-                <span>{resolved[key]}</span>
-              </small>
-            )}
-          </code>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function serverVariableKeys(server: McpServer): string[] {
-  const values = [
-    server.command,
-    ...(server.args ?? []),
-    server.url,
-    ...Object.values(server.env ?? {}),
-    ...Object.values(server.headers ?? {}),
-  ].filter((value): value is string => Boolean(value))
-  return Array.from(
-    new Set(values.flatMap((value) => getMcpVariableTokens(value).map((token) => token.key))),
-  )
-}
-
-function FieldCard({
-  title,
-  tone,
-  children,
-}: {
-  title: string
-  tone?: string
-  children: ReactNode
-}) {
-  return (
-    <section className={styles.fieldCard}>
-      <div className={styles.fieldCardHead}>
-        <div className={styles.cardKicker}>{title}</div>
-        {tone && <small>{tone}</small>}
-      </div>
-      <div className={styles.fieldBody}>{children}</div>
-    </section>
-  )
-}
-
 function RecordField({
   name,
   mode,
@@ -523,6 +570,7 @@ function RecordField({
   setMode,
   onTextChange,
   onRowsChange,
+  error,
   varsKeys = [],
 }: {
   name: 'env' | 'headers'
@@ -532,6 +580,7 @@ function RecordField({
   setMode: (mode: RecordEditMode) => void
   onTextChange: (value: string) => void
   onRowsChange: (rows: RecordRow[]) => void
+  error?: string | null
   varsKeys?: string[]
 }) {
   const varsKeysRef = useRef(varsKeys)
@@ -541,7 +590,7 @@ function RecordField({
   }, [varsKeys])
 
   const onEditorMount = useCallback(
-    (_editor: unknown, monaco: unknown) =>
+    (_editor: unknown, monaco: Parameters<typeof registerVarsCompletionProvider>[0]) =>
       registerVarsCompletionProvider(monaco, 'plaintext', () => varsKeysRef.current),
     [],
   )
@@ -551,8 +600,9 @@ function RecordField({
     onTextChange(rowsToLines(nextRows))
   }
 
-  const switchMode = () => {
-    if (mode === 'file') {
+  const switchMode = (nextMode: RecordEditMode) => {
+    if (nextMode === mode) return
+    if (nextMode === 'pairs') {
       onRowsChange(rowsFromLines(value))
       setMode('pairs')
     } else {
@@ -561,22 +611,37 @@ function RecordField({
     }
   }
 
-  const modeLabel =
-    mode === 'file' ? `切换 ${name} 为 key value 编辑` : `切换 ${name} 为 env file 编辑`
+  const keyCounts = rows.reduce<Record<string, number>>((counts, row) => {
+    const key = row.key.trim()
+    if (key) counts[key] = (counts[key] ?? 0) + 1
+    return counts
+  }, {})
 
   return (
-    <section className={styles.recordField}>
-      <div className={styles.recordHead}>
-        <span>{name}</span>
-        <Button
-          type="button"
-          variant="secondary"
-          size="xs"
-          aria-label={modeLabel}
-          onClick={switchMode}
-        >
-          {mode === 'file' ? 'key/value' : 'env file'}
-        </Button>
+    <section className={styles.recordEditor}>
+      <div className={styles.recordModeBar}>
+        <div className={styles.recordModeSwitch} role="tablist" aria-label={`${name} 编辑方式`}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'pairs'}
+            aria-label={`切换 ${name} 为 key value 编辑`}
+            onClick={() => switchMode('pairs')}
+          >
+            <LayoutList className="h-3.5 w-3.5" />
+            Key/value
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'file'}
+            aria-label={`切换 ${name} 为 env file 编辑`}
+            onClick={() => switchMode('file')}
+          >
+            <FileText className="h-3.5 w-3.5" />
+            {name === 'env' ? 'env file' : 'raw text'}
+          </button>
+        </div>
       </div>
       {mode === 'file' ? (
         <MonacoTextEditor
@@ -593,31 +658,52 @@ function RecordField({
           }}
         />
       ) : (
-        <div className={styles.kvList}>
+        <div className={styles.recordEditor}>
+          <div className={styles.recordHeader} aria-hidden="true">
+            <span>KEY</span>
+            <span>VALUE</span>
+            <span />
+          </div>
           {rows.map((row, index) => (
-            <div className={styles.kvRow} key={row.id}>
-              <input
-                aria-label={`${name} key ${index + 1}`}
-                value={row.key}
-                onChange={(event) => {
-                  const next = rows.map((item) =>
-                    item.id === row.id ? { ...item, key: event.target.value } : item,
-                  )
-                  syncRows(next)
-                }}
-                placeholder="KEY"
-              />
-              <input
-                aria-label={`${name} value ${index + 1}`}
-                value={row.value}
-                onChange={(event) => {
-                  const next = rows.map((item) =>
-                    item.id === row.id ? { ...item, value: event.target.value } : item,
-                  )
-                  syncRows(next)
-                }}
-                placeholder="value"
-              />
+            <div className={styles.recordRow} key={row.id}>
+              <div
+                className={styles.recordInput}
+                data-invalid={
+                  Boolean(row.value.trim() && !row.key.trim()) ||
+                  Boolean(row.key.trim() && keyCounts[row.key.trim()] > 1)
+                }
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                <input
+                  aria-label={`${name} key ${index + 1}`}
+                  aria-invalid={
+                    Boolean(row.value.trim() && !row.key.trim()) ||
+                    Boolean(row.key.trim() && keyCounts[row.key.trim()] > 1)
+                  }
+                  value={row.key}
+                  onChange={(event) => {
+                    const next = rows.map((item) =>
+                      item.id === row.id ? { ...item, key: event.target.value } : item,
+                    )
+                    syncRows(next)
+                  }}
+                  placeholder={name === 'env' ? 'API_KEY' : 'Authorization'}
+                />
+              </div>
+              <div className={styles.recordInput}>
+                <Variable className="h-3.5 w-3.5" />
+                <input
+                  aria-label={`${name} value ${index + 1}`}
+                  value={row.value}
+                  onChange={(event) => {
+                    const next = rows.map((item) =>
+                      item.id === row.id ? { ...item, value: event.target.value } : item,
+                    )
+                    syncRows(next)
+                  }}
+                  placeholder="${VARIABLE_NAME}"
+                />
+              </div>
               <IconButton
                 label={`删除 ${name} 行 ${index + 1}`}
                 tooltip="删除行"
@@ -632,15 +718,95 @@ function RecordField({
               </IconButton>
             </div>
           ))}
-          <IconButton
-            label={`新增 ${name} 行`}
-            tooltip="新增行"
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className={styles.addRecordButton}
+            aria-label={`新增 ${name} 行`}
             onClick={() => syncRows([...rows, newRecordRow()])}
           >
             <Plus className="h-3.5 w-3.5" />
-          </IconButton>
+            {name === 'env' ? '添加环境变量' : '添加 Header'}
+          </Button>
         </div>
       )}
+      {error && (
+        <p className={styles.recordError} role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  )
+}
+
+function ArgumentsEditor({
+  args,
+  onChange,
+}: {
+  args: string[]
+  onChange: (args: string[]) => void
+}) {
+  const items = args.map((value, index) => ({ id: `argument-${index}`, index, value }))
+
+  return (
+    <section className={styles.argumentsEditor} aria-label="Arguments">
+      <header className={styles.argumentsHeader}>
+        <strong>Arguments</strong>
+      </header>
+      <SortableList
+        items={items}
+        activator="child"
+        className={styles.argumentList}
+        label={(item) => `Argument ${item.index + 1}`}
+        onReorder={(next) => onChange(next.map((item) => item.value))}
+      >
+        {(item, sortable) => (
+          <div className={styles.argumentRow} data-dragging={sortable.dragging || undefined}>
+            <span className={styles.argumentIndex}>{item.index + 1}</span>
+            <button
+              type="button"
+              className={styles.argumentHandle}
+              aria-label={`拖拽 Argument ${item.index + 1}`}
+              {...sortable.activatorProps}
+            >
+              <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+            <input
+              aria-label={`Argument ${item.index + 1}`}
+              value={item.value}
+              placeholder={item.index === 0 ? '-y' : '@scope/server'}
+              onPaste={(event) => {
+                const text = event.clipboardData.getData('text')
+                if (!/\r?\n/.test(text)) return
+                event.preventDefault()
+                const parts = text.replace(/\r\n/g, '\n').split('\n')
+                if (parts.at(-1) === '') parts.pop()
+                onChange([...args.slice(0, item.index), ...parts, ...args.slice(item.index + 1)])
+              }}
+              onChange={(event) =>
+                onChange(
+                  args.map((arg, index) => (index === item.index ? event.target.value : arg)),
+                )
+              }
+            />
+            <div className={styles.argumentActions}>
+              <IconButton
+                label={`删除 Argument ${item.index + 1}`}
+                tooltip="删除"
+                tone="danger"
+                onClick={() => onChange(args.filter((_, index) => index !== item.index))}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </IconButton>
+            </div>
+          </div>
+        )}
+      </SortableList>
+      <Button type="button" variant="secondary" size="xs" onClick={() => onChange([...args, ''])}>
+        <Plus className="h-3.5 w-3.5" />
+        添加参数
+      </Button>
     </section>
   )
 }
@@ -669,47 +835,37 @@ function McpVariableInspector({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className={styles.variableHead}>
-          <div>
-            <div className={styles.cardKicker}>VARIABLE</div>
-            <h3>变量信息</h3>
-            <p>{'$' + '{' + variableKey + '}'}</p>
-          </div>
-          <div className={styles.variableHeadActions}>
-            <span>{value?.type ?? 'unknown'}</span>
-            <IconButton
-              label="关闭变量信息"
-              tooltip="关闭"
-              className={styles.variableClose}
-              onClick={onClose}
-            >
-              <X className="h-3.5 w-3.5" />
-            </IconButton>
-          </div>
+          <h3>变量信息</h3>
+          <IconButton label="关闭变量信息" tooltip="关闭" onClick={onClose}>
+            <X className="h-3.5 w-3.5" />
+          </IconButton>
         </header>
         <div className={styles.variableBody}>
-          <section className={styles.variableCard}>
-            <span>definition</span>
-            <code className={styles.variableName}>{'$' + '{' + variableKey + '}'}</code>
-            <dl className={styles.variableMeta}>
-              <div>
-                <dt>resolved value</dt>
-                <dd>{value ? String(value.value) : '未解析'}</dd>
-              </div>
-              <div>
-                <dt>type</dt>
-                <dd>{value?.type ?? 'unknown'}</dd>
-              </div>
-              <div>
-                <dt>source</dt>
-                <dd>{source ? '当前来源 · ' + formatMcpTraceLayer(source) : '未解析'}</dd>
-              </div>
-            </dl>
-          </section>
-          <section className={styles.variableCard}>
-            <span>resolution trace</span>
+          <div className={styles.variableDefinitionHead}>
+            <code>{'$' + '{' + variableKey + '}'}</code>
+            <span data-kind={value?.type ?? 'unknown'}>{value?.type ?? 'unknown'}</span>
+          </div>
+          <dl className={styles.variableSummary}>
+            <div>
+              <dt>Resolved value</dt>
+              <dd>{value ? String(value.value) : '未解析'}</dd>
+            </div>
+            <div>
+              <dt>Current source</dt>
+              <dd>{source ? '当前来源 · ' + formatMcpTraceLayer(source) : '未解析'}</dd>
+            </div>
+          </dl>
+          <section className={styles.variableTraceSection}>
+            <header>
+              <strong>Resolution trace</strong>
+              <small>Base → Local → Runtime</small>
+            </header>
             <ol className={styles.variableTrace}>
               {chain.map((layer: VarsLayerRef, index) => (
-                <li key={layer.locality + layer.layer + index}>
+                <li
+                  key={layer.locality + layer.layer + index}
+                  data-active={index === chain.length - 1}
+                >
                   <b>{index + 1}</b>
                   <div>
                     <strong>{formatMcpTraceLayer(layer)}</strong>
@@ -725,12 +881,12 @@ function McpVariableInspector({
               ))}
             </ol>
           </section>
+          <div className={styles.variableInspectorActions}>
+            <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+              关闭
+            </Button>
+          </div>
         </div>
-        <footer className={styles.variableFooter}>
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-            Close
-          </Button>
-        </footer>
       </section>
     </div>
   )
@@ -738,14 +894,18 @@ function McpVariableInspector({
 
 function McpDebugPanel({
   repoPath,
-  source,
   server,
   previewTarget,
+  needsSave = false,
+  onPersist,
+  disabledReason,
 }: {
   repoPath: string
-  source: McpDebugSource
   server: McpServer
-  previewTarget: AgentId
+  previewTarget: McpDebugPreviewTarget
+  needsSave?: boolean
+  onPersist?: () => Promise<McpServer | null>
+  disabledReason?: string
 }) {
   const [connection, setConnection] = useState<McpDebugConnectionState>('idle')
   const [session, setSession] = useState<Extract<
@@ -753,48 +913,83 @@ function McpDebugPanel({
     { ok: true }
   > | null>(null)
   const [selectedTool, setSelectedTool] = useState<string | null>(null)
+  const [toolQuery, setToolQuery] = useState('')
   const [args, setArgs] = useState('{}')
   const [result, setResult] = useState<string | null>(null)
+  const [resultCopied, setResultCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [parseError, setParseError] = useState<string | null>(null)
   const [calling, setCalling] = useState(false)
   const sessionIdRef = useRef<string | null>(null)
+  const connectGenerationRef = useRef(0)
+  const mountedRef = useRef(true)
   const connectionKey = useMemo(
-    () => source + ':' + previewTarget + ':' + stableStringify(connectionOnlyServer(server)),
-    [previewTarget, server, source],
+    () =>
+      (disabledReason ?? 'enabled') +
+      ':' +
+      previewTarget +
+      ':' +
+      stableStringify(connectionOnlyServer(server)),
+    [disabledReason, previewTarget, server],
   )
   const connectionKeyRef = useRef(connectionKey)
   const tools = session?.tools ?? []
+  const normalizedToolQuery = toolQuery.trim().toLowerCase()
+  const visibleTools = useMemo(() => {
+    if (!normalizedToolQuery) return tools
+    const tokens = normalizedToolQuery.split(/\s+/)
+    return tools.filter((tool) => {
+      const searchText = `${tool.name} ${tool.description ?? ''}`.toLowerCase()
+      return tokens.every((token) => searchText.includes(token))
+    })
+  }, [normalizedToolQuery, tools])
   const activeTool = tools.find((tool) => tool.name === selectedTool) ?? tools[0] ?? null
-  const regionLabel = source === 'draft' ? 'MCP draft tools debug' : 'MCP tools debug'
 
   useEffect(() => {
     sessionIdRef.current = session?.sessionId ?? null
   }, [session?.sessionId])
 
+  useEffect(() => setToolQuery(''), [session?.sessionId])
+
   useEffect(() => {
+    if (!resultCopied) return
+    const timer = window.setTimeout(() => setResultCopied(false), 1600)
+    return () => window.clearTimeout(timer)
+  }, [resultCopied])
+
+  useEffect(() => {
+    mountedRef.current = true
     return () => {
-      if (sessionIdRef.current) void api.disconnectMcpDebugSession(sessionIdRef.current)
+      mountedRef.current = false
+      connectGenerationRef.current += 1
+      const sessionId = sessionIdRef.current
+      sessionIdRef.current = null
+      if (sessionId)
+        void api.disconnectMcpDebugSession(sessionId).catch((err) => {
+          console.error({ err, sessionId }, 'Failed to disconnect unmounted MCP debug session')
+        })
     }
   }, [])
 
   useEffect(() => {
     if (connectionKeyRef.current === connectionKey) return
     connectionKeyRef.current = connectionKey
+    connectGenerationRef.current += 1
+    setConnection('idle')
     if (session) {
-      const staleSessionId = session.sessionId
+      const previousSessionId = session.sessionId
       sessionIdRef.current = null
       setSession(null)
       setSelectedTool(null)
-      setConnection('stale')
+      setConnection('idle')
       setResult(null)
       setError(null)
       setParseError(null)
       setCalling(false)
-      void api.disconnectMcpDebugSession(staleSessionId).catch((err) => {
+      void api.disconnectMcpDebugSession(previousSessionId).catch((err) => {
         console.error(
-          { err, sessionId: staleSessionId },
-          'Failed to disconnect stale MCP debug session',
+          { err, sessionId: previousSessionId },
+          'Failed to disconnect replaced MCP debug session',
         )
       })
     }
@@ -804,9 +999,11 @@ function McpDebugPanel({
     setArgs(starterArgsForTool(activeTool))
     setParseError(null)
     setResult(null)
+    setResultCopied(false)
   }, [activeTool?.name])
 
   const disconnectCurrent = async () => {
+    connectGenerationRef.current += 1
     if (!session) {
       setConnection('idle')
       return
@@ -826,10 +1023,12 @@ function McpDebugPanel({
   }
 
   const connect = async () => {
+    const generation = ++connectGenerationRef.current
     setConnection('connecting')
     setError(null)
     setParseError(null)
     setResult(null)
+    setResultCopied(false)
     if (session) {
       try {
         await api.disconnectMcpDebugSession(session.sessionId)
@@ -838,16 +1037,28 @@ function McpDebugPanel({
       }
     }
     try {
-      const request =
-        source === 'saved'
-          ? ({ repo: repoPath, source, serverId: server.id, previewTarget } as const)
-          : ({
-              repo: repoPath,
-              source,
-              draft: connectionOnlyServer(server),
-              previewTarget,
-            } as const)
-      const response = await api.createMcpDebugSession(request)
+      const persisted = needsSave ? await onPersist?.() : server
+      if (!persisted) {
+        if (mountedRef.current && generation === connectGenerationRef.current) setConnection('idle')
+        return
+      }
+      if (!mountedRef.current || generation !== connectGenerationRef.current) return
+      const response = await api.createMcpDebugSession({
+        repo: repoPath,
+        source: 'saved',
+        serverId: persisted.id,
+        previewTarget,
+      })
+      if (!mountedRef.current || generation !== connectGenerationRef.current) {
+        if (response.ok)
+          void api.disconnectMcpDebugSession(response.sessionId).catch((err) => {
+            console.error(
+              { err, sessionId: response.sessionId },
+              'Failed to disconnect stale MCP debug session',
+            )
+          })
+        return
+      }
       if (!response.ok) {
         setSession(null)
         setConnection('idle')
@@ -860,7 +1071,8 @@ function McpDebugPanel({
       setArgs(starterArgsForTool(firstTool))
       setConnection('connected')
     } catch (err) {
-      console.error({ err, source, serverId: server.id }, 'Failed to create MCP debug session')
+      console.error({ err, serverId: server.id }, 'Failed to create MCP debug session')
+      if (!mountedRef.current || generation !== connectGenerationRef.current) return
       setSession(null)
       setConnection('idle')
       setError(normalizeManifestOperationError(err, '连接 MCP debug session 失败'))
@@ -868,11 +1080,12 @@ function McpDebugPanel({
   }
 
   const callTool = async () => {
-    if (!session || !activeTool || connection !== 'connected') return
+    if (disabledReason || !session || !activeTool || connection !== 'connected') return
     setCalling(true)
     setError(null)
     setParseError(null)
     setResult(null)
+    setResultCopied(false)
     let parsed: unknown
     try {
       parsed = JSON.parse(args)
@@ -909,23 +1122,35 @@ function McpDebugPanel({
     }
   }
 
-  const canCall = connection === 'connected' && Boolean(activeTool) && !calling
-  const connectLabel = connection === 'stale' ? 'Reconnect debug session' : 'Connect debug session'
+  const copyResult = async () => {
+    if (!result) return
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
+      await navigator.clipboard.writeText(result)
+      setError(null)
+      setResultCopied(true)
+    } catch (err) {
+      console.error({ err }, 'Failed to copy MCP tool result')
+      setError('复制调用结果失败')
+    }
+  }
+
+  const canCall = !disabledReason && connection === 'connected' && Boolean(activeTool) && !calling
+  const connectLabel = needsSave ? '保存并连接 MCP server' : 'Connect debug session'
+  const contextDescription =
+    previewTarget === 'default'
+      ? '使用 Base → Local 变量连接当前 Server。'
+      : `使用 ${agentName[previewTarget]} 变量连接当前 Server。`
 
   return (
-    <section className={styles.debugPanel} role="region" aria-label={regionLabel}>
-      <div className={styles.debugToolbar}>
-        <div>
-          <div className={styles.cardKicker}>DEBUG SESSION</div>
-          <strong>Tools only</strong>
-          <small>
-            {source === 'draft'
-              ? '连接当前草稿，字段变更后需要重新连接。'
-              : '连接、tools、参数和结果在 detail 内分栏。'}
-          </small>
+    <section className={styles.toolsDebug} role="region" aria-label="MCP tools debug">
+      <div className={styles.toolsToolbar}>
+        <div className={styles.toolsIntro}>
+          <strong>Tools 调试</strong>
+          <small>{disabledReason ?? contextDescription}</small>
         </div>
-        <div className={styles.debugActions}>
-          <span className={styles.debugState} data-state={connection}>
+        <div className={styles.toolsActions}>
+          <span className={styles.toolsState} data-state={connection}>
             <Activity className="h-3.5 w-3.5" />
             {connection}
           </span>
@@ -934,6 +1159,8 @@ function McpDebugPanel({
               type="button"
               variant="secondary"
               size="sm"
+              className={styles.toolsConnectionButton}
+              style={{ height: 30, paddingInline: 9 }}
               onClick={() => void disconnectCurrent()}
             >
               <Unplug className="h-3.5 w-3.5" />
@@ -944,31 +1171,49 @@ function McpDebugPanel({
               type="button"
               variant="primary"
               size="sm"
+              className={styles.toolsConnectionButton}
+              style={{ height: 30, paddingInline: 9 }}
               aria-label={connectLabel}
               onClick={() => void connect()}
-              disabled={connection === 'connecting'}
+              disabled={connection === 'connecting' || Boolean(disabledReason)}
             >
               {connection === 'connecting' ? (
                 <LoaderCircle className="h-3.5 w-3.5" />
               ) : (
                 <RefreshCw className="h-3.5 w-3.5" />
               )}
-              {connection === 'stale' ? 'Reconnect' : 'Connect'}
+              {needsSave ? '保存并连接' : '连接'}
             </Button>
           )}
         </div>
       </div>
 
-      {(error || parseError) && <div className={styles.debugError}>{parseError ?? error}</div>}
+      {(error || parseError) && <div className={styles.toolsError}>{parseError ?? error}</div>}
 
-      <div className={styles.debugBody}>
-        <section className={styles.debugTools}>
-          <div className={styles.debugPanelHead}>
-            <strong>Tools</strong>
-            <span>{tools.length}</span>
-          </div>
-          <div className={styles.debugToolList}>
-            {tools.map((tool) => (
+      <div className={styles.toolsBody}>
+        <section className={styles.toolsColumn}>
+          <header>
+            <div className={styles.toolsListTitle}>
+              <strong>Tools</strong>
+              <span aria-label={`显示 ${visibleTools.length} / ${tools.length} 个 Tools`}>
+                {normalizedToolQuery ? `${visibleTools.length}/${tools.length}` : tools.length}
+              </span>
+            </div>
+            <label className={styles.toolsSearch}>
+              <Search className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="sr-only">搜索 Tools</span>
+              <input
+                type="search"
+                aria-label="搜索 Tools"
+                placeholder="搜索…"
+                value={toolQuery}
+                disabled={tools.length === 0}
+                onChange={(event) => setToolQuery(event.target.value)}
+              />
+            </label>
+          </header>
+          <div className={styles.toolsList}>
+            {visibleTools.map((tool) => (
               <button
                 key={tool.name}
                 type="button"
@@ -980,15 +1225,20 @@ function McpDebugPanel({
                 {tool.description && <small>{tool.description}</small>}
               </button>
             ))}
-            {tools.length === 0 && <div className={styles.debugEmpty}>连接后显示 tools</div>}
+            {tools.length === 0 && <div className={styles.toolsNotice}>连接后显示 tools</div>}
+            {tools.length > 0 && visibleTools.length === 0 && (
+              <div className={styles.toolsNoMatches}>没有匹配的 Tools</div>
+            )}
           </div>
         </section>
 
-        <section className={styles.debugCall}>
-          <div className={styles.debugPanelHead}>
-            <div>
-              <strong>参数</strong>
-              <small>JSON arguments</small>
+        <section className={styles.toolCallColumn}>
+          <header>
+            <div className={styles.selectedTool} aria-live="polite">
+              <strong title={activeTool?.name}>{activeTool?.name ?? '参数'}</strong>
+              <small title={activeTool?.description}>
+                {activeTool?.description ?? 'JSON arguments'}
+              </small>
             </div>
             <Button
               type="button"
@@ -1000,8 +1250,8 @@ function McpDebugPanel({
               <Braces className="h-3.5 w-3.5" />
               重置参数
             </Button>
-          </div>
-          <div className={styles.debugEditor}>
+          </header>
+          <div className={styles.toolArguments}>
             <MonacoTextEditor
               ariaLabel="Tool arguments JSON"
               language="json"
@@ -1016,23 +1266,197 @@ function McpDebugPanel({
               }}
             />
           </div>
-          <div className={styles.debugCallActions}>
+          <div className={styles.toolCallActions}>
             <Button
               type="button"
               variant="primary"
+              aria-label={calling ? 'Calling MCP tool' : 'Call tool'}
+              aria-busy={calling}
               onClick={() => void callTool()}
               disabled={!canCall}
             >
-              {calling ? <CircleStop className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-              {calling ? 'Calling' : 'Call tool'}
+              {calling ? (
+                <LoaderCircle className={`${styles.toolCallSpinner} h-3.5 w-3.5`} />
+              ) : (
+                <Play className="h-3.5 w-3.5" />
+              )}
+              {calling ? 'Calling…' : 'Call tool'}
             </Button>
             <span>{connection === 'connected' ? '真实调用，无二次确认' : '连接后才能调用'}</span>
           </div>
-          <pre className={styles.debugResult} data-empty={!result}>
-            {result ?? 'Call result will appear here.'}
-          </pre>
+          <section className={styles.toolResultPanel} aria-label="Tool 调用结果">
+            <header>
+              <strong>调用结果</strong>
+              <IconButton
+                label={resultCopied ? '已复制调用结果' : '复制调用结果'}
+                tooltip={resultCopied ? '已复制' : '复制结果'}
+                onClick={() => void copyResult()}
+                disabled={!result}
+              >
+                {resultCopied ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </IconButton>
+            </header>
+            <pre className={styles.toolResult} data-empty={!result}>
+              <code>
+                {result
+                  ? renderSettingsPreviewSyntax(result, 'opencode')
+                  : 'Call result will appear here.'}
+              </code>
+            </pre>
+          </section>
         </section>
       </div>
+    </section>
+  )
+}
+
+function DrawerSectionTabs({
+  value,
+  onChange,
+}: {
+  value: McpDetailTab
+  onChange: (value: McpDetailTab) => void
+}) {
+  return (
+    <div className={styles.sectionTabs} role="tablist" aria-label="Server 工作区">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === 'config'}
+        onClick={() => onChange('config')}
+      >
+        <Settings2 className="h-3.5 w-3.5" />
+        配置
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === 'debug'}
+        onClick={() => onChange('debug')}
+      >
+        <Wrench className="h-3.5 w-3.5" />
+        Tools
+      </button>
+    </div>
+  )
+}
+
+function DetailDefinitionGroup({
+  tone,
+  icon,
+  title,
+  meta,
+  rows,
+}: {
+  tone: 'connection' | 'env' | 'headers'
+  icon: ReactNode
+  title: string
+  meta: string
+  rows: Array<{ label: string; value: ReactNode }>
+}) {
+  if (rows.length === 0) return null
+  return (
+    <section className={styles.definitionGroup} data-tone={tone}>
+      <header>
+        <span className={styles.definitionGroupIcon}>{icon}</span>
+        <div>
+          <strong>{title}</strong>
+          <small>{meta}</small>
+        </div>
+      </header>
+      <dl>
+        {rows.map((row, index) => (
+          <div key={`${row.label}-${index}`}>
+            <dt>{row.label}</dt>
+            <dd>{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
+function ServerPreview({
+  server,
+  configView,
+  target,
+  matrix,
+}: {
+  server: McpServer
+  configView: McpConfigView
+  target: AgentId
+  matrix: VarsMatrixResponse | undefined
+}) {
+  const raw = configView === 'raw'
+  const defaultView = configView === 'default'
+  const resolvedPreview = buildResolvedMcpServer(server, target, matrix)
+  const resolved = resolvedPreview.server
+  const settings = !raw && !defaultView ? buildMcpSettingsPreview(server, target, matrix) : null
+  const diagnostics = raw ? [] : defaultView ? resolvedPreview.diagnostics : settings!.diagnostics
+  const text = raw
+    ? formToSource(serverToForm(server))
+    : defaultView
+      ? formToSource(serverToForm(resolved))
+      : settings!.text
+  const previewKicker = raw
+    ? 'SERVER DEFINITION'
+    : defaultView
+      ? 'RESOLVED SERVER PREVIEW'
+      : 'TARGET SETTINGS PREVIEW'
+  const previewTitle = raw
+    ? '原始 Server 配置'
+    : defaultView
+      ? 'Default 解析配置'
+      : `${agentName[target]} 写入预览`
+  const previewDescription = raw
+    ? '保留 ${...} 变量引用，显示 Loom 中保存的定义。'
+    : defaultView
+      ? '使用 Base → Local 变量，显示 Server 的实际连接配置。'
+      : '使用当前 agent 的变量解析结果，预览最终配置形态。'
+  const previewPath = raw
+    ? 'mcp.yaml · Server 定义'
+    : defaultView
+      ? 'mcp.yaml · 解析结果'
+      : settings!.path
+  const previewLabel = raw ? 'RAW' : defaultView ? 'Default' : agentName[target]
+  const previewStatus = raw
+    ? '未解析'
+    : defaultView && diagnostics.length > 0
+      ? `${diagnostics.length} 个问题`
+      : defaultView
+        ? '变量已解析'
+        : '写入后配置'
+  const previewColor = raw || defaultView ? 'var(--primary)' : agentColor[target]
+  return (
+    <section className={styles.previewCard}>
+      <div className={styles.previewHead}>
+        <div>
+          <div className={styles.cardKicker}>{previewKicker}</div>
+          <strong>{previewTitle}</strong>
+          <p>{previewDescription}</p>
+        </div>
+      </div>
+      <div className={styles.previewPath} style={{ '--c': previewColor } as CSSProperties}>
+        <span>{previewLabel}</span>
+        <code>{previewPath}</code>
+        <em>{previewStatus}</em>
+      </div>
+      {diagnostics.length > 0 && (
+        <div className={styles.previewDiagnostics}>
+          {diagnostics.map((item, index) => (
+            <span key={item.code + index}>
+              {item.code}: {item.message}
+            </span>
+          ))}
+        </div>
+      )}
+      <pre className={styles.syntaxPreview}>
+        <code>{renderSettingsPreviewSyntax(text, raw || defaultView ? 'opencode' : target)}</code>
+      </pre>
     </section>
   )
 }
@@ -1040,161 +1464,146 @@ function McpDebugPanel({
 function McpDetail({
   repoPath,
   server,
-  previewTarget,
+  configView,
   matrix,
-  onPreviewTarget,
+  onConfigView,
   onEdit,
   onCopy,
   onInspect,
+  onClose,
 }: {
   repoPath: string
   server: McpServer
-  previewTarget: AgentId
+  configView: McpConfigView
   matrix: VarsMatrixResponse | undefined
-  onPreviewTarget: (agent: AgentId) => void
+  onConfigView: (view: McpConfigView) => void
   onEdit: () => void
   onCopy: () => void
   onInspect: (key: string) => void
+  onClose: () => void
 }) {
   const [detailTab, setDetailTab] = useState<McpDetailTab>('config')
-  const preview = buildResolvedMcpServer(server, previewTarget, matrix)
-  const settings = buildMcpSettingsPreview(server, previewTarget, matrix)
-  const rawCommandLine =
-    server.type === 'stdio'
-      ? [server.command, ...(server.args ?? [])].filter(Boolean).join(' ')
-      : (server.url ?? '')
-  const resolvedCommandLine =
-    server.type === 'stdio'
-      ? [preview.server.command, ...(preview.server.args ?? [])].filter(Boolean).join(' ')
-      : (preview.server.url ?? '')
+  const previewTarget = isAgentConfigView(configView) ? configView : 'codex'
+  const debugTarget: McpDebugPreviewTarget = configView === 'raw' ? 'default' : configView
+  const resolved = buildResolvedMcpServer(server, previewTarget, matrix).server
+  const displayed = configView === 'raw' ? server : resolved
+  const displayValue = (value: string) =>
+    configView === 'raw' ? renderValueWithTokens(value, onInspect) : value
+  const envEntries = Object.entries(displayed.env ?? {})
+  const headerEntries = Object.entries(displayed.headers ?? {})
+  const connectionRows =
+    displayed.type === 'stdio'
+      ? [
+          { label: 'Command', value: <code>{displayValue(displayed.command ?? '')}</code> },
+          {
+            label: 'Arguments',
+            value: (
+              <span className={styles.detailArguments}>
+                {(displayed.args ?? []).map((arg, index) => (
+                  <code key={index}>{displayValue(arg)}</code>
+                ))}
+              </span>
+            ),
+          },
+        ]
+      : [{ label: 'URL', value: <code>{displayValue(displayed.url ?? '')}</code> }]
+
+  useEffect(() => {
+    if (detailTab === 'debug' && configView === 'raw') onConfigView('default')
+  }, [configView, detailTab, onConfigView])
+
   return (
-    <div className={styles.detailScroll}>
-      <section className={styles.detailHero}>
+    <div className={styles.drawerContent}>
+      <header className={styles.paneHeader}>
+        <IconButton
+          label="返回 Server 列表"
+          tooltip="返回"
+          className={styles.backButton}
+          onClick={onClose}
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </IconButton>
         <div>
-          <div className={styles.cardKicker}>SELECTED SERVER</div>
           <h2>{server.id}</h2>
-          <p>{server.type === 'stdio' ? 'local process' : 'remote endpoint'}</p>
+          <p>{server.type === 'stdio' ? 'local process' : `${server.type} endpoint`}</p>
         </div>
-        <TypeBadge type={server.type} large />
-        <div className={styles.detailActions}>
-          <PreviewTargetSwitch value={previewTarget} agents={AGENTS} onChange={onPreviewTarget} />
-          <IconButton label="Copy server JSON" tooltip="Copy" onClick={onCopy}>
+        <div className={styles.paneHeaderActions}>
+          <TypeBadge type={server.type} />
+          <PreviewTargetSwitch value={configView} agents={AGENTS} onChange={onConfigView} />
+          <IconButton label="Copy server JSON" tooltip="复制" onClick={onCopy}>
             <Copy className="h-3.5 w-3.5" />
           </IconButton>
           <IconButton label="编辑当前 MCP server" tooltip="编辑" onClick={onEdit}>
             <Edit3 className="h-3.5 w-3.5" />
           </IconButton>
         </div>
-      </section>
-      <div className={styles.detailTabs} role="tablist" aria-label="MCP detail sections">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={detailTab === 'config'}
-          data-active={detailTab === 'config'}
-          onClick={() => setDetailTab('config')}
-        >
-          配置
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={detailTab === 'debug'}
-          data-active={detailTab === 'debug'}
-          onClick={() => setDetailTab('debug')}
-        >
-          Tools 调试
-        </button>
-      </div>
-      {detailTab === 'config' ? (
-        <>
-          <div className={styles.detailGrid}>
-            <FieldCard title="TRANSPORT" tone={server.type}>
-              <div className={styles.codePreview}>
-                <pre className={styles.commandLine}>
-                  {renderValueWithTokens(rawCommandLine, onInspect, '查看 transport 变量 ')}
-                </pre>
-                {resolvedCommandLine !== rawCommandLine && (
-                  <div className={styles.resolvedPreview}>
-                    <span>解析预览</span>
-                    <code>{resolvedCommandLine}</code>
-                  </div>
+      </header>
+      <div
+        className={`${styles.drawerBody} ${detailTab === 'debug' ? styles.drawerBodyTools : ''}`}
+      >
+        <DrawerSectionTabs
+          value={detailTab}
+          onChange={(next) => {
+            if (next === 'debug' && configView === 'raw') onConfigView('default')
+            setDetailTab(next)
+          }}
+        />
+        {detailTab === 'config' ? (
+          <>
+            <section className={styles.detailSection}>
+              <header>
+                <h3>配置定义</h3>
+                <p>连接、环境变量和 headers 按用途分组展示。</p>
+              </header>
+              <div className={styles.definitionGroups}>
+                <DetailDefinitionGroup
+                  tone="connection"
+                  icon={
+                    server.type === 'stdio' ? (
+                      <Command className="h-4 w-4" />
+                    ) : (
+                      <Cloud className="h-4 w-4" />
+                    )
+                  }
+                  title="连接"
+                  meta={server.type === 'stdio' ? 'local process' : `${server.type} endpoint`}
+                  rows={connectionRows}
+                />
+                <DetailDefinitionGroup
+                  tone="env"
+                  icon={<Variable className="h-4 w-4" />}
+                  title="Environment"
+                  meta={`${envEntries.length} variables`}
+                  rows={envEntries.map(([key, value]) => ({
+                    label: key,
+                    value: <code>{displayValue(value)}</code>,
+                  }))}
+                />
+                {server.type !== 'stdio' && (
+                  <DetailDefinitionGroup
+                    tone="headers"
+                    icon={<KeyRound className="h-4 w-4" />}
+                    title="Headers"
+                    meta={`${headerEntries.length} headers`}
+                    rows={headerEntries.map(([key, value]) => ({
+                      label: key,
+                      value: <code>{displayValue(value)}</code>,
+                    }))}
+                  />
                 )}
               </div>
-            </FieldCard>
-            <FieldCard title="ENV" tone="resolved preview">
-              <RecordPreview
-                record={server.env}
-                resolved={preview.server.env}
-                empty="未配置 env"
-                onInspect={onInspect}
-              />
-            </FieldCard>
-            {server.type !== 'stdio' && (
-              <FieldCard title="HEADERS" tone="remote auth">
-                <RecordPreview
-                  record={server.headers}
-                  resolved={preview.server.headers}
-                  empty="未配置 headers"
-                  onInspect={onInspect}
-                />
-              </FieldCard>
-            )}
-          </div>
-          {serverVariableKeys(server).length > 0 && (
-            <section className={styles.variableStrip}>
-              <span>Variables</span>
-              {serverVariableKeys(server).map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={styles.varToken}
-                  aria-label={'查看变量 ' + key}
-                  onClick={() => onInspect(key)}
-                >
-                  {'$' + '{' + key + '}'}
-                </button>
-              ))}
             </section>
-          )}
-          <section className={styles.previewCard}>
-            <div className={styles.previewHead}>
-              <div>
-                <div className={styles.cardKicker}>TARGET SETTINGS PREVIEW</div>
-                <strong>{agentName[previewTarget]} 写入预览</strong>
-                <p>使用当前 target 的变量解析结果，预览 transport、env、headers 和最终配置形态。</p>
-              </div>
-            </div>
-            <div
-              className={styles.previewPath}
-              style={{ '--c': agentColor[previewTarget] } as CSSProperties}
-            >
-              <span>{agentName[previewTarget]}</span>
-              <code>{settings.path}</code>
-              <em>{(server.targets ?? []).includes(previewTarget) ? '当前已应用' : '仅预览'}</em>
-            </div>
-            {settings.diagnostics.length > 0 && (
-              <div className={styles.previewDiagnostics}>
-                {settings.diagnostics.map((item, index) => (
-                  <span key={item.code + index}>
-                    {item.code}: {item.message}
-                  </span>
-                ))}
-              </div>
-            )}
-            <pre className={styles.syntaxPreview}>
-              <code>{renderSettingsPreviewSyntax(settings.text, previewTarget)}</code>
-            </pre>
-          </section>
-        </>
-      ) : (
-        <McpDebugPanel
-          repoPath={repoPath}
-          source="saved"
-          server={server}
-          previewTarget={previewTarget}
-        />
-      )}
+            <ServerPreview
+              server={server}
+              configView={configView}
+              target={previewTarget}
+              matrix={matrix}
+            />
+          </>
+        ) : (
+          <McpDebugPanel repoPath={repoPath} server={server} previewTarget={debugTarget} />
+        )}
+      </div>
     </div>
   )
 }
@@ -1203,230 +1612,426 @@ function McpEditor({
   repoPath,
   mode,
   initial,
-  previewTarget,
+  configView,
   matrix,
   varsKeys,
   busy,
   error,
-  onPreviewTarget,
+  onConfigView,
   onCancel,
   onSubmit,
+  onDirtyChange,
 }: {
   repoPath: string
   mode: Exclude<EditorMode, null>
   initial?: McpServer
-  previewTarget: AgentId
+  configView: McpConfigView
   matrix: VarsMatrixResponse | undefined
   varsKeys: string[]
   busy: boolean
   error: string | null
-  onPreviewTarget: (agent: AgentId) => void
+  onConfigView: (view: McpConfigView) => void
   onCancel: () => void
-  onSubmit: (form: McpServerFormState) => void
+  onSubmit: (form: McpServerFormState) => Promise<McpServer | null>
+  onDirtyChange: (dirty: boolean) => void
 }) {
   const [form, setForm] = useState<McpServerFormState>(() => serverToForm(initial))
-  const [envMode, setEnvMode] = useState<RecordEditMode>('file')
-  const [headersMode, setHeadersMode] = useState<RecordEditMode>('file')
+  const [section, setSection] = useState<McpDetailTab>('config')
+  const [editorView, setEditorView] = useState<EditorViewMode>('visual')
+  const [sourceText, setSourceText] = useState(() => formToSource(serverToForm(initial)))
+  const [savedSource, setSavedSource] = useState(() => formToSource(serverToForm(initial)))
+  const [savedFormSignature, setSavedFormSignature] = useState(() =>
+    stableStringify(serverToForm(initial)),
+  )
+  const [sourceError, setSourceError] = useState<string | null>(null)
+  const [envMode, setEnvMode] = useState<RecordEditMode>('pairs')
+  const [headersMode, setHeadersMode] = useState<RecordEditMode>('pairs')
   const [envRows, setEnvRows] = useState<RecordRow[]>(() => rowsFromRecord(initial?.env))
   const [headersRows, setHeadersRows] = useState<RecordRow[]>(() =>
     rowsFromRecord(initial?.headers),
   )
+  const varsKeysRef = useRef(varsKeys)
+  const previousModeRef = useRef(mode)
+  const promotedServerIdRef = useRef<string | null>(null)
 
   useEffect(() => {
-    setForm(mode === 'edit' ? serverToForm(initial) : emptyMcpForm())
-    setEnvMode('file')
-    setHeadersMode('file')
+    if (section === 'debug' && configView === 'raw') onConfigView('default')
+  }, [configView, onConfigView, section])
+
+  useEffect(() => {
+    varsKeysRef.current = varsKeys
+  }, [varsKeys])
+
+  const onSourceEditorMount = useCallback(
+    (_editor: unknown, monaco: Parameters<typeof registerVarsCompletionProvider>[0]) =>
+      registerVarsCompletionProvider(monaco, 'json', () => varsKeysRef.current),
+    [],
+  )
+
+  useEffect(() => {
+    const promotedFromCreate = previousModeRef.current === 'create' && mode === 'edit'
+    previousModeRef.current = mode
+    if (promotedFromCreate) {
+      promotedServerIdRef.current = form.id
+      const persistedForm = initial ? serverToForm(initial) : form
+      const persistedSource = formToSource(persistedForm)
+      setForm(persistedForm)
+      setSourceText(persistedSource)
+      setSavedSource(persistedSource)
+      setSavedFormSignature(stableStringify(persistedForm))
+      return
+    }
+    if (promotedServerIdRef.current && initial?.id === promotedServerIdRef.current) {
+      promotedServerIdRef.current = null
+      const persistedForm = serverToForm(initial)
+      setSavedSource(formToSource(persistedForm))
+      setSavedFormSignature(stableStringify(persistedForm))
+      return
+    }
+    const nextForm = mode === 'edit' ? serverToForm(initial) : emptyMcpForm()
+    setForm(nextForm)
+    setSourceText(formToSource(nextForm))
+    setSavedSource(formToSource(nextForm))
+    setSavedFormSignature(stableStringify(nextForm))
+    setSourceError(null)
+    setEditorView('visual')
+    setSection('config')
+    setEnvMode('pairs')
+    setHeadersMode('pairs')
     setEnvRows(rowsFromRecord(mode === 'edit' ? initial?.env : undefined))
     setHeadersRows(rowsFromRecord(mode === 'edit' ? initial?.headers : undefined))
   }, [initial?.id, mode])
-  const draftServer = useMemo(() => formToDraftServer(form, initial?.id), [form, initial?.id])
-  const settings = buildMcpSettingsPreview(draftServer, previewTarget, matrix)
+  const previewTarget = isAgentConfigView(configView) ? configView : 'codex'
+  const debugTarget: McpDebugPreviewTarget = configView === 'raw' ? 'default' : configView
+  const previewServer = useMemo(() => formToPreviewServer(form, initial?.id), [form, initial?.id])
   const transportLabel =
     form.type === 'stdio' ? 'local process' : form.type === 'sse' ? 'event stream' : 'remote http'
-  const setField = <K extends keyof McpServerFormState>(key: K, value: McpServerFormState[K]) =>
-    setForm((prev) => ({ ...prev, [key]: value }))
+  const setField = <K extends keyof McpServerFormState>(key: K, value: McpServerFormState[K]) => {
+    setForm((previous) => {
+      const next = { ...previous, [key]: value }
+      if (!sourceError) {
+        try {
+          setSourceText(formToSource(next))
+        } catch {
+          // Keep the last valid JSON while a visual key/value row is incomplete.
+        }
+      }
+      return next
+    })
+  }
+  const updateSource = (value: string) => {
+    setSourceText(value)
+    try {
+      const next = formFromSource(value, mode === 'edit' ? initial?.id : undefined)
+      setForm(next)
+      setEnvRows(rowsFromRecord(parseRecordLines(next.env, 'env')))
+      setHeadersRows(rowsFromRecord(parseRecordLines(next.headers, 'headers')))
+      setSourceError(null)
+    } catch (sourceParseError) {
+      setSourceError(
+        sourceParseError instanceof Error ? sourceParseError.message : 'Server JSON 无法解析',
+      )
+    }
+  }
+  const dirty =
+    Boolean(sourceError) ||
+    sourceText !== savedSource ||
+    stableStringify(form) !== savedFormSignature
+  const envError = recordValidationError(form.env, 'env')
+  const headersError = form.type === 'stdio' ? null : recordValidationError(form.headers, 'headers')
+  const recordError = envError ?? headersError
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange])
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange])
+  const persist = async () => {
+    if (sourceError || recordError) return null
+    const saved = await onSubmit(form)
+    if (saved) {
+      const persistedForm = serverToForm(saved)
+      const persistedSource = formToSource(persistedForm)
+      setForm(persistedForm)
+      setSourceText(persistedSource)
+      setSavedSource(persistedSource)
+      setSavedFormSignature(stableStringify(persistedForm))
+      setEnvRows(rowsFromRecord(saved.env))
+      setHeadersRows(rowsFromRecord(saved.headers))
+    }
+    return saved
+  }
   return (
-    <div className={styles.editorShell}>
-      <section className={styles.editorHero}>
+    <div className={styles.drawerContent}>
+      <header className={styles.paneHeader}>
+        <IconButton
+          label="返回 Server 列表"
+          tooltip="返回"
+          className={styles.backButton}
+          onClick={onCancel}
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </IconButton>
         <div>
-          <div className={styles.cardKicker}>
-            {mode === 'edit' ? 'EDIT SERVER' : 'CREATE SERVER'}
-          </div>
           <h2>{mode === 'edit' ? '编辑 MCP server' : '新增 MCP server'}</h2>
-          <p>编辑 server 定义本身；是否应用到各 agent，回到列表里单独控制。</p>
-          <div className={styles.editorHeroMeta}>
-            <span>{transportLabel}</span>
-            <span>{mode === 'create' ? 'unprojected by default' : 'definition only'}</span>
-            <span>draft only</span>
-          </div>
+          <p>{transportLabel}</p>
         </div>
-        <TypeBadge type={form.type} large />
-        <PreviewTargetSwitch value={previewTarget} agents={AGENTS} onChange={onPreviewTarget} />
-      </section>
-      {error && <FieldError id="mcp-server-form-error">{error}</FieldError>}
-      <div className={styles.editorFormStack}>
-        <section className={styles.editorCard}>
-          <div className={styles.editorCardHead}>
-            <div>
-              <div className={styles.cardKicker}>IDENTITY</div>
-              <strong>命名与说明</strong>
-            </div>
-            <small>不会写入 header/env</small>
-          </div>
-          <div className={styles.editorFields}>
-            <label>
-              <span>server id</span>
-              <input
-                aria-label="server id"
-                value={form.id}
-                disabled={mode === 'edit'}
-                onChange={(event) => setField('id', event.target.value)}
-                placeholder="new-browser-tools"
-              />
-              <small>保存后作为各 agent 配置里的 key。</small>
-            </label>
-          </div>
-        </section>
-
-        <section className={styles.editorCard}>
-          <div className={styles.editorCardHead}>
-            <div>
-              <div className={styles.cardKicker}>CONNECTION</div>
-              <strong>Transport 与入口</strong>
-            </div>
-          </div>
-          <div className={styles.editorTransport}>
-            {MCP_TYPES.map((type) => (
-              <button
-                key={type}
-                type="button"
-                data-active={form.type === type}
-                aria-pressed={form.type === type}
-                onClick={() => setField('type', type)}
-              >
-                <span>{type}</span>
-                <small>
-                  {type === 'stdio'
-                    ? 'local process'
-                    : type === 'sse'
-                      ? 'event stream'
-                      : 'remote http'}
-                </small>
-              </button>
-            ))}
-          </div>
-          <div className={styles.editorFields}>
-            {form.type === 'stdio' ? (
-              <>
-                <label>
-                  <span>command</span>
-                  <input
-                    aria-label="command"
-                    value={form.command}
-                    onChange={(event) => setField('command', event.target.value)}
-                    placeholder="npx"
-                  />
-                </label>
-                <label>
-                  <span>args</span>
-                  <input
-                    aria-label="args"
-                    value={form.args}
-                    onChange={(event) => setField('args', event.target.value)}
-                    placeholder="-y @modelcontextprotocol/server-filesystem"
-                  />
-                </label>
-              </>
-            ) : (
-              <label>
-                <span>url</span>
-                <input
-                  aria-label="url"
-                  value={form.url}
-                  onChange={(event) => setField('url', event.target.value)}
-                  placeholder="https://example.test/sse"
-                />
-              </label>
-            )}
-          </div>
-        </section>
-
-        <section className={styles.editorCard}>
-          <div className={styles.editorCardHead}>
-            <div>
-              <div className={styles.cardKicker}>VARIABLES</div>
-              <strong>{form.type === 'stdio' ? 'Env 变量' : 'Env 与 headers'}</strong>
-            </div>
-            <small>{form.type === 'stdio' ? 'stdio 不显示 headers' : 'remote auth 单独成行'}</small>
-          </div>
-          <RecordField
-            name="env"
-            mode={envMode}
-            value={form.env}
-            rows={envRows}
-            setMode={setEnvMode}
-            onTextChange={(value) => setField('env', value)}
-            onRowsChange={setEnvRows}
-            varsKeys={varsKeys}
-          />
-          {form.type !== 'stdio' && (
-            <RecordField
-              name="headers"
-              mode={headersMode}
-              value={form.headers}
-              rows={headersRows}
-              setMode={setHeadersMode}
-              onTextChange={(value) => setField('headers', value)}
-              onRowsChange={setHeadersRows}
-              varsKeys={varsKeys}
-            />
-          )}
-        </section>
-
-        <section className={`${styles.previewCard} ${styles.editorCard}`}>
-          <div className={styles.previewHead}>
-            <div>
-              <div className={styles.cardKicker}>WRITE PREVIEW</div>
-              <p>
-                {agentName[previewTarget]} · {settings.path}
-              </p>
-            </div>
-          </div>
-          <pre className={styles.syntaxPreview}>
-            <code>{renderSettingsPreviewSyntax(settings.text, previewTarget)}</code>
-          </pre>
-        </section>
-        <McpDebugPanel
-          repoPath={repoPath}
-          source="draft"
-          server={draftServer}
-          previewTarget={previewTarget}
+        <div className={styles.paneHeaderActions}>
+          <TypeBadge type={form.type} />
+          <PreviewTargetSwitch value={configView} agents={AGENTS} onChange={onConfigView} />
+        </div>
+      </header>
+      <div className={`${styles.drawerBody} ${section === 'debug' ? styles.drawerBodyTools : ''}`}>
+        <DrawerSectionTabs
+          value={section}
+          onChange={(next) => {
+            if (next === 'debug' && configView === 'raw') onConfigView('default')
+            setSection(next)
+          }}
         />
+        {error && <FieldError id="mcp-server-form-error">{error}</FieldError>}
+        {section === 'config' ? (
+          <>
+            <div className={styles.editorModeBar}>
+              <div className={styles.editorModeSwitch} role="tablist" aria-label="Server 编辑方式">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={editorView === 'visual'}
+                  onClick={() => setEditorView('visual')}
+                >
+                  <LayoutList className="h-3.5 w-3.5" />
+                  可视化
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={editorView === 'json'}
+                  onClick={() => setEditorView('json')}
+                >
+                  <FileJson2 className="h-3.5 w-3.5" />
+                  JSON
+                </button>
+              </div>
+            </div>
+            {editorView === 'json' ? (
+              <section className={styles.sourceEditorSection}>
+                <div className={styles.sourceEditorHead}>
+                  <div>
+                    <span className={styles.eyebrow}>SERVER SOURCE</span>
+                    <strong>完整 Server JSON</strong>
+                  </div>
+                  <span data-valid={!sourceError}>{sourceError ? '需要修复' : 'JSON 有效'}</span>
+                </div>
+                <div className={styles.sourceEditorShell} data-invalid={Boolean(sourceError)}>
+                  <MonacoTextEditor
+                    ariaLabel="完整 Server JSON"
+                    ariaDescribedBy={sourceError ? 'mcp-server-source-error' : undefined}
+                    language="json"
+                    height="430px"
+                    value={sourceText}
+                    onChange={updateSource}
+                    onEditorMount={onSourceEditorMount}
+                    options={{
+                      fontSize: 14,
+                      lineHeight: 22,
+                      padding: { top: 14, bottom: 14 },
+                      wordWrap: 'on',
+                    }}
+                  />
+                </div>
+                {sourceError && (
+                  <div className={styles.sourceError} id="mcp-server-source-error">
+                    <CircleAlert className="h-4 w-4" />
+                    <span>{sourceError}</span>
+                  </div>
+                )}
+              </section>
+            ) : (
+              <div className={styles.visualEditor} data-readonly={Boolean(sourceError)}>
+                <fieldset disabled={Boolean(sourceError)}>
+                  <section className={styles.formGroup}>
+                    <header>
+                      <h3>基本信息</h3>
+                      <p>用于在列表和 agent 配置中识别这个 server。</p>
+                    </header>
+                    <div className={styles.formFields}>
+                      <label className={styles.field}>
+                        <span>Server ID</span>
+                        <div className={styles.fieldInput}>
+                          <Server className="h-3.5 w-3.5" />
+                          <input
+                            aria-label="server id"
+                            value={form.id}
+                            disabled={mode === 'edit'}
+                            onChange={(event) => setField('id', event.target.value)}
+                            placeholder="browser-tools"
+                          />
+                        </div>
+                        {mode === 'edit' ? (
+                          <small className={styles.readOnlyHint}>
+                            <LockKeyhole className="h-3.5 w-3.5" />
+                            ID 已锁定，保存后不可修改
+                          </small>
+                        ) : (
+                          <small>小写字母、数字与连字符。</small>
+                        )}
+                      </label>
+                    </div>
+                  </section>
+
+                  <section className={styles.formGroup}>
+                    <header>
+                      <h3>连接</h3>
+                      <p>选择 transport 并填写连接信息。</p>
+                    </header>
+                    <div className={styles.formFields}>
+                      <div
+                        className={styles.transportTabs}
+                        role="radiogroup"
+                        aria-label="Transport"
+                      >
+                        {MCP_TYPES.map((type) => (
+                          <button
+                            key={type}
+                            type="button"
+                            role="radio"
+                            aria-checked={form.type === type}
+                            data-active={form.type === type}
+                            data-transport={type}
+                            aria-pressed={form.type === type}
+                            onClick={() => setField('type', type)}
+                          >
+                            {type === 'stdio' ? (
+                              <Command className="h-3.5 w-3.5" />
+                            ) : type === 'sse' ? (
+                              <Cloud className="h-3.5 w-3.5" />
+                            ) : (
+                              <Braces className="h-3.5 w-3.5" />
+                            )}
+                            {type}
+                          </button>
+                        ))}
+                      </div>
+                      <div className={styles.connectionFields}>
+                        {form.type === 'stdio' ? (
+                          <>
+                            <label className={styles.field}>
+                              <span>Command</span>
+                              <div className={styles.fieldInput}>
+                                <Command className="h-3.5 w-3.5" />
+                                <input
+                                  aria-label="command"
+                                  value={form.command}
+                                  onChange={(event) => setField('command', event.target.value)}
+                                  placeholder="npx"
+                                />
+                              </div>
+                            </label>
+                            <ArgumentsEditor
+                              args={form.args}
+                              onChange={(args) => setField('args', args)}
+                            />
+                          </>
+                        ) : (
+                          <label className={styles.field}>
+                            <span>Endpoint URL</span>
+                            <div className={styles.fieldInput}>
+                              <Cloud className="h-3.5 w-3.5" />
+                              <input
+                                aria-label="url"
+                                value={form.url}
+                                onChange={(event) => setField('url', event.target.value)}
+                                placeholder="https://mcp.example.com/api"
+                              />
+                            </div>
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className={styles.formGroup}>
+                    <header>
+                      <h3>Environment</h3>
+                      <p>运行时环境变量。</p>
+                    </header>
+                    <div className={styles.formFields}>
+                      <RecordField
+                        name="env"
+                        mode={envMode}
+                        value={form.env}
+                        rows={envRows}
+                        setMode={setEnvMode}
+                        onTextChange={(value) => setField('env', value)}
+                        onRowsChange={setEnvRows}
+                        error={envError}
+                        varsKeys={varsKeys}
+                      />
+                    </div>
+                  </section>
+                  {form.type !== 'stdio' && (
+                    <section className={styles.formGroup}>
+                      <header>
+                        <h3>Headers</h3>
+                        <p>远程认证与请求 headers。</p>
+                      </header>
+                      <div className={styles.formFields}>
+                        <RecordField
+                          name="headers"
+                          mode={headersMode}
+                          value={form.headers}
+                          rows={headersRows}
+                          setMode={setHeadersMode}
+                          onTextChange={(value) => setField('headers', value)}
+                          onRowsChange={setHeadersRows}
+                          error={headersError}
+                          varsKeys={varsKeys}
+                        />
+                      </div>
+                    </section>
+                  )}
+                </fieldset>
+              </div>
+            )}
+
+            <ServerPreview
+              server={previewServer}
+              configView={configView}
+              target={previewTarget}
+              matrix={matrix}
+            />
+          </>
+        ) : (
+          <McpDebugPanel
+            repoPath={repoPath}
+            server={previewServer}
+            previewTarget={debugTarget}
+            needsSave
+            onPersist={persist}
+            disabledReason={
+              sourceError
+                ? '修复 Server JSON 后才能保存并连接。'
+                : recordError
+                  ? recordError
+                  : undefined
+            }
+          />
+        )}
       </div>
-      <footer className={styles.editorActionbar}>
+      <footer className={styles.editorFooter}>
         <div>
-          <strong>{mode === 'create' ? 'Create as draft' : 'Save draft changes'}</strong>
-          <span>
-            {mode === 'create'
-              ? '新增后默认不应用到任何 target。'
-              : '只保存 server 定义，不改变 target 应用状态。'}
-          </span>
+          <strong>{busy ? '正在保存' : 'Server 定义'}</strong>
         </div>
         <div className={styles.editorActions}>
-          <Button type="button" variant="ghost" className={styles.editorCancel} onClick={onCancel}>
-            <X className="h-3.5 w-3.5" />
+          <Button type="button" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
           <Button
             type="button"
             variant="primary"
-            aria-label="Save server"
-            className={styles.editorSave}
-            onClick={() => onSubmit(form)}
-            disabled={busy}
+            aria-label="保存"
+            onClick={() => void persist()}
+            disabled={busy || Boolean(sourceError) || Boolean(recordError)}
           >
             <Check className="h-3.5 w-3.5" />
-            {busy ? 'Saving…' : mode === 'create' ? 'Create draft' : 'Save draft'}
+            {busy ? '保存中…' : mode === 'create' ? '创建' : '保存'}
           </Button>
         </div>
       </footer>
@@ -1446,7 +2051,7 @@ function GlobalTargetsBar({
   if (servers.length === 0) return null
   return (
     <section className={styles.globalTargets} role="region" aria-label="全局 MCP targets">
-      <span className={styles.globalTargetsLabel}>投影目标</span>
+      <span className={styles.globalTargetsLabel}>Apply all</span>
       <div className="target-chips">
         {visibleAgents.map((agent) => {
           const count = servers.filter((server) => (server.targets ?? []).includes(agent)).length
@@ -1485,18 +2090,25 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     onToast: showToast,
   })
   const { matrices } = useMcpPreviewVars(repoPath)
-  const [selected, setSelected] = useState<string | null>(null)
+  const initialDrawer = useMemo(drawerLocation, [])
+  const [selected, setSelected] = useState<string | null>(initialDrawer.selected)
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<McpFilter>('all')
+  const [configView, setConfigView] = useState<McpConfigView>('raw')
   const [previewTarget, setPreviewTarget] = useState<AgentId>('codex')
-  const [editorMode, setEditorMode] = useState<EditorMode>(null)
+  const [editorMode, setEditorMode] = useState<EditorMode>(initialDrawer.editorMode)
   const [editorBusy, setEditorBusy] = useState(false)
   const [editorError, setEditorError] = useState<string | null>(null)
+  const [editorDirty, setEditorDirty] = useState(false)
+  const [dirtyCloseOpen, setDirtyCloseOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<McpServer | null>(null)
   const [inspectedVar, setInspectedVar] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [serverOrder, setServerOrder] = useState<string[]>([])
+  const [createdServer, setCreatedServer] = useState<McpServer | null>(null)
+  const [drawerEntered, setDrawerEntered] = useState(false)
+  const pendingHistoryCloseRef = useRef(false)
+  const historyNavigationRef = useRef<'restore-editor' | 'confirm-close' | null>(null)
 
   const manifestServers = manifest?.mcp ?? []
   const orderedServerIds = normalizeOrder(
@@ -1505,10 +2117,11 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   )
   const serversById = new Map(manifestServers.map((server) => [server.id, server]))
   const servers = orderedServerIds.map((id) => serversById.get(id)!).filter(Boolean)
-  const visibleAgents = ((manifest?.config?.targets ?? AGENTS) as AgentId[]).filter((agent) =>
-    AGENTS.includes(agent),
-  )
-  const selectedServer = servers.find((server) => server.id === selected)
+  const visibleAgents = AGENTS
+  const selectedServer =
+    servers.find((server) => server.id === selected) ??
+    (createdServer?.id === selected ? createdServer : undefined)
+  const drawerActive = Boolean(editorMode || selectedServer)
   const mcpVarsKeys = useMemo(
     () =>
       Array.from(
@@ -1523,46 +2136,112 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   )
 
   useEffect(() => {
-    if (servers.length === 0) {
-      setSelected(null)
+    const syncFromHistory = () => {
+      if (historyNavigationRef.current === 'restore-editor') {
+        historyNavigationRef.current = null
+        return
+      }
+      if (historyNavigationRef.current === 'confirm-close') {
+        historyNavigationRef.current = null
+        const next = drawerLocation()
+        setSelected(next.selected)
+        setEditorMode(next.editorMode)
+        return
+      }
+      if (editorMode && editorDirty) {
+        pendingHistoryCloseRef.current = true
+        setDirtyCloseOpen(true)
+        historyNavigationRef.current = 'restore-editor'
+        window.history.forward()
+        return
+      }
+      const next = drawerLocation()
+      setSelected(next.selected)
+      setEditorMode(next.editorMode)
+    }
+    window.addEventListener('popstate', syncFromHistory)
+    return () => window.removeEventListener('popstate', syncFromHistory)
+  }, [editorDirty, editorMode, selected])
+
+  useEffect(() => {
+    if (!manifest || !selected || servers.some((server) => server.id === selected)) return
+    if (createdServer?.id === selected) return
+    setSelected(null)
+    setEditorMode(null)
+    writeDrawerLocation(null)
+  }, [createdServer?.id, manifest, selected, servers])
+
+  useEffect(() => {
+    if (createdServer && servers.some((server) => server.id === createdServer.id))
+      setCreatedServer(null)
+  }, [createdServer, servers])
+
+  useEffect(() => {
+    if (!drawerActive) {
+      setDrawerEntered(false)
       return
     }
-    if (!selected || !servers.some((server) => server.id === selected)) setSelected(servers[0].id)
-  }, [selected, servers])
+    const frame = window.requestAnimationFrame(() => setDrawerEntered(true))
+    return () => window.cancelAnimationFrame(frame)
+  }, [drawerActive])
+
+  const openDrawer = (view: 'detail' | 'edit' | 'create', server?: string) => {
+    setSelected(server ?? null)
+    setEditorMode(view === 'detail' ? null : view)
+    writeDrawerLocation(view, server)
+  }
+  const changeConfigView = (view: McpConfigView) => {
+    setConfigView(view)
+    if (isAgentConfigView(view)) setPreviewTarget(view)
+  }
+  const closeDrawer = () => {
+    setDrawerEntered(false)
+    setSelected(null)
+    setEditorMode(null)
+    setEditorError(null)
+    writeDrawerLocation(null)
+  }
+  const requestCloseDrawer = () => {
+    if (editorMode && editorDirty) {
+      pendingHistoryCloseRef.current = false
+      setDirtyCloseOpen(true)
+      return
+    }
+    closeDrawer()
+  }
 
   const filteredServers = useMemo(() => {
     const term = search.trim().toLowerCase()
     return servers.filter(
       (server) =>
-        (filter === 'all' ||
-          (filter === 'local' && server.type === 'stdio') ||
-          (filter === 'remote' && server.type !== 'stdio')) &&
-        (!term ||
-          (server.id + ' ' + server.type + ' ' + serverSubtitle(server))
-            .toLowerCase()
-            .includes(term)),
+        !term ||
+        (server.id + ' ' + server.type + ' ' + serverSubtitle(server)).toLowerCase().includes(term),
     )
-  }, [filter, search, servers])
-  const submitServer = async (form: McpServerFormState) => {
+  }, [search, servers])
+  const submitServer = async (form: McpServerFormState): Promise<McpServer | null> => {
     setEditorBusy(true)
     setEditorError(null)
     try {
       if (editorMode === 'edit') {
-        if (!selectedServer) return
+        if (!selectedServer) return null
         const server = buildServerFromForm(form, {
           idOverride: selectedServer.id,
           preserveTargets: (selectedServer.targets ?? []) as AgentId[],
         })
         const result = await operations.updateMcpServer(selectedServer.id, server)
-        if (result.ok) setEditorMode(null)
-        else setEditorError(result.message || '保存 MCP Server 失败')
+        if (result.ok) return server
+        setEditorError(result.message || '保存 MCP Server 失败')
       } else {
         const server = buildServerFromForm(form)
         const result = await operations.addMcpServer(server)
         if (result.ok) {
-          setEditorMode(null)
+          setCreatedServer(server)
           setSelected(server.id)
-        } else setEditorError(result.message || '添加 MCP Server 失败')
+          setEditorMode('edit')
+          writeDrawerLocation('edit', server.id)
+          return server
+        }
+        setEditorError(result.message || '添加 MCP Server 失败')
       }
     } catch (err) {
       console.error({ err }, 'Failed to submit MCP server')
@@ -1570,6 +2249,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     } finally {
       setEditorBusy(false)
     }
+    return null
   }
 
   const copySelected = () => {
@@ -1610,13 +2290,44 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   return (
     <div className={styles.page}>
       {error && <ErrorState {...error} />}
+      <header className={styles.pageHeading}>
+        <div>
+          <span className={styles.eyebrow}>CONFIGURATION</span>
+          <h1>MCP servers</h1>
+          <p>管理仓库中的 Server 定义与 agent targets。</p>
+        </div>
+        <div className={styles.pageActions}>
+          <Button
+            variant="primary"
+            onClick={() => {
+              setEditorError(null)
+              openDrawer('create')
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add server
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => void operations.project('mcp')}
+            disabled={operations.pending.project('mcp')}
+          >
+            {operations.pending.project('mcp') ? (
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+            Project changes
+          </Button>
+        </div>
+      </header>
       <section className={styles.workbench} role="region" aria-label="MCP workbench">
         <aside className={styles.inventory} aria-label="MCP inventory">
-          <div className={styles.inventoryTop}>
+          <div className={styles.inventoryHeader}>
             <div className={styles.inventoryHeading}>
               <div className={styles.inventoryTitle}>
-                <div className={styles.kicker}>MCP</div>
-                <h2>Server 列表</h2>
+                <h2>所有 Servers</h2>
+                <span className={styles.serverCount}>{servers.length} 个</span>
               </div>
               <div
                 className={styles.inventoryActions}
@@ -1624,14 +2335,13 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                 aria-label="MCP inventory actions"
               >
                 <IconButton
-                  label="Add server"
-                  tooltip="Add server"
+                  label="新增 MCP server"
+                  tooltip="新增"
                   variant="secondary"
                   size="sm"
-                  className={styles.inventoryActionPrimary}
                   onClick={() => {
                     setEditorError(null)
-                    setEditorMode('create')
+                    openDrawer('create')
                   }}
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -1641,25 +2351,10 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                   tooltip="Import"
                   variant="secondary"
                   size="sm"
-                  className={styles.inventoryActionImport}
                   onClick={() => setImportOpen(true)}
                   disabled={operations.pending.mcp.importScan || operations.pending.mcp.importApply}
                 >
                   <Download className="h-3.5 w-3.5" />
-                </IconButton>
-                <IconButton
-                  label="Project changes"
-                  tooltip={operations.pending.project('mcp') ? '投影中…' : '投影'}
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void operations.project('mcp')}
-                  disabled={operations.pending.project('mcp')}
-                >
-                  {operations.pending.project('mcp') ? (
-                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Send className="h-3.5 w-3.5" />
-                  )}
                 </IconButton>
               </div>
             </div>
@@ -1669,87 +2364,76 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
               operations={operations}
             />
           </div>
-          <label className={styles.searchBox}>
-            <Search className="h-3.5 w-3.5" />
-            <input
-              type="search"
-              aria-label="搜索 MCP server"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Filter by id, command, url"
-            />
-          </label>
-          <div className={styles.filterRow}>
-            {MCP_FILTERS.map((item) => (
-              <button
-                key={item}
-                type="button"
-                data-active={filter === item}
-                onClick={() => setFilter(item)}
-              >
-                {item === 'all' ? 'All' : item === 'local' ? 'Local' : 'Remote'}
-              </button>
-            ))}
+          <div className={styles.searchBar}>
+            <label className={styles.search}>
+              <Search className="h-3.5 w-3.5" />
+              <input
+                type="search"
+                aria-label="搜索 MCP server"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="搜索 server"
+              />
+            </label>
           </div>
           <div className={styles.serverList}>
+            <div className={styles.listColumns} aria-hidden="true">
+              <span>Server</span>
+              <span>Targets</span>
+              <span>操作</span>
+            </div>
             <SortableList
               items={filteredServers}
               label={(server) => server.id}
-              disabled={search.trim().length > 0 || filter !== 'all'}
+              activator="child"
+              disabled={search.trim().length > 0}
+              className={styles.serverSortableList}
               onReorder={reorderServers}
             >
-              {(server) => {
+              {(server, sortable) => {
                 const activeTargets = server.targets ?? []
-                const projectionState = serverProjectionState(server, visibleAgents)
+                const sortingDisabled = search.trim().length > 0
                 return (
                   <article
                     role="button"
-                    tabIndex={-1}
+                    tabIndex={0}
                     aria-label={'选择 ' + server.id}
-                    className={styles.serverCard}
+                    className={styles.serverRow}
                     data-selected={selected === server.id}
+                    data-dragging={sortable.dragging || undefined}
+                    data-overlay={sortable.overlay || undefined}
                     onClick={() => {
-                      setSelected(server.id)
-                      setEditorMode(null)
+                      openDrawer('detail', server.id)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return
+                      if (event.key !== 'Enter' && event.key !== ' ') return
+                      event.preventDefault()
+                      openDrawer('detail', server.id)
                     }}
                   >
                     <span className={styles.serverMain} aria-label={'选择 ' + server.id}>
-                      <span className={styles.serverTopline}>
-                        <b>{server.id}</b>
-                        <TypeBadge type={server.type} />
-                        <span className={styles.rowActions} aria-label={server.id + ' actions'}>
-                          <IconButton
-                            label={'编辑 ' + server.id}
-                            tooltip="编辑"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setSelected(server.id)
-                              setEditorError(null)
-                              setEditorMode('edit')
-                            }}
-                          >
-                            <Edit3 className="h-3.5 w-3.5" />
-                          </IconButton>
-                          <IconButton
-                            label={'删除 ' + server.id}
-                            tooltip="删除"
-                            tone="danger"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setDeleteTarget(server)
-                            }}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </IconButton>
+                      <button
+                        type="button"
+                        className={styles.dragHandle}
+                        title={sortingDisabled ? '清除搜索后可排序' : '拖拽调整顺序'}
+                        aria-disabled={sortingDisabled}
+                        onClick={(event) => event.stopPropagation()}
+                        {...sortable.activatorProps}
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </button>
+                      <span className={styles.serverCopy}>
+                        <span className={styles.serverTitle}>
+                          <i className={styles.transportDot} data-transport={server.type} />
+                          <strong>{server.id}</strong>
+                          <TypeBadge type={server.type} />
                         </span>
+                        <small>{serverSubtitle(server)}</small>
                       </span>
-                      <small>{serverSubtitle(server)}</small>
                     </span>
                     <div className={styles.serverFoot}>
-                      <span className={styles.projectionState} data-tone={projectionState.tone}>
-                        {projectionState.label}
-                      </span>
-                      <div className={styles.rowTargets}>
+                      <div className={styles.targets}>
                         {visibleAgents.map((agent) => (
                           <TargetChip
                             key={agent}
@@ -1767,6 +2451,30 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                           />
                         ))}
                       </div>
+                      <span className={styles.rowActions} aria-label={server.id + ' actions'}>
+                        <IconButton
+                          label={'编辑 ' + server.id}
+                          tooltip="编辑"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setEditorError(null)
+                            openDrawer('edit', server.id)
+                          }}
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </IconButton>
+                        <IconButton
+                          label={'删除 ' + server.id}
+                          tooltip="删除"
+                          tone="danger"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setDeleteTarget(server)
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </IconButton>
+                      </span>
                     </div>
                   </article>
                 )
@@ -1782,46 +2490,62 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           operations={operations}
           onClose={() => setImportOpen(false)}
         />
-        <main className={styles.detail}>
-          {editorMode ? (
-            <McpEditor
-              repoPath={repoPath}
-              mode={editorMode}
-              initial={editorMode === 'edit' ? selectedServer : undefined}
-              previewTarget={previewTarget}
-              matrix={matrices[previewTarget]}
-              varsKeys={mcpVarsKeys}
-              busy={editorBusy}
-              error={editorError}
-              onPreviewTarget={setPreviewTarget}
-              onCancel={() => setEditorMode(null)}
-              onSubmit={submitServer}
-            />
-          ) : selectedServer ? (
-            <McpDetail
-              repoPath={repoPath}
-              server={selectedServer}
-              previewTarget={previewTarget}
-              matrix={matrices[previewTarget]}
-              onPreviewTarget={setPreviewTarget}
-              onEdit={() => {
-                setEditorError(null)
-                setEditorMode('edit')
-              }}
-              onCopy={copySelected}
-              onInspect={setInspectedVar}
-            />
-          ) : (
-            <div className={styles.noSelection}>
-              <h2>还没有 MCP server</h2>
-              <p>从左侧新增一个 server，保存后默认不会应用到任何 target。</p>
-              <Button variant="primary" onClick={() => setEditorMode('create')}>
-                Add server
-              </Button>
-            </div>
-          )}
-        </main>
       </section>
+      {drawerActive && (
+        <div
+          className={styles.drawerLayer}
+          data-view={editorMode ?? 'detail'}
+          data-open={drawerEntered ? 'true' : undefined}
+        >
+          <button
+            className={styles.drawerScrim}
+            aria-label="关闭 Server 面板"
+            onClick={requestCloseDrawer}
+          />
+          <aside
+            className={styles.contentPane}
+            aria-label={
+              editorMode === 'create'
+                ? '新增 Server'
+                : editorMode === 'edit'
+                  ? '编辑 Server'
+                  : 'Server 详情'
+            }
+          >
+            {editorMode ? (
+              <McpEditor
+                repoPath={repoPath}
+                mode={editorMode}
+                initial={editorMode === 'edit' ? selectedServer : undefined}
+                configView={configView}
+                matrix={matrices[configView === 'raw' ? 'default' : configView]}
+                varsKeys={mcpVarsKeys}
+                busy={editorBusy}
+                error={editorError}
+                onConfigView={changeConfigView}
+                onCancel={requestCloseDrawer}
+                onSubmit={submitServer}
+                onDirtyChange={setEditorDirty}
+              />
+            ) : selectedServer ? (
+              <McpDetail
+                repoPath={repoPath}
+                server={selectedServer}
+                configView={configView}
+                matrix={matrices[configView === 'raw' ? 'default' : configView]}
+                onConfigView={changeConfigView}
+                onEdit={() => {
+                  setEditorError(null)
+                  openDrawer('edit', selectedServer.id)
+                }}
+                onCopy={copySelected}
+                onInspect={setInspectedVar}
+                onClose={requestCloseDrawer}
+              />
+            ) : null}
+          </aside>
+        </div>
+      )}
       {deleteTarget && (
         <div
           className={styles.variableOverlay}
@@ -1861,9 +2585,47 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           </section>
         </div>
       )}
+      {dirtyCloseOpen && (
+        <div
+          className={styles.variableOverlay}
+          role="presentation"
+          onMouseDown={() => setDirtyCloseOpen(false)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="放弃未保存的更改"
+            className={styles.confirmPanel}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <h3>放弃未保存的更改？</h3>
+            <p>关闭后，本次对 Server 定义的修改不会保存。</p>
+            <div>
+              <Button variant="ghost" onClick={() => setDirtyCloseOpen(false)}>
+                继续编辑
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setDirtyCloseOpen(false)
+                  if (pendingHistoryCloseRef.current) {
+                    pendingHistoryCloseRef.current = false
+                    historyNavigationRef.current = 'confirm-close'
+                    window.history.back()
+                    return
+                  }
+                  closeDrawer()
+                }}
+              >
+                放弃更改
+              </Button>
+            </div>
+          </section>
+        </div>
+      )}
       <McpVariableInspector
         variableKey={inspectedVar}
-        matrix={matrices[previewTarget]}
+        matrix={matrices[configView === 'raw' ? 'default' : configView]}
         onClose={() => setInspectedVar(null)}
       />
       {copied && (

@@ -36,7 +36,9 @@ const VarEntryRequestSchema = z.unknown().transform((value, ctx): VarEntry => {
 })
 
 const VarsRepoQuery = z.object({ repoPath: RepoPathSchema })
-const VarsAgentQuery = VarsRepoQuery.extend({ agent: AgentIdSchema })
+const VarsAgentQuery = VarsRepoQuery.extend({
+  agent: z.union([z.literal('default'), AgentIdSchema]),
+})
 const VarsEnvironmentParams = z.object({ environment: EnvironmentNameSchema })
 const VarsRepoBody = z.object({ repoPath: RepoPathSchema })
 const VarsKeyBody = VarsRepoBody.extend({ key: VarKeySchema })

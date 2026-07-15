@@ -320,6 +320,23 @@ describe('resolveLayeredVars', () => {
     })
   })
 
+  it('resolves the default context from base and local without agent or runtime layers', () => {
+    const result = resolveLayeredVars({
+      base: {
+        name: { type: 'string', value: 'Base' },
+        path: { type: 'string', value: '${name}/mcp' },
+      },
+      local: { name: { value: 'Local' } },
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.values.name.value).toBe('Local')
+    expect(result.values.path.value).toBe('Local/mcp')
+    expect(result.sources.name).toEqual(localRef)
+    expect(result.values).not.toHaveProperty('LOOM_AGENT')
+  })
+
   it('rejects unsupported defaults and json text interpolation', () => {
     const defaulted = resolveLayeredVars({
       agent: 'codex',

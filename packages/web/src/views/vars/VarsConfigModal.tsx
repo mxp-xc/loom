@@ -237,6 +237,7 @@ export default function VarsConfigModal({
       ? valueForSlot(definitionMatrix, matricesByAgent, profile.id, selectedEntry.key, initialSlot)
       : '',
   )
+  const [draftChanged, setDraftChanged] = useState(false)
   const [baseKeyDraft, setBaseKeyDraft] = useState('')
   const [baseTypeDraft, setBaseTypeDraft] = useState<VarEntryInput['type']>('string')
   const [baseFormatDraft, setBaseFormatDraft] = useState<StringFormat>('plain')
@@ -255,6 +256,7 @@ export default function VarsConfigModal({
   useEffect(() => {
     if (!selectedEntry) return
     setDraft(valueForSlot(definitionMatrix, matricesByAgent, profile.id, selectedEntry.key, slot))
+    setDraftChanged(false)
   }, [definitionMatrix, matricesByAgent, profile.id, selectedEntry, slot])
 
   const key = isNewBaseDefinition ? baseKeyDraft.trim() : (selectedEntry?.key ?? '')
@@ -295,6 +297,10 @@ export default function VarsConfigModal({
   const save = async () => {
     if (!key) return
     if (!selectedEntry && !(isNewBaseDefinition && slot === 'default')) return
+    if (type === 'secret' && draft === secretPreviewMask && !draftChanged) {
+      onClose()
+      return
+    }
     setPending(true)
     try {
       if (profile.id === 'base' && slot === 'default') {
@@ -489,7 +495,10 @@ export default function VarsConfigModal({
                     <SecretConfigValueInput
                       disabled={isReadonly}
                       value={draft}
-                      onChange={setDraft}
+                      onChange={(value) => {
+                        setDraft(value)
+                        setDraftChanged(true)
+                      }}
                     />
                   ) : (
                     <VarsMonacoValueEditor

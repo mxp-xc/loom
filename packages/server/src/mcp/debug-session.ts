@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { AgentId, McpServer } from '@loom/core'
 
 export type McpDebugSource = 'saved' | 'draft'
+export type McpDebugPreviewTarget = 'default' | AgentId
 
 export interface McpDebugTool {
   name: string
@@ -19,7 +20,7 @@ export interface McpDebugSessionSnapshot {
   sessionId: string
   source: McpDebugSource
   serverFingerprint: string
-  previewTarget: AgentId
+  previewTarget: McpDebugPreviewTarget
   tools: McpDebugTool[]
   createdAt: string
   idleExpiresAt: string
@@ -55,7 +56,7 @@ interface McpDebugSession {
   source: McpDebugSource
   serverId: string
   serverFingerprint: string
-  previewTarget: AgentId
+  previewTarget: McpDebugPreviewTarget
   client: McpDebugClient
   tools: McpDebugTool[]
   createdAt: number
@@ -108,7 +109,7 @@ export class McpDebugSessionManager {
   async createSession(input: {
     source: McpDebugSource
     server: McpServer
-    previewTarget: AgentId
+    previewTarget: McpDebugPreviewTarget
   }): Promise<McpDebugSessionSnapshot> {
     this.sweepExpired()
     if (this.sessions.size >= this.maxSessions)
