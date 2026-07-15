@@ -100,7 +100,7 @@
   white-space: nowrap;
   text-decoration: none;
 }
-.group-head .gurl:hover {
+.group-head a.gurl:hover {
   text-decoration: underline;
 }
 .group-head .gref {

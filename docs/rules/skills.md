@@ -274,3 +274,33 @@ Tests:
 - packages/server/test/remote/discover.test.ts
 - packages/server/test/remote/update.test.ts
 - packages/core/test/derive-repo-id.test.ts
+
+## R-SKILLS-010 Source Web 链接不改变 Git remote
+
+Status: active
+Applies to: remote sources, source members, skills UI
+
+Rule:
+Skills UI 可以从 Source Git remote 推导仓库主页和 member 文件 Web 链接，但推导结果只用于展示，不得写回 Source 或替代 scan、update、clone 使用的 remote。
+
+Implications:
+
+- GitHub、GitCode 和 Gitee member 使用 `/blob/<ref>/<path>`，GitLab 使用 `/-/blob/<ref>/<path>`。
+- 未识别但可解析的 forge 使用 `/blob/<ref>/<path>` 作为 best-effort 降级。
+- 无法生成安全 HTTP(S) URL 时，UI 显示原 remote 文本但不提供外链。
+
+Safety:
+
+- Web 链接只能使用 HTTP(S)，不能包含 Git remote 中的 username、password、query 或 fragment。
+- SSH username 和 transport port 不能进入推导后的 Web URL。
+- Web 链接推导不能修改 R-SKILLS-009 规定的 Git transport 行为。
+
+Examples:
+
+- `git@gitcode.com:team/skills.git` 的仓库主页为 `https://gitcode.com/team/skills`。
+- GitCode member `skills/example/SKILL.md` 在 `main` 下使用 `https://gitcode.com/team/skills/blob/main/skills/example/SKILL.md`。
+
+Tests:
+
+- packages/web/test/repository-links.test.ts
+- packages/web/test/views.test.tsx

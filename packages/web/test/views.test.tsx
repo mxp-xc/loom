@@ -947,7 +947,7 @@ describe('Skills view', () => {
       within(sourceRow).getByText('A disciplined debugging loop for bugs and regressions.'),
     ).toBeDefined()
     const sourceFileLink = within(sourceRow).getByRole('link', {
-      name: '在 GitHub 打开 systematic-debugging 的 SKILL.md',
+      name: '在仓库中打开 systematic-debugging 的 SKILL.md',
     })
     expect(sourceFileLink.getAttribute('href')).toBe(
       'https://github.com/obra/superpowers/blob/main/skills/systematic-debugging/SKILL.md',
@@ -1754,6 +1754,79 @@ describe('Skill source updates', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑 source superpowers' }))
     expect(onToggleGroup).toHaveBeenCalledTimes(2)
     expect(onOpenEdit).toHaveBeenCalledTimes(1)
+  })
+
+  it('maps SSH sources and forge-specific member links without changing row interactions', () => {
+    const onToggleGroup = vi.fn()
+    const onOpenDetail = vi.fn()
+    const sources = [
+      {
+        name: 'marketplace',
+        url: 'git@gitcode.com:HarnessPlatform/Marketplace.git',
+        ref: 'main',
+        members: [{ name: 'so-debug', path: 'skills/so-debug/SKILL.md' }],
+      },
+      {
+        name: 'generic',
+        url: 'git@forge.example:team/generic.git',
+        ref: 'feature/new-ui',
+        members: [{ name: 'generic-tool', path: 'nested/generic-tool/SKILL.md' }],
+      },
+      {
+        name: 'invalid',
+        url: '/local/source',
+        ref: 'main',
+        members: [{ name: 'invalid-tool', path: 'skills/invalid-tool/SKILL.md' }],
+      },
+    ]
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/source-web-links"
+        manifest={
+          {
+            skills: { sources, skills: [] },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: [] },
+            errors: [],
+          } as never
+        }
+        onOpenDetail={onOpenDetail}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set(sources.map((source) => `${source.url}-${source.ref}`))}
+        onToggleGroup={onToggleGroup}
+      />,
+    )
+
+    const marketplaceHead = screen.getByTestId('skill-group-head-marketplace')
+    expect(
+      within(marketplaceHead)
+        .getByRole('link', { name: 'git@gitcode.com:HarnessPlatform/Marketplace.git' })
+        .getAttribute('href'),
+    ).toBe('https://gitcode.com/HarnessPlatform/Marketplace')
+
+    const gitcodeMemberLink = within(screen.getByTestId('source-skill-so-debug')).getByRole(
+      'link',
+      { name: '在仓库中打开 so-debug 的 SKILL.md' },
+    )
+    expect(gitcodeMemberLink.getAttribute('href')).toBe(
+      'https://gitcode.com/HarnessPlatform/Marketplace/blob/main/skills/so-debug/SKILL.md',
+    )
+    expect(
+      within(screen.getByTestId('source-skill-generic-tool'))
+        .getByRole('link', { name: '在仓库中打开 generic-tool 的 SKILL.md' })
+        .getAttribute('href'),
+    ).toBe('https://forge.example/team/generic/blob/feature/new-ui/nested/generic-tool/SKILL.md')
+
+    const invalidHead = screen.getByTestId('skill-group-head-invalid')
+    expect(within(invalidHead).queryByRole('link')).toBeNull()
+    expect(within(invalidHead).getByText('/local/source').tagName).toBe('SPAN')
+    expect(within(screen.getByTestId('source-skill-invalid-tool')).queryByRole('link')).toBeNull()
+
+    fireEvent.click(gitcodeMemberLink)
+    expect(onOpenDetail).not.toHaveBeenCalled()
+    expect(onToggleGroup).not.toHaveBeenCalled()
   })
 
   it('updates a tag source to the latest tag returned by Check', async () => {

@@ -31,6 +31,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { agentShort, type AgentId } from '@/lib/agents'
+import { inferRepositoryFileWebUrl, inferRepositoryWebUrl } from '@/lib/repository-links'
 import {
   formatSourceMemberSkillId,
   normalizeSkillGroupOrder,
@@ -285,25 +286,6 @@ function sourceSkillRelativePath(member: SourceSkillMember): string {
     : relativePath.replace(/\/+$/, '') + '/SKILL.md'
 }
 
-function githubRepositoryUrl(sourceUrl: string): string | null {
-  const withoutGitSuffix = sourceUrl.replace(/\.git$/, '')
-  if (withoutGitSuffix.startsWith('git@github.com:')) {
-    return 'https://github.com/' + withoutGitSuffix.slice('git@github.com:'.length)
-  }
-  const match = withoutGitSuffix.match(/^https?:\/\/github\.com\/([^/]+\/[^/#?]+)/)
-  return match ? 'https://github.com/' + match[1] : null
-}
-
-function encodePathSegmented(value: string): string {
-  return value.split('/').map(encodeURIComponent).join('/')
-}
-
-function githubSourceFileUrl(sourceUrl: string, ref: string, relativePath: string): string | null {
-  const repoUrl = githubRepositoryUrl(sourceUrl)
-  if (!repoUrl) return null
-  return `${repoUrl}/blob/${encodePathSegmented(ref)}/${encodePathSegmented(relativePath)}`
-}
-
 function localSkillFilePath(skill: LocalSkillItem): string {
   if (skill.skillFilePath) return skill.skillFilePath
   const rawPath = skill.path?.replace(/\\/g, '/') ?? `assets/skills/${skill.id}`
@@ -438,6 +420,7 @@ export default function SkillSourceList({
           const key = src.url + '-' + src.ref
           const isExpanded = expandedGroups.has(key)
           const sourceUpdate = updates[src.url]
+          const repositoryWebUrl = inferRepositoryWebUrl(src.url)
           return (
             <SortableSkillGroup key={key} id={`source:${src.url}`}>
               <div className={styles.group}>
@@ -466,16 +449,22 @@ export default function SkillSourceList({
                   >
                     {src.type ?? 'branch'}
                   </span>
-                  <a
-                    href={src.url.replace(/\.git$/, '')}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={styles.gurl}
-                    title={src.url}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {src.url}
-                  </a>
+                  {repositoryWebUrl ? (
+                    <a
+                      href={repositoryWebUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.gurl}
+                      title={src.url}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {src.url}
+                    </a>
+                  ) : (
+                    <span className={styles.gurl} title={src.url}>
+                      {src.url}
+                    </span>
+                  )}
                   <span className={styles.gref}>@ {src.ref}</span>
                   {sourceUpdate && (
                     <span
@@ -583,7 +572,11 @@ export default function SkillSourceList({
                     const mTargets = (m.targets ?? []) as AgentId[]
                     const relativePath = sourceSkillRelativePath(m)
                     const displayPath = skillFolderDisplayPath(relativePath)
-                    const githubFileUrl = githubSourceFileUrl(src.url, src.ref, relativePath)
+                    const repositoryFileWebUrl = inferRepositoryFileWebUrl(
+                      src.url,
+                      src.ref,
+                      relativePath,
+                    )
                     return (
                       <div
                         key={m.name}
@@ -610,14 +603,14 @@ export default function SkillSourceList({
                             >
                               {m.name}
                             </span>
-                            {githubFileUrl && (
+                            {repositoryFileWebUrl && (
                               <a
-                                href={githubFileUrl}
+                                href={repositoryFileWebUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className={styles['skill-source-link']}
-                                aria-label={`在 GitHub 打开 ${m.name} 的 SKILL.md`}
-                                title={githubFileUrl}
+                                aria-label={`在仓库中打开 ${m.name} 的 SKILL.md`}
+                                title={repositoryFileWebUrl}
                                 onClick={(event) => event.stopPropagation()}
                               >
                                 <ExternalLink className="h-3 w-3" />
