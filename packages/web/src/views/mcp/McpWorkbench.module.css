@@ -70,18 +70,44 @@
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 42px;
+  min-height: 52px;
   align-items: center;
-  gap: 9px;
-  padding: 7px 18px;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 18px;
   border-top: 1px solid var(--border);
   background: color-mix(in srgb, var(--accent) 52%, var(--card));
 }
 
+.globalTargetsControls {
+  display: flex;
+  min-width: max-content;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
 .globalTargetsLabel {
-  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: color-mix(in srgb, var(--text) 76%, var(--muted));
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.globalTargetsLabel::after {
+  width: 1px;
+  height: 16px;
+  content: '';
+  background: color-mix(in srgb, var(--border) 84%, transparent);
+}
+
+.globalTargetsControls :global(.target-chips) {
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
 }
 
 .workbench {
@@ -94,7 +120,7 @@
 
 .inventory {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -102,8 +128,8 @@
 
 .inventoryHeader {
   display: grid;
-  min-height: 100px;
-  grid-template-rows: minmax(56px, auto) minmax(42px, auto);
+  min-height: 108px;
+  grid-template-rows: minmax(56px, auto) minmax(52px, auto);
   border-bottom: 1px solid var(--border);
 }
 
@@ -161,30 +187,27 @@
   gap: 6px;
 }
 
-.searchBar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 18px;
-}
-
 .search {
   display: flex;
+  width: min(320px, 38vw);
   min-width: 0;
-  min-height: 44px;
-  flex: 1 1 auto;
+  min-height: 34px;
+  flex: 0 1 320px;
   align-items: center;
   gap: 8px;
-  padding-inline: 12px;
+  padding-inline: 10px;
   color: var(--muted);
   border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg);
+  border-radius: 6px;
+  background: var(--card);
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
 }
 
 .search:focus-within {
-  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 10%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 58%, var(--border));
+  background: var(--popover);
 }
 
 .search input {
@@ -194,7 +217,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .search input:focus {
@@ -203,7 +226,7 @@
 
 .serverList {
   min-height: 0;
-  padding: 0 12px 16px;
+  padding: 0 8px 16px;
   overflow: auto;
   overflow-x: hidden;
 }
@@ -211,12 +234,13 @@
 .listColumns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 230px 104px;
-  min-height: 36px;
+  min-height: 38px;
   align-items: center;
   gap: 20px;
-  padding: 0 16px;
+  padding: 0 10px;
   color: var(--muted);
   border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 34%, var(--card));
   font-size: 12px;
   font-weight: 600;
 }
@@ -225,6 +249,14 @@
   display: flex;
   height: 100%;
   align-items: center;
+  justify-content: flex-start;
+}
+
+.listColumns span:first-child {
+  padding-left: 36px;
+}
+
+.listColumns span:not(:first-child) {
   justify-content: center;
 }
 
@@ -235,7 +267,7 @@
   min-height: 76px;
   align-items: center;
   gap: 24px;
-  padding: 13px 16px;
+  padding: 13px 10px;
   color: var(--text);
   cursor: pointer;
   border: 0;
@@ -273,10 +305,10 @@
 
 .serverMain {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-columns: 32px minmax(0, 1fr);
   min-width: 0;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
 }
 
 .serverCopy {
@@ -332,7 +364,7 @@
 
 .dragHandle {
   display: grid;
-  width: 40px;
+  width: 32px;
   height: 40px;
   place-items: center;
   color: color-mix(in srgb, var(--muted) 78%, transparent);
@@ -2169,6 +2201,15 @@
 
   .globalTargets {
     flex-wrap: wrap;
+  }
+
+  .search {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .globalTargetsControls {
+    min-width: 0;
   }
 
   .listColumns {

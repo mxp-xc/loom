@@ -218,7 +218,7 @@ describe('MCP workbench view', () => {
     expect(screen.getByText('ID 已锁定，保存后不可修改')).toBeDefined()
   })
 
-  it('separates the server title and Apply all into a two-tier inventory toolbar', async () => {
+  it('separates the server title and bulk targets into a two-tier inventory toolbar', async () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
     const workbench = await screen.findByRole('region', { name: 'MCP workbench' })
@@ -228,11 +228,16 @@ describe('MCP workbench view', () => {
     const globalTargets = screen.getByRole('region', { name: '全局 MCP targets' })
     expect(inventory.contains(globalTargets)).toBe(true)
     expect(within(inventory).queryByText('全部 servers')).toBeNull()
+    expect(within(globalTargets).getByText('批量应用')).toBeDefined()
+    expect(
+      within(globalTargets).getByRole('group', { name: '批量设置全部 Server targets' }),
+    ).toBeDefined()
     expect(
       within(globalTargets)
-        .getByRole('button', { name: '全部 MCP servers 应用到 OpenCode' })
+        .getByRole('button', { name: '全部 MCP servers 应用到 OpenCode：全部未应用' })
         .getAttribute('data-tooltip'),
-    ).toBe('应用到 OpenCode')
+    ).toBe('OpenCode：全部未应用，点击批量切换')
+    expect(within(globalTargets).queryByText(/0\/2/)).toBeNull()
 
     const toolbar = within(inventory).getByRole('toolbar', { name: 'MCP inventory actions' })
     expect(globalTargets.parentElement).toBe(toolbar.parentElement?.parentElement)
@@ -271,7 +276,9 @@ describe('MCP workbench view', () => {
 
     const globalTargets = await screen.findByRole('region', { name: '全局 MCP targets' })
     expect(
-      within(globalTargets).getByRole('button', { name: '全部 MCP servers 应用到 Claude Code' }),
+      within(globalTargets).getByRole('button', {
+        name: '全部 MCP servers 应用到 Claude Code：全部未应用',
+      }),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'target-matrix 应用到 Claude Code' })).toBeDefined()
   })
@@ -282,7 +289,9 @@ describe('MCP workbench view', () => {
     const globalTargets = await screen.findByRole('region', { name: '全局 MCP targets' })
 
     fireEvent.click(
-      within(globalTargets).getByRole('button', { name: '全部 MCP servers 应用到 OpenCode' }),
+      within(globalTargets).getByRole('button', {
+        name: '全部 MCP servers 应用到 OpenCode：全部未应用',
+      }),
     )
 
     await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalled())

@@ -2043,32 +2043,50 @@ function GlobalTargetsBar({
   servers,
   visibleAgents,
   operations,
+  search,
+  onSearchChange,
 }: {
   servers: McpServer[]
   visibleAgents: AgentId[]
   operations: ReturnType<typeof useManifestOperations>
+  search: string
+  onSearchChange: (value: string) => void
 }) {
   if (servers.length === 0) return null
   return (
     <section className={styles.globalTargets} role="region" aria-label="全局 MCP targets">
-      <span className={styles.globalTargetsLabel}>Apply all</span>
-      <div className="target-chips">
-        {visibleAgents.map((agent) => {
-          const count = servers.filter((server) => (server.targets ?? []).includes(agent)).length
-          const state = count === 0 ? 'off' : count === servers.length ? 'on' : 'mixed'
-          return (
-            <TargetChip
-              key={agent}
-              agent={agent}
-              state={state}
-              label={'全部 MCP servers 应用到 ' + agentName[agent]}
-              tooltip={'应用到 ' + agentName[agent]}
-              onClick={() => void operations.setAllMcpTargets(servers, agent)}
-              disabled={operations.pending.mcp.allTargets(agent)}
-              stopPropagation
-            />
-          )
-        })}
+      <label className={styles.search}>
+        <Search className="h-3.5 w-3.5" aria-hidden="true" />
+        <input
+          type="search"
+          aria-label="搜索 MCP server"
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="搜索 server"
+        />
+      </label>
+      <div className={styles.globalTargetsControls}>
+        <span className={styles.globalTargetsLabel}>批量应用</span>
+        <div className="target-chips" role="group" aria-label="批量设置全部 Server targets">
+          {visibleAgents.map((agent) => {
+            const count = servers.filter((server) => (server.targets ?? []).includes(agent)).length
+            const state = count === 0 ? 'off' : count === servers.length ? 'on' : 'mixed'
+            const status =
+              state === 'on' ? '全部已应用' : state === 'mixed' ? '部分已应用' : '全部未应用'
+            return (
+              <TargetChip
+                key={agent}
+                agent={agent}
+                state={state}
+                label={`全部 MCP servers 应用到 ${agentName[agent]}：${status}`}
+                tooltip={`${agentName[agent]}：${status}，点击批量切换`}
+                onClick={() => void operations.setAllMcpTargets(servers, agent)}
+                disabled={operations.pending.mcp.allTargets(agent)}
+                stopPropagation
+              />
+            )
+          })}
+        </div>
       </div>
     </section>
   )
@@ -2362,19 +2380,9 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
               servers={servers}
               visibleAgents={visibleAgents}
               operations={operations}
+              search={search}
+              onSearchChange={setSearch}
             />
-          </div>
-          <div className={styles.searchBar}>
-            <label className={styles.search}>
-              <Search className="h-3.5 w-3.5" />
-              <input
-                type="search"
-                aria-label="搜索 MCP server"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="搜索 server"
-              />
-            </label>
           </div>
           <div className={styles.serverList}>
             <div className={styles.listColumns} aria-hidden="true">
