@@ -116,10 +116,13 @@ export interface SkillsManifest {
 export interface Memory {
   name: string
   content?: string
+  targets?: AgentId[]
 }
 
 export interface MemoryManifest {
   memories: Memory[]
+  assignments?: Partial<Record<AgentId, string>>
+  /** Legacy compatibility fields. New consumers use assignments. */
   active: Memory | null
   activeContent: string
 }
@@ -157,6 +160,7 @@ export interface Config {
   proxy?: ProxyConfig
   skill_naming?: 'dir' | 'hyphen'
   active_memory?: string
+  memory_targets?: Partial<Record<AgentId, string>>
   memory_order?: string[]
 }
 

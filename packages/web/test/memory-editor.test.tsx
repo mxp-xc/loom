@@ -156,11 +156,11 @@ describe('MemoryEditor', () => {
     )
 
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      '所见编辑',
+      '所见',
       '源码',
-      '解析预览',
+      '解析',
     ])
-    expect(screen.getByRole('tab', { name: '所见编辑' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: '所见' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.queryByTestId('memory-rich-mdx-editor')).toBeNull()
     expect(screen.getByRole('table')).toBeTruthy()
     expect(screen.queryByRole('listbox', { name: '变量引用建议' })).toBeNull()
@@ -173,6 +173,32 @@ describe('MemoryEditor', () => {
     fireEvent.change(source, { target: { value: '## Source edit' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenLastCalledWith('## Source edit'))
+  })
+
+  it('keeps edited content dirty when saving fails', async () => {
+    const error = new Error('save failed')
+    const onSave = vi.fn().mockRejectedValue(error)
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(
+      <MemoryEditor
+        repo="/repo"
+        name="default"
+        content="# Original"
+        targets={['codex']}
+        onSave={onSave}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Memory 内容' }), {
+      target: { value: '# Edited' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith('# Edited'))
+    expect(screen.getByRole('button', { name: '保存' })).toBeDefined()
+    expect(consoleError).toHaveBeenCalledWith({ err: error }, 'Failed to save Memory content')
+    consoleError.mockRestore()
   })
 
   it('registers Monaco variable completion with disposable provider', async () => {
@@ -315,11 +341,12 @@ describe('MemoryEditor', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Memory 内容' }), {
       target: { value: '# Unsaved raw Markdown' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '复制 Memory 原始内容' }))
+    fireEvent.click(screen.getByRole('button', { name: '管理 Memory' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '复制 Memory 原始内容' }))
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('# Unsaved raw Markdown'))
     expect(toastMocks.showToast).toHaveBeenCalledWith('已复制')
-    expect(screen.getByRole('button', { name: '已复制 Memory 原始内容' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '已复制 Memory 原始内容' })).toBeTruthy()
   })
 
   it('logs and reports clipboard failures', async () => {
@@ -340,7 +367,8 @@ describe('MemoryEditor', () => {
         />,
       )
 
-      fireEvent.click(screen.getByRole('button', { name: '复制 Memory 原始内容' }))
+      fireEvent.click(screen.getByRole('button', { name: '管理 Memory' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: '复制 Memory 原始内容' }))
 
       await waitFor(() =>
         expect(errorSpy).toHaveBeenCalledWith({ err: cause }, 'Failed to copy memory content'),
@@ -379,7 +407,7 @@ describe('MemoryEditor', () => {
         />,
       )
 
-      fireEvent.click(screen.getByRole('tab', { name: '解析预览' }))
+      fireEvent.click(screen.getByRole('tab', { name: '解析' }))
 
       await waitFor(() =>
         expect(api.previewMemory).toHaveBeenCalledWith({
@@ -414,7 +442,7 @@ describe('MemoryEditor', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('tab', { name: '解析预览' }))
+    fireEvent.click(screen.getByRole('tab', { name: '解析' }))
 
     const resolvedText = await screen.findByText('Resolved notes')
     const preview = resolvedText.closest('.md-preview')
@@ -450,14 +478,14 @@ describe('MemoryEditor', () => {
         />,
       )
 
-      fireEvent.click(screen.getByRole('tab', { name: '解析预览' }))
+      fireEvent.click(screen.getByRole('tab', { name: '解析' }))
       expect(await screen.findByText('Rendered once')).toBeTruthy()
 
       fireEvent.click(screen.getByRole('tab', { name: '源码' }))
       fireEvent.change(screen.getByRole('textbox', { name: 'Memory 内容' }), {
         target: { value: 'Use ' + '$' + '{missing}' },
       })
-      fireEvent.click(screen.getByRole('tab', { name: '解析预览' }))
+      fireEvent.click(screen.getByRole('tab', { name: '解析' }))
 
       await screen.findByLabelText('解析诊断')
       expect(screen.queryByText('Rendered once')).toBeNull()

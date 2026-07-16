@@ -15,11 +15,13 @@ describe('executeProjection memory phase', () => {
     fs = new NodeFileSystem()
     process.env.CLAUDE_CONFIG_DIR = join(home, 'claude')
     process.env.CODEX_HOME = join(home, 'codex')
+    process.env.OPENCODE_CONFIG_DIR = join(home, 'opencode')
   })
   afterEach(() => {
     rmSync(home, { recursive: true, force: true })
     delete process.env.CLAUDE_CONFIG_DIR
     delete process.env.CODEX_HOME
+    delete process.env.OPENCODE_CONFIG_DIR
   })
 
   const buildPlan = (mf: Manifest, agents: AgentId[]) =>
@@ -87,6 +89,75 @@ describe('executeProjection memory phase', () => {
     )
     expect(res.ok).toBe(true)
     expect(existsSync(join(home, 'claude', 'CLAUDE.md'))).toBe(false)
+  })
+
+  it('writes each assigned memory only to its target agents', async () => {
+    const mf: Manifest = {
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      memory: {
+        memories: [
+          { name: 'team', content: '# team rules', targets: ['codex'] },
+          { name: 'personal', content: '# personal rules', targets: ['opencode'] },
+        ],
+        assignments: { codex: 'team', opencode: 'personal' },
+        active: null,
+        activeContent: '',
+      },
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex', 'opencode'] },
+      errors: [],
+    }
+
+    const res = await executeProjection(
+      buildPlan(mf, ['codex', 'opencode']),
+      mf,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      {
+        fs,
+        adapters: {},
+        installedAgents: new Set(['codex', 'opencode']),
+        resolveSkillSrc: () => null,
+      },
+      'memory',
+    )
+
+    expect(res.ok).toBe(true)
+    expect(readFileSync(join(home, 'codex', 'AGENTS.md'), 'utf8')).toBe('# team rules')
+    expect(readFileSync(join(home, 'opencode', 'AGENTS.md'), 'utf8')).toBe('# personal rules')
+  })
+
+  it('writes one memory to multiple assigned targets', async () => {
+    const mf: Manifest = {
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      memory: {
+        memories: [{ name: 'shared', content: '# shared', targets: ['codex', 'opencode'] }],
+        assignments: { codex: 'shared', opencode: 'shared' },
+        active: null,
+        activeContent: '',
+      },
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex', 'opencode'] },
+      errors: [],
+    }
+
+    const res = await executeProjection(
+      buildPlan(mf, ['codex', 'opencode']),
+      mf,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      {
+        fs,
+        adapters: {},
+        installedAgents: new Set(['codex', 'opencode']),
+        resolveSkillSrc: () => null,
+      },
+      'memory',
+    )
+
+    expect(res.ok).toBe(true)
+    expect(readFileSync(join(home, 'codex', 'AGENTS.md'), 'utf8')).toBe('# shared')
+    expect(readFileSync(join(home, 'opencode', 'AGENTS.md'), 'utf8')).toBe('# shared')
   })
 
   it('scope=memory renders with the agent-aware resolver before writing targets', async () => {

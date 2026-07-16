@@ -46,4 +46,56 @@ describe('planProjection memory', () => {
     expect(plan.skippedAgents).toContain('codex')
     expect(plan.skippedAgents).toContain('opencode')
   })
+
+  it('plans different memory content for independently assigned targets', () => {
+    const mf = baseManifest({
+      memory: {
+        memories: [
+          { name: 'team', content: '# team', targets: ['codex'] },
+          { name: 'personal', content: '# personal', targets: ['opencode'] },
+        ],
+        assignments: { codex: 'team', opencode: 'personal' },
+        active: null,
+        activeContent: '',
+      },
+    })
+    const cfg: Config = { targets: ['codex', 'opencode'] }
+
+    const plan = planProjection(mf, cfg, new Set(['codex', 'opencode']))
+
+    expect(plan.memoryPlan.entries).toEqual([
+      {
+        memory: { name: 'team', content: '# team', targets: ['codex'] },
+        content: '# team',
+        targets: ['codex'],
+      },
+      {
+        memory: { name: 'personal', content: '# personal', targets: ['opencode'] },
+        content: '# personal',
+        targets: ['opencode'],
+      },
+    ])
+  })
+
+  it('does not fall back to active memory when explicit assignments are filtered out', () => {
+    const mf = baseManifest({
+      memory: {
+        memories: [
+          { name: 'team', content: '# team', targets: ['codex'] },
+          { name: 'personal', content: '# personal' },
+        ],
+        assignments: { codex: 'team' },
+        active: { name: 'personal', content: '# personal' },
+        activeContent: '# personal',
+      },
+    })
+    const cfg: Config = {
+      targets: ['codex', 'opencode'],
+      memory_targets: { codex: 'team' },
+    }
+
+    const plan = planProjection(mf, cfg, new Set(['opencode']))
+
+    expect(plan.memoryPlan.entries).toEqual([])
+  })
 })

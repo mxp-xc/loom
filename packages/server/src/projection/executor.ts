@@ -165,38 +165,45 @@ export async function executeProjection(
     // Phase D: memory projection
     if (scope === 'memory' || scope === 'all') {
       const mp = plan.memoryPlan
-      if (mp.active && mp.content !== null) {
+      const entries =
+        mp.entries ??
+        (mp.active && mp.content !== null
+          ? [{ memory: mp.active, content: mp.content, targets: mp.targets }]
+          : [])
+      if (entries.length > 0) {
         const renderedTargets: Array<{ agent: AgentId; path: string; rendered: string }> = []
-        for (const agent of mp.targets) {
-          const ctx: VarsContext = {
-            env: {
-              ...varsCtx.env,
-              LOOM_AGENT: agent,
-              LOOM_CONFIG_DIR: agentConfigDir(agent),
-              LOOM_SKILLS_DIR: agentSkillsDir(agent),
-              LOOM_AGENT_FILE: agent === 'claude-code' ? 'CLAUDE.md' : 'AGENTS.md',
-            },
-            activeProfile: varsCtx.activeProfile,
-            defaultProfile: varsCtx.defaultProfile,
-          }
-          let rendered: string
-          try {
-            if (agentAwareVars.resolveForAgent) {
-              const resolution = await agentAwareVars.resolveForAgent(agent)
-              if (!resolution.ok)
-                throw new Error(resolution.diagnostics.map((item) => item.message).join('; '))
-              const renderResult = renderTextWithResolvedVars(mp.content, resolution)
-              if (!renderResult.ok)
-                throw new Error(renderResult.diagnostics.map((item) => item.message).join('; '))
-              rendered = renderResult.text
-            } else {
-              rendered = renderText(mp.content, ctx)
+        for (const entry of entries) {
+          for (const agent of entry.targets) {
+            const ctx: VarsContext = {
+              env: {
+                ...varsCtx.env,
+                LOOM_AGENT: agent,
+                LOOM_CONFIG_DIR: agentConfigDir(agent),
+                LOOM_SKILLS_DIR: agentSkillsDir(agent),
+                LOOM_AGENT_FILE: agent === 'claude-code' ? 'CLAUDE.md' : 'AGENTS.md',
+              },
+              activeProfile: varsCtx.activeProfile,
+              defaultProfile: varsCtx.defaultProfile,
             }
-          } catch (e) {
-            deps.logger?.error('memory var resolve failed', { err: e, agent })
-            throw e
+            let rendered: string
+            try {
+              if (agentAwareVars.resolveForAgent) {
+                const resolution = await agentAwareVars.resolveForAgent(agent)
+                if (!resolution.ok)
+                  throw new Error(resolution.diagnostics.map((item) => item.message).join('; '))
+                const renderResult = renderTextWithResolvedVars(entry.content, resolution)
+                if (!renderResult.ok)
+                  throw new Error(renderResult.diagnostics.map((item) => item.message).join('; '))
+                rendered = renderResult.text
+              } else {
+                rendered = renderText(entry.content, ctx)
+              }
+            } catch (e) {
+              deps.logger?.error('memory var resolve failed', { err: e, agent })
+              throw e
+            }
+            renderedTargets.push({ agent, path: agentMemoryFile(agent), rendered })
           }
-          renderedTargets.push({ agent, path: agentMemoryFile(agent), rendered })
         }
         for (const { path, rendered } of renderedTargets) {
           await fs.mkdir(join(path, '..'), true).catch(() => {})
@@ -205,7 +212,7 @@ export async function executeProjection(
           await fs.writeFile(path, rendered)
         }
       } else {
-        deps.logger?.warn?.('no active memory, skip memory phase')
+        deps.logger?.warn?.('no assigned memory, skip memory phase')
       }
     }
     await discardNamespaceBackups(journal, fs, deps.logger)

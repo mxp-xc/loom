@@ -1,8 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { Check, Copy } from 'lucide-react'
+import {
+  Braces,
+  Check,
+  CircleDot,
+  Copy,
+  Eye,
+  Files,
+  MoreHorizontal,
+  Pencil,
+  Sparkles,
+  Trash2,
+} from 'lucide-react'
 import { ApiError, api } from '@/lib/api'
 import type { AgentId } from '@/lib/agents'
 import { MarkdownDocument } from '@/components/MarkdownPreview'
@@ -22,8 +33,13 @@ interface Props {
   name: string
   content: string
   onSave: (content: string) => Promise<void>
+  onDirtyChange?: (dirty: boolean) => void
   targets: AgentId[]
+  assignedTargets?: AgentId[]
   contextLabel?: string
+  toolbarStart?: ReactNode
+  onRename?: () => void
+  onDelete?: () => void
 }
 
 function diagnosticText(diagnostic: VarsDiagnostic): string {
@@ -52,8 +68,13 @@ export default function MemoryEditor({
   name,
   content,
   onSave,
+  onDirtyChange,
   targets,
+  assignedTargets = [],
   contextLabel,
+  toolbarStart,
+  onRename,
+  onDelete,
 }: Props) {
   const [view, setView] = useState<View>('compose')
   const [edit, setEdit] = useState(content)
@@ -64,7 +85,9 @@ export default function MemoryEditor({
   const [resolveErr, setResolveErr] = useState<string | null>(null)
   const [diagnostics, setDiagnostics] = useState<VarsDiagnostic[]>([])
   const [copied, setCopied] = useState(false)
+  const [actionsOpen, setActionsOpen] = useState(false)
   const copiedTimerRef = useRef<number | null>(null)
+  const actionsRef = useRef<HTMLDivElement>(null)
   const [varKeyState, setVarKeyState] = useState<{ cacheKey: string; keys: string[] }>({
     cacheKey: '',
     keys: [],
@@ -81,12 +104,24 @@ export default function MemoryEditor({
     }
   }, [content, name])
 
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
+
   useEffect(
     () => () => {
       if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current)
     },
     [],
   )
+
+  useEffect(() => {
+    const closeActions = (event: PointerEvent) => {
+      if (!actionsRef.current?.contains(event.target as Node)) setActionsOpen(false)
+    }
+    document.addEventListener('pointerdown', closeActions)
+    return () => document.removeEventListener('pointerdown', closeActions)
+  }, [])
 
   useEffect(() => {
     if (targets.length && !targets.includes(agent)) setAgent(targets[0])
@@ -156,6 +191,8 @@ export default function MemoryEditor({
     try {
       await onSave(edit)
       setDirty(false)
+    } catch (error) {
+      console.error({ err: error }, 'Failed to save Memory content')
     } finally {
       setSaving(false)
     }
@@ -188,10 +225,13 @@ export default function MemoryEditor({
             styles['mem-rich-readonly'],
           )}
         >
-          <MarkdownDocument
-            content={showMarkdownComments(edit)}
-            className={styles['mem-rendered-editor']}
-          />
+          <div className={styles['mem-document-content']}>
+            <DocumentHeader name={name} targets={assignedTargets} />
+            <MarkdownDocument
+              content={showMarkdownComments(edit)}
+              className={styles['mem-rendered-editor']}
+            />
+          </div>
         </div>
       )
     }
@@ -199,9 +239,9 @@ export default function MemoryEditor({
       return <MemorySourceMarkdownEditor value={edit} onChange={updateEdit} varsKeys={varKeys} />
     }
     return null
-  }, [edit, varKeys, view])
+  }, [assignedTargets, edit, name, varKeys, view])
 
-  const tab = (v: View, label: string) => (
+  const tab = (v: View, label: string, icon: ReactNode) => (
     <button
       type="button"
       role="tab"
@@ -209,6 +249,7 @@ export default function MemoryEditor({
       className={cn(styles['cfg-seg-opt'], view === v && styles.on)}
       onClick={() => setView(v)}
     >
+      {icon}
       {label}
     </button>
   )
@@ -216,51 +257,107 @@ export default function MemoryEditor({
   return (
     <div className={styles['mem-editor']}>
       <div className={styles['mem-toolbar']}>
-        {contextLabel && (
-          <div className={styles['mem-current']}>
-            <strong>{contextLabel}</strong>
-          </div>
-        )}
+        <div className={styles['mem-toolbar-start']}>{toolbarStart}</div>
         <div className={styles['cfg-seg']} role="tablist" aria-label="Memory 视图">
-          {tab('compose', '所见编辑')}
-          {tab('source', '源码')}
-          {tab('resolved', '解析预览')}
+          {tab('compose', '所见', <Eye />)}
+          {tab('source', '源码', <Braces />)}
+          {tab('resolved', '解析', <Sparkles />)}
         </div>
         <div className={styles['mem-toolbar-actions']}>
-          <IconButton
-            label={copied ? '已复制 Memory 原始内容' : '复制 Memory 原始内容'}
-            tooltip={copied ? '已复制' : '复制'}
-            tone={copied ? 'success' : 'default'}
-            onClick={() => void copyRawMarkdown()}
-          >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          </IconButton>
-          {view !== 'resolved' && dirty && (
+          {view === 'resolved' && (
+            <div className={styles['mem-preview-targets']}>
+              <span className="label">预览为</span>
+              <div className="target-chips">
+                {targets.map((a) => (
+                  <TargetChip
+                    key={a}
+                    agent={a}
+                    state={agent === a ? 'on' : 'off'}
+                    onClick={() => setAgent(a)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          <div className={styles['mem-action-control']} ref={actionsRef}>
+            <IconButton
+              label="管理 Memory"
+              tooltip="管理"
+              onClick={() => setActionsOpen((open) => !open)}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </IconButton>
+            {actionsOpen && (
+              <div className={styles['mem-action-menu']} role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  aria-label={copied ? '已复制 Memory 原始内容' : '复制 Memory 原始内容'}
+                  onClick={() => void copyRawMarkdown()}
+                >
+                  {copied ? <Check /> : <Copy />}
+                  {copied ? '已复制' : '复制源码'}
+                </button>
+                {onRename && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setActionsOpen(false)
+                      onRename()
+                    }}
+                  >
+                    <Pencil />
+                    重命名
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.danger}
+                    onClick={() => {
+                      setActionsOpen(false)
+                      onDelete()
+                    }}
+                  >
+                    <Trash2 />
+                    删除
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          {view !== 'resolved' && (
             <button
               type="button"
-              className={styles['mem-save']}
+              className={cn(styles['mem-save'], !dirty && styles.saved)}
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || !dirty}
             >
-              {saving ? '保存中…' : '保存'}
+              <Check />
+              {saving ? '保存中…' : dirty ? '保存' : '已保存'}
             </button>
           )}
         </div>
-        {view === 'resolved' && (
-          <div className={styles['mem-preview-targets']}>
-            <span className="label">预览为</span>
-            <div className="target-chips">
-              {targets.map((a) => (
-                <TargetChip
-                  key={a}
-                  agent={a}
-                  state={agent === a ? 'on' : 'off'}
-                  onClick={() => setAgent(a)}
-                />
-              ))}
-            </div>
+      </div>
+
+      <div className={styles['mem-document-context']}>
+        <div className={styles['mem-document-identity']}>
+          <span className={styles['mem-file-symbol']}>
+            <Files />
+          </span>
+          <div>
+            <strong>{contextLabel ?? name}</strong>
+            <span>Agent Memory</span>
           </div>
-        )}
+        </div>
+        <div className={styles['mem-document-facts']} aria-label="Memory 状态">
+          <span>
+            <CircleDot /> {assignedTargets.length} 个 Target
+          </span>
+          <span>{edit.length} 字符</span>
+        </div>
       </div>
 
       {editor}
@@ -277,13 +374,30 @@ export default function MemoryEditor({
               </ul>
             </div>
           )}
-          <div className={cn('md-preview', styles['mem-rendered-preview'])}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-              {resolved}
-            </ReactMarkdown>
+          <div className={styles['mem-document-content']}>
+            <DocumentHeader name={name} targets={assignedTargets} />
+            <div className={cn('md-preview', styles['mem-rendered-preview'])}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                {resolved}
+              </ReactMarkdown>
+            </div>
           </div>
         </div>
       )}
     </div>
+  )
+}
+
+function DocumentHeader({ name, targets }: { name: string; targets: AgentId[] }) {
+  return (
+    <header className={styles['mem-document-header']}>
+      <h1>{name}</h1>
+      <div className={styles['mem-document-targets']}>
+        <span>{targets.length ? '投影到' : '尚未分配投影目标'}</span>
+        {targets.map((target) => (
+          <TargetChip key={target} agent={target} state="on" label={target} />
+        ))}
+      </div>
+    </header>
   )
 }

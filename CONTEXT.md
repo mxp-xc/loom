@@ -49,7 +49,7 @@ _Avoid_: custom skill
 _Avoid_: import, install
 
 **Memory**:
-由 Loom 管理并投影到支持 agent 的仓库级 agent 指令内容。
+由 Loom 管理的独立仓库级 agent 指令内容。一个 Memory 可分配给多个 Target，但一个 Target 同时只能分配一个 Memory。
 _Avoid_: prompt, note
 
 **Vars**:

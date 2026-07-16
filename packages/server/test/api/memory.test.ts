@@ -124,6 +124,39 @@ describe('memory routes', () => {
     )
   })
 
+  it('PUT /memory/target creates a unique target assignment and removes legacy active memory', async () => {
+    const repo = join(home, '.loom', 'repos', 'default')
+    writeFileSync(join(repo, 'memories', 'v1.md'), '# v1')
+    writeFileSync(join(repo, 'memories', 'v2.md'), '# v2')
+    writeFileSync(join(repo, 'config.yaml'), 'active_memory: v1\ntargets:\n  - codex\n')
+
+    const assigned = await req('PUT', '/api/memory/target', {
+      repo: 'default',
+      target: 'codex',
+      name: 'v1',
+    })
+    expect(await assigned.json()).toEqual({ ok: true, assignments: { codex: 'v1' } })
+
+    const moved = await req('PUT', '/api/memory/target', {
+      repo: 'default',
+      target: 'codex',
+      name: 'v2',
+    })
+    expect(await moved.json()).toEqual({ ok: true, assignments: { codex: 'v2' } })
+
+    const cfg = readFileSync(join(repo, 'config.yaml'), 'utf8')
+    expect(cfg).toContain('memory_targets:\n  codex: v2')
+    expect(cfg).not.toContain('active_memory')
+    const listed = await req('GET', '/api/memory?repo=default')
+    expect(await listed.json()).toMatchObject({
+      assignments: { codex: 'v2' },
+      memories: [
+        { name: 'v1', targets: [] },
+        { name: 'v2', targets: ['codex'] },
+      ],
+    })
+  })
+
   it('POST /memory/active sets active_memory in config.yaml', async () => {
     writeFileSync(join(home, '.loom', 'repos', 'default', 'memories', 'v1.md'), 'x')
     await req('POST', '/api/memory/active', { repo: 'default', name: 'v1' })
@@ -139,12 +172,45 @@ describe('memory routes', () => {
     expect(cfg).not.toContain('active_memory')
   })
 
+  it('POST /memory/active remains effective after memory_targets migration', async () => {
+    const repo = join(home, '.loom', 'repos', 'default')
+    writeFileSync(join(repo, 'memories', 'v1.md'), '# v1')
+    writeFileSync(join(repo, 'memories', 'v2.md'), '# v2')
+    writeFileSync(
+      join(repo, 'config.yaml'),
+      'targets:\n  - codex\n  - opencode\nmemory_targets:\n  codex: v2\n',
+    )
+
+    await req('POST', '/api/memory/active', { repo: 'default', name: 'v1' })
+    const activated = await req('GET', '/api/memory?repo=default')
+    expect(await activated.json()).toMatchObject({
+      active: 'v1',
+      assignments: { codex: 'v1', opencode: 'v1' },
+    })
+
+    await req('POST', '/api/memory/active', { repo: 'default', name: null })
+    const cleared = await req('GET', '/api/memory?repo=default')
+    expect(await cleared.json()).toMatchObject({ active: null, assignments: {} })
+  })
+
   it('DELETE /memory removes file + clears active if active', async () => {
     writeFileSync(join(home, '.loom', 'repos', 'default', 'memories', 'v1.md'), 'x')
     writeFileSync(join(home, '.loom', 'repos', 'default', 'config.yaml'), 'active_memory: v1\n')
     await req('DELETE', '/api/memory?repo=default&name=v1')
     const cfg = readFileSync(join(home, '.loom', 'repos', 'default', 'config.yaml'), 'utf8')
     expect(cfg).not.toContain('active_memory: v1')
+  })
+
+  it('DELETE /memory removes every target assignment for the deleted memory', async () => {
+    const repo = join(home, '.loom', 'repos', 'default')
+    writeFileSync(join(repo, 'memories', 'team.md'), '# team')
+    writeFileSync(join(repo, 'config.yaml'), 'memory_targets:\n  codex: team\n  opencode: team\n')
+
+    await req('DELETE', '/api/memory?repo=default&name=team')
+
+    const cfg = readFileSync(join(repo, 'config.yaml'), 'utf8')
+    expect(cfg).not.toContain('codex: team')
+    expect(cfg).not.toContain('opencode: team')
   })
 
   it('DELETE /memory rejects a missing name query before resolving a file path', async () => {
@@ -163,6 +229,23 @@ describe('memory routes', () => {
     )
     const cfg = readFileSync(join(home, '.loom', 'repos', 'default', 'config.yaml'), 'utf8')
     expect(cfg).toContain('active_memory: v2')
+  })
+
+  it('POST /memory/rename updates every target assignment', async () => {
+    const repo = join(home, '.loom', 'repos', 'default')
+    writeFileSync(join(repo, 'memories', 'team.md'), '# team')
+    writeFileSync(join(repo, 'config.yaml'), 'memory_targets:\n  codex: team\n  opencode: team\n')
+
+    await req('POST', '/api/memory/rename', {
+      repo: 'default',
+      name: 'team',
+      newName: 'guidelines',
+    })
+
+    const cfg = readFileSync(join(repo, 'config.yaml'), 'utf8')
+    expect(cfg).toContain('codex: guidelines')
+    expect(cfg).toContain('opencode: guidelines')
+    expect(cfg).not.toContain(': team')
   })
 
   it('uses a dotted name consistently across content, activation, rename, and deletion', async () => {

@@ -527,10 +527,15 @@ export const api = {
 
   getMemory: (repo: string) =>
     fetch(`${base}/memory?repo=${encodeURIComponent(repo)}`).then(json) as Promise<{
-      memories: Array<{ name: string }>
+      memories: Array<{ name: string; targets: string[] }>
+      assignments: Partial<Record<string, string>>
       active: string | null
       activeContent: string
     }>,
+  getMemoryContent: (repo: string, name: string) =>
+    fetch(`${base}/memory?repo=${encodeURIComponent(repo)}&name=${encodeURIComponent(name)}`).then(
+      json,
+    ) as Promise<{ content: string }>,
   createMemory: (body: { repo: string; name: string }) => post('/memory', body).then(json),
   deleteMemory: (repo: string, name: string) =>
     fetch(`${base}/memory?repo=${encodeURIComponent(repo)}&name=${encodeURIComponent(name)}`, {
@@ -546,6 +551,11 @@ export const api = {
     post('/memory/rename', body).then(json),
   setMemoryActive: (body: { repo: string; name: string | null }) =>
     post('/memory/active', body).then(json),
+  updateMemoryTarget: (body: { repo: string; target: string; name: string | null }) =>
+    put('/memory/target', body).then(json) as Promise<{
+      ok: true
+      assignments: Partial<Record<string, string>>
+    }>,
   reorderMemories: (body: { repo: string; names: string[] }) =>
     put('/memory/order', body).then(json) as Promise<{ ok: true; names: string[] }>,
   previewMemory: (body: { repo: string; content: string; agent: string }) =>

@@ -10,7 +10,14 @@ export interface McpPlanEntry {
   id: string
   targets: AgentId[]
 }
+export interface MemoryPlanEntry {
+  memory: Memory
+  content: string
+  targets: AgentId[]
+}
 export interface MemoryPlan {
+  entries?: MemoryPlanEntry[]
+  /** Legacy compatibility fields. New executors use entries. */
   active: Memory | null
   content: string | null
   targets: AgentId[]
@@ -111,12 +118,30 @@ export function planProjection(
     targets: activeTargets(m.targets ?? []),
   }))
 
-  const memActive = manifest.memory.active
-  const memoryTargets = activeTargets(globalTargets)
+  const explicitMemoryEntries = manifest.memory.memories.flatMap((memory) => {
+    const targets = activeTargets(memory.targets ?? [])
+    return targets.length && memory.content !== undefined
+      ? [{ memory, content: memory.content, targets }]
+      : []
+  })
+  const legacyMemoryTargets = activeTargets(globalTargets)
+  const legacyMemory = manifest.memory.active
+  const usesExplicitMemoryTargets = effectiveConfig.memory_targets !== undefined
+  const memoryEntries =
+    usesExplicitMemoryTargets || !legacyMemory
+      ? explicitMemoryEntries
+      : [
+          {
+            memory: legacyMemory,
+            content: manifest.memory.activeContent,
+            targets: legacyMemoryTargets,
+          },
+        ]
   const memoryPlan: MemoryPlan = {
-    active: memActive,
-    content: memActive ? manifest.memory.activeContent : null,
-    targets: memoryTargets,
+    entries: memoryEntries,
+    active: legacyMemory,
+    content: legacyMemory ? manifest.memory.activeContent : null,
+    targets: legacyMemoryTargets,
   }
 
   return {

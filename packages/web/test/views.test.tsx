@@ -110,7 +110,14 @@ vi.mock('../src/lib/api', () => ({
     updateMcpTargets: vi.fn(async () => ({ ok: true })),
     deleteMcpServer: vi.fn(async () => ({ ok: true })),
     reorderMcpServers: vi.fn(async ({ ids }: { ids: string[] }) => ({ ok: true, ids })),
-    getMemory: vi.fn(async () => ({ memories: [], active: null, activeContent: '' })),
+    getMemory: vi.fn(async () => ({
+      memories: [],
+      assignments: {},
+      active: null,
+      activeContent: '',
+    })),
+    getMemoryContent: vi.fn(async (_repo: string, name: string) => ({ content: `# ${name}` })),
+    updateMemoryTarget: vi.fn(async () => ({ ok: true, assignments: {} })),
     setMemoryActive: vi.fn(async () => ({ ok: true })),
     createMemory: vi.fn(async () => ({ ok: true })),
     renameMemory: vi.fn(async () => ({ ok: true })),
@@ -694,7 +701,7 @@ describe('Skill detail modal', () => {
 })
 
 describe('Memory view', () => {
-  it('uses the approved compact rail and preview-first workbench layout', async () => {
+  it('uses the approved dropdown manager and preview-first workbench layout', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
       skills: { sources: [], skills: [] },
       mcp: [],
@@ -703,182 +710,203 @@ describe('Memory view', () => {
       errors: [],
     } as never)
     vi.mocked(api.getMemory).mockResolvedValueOnce({
-      memories: [{ name: 'v1' }, { name: 'review-rules' }],
-      active: 'v1',
-      activeContent: '# Active memory',
+      memories: [
+        { name: 'v1', targets: ['codex'] },
+        { name: 'review-rules', targets: ['opencode'] },
+      ],
+      assignments: { codex: 'v1', opencode: 'review-rules' },
+      active: null,
+      activeContent: '',
     } as never)
+    vi.mocked(api.getMemoryContent).mockResolvedValueOnce({ content: '# Active memory' })
 
     render(<Memory repoPath="/tmp/memory-layout-approved" />)
 
     const layout = await screen.findByTestId('memory-layout')
-    expect(layout.getAttribute('data-layout')).toBe('compact-workbench')
-
-    const railHeader = screen.getByTestId('memory-rail-header')
-    const projectButton = screen.getByRole('button', { name: '投影 memory' })
-    const createButton = screen.getByRole('button', { name: '新建 memory' })
-    expect(railHeader.contains(projectButton)).toBe(true)
-    expect(railHeader.contains(createButton)).toBe(true)
-    expect(projectButton.querySelector('.lucide-send')).not.toBeNull()
-    expect(projectButton.className).toContain('border-[var(--border)]')
-    expect(createButton.className).toContain('border-[var(--border)]')
-    expect(projectButton.style.width).toBe('32px')
-    expect(projectButton.style.height).toBe('32px')
-    expect(createButton.style.width).toBe('32px')
-    expect(createButton.style.height).toBe('32px')
-    expect(
-      within(railHeader)
-        .getAllByRole('button')
-        .map((button) => button.getAttribute('aria-label')),
-    ).toEqual(['新建 memory', '投影 memory'])
-
-    expect(railHeader.textContent).not.toContain('2 份')
-    expect(screen.getByRole('tab', { name: '所见编辑' }).getAttribute('aria-selected')).toBe('true')
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      '所见编辑',
-      '源码',
-      '解析预览',
-    ])
-    expect(screen.queryByText('Markdown')).toBeNull()
+    expect(layout).toBeDefined()
+    expect(screen.getByRole('tab', { name: '所见' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('heading', { name: 'v1', level: 1 })).toBeDefined()
+    expect(screen.getByLabelText('Memory 状态').textContent).toContain('1 个 Target')
     expect(screen.getByRole('article').textContent).toContain('Active memory')
-    expect(screen.getByRole('button', { name: '复制 Memory 原始内容' })).toBeDefined()
-    const targetPanel = screen.getByTestId('memory-targets')
-    expect(within(targetPanel).queryByRole('button', { name: 'CC' })).toBeNull()
-    expect(within(targetPanel).getByRole('button', { name: 'Codex' })).toBeDefined()
-    expect(within(targetPanel).getByRole('button', { name: 'OpenCode' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '管理 Memory' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: /Memory.*v1/ }))
+    const menu = screen.getByRole('menu', { name: 'Memory 列表' })
+    expect(within(menu).getByRole('menuitem', { name: '新建 Memory' })).toBeDefined()
+    expect(within(menu).getByRole('button', { name: '删除 v1' })).toBeDefined()
+    expect(within(menu).getByRole('button', { name: '删除 review-rules' })).toBeDefined()
+    expect(within(menu).getByRole('button', { name: 'v1 已投影到 Codex' })).toBeDefined()
   })
 
-  it('toggles Memory projection targets and reconciles projection immediately', async () => {
-    vi.mocked(api.getManifest)
-      .mockResolvedValueOnce({
-        skills: { sources: [], skills: [] },
-        mcp: [],
-        vars: { default: {}, active: {} },
-        config: { targets: ['codex', 'opencode'] },
-        errors: [],
-      } as never)
-      .mockResolvedValueOnce({
-        skills: { sources: [], skills: [] },
-        mcp: [],
-        vars: { default: {}, active: {} },
-        config: { targets: ['codex'] },
-        errors: [],
-      } as never)
-    vi.mocked(api.getMemory).mockResolvedValueOnce({
-      memories: [{ name: 'v1' }],
-      active: 'v1',
-      activeContent: '# v1',
+  it('ignores stale content when memory selections resolve out of order', async () => {
+    let resolveV2!: (value: { content: string }) => void
+    vi.mocked(api.getMemory).mockResolvedValue({
+      memories: [
+        { name: 'v1', targets: ['codex'] },
+        { name: 'v2', targets: [] },
+        { name: 'v3', targets: [] },
+      ],
+      assignments: { codex: 'v1' },
+      active: null,
+      activeContent: '',
     } as never)
+    vi.mocked(api.getMemoryContent).mockImplementation(async (_repo, name) => {
+      if (name === 'v2') return new Promise((resolve) => (resolveV2 = resolve))
+      return { content: `# ${name}` }
+    })
+
+    render(<Memory repoPath="/tmp/memory-selection-race" />)
+    await screen.findByRole('button', { name: /Memory.*v1/ })
+
+    fireEvent.click(screen.getByRole('button', { name: /Memory.*v1/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'v2' }))
+    fireEvent.click(screen.getByRole('button', { name: /Memory.*v1/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'v3' }))
+    await screen.findByRole('heading', { name: 'v3' })
+
+    await act(async () => {
+      resolveV2({ content: '# stale v2' })
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('button', { name: /Memory.*v3/ })).toBeDefined()
+    expect(screen.queryByRole('heading', { name: 'stale v2' })).toBeNull()
+  })
+
+  it('asks before discarding an unsaved draft when switching memories', async () => {
+    vi.mocked(api.getMemory).mockResolvedValue({
+      memories: [
+        { name: 'v1', targets: ['codex'] },
+        { name: 'v2', targets: [] },
+      ],
+      assignments: { codex: 'v1' },
+      active: null,
+      activeContent: '',
+    } as never)
+    vi.mocked(api.getMemoryContent).mockImplementation(async (_repo, name) => ({
+      content: `# ${name}`,
+    }))
+
+    render(<Memory repoPath="/tmp/memory-unsaved-switch" />)
+    await screen.findByRole('button', { name: /Memory.*v1/ })
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+    const source = screen.getByRole('textbox', { name: 'Memory 内容' })
+    fireEvent.change(source, { target: { value: '# Edited draft' } })
+    await screen.findByRole('button', { name: '保存' })
+
+    fireEvent.click(screen.getByRole('button', { name: /Memory.*v1/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'v2' }))
+    const dialog = await screen.findByRole('dialog', { name: '放弃未保存更改' })
+    expect((source as HTMLTextAreaElement).value).toBe('# Edited draft')
+    fireEvent.click(within(dialog).getByRole('button', { name: '继续编辑' }))
+    expect(screen.getByRole('button', { name: /Memory.*v1/ })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: /Memory.*v1/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'v2' }))
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: '放弃未保存更改' })).getByRole('button', {
+        name: '放弃并切换',
+      }),
+    )
+    await waitFor(() => expect(screen.getByRole('button', { name: /Memory.*v2/ })).toBeDefined())
+    expect(
+      (screen.getByRole('textbox', { name: 'Memory 内容' }) as HTMLTextAreaElement).value,
+    ).toBe('# v2')
+  })
+
+  it('assigns an unoccupied target and reconciles projection immediately', async () => {
+    vi.mocked(api.getManifest).mockResolvedValue({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex', 'opencode'] },
+      errors: [],
+    } as never)
+    vi.mocked(api.getMemory)
+      .mockResolvedValueOnce({
+        memories: [{ name: 'v1', targets: ['codex'] }],
+        assignments: { codex: 'v1' },
+        active: null,
+        activeContent: '',
+      } as never)
+      .mockResolvedValueOnce({
+        memories: [{ name: 'v1', targets: ['codex', 'opencode'] }],
+        assignments: { codex: 'v1', opencode: 'v1' },
+        active: null,
+        activeContent: '',
+      } as never)
+    vi.mocked(api.getMemoryContent).mockResolvedValue({ content: '# v1' })
 
     render(<Memory repoPath="/tmp/memory-targets" />)
 
-    const targetsPanel = await screen.findByText('投影目标')
-    const panel = screen.getByTestId('memory-targets')
-    expect(panel.contains(targetsPanel)).toBe(true)
-    fireEvent.click(within(panel).getByRole('button', { name: 'OpenCode' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'v1 投影到 OpenCode' }))
 
     await waitFor(() =>
-      expect(api.putConfig).toHaveBeenCalledWith({
+      expect(api.updateMemoryTarget).toHaveBeenCalledWith({
         repo: '/tmp/memory-targets',
-        level: 'repo',
-        field: 'targets',
-        value: ['codex'],
+        target: 'opencode',
+        name: 'v1',
       }),
     )
-    await waitFor(() =>
-      expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/memory-targets', scope: 'memory' }),
-    )
-    await waitFor(() => expect(within(panel).queryByRole('button', { name: 'OC' })).toBeNull())
+    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/memory-targets', scope: 'memory' })
   })
 
-  it('uses the active status dot as the only memory activation control', async () => {
-    vi.mocked(api.getMemory).mockResolvedValue({
-      memories: [{ name: 'v1' }],
-      active: 'v1',
-      activeContent: '# v1',
+  it('confirms before moving an occupied target to another memory', async () => {
+    vi.mocked(api.updateMemoryTarget).mockClear()
+    vi.mocked(api.getManifest).mockResolvedValue({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { targets: ['codex', 'opencode'] },
+      errors: [],
     } as never)
+    vi.mocked(api.getMemory).mockResolvedValue({
+      memories: [
+        { name: 'v1', targets: ['codex'] },
+        { name: 'v2', targets: ['opencode'] },
+      ],
+      assignments: { codex: 'v1', opencode: 'v2' },
+      active: null,
+      activeContent: '',
+    } as never)
+    vi.mocked(api.getMemoryContent).mockResolvedValue({ content: '# memory' })
+
+    render(<Memory repoPath="/tmp/memory-conflict" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'v1 投影到 OpenCode' }))
+    const dialog = await screen.findByRole('dialog', { name: '切换 OpenCode 的 Memory' })
+    expect(dialog.textContent).toContain('v2')
+    expect(dialog.textContent).toContain('v1')
+    expect(api.updateMemoryTarget).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认切换' }))
+
+    await waitFor(() =>
+      expect(api.updateMemoryTarget).toHaveBeenCalledWith({
+        repo: '/tmp/memory-conflict',
+        target: 'opencode',
+        name: 'v1',
+      }),
+    )
+  })
+
+  it('deletes a specific memory from the dropdown', async () => {
+    vi.mocked(api.getMemory).mockResolvedValue({
+      memories: [
+        { name: 'v1', targets: ['codex'] },
+        { name: 'v2', targets: [] },
+      ],
+      assignments: { codex: 'v1' },
+      active: null,
+      activeContent: '',
+    } as never)
+    vi.mocked(api.getMemoryContent).mockResolvedValue({ content: '# memory' })
 
     render(<Memory repoPath="/tmp/memory-actions" />)
 
-    await screen.findAllByText('v1')
-    const row = screen.getByTestId('memory-row-v1')
-
-    const activeDot = within(row).getByRole('button', { name: '取消激活 memory v1' })
-    const rename = within(row).getByRole('button', { name: '重命名 memory v1' })
-    const remove = within(row).getByRole('button', { name: '删除 memory v1' })
-
-    expect(activeDot.getAttribute('aria-pressed')).toBe('true')
-    expect(activeDot.getAttribute('data-state')).toBe('active')
-    expect(activeDot.getAttribute('data-tooltip')).toBe('已激活，点击取消')
-    expect(within(row).queryByRole('button', { name: '激活 memory v1' })).toBeNull()
-    expect(rename.getAttribute('data-tooltip')).toBe('重命名')
-    expect(remove.getAttribute('data-tooltip')).toBe('删除')
-
-    fireEvent.click(activeDot)
-    await waitFor(() =>
-      expect(api.setMemoryActive).toHaveBeenCalledWith({
-        repo: '/tmp/memory-actions',
-        name: null,
-      }),
-    )
-  })
-
-  it('shows Memory feedback through the app-level toast host', async () => {
-    vi.mocked(api.getMemory).mockResolvedValue({
-      memories: [{ name: 'v1' }],
-      active: 'v1',
-      activeContent: '# v1',
-    } as never)
-    vi.mocked(api.project).mockResolvedValueOnce({ ok: true } as never)
-
-    render(
-      <>
-        <ToastHost />
-        <Memory repoPath="/tmp/memory-feedback" />
-      </>,
-    )
-
-    fireEvent.click(await screen.findByRole('button', { name: '投影 memory' }))
-
-    await waitFor(() =>
-      expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/memory-feedback', scope: 'memory' }),
-    )
-    expect(await screen.findByText('投影完成')).toBeDefined()
-  })
-
-  it('keeps active selection and editor draft while moving a memory to the end', async () => {
-    vi.mocked(api.getMemory).mockResolvedValueOnce({
-      memories: [{ name: 'v1' }, { name: 'v2' }],
-      active: 'v1',
-      activeContent: '# v1',
-    } as never)
-    render(<Memory repoPath="/tmp/memory-order" />)
-
-    fireEvent.click(await screen.findByRole('tab', { name: '源码' }))
-    const editor = await screen.findByRole('textbox', { name: 'Memory 内容' })
-    fireEvent.change(editor, { target: { value: '# unsaved draft' } })
-    const first = screen.getByLabelText('调整 v1 顺序')
-    const second = screen.getByLabelText('调整 v2 顺序')
-    ;[first, second].forEach((element, index) => {
-      element.getBoundingClientRect = () =>
-        DOMRect.fromRect({ x: 0, y: index * 44, width: 260, height: 40 })
-    })
-
-    first.focus()
-    fireEvent.keyDown(first, { key: ' ', code: 'Space' })
-    await waitFor(() => expect(first.getAttribute('aria-pressed')).toBe('true'))
-    fireEvent.keyDown(document, { key: 'ArrowDown', code: 'ArrowDown' })
-    fireEvent.keyDown(document, { key: ' ', code: 'Space' })
-
-    await waitFor(() =>
-      expect(api.reorderMemories).toHaveBeenCalledWith({
-        repo: '/tmp/memory-order',
-        names: ['v2', 'v1'],
-      }),
-    )
-    expect(
-      (screen.getByRole('textbox', { name: 'Memory 内容' }) as HTMLTextAreaElement).value,
-    ).toBe('# unsaved draft')
-    expect(screen.getByRole('button', { name: '取消激活 memory v1' })).toBeDefined()
+    fireEvent.click(await screen.findByRole('button', { name: /Memory.*v1/ }))
+    fireEvent.click(screen.getByRole('button', { name: '删除 v2' }))
+    const dialog = await screen.findByRole('dialog', { name: '删除 Memory' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除' }))
+    await waitFor(() => expect(api.deleteMemory).toHaveBeenCalledWith('/tmp/memory-actions', 'v2'))
   })
 })
 

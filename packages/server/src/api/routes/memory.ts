@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { join, sep } from 'node:path'
-import { AgentIdSchema, normalizeOrder, sameOrder } from '@loom/core'
+import { AgentIdSchema, normalizeOrder, sameOrder, type AgentId } from '@loom/core'
 import { z } from 'zod'
 import { resolveRepoPath } from '../repo.js'
 import { readYaml, writeYaml } from '../repo-config.js'
@@ -25,6 +25,11 @@ const CreateMemoryBody = z.object({ repo: NonEmptyString, name: MemoryName })
 const MemoryContentBody = CreateMemoryBody.extend({ content: z.string() })
 const RenameMemoryBody = CreateMemoryBody.extend({ newName: MemoryName })
 const ActiveMemoryBody = z.object({ repo: NonEmptyString, name: MemoryName.nullable() })
+const MemoryTargetBody = z.object({
+  repo: NonEmptyString,
+  target: AgentIdSchema,
+  name: MemoryName.nullable(),
+})
 const ReorderMemoriesBody = z.object({ repo: NonEmptyString, names: z.array(MemoryName) })
 const PreviewMemoryBody = z.object({
   repo: NonEmptyString,
@@ -70,6 +75,31 @@ async function readMemoryNames(fs: RouteDeps['fs'], repoPath: string): Promise<s
     .sort()
 }
 
+function memoryAssignments(
+  cfg: Record<string, any>,
+  names: string[],
+): Partial<Record<AgentId, string>> {
+  const assignments: Partial<Record<AgentId, string>> = {}
+  if (
+    cfg.memory_targets &&
+    typeof cfg.memory_targets === 'object' &&
+    !Array.isArray(cfg.memory_targets)
+  ) {
+    for (const agent of AgentIdSchema.options) {
+      const name = cfg.memory_targets[agent]
+      if (typeof name === 'string' && names.includes(name)) assignments[agent] = name
+    }
+    return assignments
+  }
+  if (typeof cfg.active_memory === 'string' && names.includes(cfg.active_memory)) {
+    for (const target of Array.isArray(cfg.targets) ? cfg.targets : []) {
+      if (AgentIdSchema.safeParse(target).success)
+        assignments[target as AgentId] = cfg.active_memory
+    }
+  }
+  return assignments
+}
+
 export function createMemoryRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
 
@@ -88,11 +118,20 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
       const cfg = await readConfig(deps.fs, repoPath)
       const names = normalizeOrder(cfg.memory_order, fileNames)
       const active = typeof cfg.active_memory === 'string' ? cfg.active_memory : null
+      const assignments = memoryAssignments(cfg, names)
       let activeContent = ''
       if (active && names.includes(active)) {
         activeContent = await deps.fs.readFile(join(dir, `${active}.md`))
       }
-      return c.json({ memories: names.map((n) => ({ name: n })), active, activeContent })
+      return c.json({
+        memories: names.map((n) => ({
+          name: n,
+          targets: AgentIdSchema.options.filter((agent) => assignments[agent] === n),
+        })),
+        assignments,
+        active,
+        activeContent,
+      })
     } catch (e) {
       return c.json({ ok: false, error: 'read_failed', message: String((e as Error).message) }, 400)
     }
@@ -151,10 +190,14 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
         const content = await deps.fs.readFile(file)
         const cfg = await readConfig(deps.fs, repoPath)
         const names = await readMemoryNames(deps.fs, repoPath)
+        const assignments = memoryAssignments(cfg, names)
         cfg.memory_order = normalizeOrder(cfg.memory_order, names).filter((item) => item !== name)
         if (cfg.active_memory === name) {
           delete cfg.active_memory
         }
+        cfg.memory_targets = Object.fromEntries(
+          Object.entries(assignments).filter(([, memoryName]) => memoryName !== name),
+        )
         await deps.fs.removeFile(file)
         try {
           await writeYaml(deps.fs, join(repoPath, 'config.yaml'), cfg)
@@ -221,6 +264,7 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
         if (!newFile.startsWith(dir + sep)) return c.json({ ok: false, error: 'invalid_name' }, 400)
         const cfg = await readConfig(deps.fs, repoPath)
         const names = await readMemoryNames(deps.fs, repoPath)
+        const assignments = memoryAssignments(cfg, names)
         const renamedNames = names.map((item) => (item === name ? newName : item))
         cfg.memory_order = normalizeOrder(cfg.memory_order, names).map((item) =>
           item === name ? newName : item,
@@ -229,6 +273,12 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
         if (cfg.active_memory === name) {
           cfg.active_memory = newName
         }
+        cfg.memory_targets = Object.fromEntries(
+          Object.entries(assignments).map(([agent, memoryName]) => [
+            agent,
+            memoryName === name ? newName : memoryName,
+          ]),
+        )
         await deps.fs.move(oldFile, newFile)
         try {
           await writeYaml(deps.fs, join(repoPath, 'config.yaml'), cfg)
@@ -266,21 +316,57 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
       try {
         const { repo, name } = c.req.valid('json')
         const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const cfg = await readConfig(deps.fs, repoPath)
         if (name === null) {
-          const cfg = await readConfig(deps.fs, repoPath)
           delete cfg.active_memory
+          delete cfg.memory_targets
           await writeYaml(deps.fs, join(repoPath, 'config.yaml'), cfg)
           return c.json({ ok: true })
         }
         const file = join(memoriesDir(repoPath), `${name}.md`)
         if (!(await deps.fs.exists(file))) return c.json({ ok: false, error: 'not_found' }, 404)
-        const cfg = await readConfig(deps.fs, repoPath)
         cfg.active_memory = name
+        if (cfg.memory_targets && typeof cfg.memory_targets === 'object') {
+          cfg.memory_targets = Object.fromEntries(
+            (Array.isArray(cfg.targets) ? cfg.targets : [])
+              .filter((target) => AgentIdSchema.safeParse(target).success)
+              .map((target: AgentId) => [target, name]),
+          )
+        }
         await writeYaml(deps.fs, join(repoPath, 'config.yaml'), cfg)
         return c.json({ ok: true })
       } catch (e) {
+        memoryLogger.error('legacy memory activation failed', { err: e })
         return c.json(
           { ok: false, error: 'activate_failed', message: String((e as Error).message) },
+          400,
+        )
+      }
+    },
+  )
+
+  app.put(
+    '/memory/target',
+    jsonValidator(MemoryTargetBody, { error: 'invalid_target' }),
+    async (c) => {
+      try {
+        const { repo, target, name } = c.req.valid('json')
+        const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const names = await readMemoryNames(deps.fs, repoPath)
+        if (name !== null && !names.includes(name))
+          return c.json({ ok: false, error: 'not_found' }, 404)
+        const cfg = await readConfig(deps.fs, repoPath)
+        const assignments = memoryAssignments(cfg, names)
+        if (name === null) delete assignments[target]
+        else assignments[target] = name
+        cfg.memory_targets = assignments
+        delete cfg.active_memory
+        await writeYaml(deps.fs, join(repoPath, 'config.yaml'), cfg)
+        return c.json({ ok: true, assignments })
+      } catch (e) {
+        memoryLogger.error('memory target update failed', { err: e })
+        return c.json(
+          { ok: false, error: 'target_update_failed', message: String((e as Error).message) },
           400,
         )
       }

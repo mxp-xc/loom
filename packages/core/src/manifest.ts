@@ -221,18 +221,41 @@ export function buildManifest(repo: RepoManifest, localConfig: Config): Manifest
   const defaultVars = toVarsFile(repo.varsFiles['default'])
   const activeEnvironment = repo.varsFiles[profileName]
   const memoryNames = normalizeOrder(repo.repoConfig?.memory_order, Object.keys(repo.memoriesFiles))
-  const memories = memoryNames.map((name) => ({ name, content: repo.memoriesFiles[name] }))
+  const memoryNameSet = new Set(memoryNames)
   const activeName = effective.active_memory ?? null
+  const configuredAssignments = effective.memory_targets
+  const assignments: Manifest['memory']['assignments'] = {}
+  if (configuredAssignments && typeof configuredAssignments === 'object') {
+    for (const agent of AgentIdSchema.options) {
+      const name = configuredAssignments[agent]
+      if (typeof name === 'string' && memoryNameSet.has(name)) assignments[agent] = name
+    }
+  } else if (activeName && memoryNameSet.has(activeName)) {
+    for (const agent of effective.targets ?? []) assignments[agent] = activeName
+  }
+  const memories = memoryNames.map((name) => ({
+    name,
+    content: repo.memoriesFiles[name],
+    targets: AgentIdSchema.options.filter((agent) => assignments[agent] === name),
+  }))
   const active = activeName ? (memories.find((m) => m.name === activeName) ?? null) : null
   const activeContent = active?.content ?? ''
   const errors = validateManifest(repo)
   if (activeName && !active) {
     errors.push(`active_memory references unknown memory: ${activeName}`)
   }
+  if (configuredAssignments && typeof configuredAssignments === 'object') {
+    for (const [agent, name] of Object.entries(configuredAssignments)) {
+      if (!AgentIdSchema.safeParse(agent).success)
+        errors.push(`memory_targets references unknown target: ${agent}`)
+      else if (typeof name !== 'string' || !memoryNameSet.has(name))
+        errors.push(`memory_targets.${agent} references unknown memory: ${String(name)}`)
+    }
+  }
   return {
     skills: { ...repo.skills, group_order: normalizeSkillGroupOrder(repo.skills) },
     mcp: repo.mcp,
-    memory: { memories, active, activeContent },
+    memory: { memories, assignments, active, activeContent },
     vars: {
       default: defaultVars,
       active: activeEnvironment ? toVarsFile(activeEnvironment) : defaultVars,

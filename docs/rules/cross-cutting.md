@@ -45,7 +45,7 @@ Rule:
 Implications:
 
 - 单个 target toggle 保存 manifest 后，会投影相关 scope。
-- Memory 页面全局 target chip 保存 repo-level targets 后，会自动运行 memory projection。
+- Memory 页面修改某个 Target 的 Memory 映射后，会自动运行 memory projection。
 - 批量 target 更新在所有 manifest 更新成功后投影。
 - 保存 source members/resources selection 后，会投影 skills。
 - MCP target chip 和全局 target chip 只保存 desired target state，不自动投影；MCP projection 由 Project changes 显式触发。
@@ -58,7 +58,7 @@ Safety:
 Examples:
 
 - 点击某个 skill 的 OpenCode chip，会更新 manifest targets，然后运行 skills projection。
-- 点击 Memory 页面的 OpenCode chip，会更新 repo config targets，然后运行 memory projection。
+- 把 Memory `team` 分配给 OpenCode，会更新 `memory_targets.opencode`，然后运行 memory projection。
 - 保存 source 内容选择，会更新 source members/resources，然后运行 skills projection。
 - 点击 MCP server 的 Codex chip，只更新 manifest targets；用户点击 MCP 页面 Project changes 后才运行 MCP projection。
 

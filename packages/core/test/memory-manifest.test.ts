@@ -33,6 +33,51 @@ describe('memory manifest', () => {
     expect(mf.errors.some((e) => e.includes('active_memory'))).toBe(true)
   })
 
+  it('derives target assignments for multiple memories', () => {
+    const rm = loadRepoManifest({
+      'config.yaml': [
+        'targets:',
+        '  - claude-code',
+        '  - codex',
+        '  - opencode',
+        'memory_targets:',
+        '  claude-code: team',
+        '  codex: team',
+        '  opencode: personal',
+      ].join('\n'),
+      'memories/team.md': '# team',
+      'memories/personal.md': '# personal',
+    })
+
+    const mf = buildManifest(rm, {})
+
+    expect(mf.memory.assignments).toEqual({
+      'claude-code': 'team',
+      codex: 'team',
+      opencode: 'personal',
+    })
+    expect(mf.memory.memories.find((memory) => memory.name === 'team')?.targets).toEqual([
+      'claude-code',
+      'codex',
+    ])
+    expect(mf.memory.memories.find((memory) => memory.name === 'personal')?.targets).toEqual([
+      'opencode',
+    ])
+  })
+
+  it('records invalid memory target references without assigning them', () => {
+    const rm = loadRepoManifest({
+      'config.yaml': ['memory_targets:', '  codex: missing', '  unknown-agent: team'].join('\n'),
+      'memories/team.md': '# team',
+    })
+
+    const mf = buildManifest(rm, {})
+
+    expect(mf.memory.assignments).toEqual({})
+    expect(mf.errors).toContain('memory_targets.codex references unknown memory: missing')
+    expect(mf.errors).toContain('memory_targets references unknown target: unknown-agent')
+  })
+
   it('no memories dir: empty list, active=null, no error', () => {
     const rm = loadRepoManifest({ 'config.yaml': '' })
     const mf = buildManifest(rm, {})
