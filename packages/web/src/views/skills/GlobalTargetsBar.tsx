@@ -1,4 +1,4 @@
-import { agentShort, type AgentId } from '@/lib/agents'
+import { agentName, type AgentId } from '@/lib/agents'
 import type { Manifest } from '@loom/core'
 import { TargetChip } from '@/components/ui/TargetChip'
 import type { ManifestOperations } from '@/hooks/useManifestOperations'
@@ -62,8 +62,8 @@ export default function GlobalTargetsBar({ manifest, operations }: Props) {
               key={agent}
               agent={agent}
               state={state}
-              label={`${agentShort[agent]}：${status}`}
-              tooltip={`${agentShort[agent]}：${tooltip}`}
+              label={`${agentName[agent]}：${status}`}
+              tooltip={tooltip}
               disabled={anyUpdating}
               onClick={() => void operations.setAllSkillTargets(manifest, agent)}
             />

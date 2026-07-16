@@ -14,7 +14,7 @@ import {
 import { Button } from '../../components/ui/button'
 import { IconButton } from '../../components/ui/IconButton'
 import { TargetChip } from '@/components/ui/TargetChip'
-import { AGENTS, agentShort, type AgentId } from '../../lib/agents'
+import { AGENTS, agentName, agentShort, type AgentId } from '../../lib/agents'
 import { cn } from '@/lib/utils'
 import styles from './VarsProfileDemo.module.css'
 
@@ -250,7 +250,7 @@ function AgentChips({
           key={agent}
           agent={agent}
           state={activeAgent === agent ? 'on' : 'off'}
-          label={agentShort[agent]}
+          label={agentName[agent]}
           onClick={() => onChange(agent)}
         />
       ))}

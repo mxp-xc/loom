@@ -30,7 +30,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { agentShort, type AgentId } from '@/lib/agents'
+import { agentName, type AgentId } from '@/lib/agents'
 import { inferRepositoryFileWebUrl, inferRepositoryWebUrl } from '@/lib/repository-links'
 import {
   formatSourceMemberSkillId,
@@ -266,8 +266,8 @@ const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
     agent={agent}
     className={styles.chip}
     state={active ? 'on' : 'off'}
-    label={agentShort[agent]}
-    tooltip={`${agentShort[agent]} ${active ? '已启用' : '未启用'}`}
+    label={agentName[agent]}
+    tooltip={active ? '已启用' : '未启用'}
     onClick={onClick}
   />
 )
@@ -529,8 +529,8 @@ export default function SkillSourceList({
                               agent={agent}
                               className={styles['source-target-chip']}
                               state={state}
-                              label={`${repoId} ${agentShort[agent]}：${status}`}
-                              tooltip={`${repoId} ${agentShort[agent]}：${tooltip}`}
+                              label={`${repoId} ${agentName[agent]}：${status}`}
+                              tooltip={`${repoId}：${tooltip}`}
                               disabled={disabled}
                               onClick={() => void operations.setSourceSkillTargets(src, agent)}
                             />

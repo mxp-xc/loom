@@ -525,7 +525,7 @@ function PreviewTargetSwitch({
           key={agent}
           agent={agent}
           state={value === agent ? 'on' : 'off'}
-          label={'Preview as ' + agentShort[agent]}
+          label={'Preview as ' + agentName[agent]}
           tooltip={'使用 ' + agentName[agent] + ' 解析配置'}
           onClick={() => onChange(agent)}
         />
@@ -2061,8 +2061,8 @@ function GlobalTargetsBar({
               key={agent}
               agent={agent}
               state={state}
-              label={'全部 MCP servers 应用到 ' + agentShort[agent]}
-              tooltip={'应用到 ' + agentShort[agent]}
+              label={'全部 MCP servers 应用到 ' + agentName[agent]}
+              tooltip={'应用到 ' + agentName[agent]}
               onClick={() => void operations.setAllMcpTargets(servers, agent)}
               disabled={operations.pending.mcp.allTargets(agent)}
               stopPropagation
@@ -2439,8 +2439,8 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                             key={agent}
                             agent={agent}
                             state={activeTargets.includes(agent) ? 'on' : 'off'}
-                            label={server.id + ' 应用到 ' + agentShort[agent]}
-                            tooltip={server.id + ' 应用到 ' + agentShort[agent]}
+                            label={server.id + ' 应用到 ' + agentName[agent]}
+                            tooltip={server.id + ' 应用到 ' + agentName[agent]}
                             onClick={() =>
                               void operations.toggleMcpTarget(
                                 { ...server, targets: server.targets ?? [] },

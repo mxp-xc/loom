@@ -213,8 +213,7 @@
 
 .vars-kind,
 .vars-type-main,
-.vars-format,
-.vars-slot-chip {
+.vars-format {
   display: inline-flex;
   width: max-content;
   align-items: center;
@@ -537,13 +536,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-
-.vars-slot-chip {
-  padding: 4px 7px;
-  border: 1px solid color-mix(in srgb, var(--c) 35%, var(--border));
-  background: color-mix(in srgb, var(--c) 10%, transparent);
-  color: var(--bright);
 }
 
 .vars-slot-dash,

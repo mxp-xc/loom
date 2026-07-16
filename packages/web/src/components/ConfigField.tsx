@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AGENTS, agentShort } from '@/lib/agents'
+import { AGENTS, agentName } from '@/lib/agents'
 import { IconButton } from '@/components/ui/IconButton'
 import { TargetChip } from '@/components/ui/TargetChip'
 import { Check, Eraser, X } from 'lucide-react'
@@ -281,7 +281,13 @@ export function ConfigField({
             />
           )}
           {field.control === 'chips' && (
-            <div className={cn('target-chips', isDisabled && styles['cfg-ctrl-disabled'])}>
+            <div
+              className={cn(
+                'target-chips',
+                styles['cfg-target-chips'],
+                isDisabled && styles['cfg-ctrl-disabled'],
+              )}
+            >
               {AGENTS.map((agent) => {
                 const on = Array.isArray(value) && (value as string[]).includes(agent)
                 return (
@@ -289,7 +295,7 @@ export function ConfigField({
                     key={agent}
                     agent={agent}
                     state={on ? 'on' : 'off'}
-                    label={agentShort[agent]}
+                    label={agentName[agent]}
                     disabled={isDisabled || saving}
                     onClick={() => toggleChip(agent)}
                   />

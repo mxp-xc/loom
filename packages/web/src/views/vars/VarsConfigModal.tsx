@@ -1,7 +1,7 @@
 import { CheckCircle2, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../lib/api.js'
-import { AGENTS, agentShort, type AgentId } from '../../lib/agents.js'
+import { AGENTS, agentName, agentShort, type AgentId } from '../../lib/agents.js'
 import { TargetChip } from '@/components/ui/TargetChip'
 import { cn } from '@/lib/utils.js'
 import type {
@@ -440,7 +440,7 @@ export default function VarsConfigModal({
                       agent={option === 'default' ? undefined : option}
                       state={slot === option ? 'on' : 'off'}
                       color={option === 'default' ? 'var(--primary)' : undefined}
-                      label={slotLabel(option)}
+                      label={option === 'default' ? 'default' : agentName[option]}
                       onClick={() => setSlot(option)}
                     >
                       {option === 'default' ? 'default' : undefined}

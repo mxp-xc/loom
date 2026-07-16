@@ -162,7 +162,7 @@ describe('Vars diagnostics actions', () => {
 
       const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
       fireEvent.click(
-        within(within(dialog).getByLabelText('配置槽位')).getByRole('button', { name: 'CX' }),
+        within(within(dialog).getByLabelText('配置槽位')).getByRole('button', { name: 'Codex' }),
       )
       fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
 

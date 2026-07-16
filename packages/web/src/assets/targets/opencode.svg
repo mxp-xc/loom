@@ -1,0 +1,5 @@
+<!-- Adapted from https://github.com/anomalyco/opencode/blob/dev/packages/ui/src/assets/favicon/favicon-v3.svg (retrieved 2026-07-16) -->
+<svg viewBox="0 0 256 320" xmlns="http://www.w3.org/2000/svg">
+  <path fill-rule="evenodd" d="M256 320H0V0h256v320Zm-64-256H64v192h128V64Z"/>
+  <path d="M192 128v128H64V128h128Z" opacity=".45"/>
+</svg>

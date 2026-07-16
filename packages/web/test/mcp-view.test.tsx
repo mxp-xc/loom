@@ -230,9 +230,9 @@ describe('MCP workbench view', () => {
     expect(within(inventory).queryByText('全部 servers')).toBeNull()
     expect(
       within(globalTargets)
-        .getByRole('button', { name: '全部 MCP servers 应用到 OC' })
+        .getByRole('button', { name: '全部 MCP servers 应用到 OpenCode' })
         .getAttribute('data-tooltip'),
-    ).toBe('应用到 OC')
+    ).toBe('应用到 OpenCode')
 
     const toolbar = within(inventory).getByRole('toolbar', { name: 'MCP inventory actions' })
     expect(globalTargets.parentElement).toBe(toolbar.parentElement?.parentElement)
@@ -271,9 +271,9 @@ describe('MCP workbench view', () => {
 
     const globalTargets = await screen.findByRole('region', { name: '全局 MCP targets' })
     expect(
-      within(globalTargets).getByRole('button', { name: '全部 MCP servers 应用到 CC' }),
+      within(globalTargets).getByRole('button', { name: '全部 MCP servers 应用到 Claude Code' }),
     ).toBeDefined()
-    expect(screen.getByRole('button', { name: 'target-matrix 应用到 CC' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'target-matrix 应用到 Claude Code' })).toBeDefined()
   })
 
   it('updates global target controls without projecting', async () => {
@@ -282,7 +282,7 @@ describe('MCP workbench view', () => {
     const globalTargets = await screen.findByRole('region', { name: '全局 MCP targets' })
 
     fireEvent.click(
-      within(globalTargets).getByRole('button', { name: '全部 MCP servers 应用到 OC' }),
+      within(globalTargets).getByRole('button', { name: '全部 MCP servers 应用到 OpenCode' }),
     )
 
     await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalled())
@@ -405,7 +405,7 @@ describe('MCP workbench view', () => {
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '保存' }).disabled).toBe(true)
     fireEvent.click(screen.getByRole('tab', { name: '可视化' }))
     expect(screen.getByLabelText('command').closest('fieldset')?.disabled).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: 'Preview as CX' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as Codex' }))
     fireEvent.click(screen.getByRole('tab', { name: 'Tools' }))
     expect(
       within(screen.getByRole('region', { name: 'MCP tools debug' })).getByRole<HTMLButtonElement>(
@@ -547,7 +547,7 @@ describe('MCP workbench view', () => {
       }),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'playwright 应用到 CC' }))
+    fireEvent.click(screen.getByRole('button', { name: 'playwright 应用到 Claude Code' }))
     await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalled())
     expect(api.project).not.toHaveBeenCalled()
 
@@ -565,9 +565,9 @@ describe('MCP workbench view', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Default' }))
     expect(await screen.findByText('Default 解析配置')).toBeDefined()
     expect((await screen.findAllByText('/preview/default/browsers')).length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: 'Preview as CX' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as Codex' }))
     expect((await screen.findAllByText('/preview/codex/browsers')).length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: 'Preview as OC' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as OpenCode' }))
     expect((await screen.findAllByText('/preview/opencode/browsers')).length).toBeGreaterThan(0)
     expect(screen.queryByText('HEADERS')).toBeNull()
 
@@ -575,11 +575,11 @@ describe('MCP workbench view', () => {
     expect(await screen.findByText('REQUEST_TIMEOUT')).toBeDefined()
     expect(screen.getByText('Authorization')).toBeDefined()
     expect(screen.getAllByText(/repo-opencode/).length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: 'Preview as CX' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as Codex' }))
     expect(await screen.findByText(/\[mcp_servers\.remote-auth\]/)).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: '选择 playwright' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Preview as OC' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as OpenCode' }))
     fireEvent.click(screen.getByRole('button', { name: 'RAW' }))
     fireEvent.click(screen.getAllByRole('button', { name: '查看变量 browsers_path' })[0])
     const dialog = await screen.findByRole('dialog', { name: '变量信息 ${browsers_path}' })
@@ -676,7 +676,7 @@ describe('MCP workbench view', () => {
     )
     expect(screen.queryByRole('region', { name: 'MCP tools debug' })).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Preview as CX' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as Codex' }))
     fireEvent.click(screen.getByRole('tab', { name: /Tools/ }))
     const panel = await screen.findByRole('region', { name: 'MCP tools debug' })
     fireEvent.click(within(panel).getByRole('button', { name: 'Connect debug session' }))
@@ -774,7 +774,7 @@ describe('MCP workbench view', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑 playwright' }))
     fireEvent.change(screen.getByLabelText(/command/i), { target: { value: 'node' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Preview as CX' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as Codex' }))
     fireEvent.click(screen.getByRole('tab', { name: /Tools/ }))
     const panel = await screen.findByRole('region', { name: /MCP (?:Tools 调试|tools debug)/i })
     fireEvent.click(within(panel).getByRole('button', { name: /保存并连接/ }))
@@ -815,7 +815,7 @@ describe('MCP workbench view', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Add server' }))
     fireEvent.change(screen.getByLabelText('server id'), { target: { value: 'new-server' } })
     fireEvent.change(screen.getByLabelText('command'), { target: { value: 'npx' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Preview as CX' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as Codex' }))
     fireEvent.click(screen.getByRole('tab', { name: 'Tools' }))
     const panel = screen.getByRole('region', { name: 'MCP tools debug' })
     fireEvent.click(within(panel).getByRole('button', { name: /保存并连接/ }))
@@ -842,7 +842,7 @@ describe('MCP workbench view', () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
     fireEvent.click(await screen.findByRole('button', { name: '选择 playwright' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Preview as CX' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as Codex' }))
     fireEvent.click(screen.getByRole('tab', { name: 'Tools' }))
     const panel = screen.getByRole('region', { name: 'MCP tools debug' })
     fireEvent.click(within(panel).getByRole('button', { name: 'Connect debug session' }))
@@ -864,7 +864,7 @@ describe('MCP workbench view', () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
     fireEvent.click(await screen.findByRole('button', { name: '选择 playwright' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Preview as CX' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as Codex' }))
     fireEvent.click(screen.getByRole('tab', { name: 'Tools' }))
     const panel = screen.getByRole('region', { name: 'MCP tools debug' })
     fireEvent.click(within(panel).getByRole('button', { name: 'Connect debug session' }))
@@ -891,7 +891,7 @@ describe('MCP workbench view', () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
     fireEvent.click(await screen.findByRole('button', { name: '选择 playwright' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Preview as CX' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as Codex' }))
     fireEvent.click(await screen.findByRole('tab', { name: /Tools/ }))
     const panel = await screen.findByRole('region', { name: 'MCP tools debug' })
     fireEvent.click(within(panel).getByRole('button', { name: 'Connect debug session' }))

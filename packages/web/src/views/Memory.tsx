@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
-import { AGENTS, agentShort, type AgentId } from '@/lib/agents'
+import { AGENTS, agentName, type AgentId } from '@/lib/agents'
 import MemoryEditor from '@/components/MemoryEditor'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
@@ -281,14 +281,15 @@ export default function Memory({ repoPath }: Props) {
                 <TargetChip
                   key={a}
                   agent={a}
+                  className={styles['mem-target-chip']}
                   state={activeTarget ? 'on' : 'off'}
-                  label={agentShort[a]}
+                  label={agentName[a]}
                   tooltip={
                     busy
                       ? '更新中…'
                       : activeTarget
-                        ? `${agentShort[a]} 点击取消投影目标`
-                        : `${agentShort[a]} 点击添加投影目标`
+                        ? `${agentName[a]}：点击取消投影目标`
+                        : `${agentName[a]}：点击添加投影目标`
                   }
                   disabled={!!updatingTarget || projecting}
                   onClick={() => void toggleProjectionTarget(a)}

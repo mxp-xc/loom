@@ -1,5 +1,5 @@
 import type { CSSProperties, MouseEvent, ReactNode } from 'react'
-import { agentColor, agentShort, type AgentId } from '@/lib/agents'
+import { agentColor, agentName, type AgentId } from '@/lib/agents'
 import { cn } from '@/lib/utils'
 
 export type TargetChipState = 'on' | 'off' | 'mixed'
@@ -31,27 +31,30 @@ export function TargetChip({
   stopPropagation,
   onClick,
 }: TargetChipProps) {
-  const text = children ?? (agent ? agentShort[agent] : null)
+  const content =
+    children ?? (agent ? <span className="target-chip-icon" aria-hidden="true" /> : null)
   const style = {
     '--c': color ?? (agent ? agentColor[agent] : 'var(--primary)'),
   } as CSSProperties
   const sharedProps = {
     className: cn('target-chip', className),
     style,
-    'data-agent-chip': agent && count == null ? 'true' : undefined,
+    'data-agent-chip': agent ? 'true' : undefined,
+    'data-agent': agent,
+    'data-has-count': count != null ? 'true' : undefined,
     'data-state': state,
     'data-tooltip': tooltip,
-    'aria-label': label,
+    'aria-label': label ?? (agent ? agentName[agent] : undefined),
   }
-  const content = (
+  const renderedContent = (
     <>
-      {text}
+      {content}
       {count != null && <span className="target-chip-count">{count}</span>}
     </>
   )
 
   if (!onClick) {
-    return <span {...sharedProps}>{content}</span>
+    return <span {...sharedProps}>{renderedContent}</span>
   }
 
   return (
@@ -66,7 +69,7 @@ export function TargetChip({
         onClick(event)
       }}
     >
-      {content}
+      {renderedContent}
     </button>
   )
 }

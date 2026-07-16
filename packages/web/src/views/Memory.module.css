@@ -64,6 +64,11 @@
   border-radius: var(--radius);
 }
 
+.mem-target-chip {
+  --target-tooltip-left: 0;
+  --target-tooltip-translate-x: 0;
+}
+
 .mem-list-scroll {
   display: flex;
   flex: 1;

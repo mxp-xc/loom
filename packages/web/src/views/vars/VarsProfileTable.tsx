@@ -2,7 +2,8 @@ import { useMemo } from 'react'
 import { Eye, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
 import { IconButton } from '@/components/ui/IconButton'
-import { agentColor, agentShort } from '../../lib/agents'
+import { TargetChip } from '@/components/ui/TargetChip'
+import { agentName } from '../../lib/agents'
 import type { AgentId } from '../../lib/agents'
 import type { VarsProfileEntry } from './profile-model'
 import styles from './Vars.module.css'
@@ -19,16 +20,9 @@ type VarsProfileTableProps = {
 function AgentChips({ slots }: { slots: AgentId[] }) {
   if (slots.length === 0) return <span className={styles['vars-slot-dash']}>—</span>
   return (
-    <span className={styles['vars-slots']}>
+    <span className={styles['vars-slots']} aria-label="已配置 targets">
       {slots.map((slot) => (
-        <span
-          key={slot}
-          className={styles['vars-slot-chip']}
-          data-a={slot === 'claude-code' ? 'cc' : slot === 'codex' ? 'cx' : 'oc'}
-          style={{ ['--c' as string]: agentColor[slot] }}
-        >
-          {agentShort[slot]}
-        </span>
+        <TargetChip key={slot} agent={slot} state="on" label={agentName[slot]} />
       ))}
     </span>
   )

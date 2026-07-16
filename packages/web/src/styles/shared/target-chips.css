@@ -36,6 +36,33 @@
   padding: 0;
 }
 
+.target-chip[data-agent-chip='true'][data-has-count='true'] {
+  width: auto;
+  padding: 0 6px;
+}
+
+.target-chip-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  background: currentColor;
+  -webkit-mask: var(--target-icon) center / contain no-repeat;
+  mask: var(--target-icon) center / contain no-repeat;
+}
+
+.target-chip[data-agent='claude-code'] {
+  --target-icon: url('../../assets/targets/claude.svg');
+}
+
+.target-chip[data-agent='codex'] {
+  --target-icon: url('../../assets/targets/codex.svg');
+}
+
+.target-chip[data-agent='opencode'] {
+  --target-icon: url('../../assets/targets/opencode.svg');
+}
+
 .target-chip[data-interactive='true'] {
   cursor: pointer;
 }
@@ -61,6 +88,21 @@
   background: color-mix(in srgb, var(--c) 10%, var(--card));
   border-color: color-mix(in srgb, var(--c) 28%, var(--border));
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bright) 4%, transparent);
+}
+
+.target-chip[data-agent-chip='true'][data-state='on'] {
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 12%, var(--card));
+  border-color: color-mix(in srgb, var(--c) 20%, var(--border));
+  box-shadow:
+    0 4px 10px color-mix(in srgb, var(--c) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--bright) 10%, transparent);
+}
+
+.target-chip[data-agent-chip='true'][data-state='off'] {
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+  background: color-mix(in srgb, var(--card) 68%, var(--bg));
+  border-color: color-mix(in srgb, var(--border) 62%, transparent);
 }
 
 .target-chip-count {
@@ -98,7 +140,7 @@
   position: absolute;
   top: auto;
   bottom: calc(100% + 7px);
-  left: 50%;
+  left: var(--target-tooltip-left, 50%);
   z-index: 1000;
   max-width: 220px;
   padding: 4px 7px;
@@ -116,7 +158,7 @@
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) - 2px);
   box-shadow: var(--shadow-popover);
-  transform: translate(-50%, 3px);
+  transform: translate(var(--target-tooltip-translate-x, -50%), 3px);
   transition:
     opacity 0.12s var(--ease),
     transform 0.12s var(--ease),
@@ -127,7 +169,7 @@
 .target-chip[data-tooltip]:focus-visible::after {
   visibility: visible;
   opacity: 1;
-  transform: translate(-50%, 0);
+  transform: translate(var(--target-tooltip-translate-x, -50%), 0);
 }
 
 @media (max-width: 760px) {
@@ -145,11 +187,11 @@
 @media (prefers-reduced-motion: reduce) {
   .target-chip[data-tooltip]::after {
     transition: none;
-    transform: translate(-50%, 0);
+    transform: translate(var(--target-tooltip-translate-x, -50%), 0);
   }
 
   .target-chip[data-tooltip]:hover::after,
   .target-chip[data-tooltip]:focus-visible::after {
-    transform: translate(-50%, 0);
+    transform: translate(var(--target-tooltip-translate-x, -50%), 0);
   }
 }

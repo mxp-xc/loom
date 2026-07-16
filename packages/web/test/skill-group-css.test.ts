@@ -6,6 +6,7 @@ const skillSourceCssPath = new URL(
   import.meta.url,
 )
 const targetChipsCssPath = new URL('../src/styles/shared/target-chips.css', import.meta.url)
+const configFieldCssPath = new URL('../src/components/ConfigField.module.css', import.meta.url)
 
 async function readCss(path: URL): Promise<string> {
   return await readFile(path, 'utf8')
@@ -51,6 +52,7 @@ describe('skill group header CSS', () => {
     const compactBadge = ruleBodyContaining(skillSourceCss, '.ref-badge')
     const targetChip = ruleBody(targetChipsCss, '.target-chip')
     const agentTargetChip = ruleBody(targetChipsCss, ".target-chip[data-agent-chip='true']")
+    const targetChipIcon = ruleBody(targetChipsCss, '.target-chip-icon')
 
     expect(chip).toMatch(/flex-shrink\s*:\s*0\b/)
     expect(compactBadge).toMatch(/display\s*:\s*inline-flex\b/)
@@ -71,5 +73,21 @@ describe('skill group header CSS', () => {
     expect(agentTargetChip).toMatch(/width\s*:\s*26px\b/)
     expect(agentTargetChip).toMatch(/height\s*:\s*26px\b/)
     expect(agentTargetChip).toMatch(/padding\s*:\s*0\b/)
+    expect(targetChipIcon).toMatch(/width\s*:\s*14px\b/)
+    expect(targetChipIcon).toMatch(/height\s*:\s*14px\b/)
+  })
+
+  it('only enlarges target chips in Settings fields', async () => {
+    const css = await readCss(configFieldCssPath)
+    const targetChip = ruleBody(
+      css,
+      ".cfg-target-chips :global(.target-chip[data-agent-chip='true'])",
+    )
+    const targetChipIcon = ruleBody(css, '.cfg-target-chips :global(.target-chip-icon)')
+
+    expect(targetChip).toMatch(/width\s*:\s*28px\b/)
+    expect(targetChip).toMatch(/height\s*:\s*28px\b/)
+    expect(targetChipIcon).toMatch(/width\s*:\s*16px\b/)
+    expect(targetChipIcon).toMatch(/height\s*:\s*16px\b/)
   })
 })

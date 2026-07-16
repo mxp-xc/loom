@@ -157,7 +157,7 @@ describe('Vars view', () => {
     const defaultScope = screen.getByRole('button', { name: 'default' })
     expect(defaultScope.getAttribute('data-state')).toBe('on')
     const targetChips = screen.getByLabelText('目标 agent')
-    expect(within(targetChips).getByRole('button', { name: 'CX' })).toBeDefined()
+    expect(within(targetChips).getByRole('button', { name: 'Codex' })).toBeDefined()
     expect(within(targetChips).queryByRole('button', { name: 'CC' })).toBeNull()
     expect(within(targetChips).queryByRole('button', { name: 'OC' })).toBeNull()
 
@@ -165,7 +165,9 @@ describe('Vars view', () => {
     await waitFor(() => {
       const row = screen.getByRole('row', { name: /agent_name/ })
       expect(row.textContent).toContain('未配置')
-      expect(row.textContent).toContain('CX')
+      const codexTarget = within(row).getByLabelText('Codex')
+      expect(codexTarget.textContent).toBe('')
+      expect(codexTarget.querySelector('.target-chip-icon')).not.toBeNull()
       expect(row.textContent).not.toContain('Local Codex agent')
     })
   })
@@ -197,10 +199,12 @@ describe('Vars view', () => {
     await waitFor(() => {
       const row = screen.getByRole('row', { name: /agent_name/ })
       expect(row.textContent).toContain('未配置')
-      expect(row.textContent).toContain('OC')
+      expect(within(row).getByLabelText('OpenCode')).toBeDefined()
     })
 
-    fireEvent.click(within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'OC' }))
+    fireEvent.click(
+      within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'OpenCode' }),
+    )
 
     expect(screen.getByRole('button', { name: '配置管理' }).getAttribute('aria-pressed')).toBe(
       'true',
@@ -241,7 +245,7 @@ describe('Vars view', () => {
     const row = screen.getByRole('row', { name: /agent_name/ })
     expect(row.textContent).toContain('string')
     expect(row.textContent).toContain('markdown')
-    expect(row.textContent).toContain('CX')
+    expect(within(row).getByLabelText('Codex')).toBeDefined()
     expect(row.textContent).not.toContain('default')
   })
 
@@ -291,15 +295,15 @@ describe('Vars view', () => {
 
     expect(screen.getByRole('button', { name: 'default' }).getAttribute('data-state')).toBe('on')
     const targetChips = screen.getByLabelText('目标 agent')
-    expect(within(targetChips).getByRole('button', { name: 'CC' })).toBeDefined()
+    expect(within(targetChips).getByRole('button', { name: 'Claude Code' })).toBeDefined()
     expect(within(targetChips).queryByRole('button', { name: 'CX' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '最终结果' }))
 
     expect(screen.getByRole('button', { name: 'default' }).getAttribute('data-state')).toBe('on')
-    expect(within(targetChips).getByRole('button', { name: 'CC' }).getAttribute('data-state')).toBe(
-      'off',
-    )
+    expect(
+      within(targetChips).getByRole('button', { name: 'Claude Code' }).getAttribute('data-state'),
+    ).toBe('off')
   })
 
   it('keeps the active tab when changing the view scope chips', async () => {
@@ -320,7 +324,9 @@ describe('Vars view', () => {
       'true',
     )
 
-    fireEvent.click(within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'OC' }))
+    fireEvent.click(
+      within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'OpenCode' }),
+    )
     expect(screen.getByRole('button', { name: '最终结果' }).getAttribute('aria-pressed')).toBe(
       'true',
     )
@@ -357,7 +363,9 @@ describe('Vars view', () => {
     await screen.findByText('agent_name')
     fireEvent.click(screen.getByRole('button', { name: '最终结果' }))
 
-    fireEvent.click(within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'CC' }))
+    fireEvent.click(
+      within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'Claude Code' }),
+    )
 
     const resolvedTable = screen.getByRole('region', { name: '解析结果' })
     const agentNameRow = within(resolvedTable).getByRole('row', { name: /agent_name/ })
@@ -378,7 +386,9 @@ describe('Vars view', () => {
     await screen.findByText('agent_name')
     fireEvent.click(screen.getByRole('button', { name: '最终结果' }))
 
-    fireEvent.click(within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'OC' }))
+    fireEvent.click(
+      within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'OpenCode' }),
+    )
     fireEvent.click(screen.getByRole('button', { name: 'default' }))
 
     const resolvedTable = screen.getByRole('region', { name: '解析结果' })
@@ -391,7 +401,9 @@ describe('Vars view', () => {
     render(<Vars repoPath="/repo" />)
     fireEvent.click(await screen.findByRole('button', { name: /Local/ }))
     await screen.findByText('agent_name')
-    fireEvent.click(within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'CX' }))
+    fireEvent.click(
+      within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'Codex' }),
+    )
 
     fireEvent.click(screen.getByRole('button', { name: '编辑 agent_name' }))
 
@@ -461,7 +473,9 @@ describe('Vars view', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑 agent_name' }))
     const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
     fireEvent.click(
-      within(within(dialog).getByLabelText('配置槽位')).getByRole('button', { name: 'CC' }),
+      within(within(dialog).getByLabelText('配置槽位')).getByRole('button', {
+        name: 'Claude Code',
+      }),
     )
 
     expect((screen.getByRole('textbox', { name: /配置值/ }) as HTMLTextAreaElement).value).toBe(
@@ -738,7 +752,9 @@ describe('Vars view', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑 rtk_path' }))
     const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
     fireEvent.click(
-      within(within(dialog).getByLabelText('配置槽位')).getByRole('button', { name: 'CC' }),
+      within(within(dialog).getByLabelText('配置槽位')).getByRole('button', {
+        name: 'Claude Code',
+      }),
     )
     fireEvent.click(within(dialog).getByRole('button', { name: '解析预览' }))
 

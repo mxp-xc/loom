@@ -50,7 +50,7 @@ describe('Settings', () => {
     render(<Settings repoPath="/tmp/r" />)
     await screen.findByText('最终结果')
     fireEvent.click(screen.getByText('仓库级'))
-    fireEvent.click(screen.getByText('CC'))
+    fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }))
 
     await waitFor(() => expect(api.getManifest).toHaveBeenCalledWith('/tmp/r'))
     await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(getConfigCallsBefore + 2))

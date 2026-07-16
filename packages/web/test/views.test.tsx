@@ -488,7 +488,7 @@ describe('MCP view', () => {
   it('bulk toggles MCP server targets without projecting', async () => {
     render(<Mcp repoPath="/tmp/mcp-layout" />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '全部 MCP servers 应用到 CX' }))
+    fireEvent.click(await screen.findByRole('button', { name: '全部 MCP servers 应用到 Codex' }))
 
     await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(2))
     expect(api.project).not.toHaveBeenCalled()
@@ -516,7 +516,7 @@ describe('MCP view', () => {
 
     render(<Mcp repoPath="/tmp/mcp-layout" />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '全部 MCP servers 应用到 CX' }))
+    fireEvent.click(await screen.findByRole('button', { name: '全部 MCP servers 应用到 Codex' }))
 
     await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(callsBefore + 1))
     releaseFirst()
@@ -743,8 +743,8 @@ describe('Memory view', () => {
     expect(screen.getByRole('button', { name: '复制 Memory 原始内容' })).toBeDefined()
     const targetPanel = screen.getByTestId('memory-targets')
     expect(within(targetPanel).queryByRole('button', { name: 'CC' })).toBeNull()
-    expect(within(targetPanel).getByRole('button', { name: 'CX' })).toBeDefined()
-    expect(within(targetPanel).getByRole('button', { name: 'OC' })).toBeDefined()
+    expect(within(targetPanel).getByRole('button', { name: 'Codex' })).toBeDefined()
+    expect(within(targetPanel).getByRole('button', { name: 'OpenCode' })).toBeDefined()
   })
 
   it('toggles Memory projection targets and reconciles projection immediately', async () => {
@@ -774,7 +774,7 @@ describe('Memory view', () => {
     const targetsPanel = await screen.findByText('投影目标')
     const panel = screen.getByTestId('memory-targets')
     expect(panel.contains(targetsPanel)).toBe(true)
-    fireEvent.click(within(panel).getByRole('button', { name: 'OC' }))
+    fireEvent.click(within(panel).getByRole('button', { name: 'OpenCode' }))
 
     await waitFor(() =>
       expect(api.putConfig).toHaveBeenCalledWith({
@@ -1006,7 +1006,7 @@ describe('Skills view', () => {
         name: '打开 frontend-design 的文件夹',
       }),
     ).toBeNull()
-    fireEvent.click(within(frontendRow).getByRole('button', { name: 'CX' }))
+    fireEvent.click(within(frontendRow).getByRole('button', { name: 'Codex' }))
     await waitFor(() =>
       expect(api.updateLocalSkillTargets).toHaveBeenCalledWith({
         repo: '/tmp/skills-layout',
@@ -1034,7 +1034,7 @@ describe('Skills view', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '全部展开' }))
     const frontendRow = screen.getByTestId('local-skill-frontend-design')
-    fireEvent.click(within(frontendRow).getByRole('button', { name: 'CX' }))
+    fireEvent.click(within(frontendRow).getByRole('button', { name: 'Codex' }))
 
     await waitFor(() =>
       expect(api.updateLocalSkillTargets).toHaveBeenCalledWith({
@@ -1089,7 +1089,7 @@ describe('Skills view', () => {
     )
 
     const sourceBulkCodex = screen.getByRole('button', {
-      name: 'openai-skills CX：部分已选择',
+      name: 'openai-skills Codex：部分已选择',
     })
     expect(sourceBulkCodex).toBeDefined()
     fireEvent.click(sourceBulkCodex)
@@ -1131,7 +1131,7 @@ describe('Skills view', () => {
       </TestRouter>,
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: 'CX：部分已选择' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Codex：部分已选择' }))
 
     await waitFor(() => expect(api.updateSkillTargets).toHaveBeenCalledTimes(sourceCallsBefore + 1))
     expect(api.updateLocalSkillTargets).toHaveBeenCalledTimes(localCallsBefore)
