@@ -1,13 +1,13 @@
 # Loom 规则索引
 
-本目录记录 Loom 的当前业务规则和安全边界。未来 agent 在修改 skills、MCP、memory、vars、projection 或同步相关代码前，应先读本索引，再进入对应规则文件。新增或调整规则时参考 [规则模板](template.md)。
+本目录记录 Loom 的当前业务规则和安全边界。修改 skills、MCP、memory、vars、projection 或同步相关代码前，先读本索引，再进入对应规则文件。新增或调整规则时参考 [规则模板](template.md)。
 
 ## 阅读顺序
 
 1. [领域术语](../../CONTEXT.md) — 统一词汇。只描述概念，不承载规则。
 2. [跨模块规则](cross-cutting.md) — 适用于 skills、MCP、memory、vars 的通用契约。
 3. [Vars 规则](vars.md) — 变量解析、分层覆盖、secret 和变更安全边界。
-4. [MCP 规则](mcp.md) — MCP server 定义、target 应用、preview target 和投影边界。
+4. [MCP 规则](mcp.md) — MCP server 定义、target 应用、配置解析上下文和投影边界。
 5. [Memory 规则](memory.md) — memory 存储、顺序、激活、预览和投影契约。
 6. [Projection 规则](projection.md) — desired state 如何落到 agent-native 文件。
 7. [Skills 规则](skills.md) — skills/source/local skill 与顶层顺序的特有规则。

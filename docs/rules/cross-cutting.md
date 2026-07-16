@@ -57,10 +57,10 @@ Safety:
 
 Examples:
 
-- 点击某个 skill 的 OC chip，会更新 manifest targets，然后运行 skills projection。
-- 点击 Memory 页面的 OC chip，会更新 repo config targets，然后运行 memory projection。
+- 点击某个 skill 的 OpenCode chip，会更新 manifest targets，然后运行 skills projection。
+- 点击 Memory 页面的 OpenCode chip，会更新 repo config targets，然后运行 memory projection。
 - 保存 source 内容选择，会更新 source members/resources，然后运行 skills projection。
-- 点击 MCP server 的 CX chip，只更新 manifest targets；用户点击 MCP 页面 Project changes 后才运行 MCP projection。
+- 点击 MCP server 的 Codex chip，只更新 manifest targets；用户点击 MCP 页面 Project changes 后才运行 MCP projection。
 
 Tests:
 
@@ -89,8 +89,8 @@ Safety:
 
 Examples:
 
-- superpowers source header 的 OC chip 只更新 selected superpowers members。
-- 顶部 skills 批量 OC chip 更新所有 source members 和 local skills。
+- superpowers source header 的 OpenCode chip 只更新 selected superpowers members。
+- 顶部 skills 批量 OpenCode chip 更新所有 source members 和 local skills。
 
 Tests:
 

@@ -1,0 +1,7 @@
+interface:
+  display_name: '根据代码更新文档'
+  short_description: '根据当前代码检查并更新文档，清理过时、重复和冗长内容'
+  default_prompt: '使用 $auditing-code-backed-docs 对照当前代码检查并更新指定文档，清理过时内容并完成必要的合并、精简和自检。'
+
+policy:
+  allow_implicit_invocation: false

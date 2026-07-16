@@ -129,18 +129,18 @@ MCP projection 写入某个 agent-native MCP 配置时，必须使用该目标 a
 
 Implications:
 
-- 同一个 MCP server 投影到 CC、CX、OC 时，\`\${var}\` 可以解析成不同 agent-specific value。
+- 同一个 MCP server 投影到 Claude Code、Codex、OpenCode 时，`${var}` 可以解析成不同 agent-specific value。
 - Projection 使用 Base → Base/agent → Local → Local/agent → Runtime 的覆盖语义。
-- Preview target 的展示语义必须与真实 projection 的 per-agent vars 渲染语义一致。
+- 各 agent 配置视图的展示语义必须与真实 projection 的 per-agent vars 渲染语义一致。
 
 Safety:
 
-- 不能把 UI 当前 preview target 用作所有目标 agent 的投影上下文。
+- 不能把 UI 当前配置视图用作所有目标 agent 的投影上下文。
 - 缺失变量或解析错误必须暴露为 projection error 或 preview diagnostic，不能静默写入错误值。
 
 Examples:
 
-- \`\${browsers_path}\` 投影到 Codex 时使用 Codex 的 resolved value，投影到 OpenCode 时使用 OpenCode 的 resolved value。
+- `${browsers_path}` 投影到 Codex 时使用 Codex 的 resolved value，投影到 OpenCode 时使用 OpenCode 的 resolved value。
 
 Tests:
 

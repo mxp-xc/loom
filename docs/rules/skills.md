@@ -77,7 +77,7 @@ Safety:
 
 Examples:
 
-- 点击 source header 中的 superpowers OC，只更新 selected superpowers members。
+- 点击 source header 中的 superpowers OpenCode chip，只更新 selected superpowers members。
 
 Tests:
 
