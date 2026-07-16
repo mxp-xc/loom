@@ -945,6 +945,8 @@ describe('Skills view', () => {
     )
 
     const expandAll = await screen.findByRole('button', { name: '全部展开' })
+    expect(screen.getByText('批量设置 · 应用于全部 skills')).toBeDefined()
+    expect(screen.queryByRole('link', { name: '在 Settings 中修改 targets' })).toBeNull()
     expect(screen.queryByText('systematic-debugging')).toBeNull()
     expect(screen.queryByText('test-qa-skill')).toBeNull()
 

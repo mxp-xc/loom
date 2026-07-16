@@ -1,8 +1,5 @@
 import { agentShort, type AgentId } from '@/lib/agents'
 import type { Manifest } from '@loom/core'
-import { Link } from 'react-router-dom'
-import { Settings2 } from 'lucide-react'
-import { IconButton } from '@/components/ui/IconButton'
 import { TargetChip } from '@/components/ui/TargetChip'
 import type { ManifestOperations } from '@/hooks/useManifestOperations'
 
@@ -31,7 +28,7 @@ export default function GlobalTargetsBar({ manifest, operations }: Props) {
       className="global-targets-bar"
       style={{
         display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+        gridTemplateColumns: 'minmax(0, 1fr) auto',
         alignItems: 'center',
         gap: 12,
         marginTop: 14,
@@ -45,7 +42,7 @@ export default function GlobalTargetsBar({ manifest, operations }: Props) {
       <span
         style={{
           fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 11,
+          fontSize: 13,
           color: 'var(--muted)',
         }}
       >
@@ -73,11 +70,6 @@ export default function GlobalTargetsBar({ manifest, operations }: Props) {
           )
         })}
       </span>
-      <IconButton asChild label="在 Settings 中修改 targets" tooltip="设置">
-        <Link to="/settings">
-          <Settings2 className="h-3.5 w-3.5" />
-        </Link>
-      </IconButton>
     </div>
   )
 }
