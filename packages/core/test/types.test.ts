@@ -5,14 +5,14 @@ describe('types', () => {
   it('AgentId is the three supported agents', () => {
     expectTypeOf<AgentId>().toEqualTypeOf<'claude-code' | 'codex' | 'opencode'>()
   })
-  it('McpServer stdio has command/args/env, targets optional', () => {
+  it('McpServer stdio has command/args/env, agents optional', () => {
     const m: McpServer = {
       id: 'x',
       type: 'stdio',
       command: 'npx',
       args: ['p'],
       env: {},
-      targets: ['claude-code'],
+      agents: ['claude-code'],
     }
     expectTypeOf(m).toMatchTypeOf<McpServer>()
     const m2: McpServer = { id: 'y', type: 'stdio', command: 'npx' }
@@ -21,7 +21,7 @@ describe('types', () => {
   it('Config fields are snake_case to align with YAML', () => {
     const c: Config = {
       profile: 'local',
-      targets: ['claude-code'],
+      agents: ['claude-code'],
       projection: { strategy: 'link' },
       update_check: { enabled: true, interval: '6h' },
       active_repo: 'default',

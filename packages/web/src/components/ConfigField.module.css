@@ -28,13 +28,13 @@
   gap: 10px;
   min-width: 0;
 }
-.cfg-target-chips :global(.target-chip[data-agent-chip='true']) {
+.cfg-agent-chips :global(.agent-chip[data-agent-chip='true']) {
   width: 28px;
   min-width: 28px;
   height: 28px;
   min-height: 28px;
 }
-.cfg-target-chips :global(.target-chip-icon) {
+.cfg-agent-chips :global(.agent-chip-icon) {
   width: 16px;
   height: 16px;
   flex-basis: 16px;

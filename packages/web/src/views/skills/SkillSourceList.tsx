@@ -42,7 +42,7 @@ import {
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
-import { TargetChip } from '@/components/ui/TargetChip'
+import { AgentChip } from '@/components/ui/AgentChip'
 import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
@@ -73,6 +73,7 @@ import styles from './SkillSourceList.module.css'
 
 interface Props {
   manifest: Manifest
+  visibleAgents: AgentId[]
   operations: ManifestOperations
   onOpenDetail: (d: SkillDetail) => void
   onOpenScan: (src: SkillSource) => void
@@ -305,7 +306,7 @@ const chevronStyle = (isCollapsed: boolean): React.CSSProperties => ({
 })
 
 const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
-  <TargetChip
+  <AgentChip
     key={agent}
     agent={agent}
     className={styles.chip}
@@ -316,9 +317,9 @@ const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
   />
 )
 
-function sourceTargetState(src: SkillSource, agent: AgentId) {
+function sourceAgentState(src: SkillSource, agent: AgentId) {
   const members = src.members ?? []
-  const count = members.filter((member) => (member.targets ?? []).includes(agent)).length
+  const count = members.filter((member) => (member.agents ?? []).includes(agent)).length
   const state: 'off' | 'on' | 'mixed' =
     count === 0 ? 'off' : count === members.length ? 'on' : 'mixed'
   return { count, total: members.length, state }
@@ -352,6 +353,7 @@ function localSkillDisplayPath(skillFilePath: string): string {
 
 export default function SkillSourceList({
   manifest,
+  visibleAgents,
   operations,
   onOpenDetail,
   onOpenScan,
@@ -368,8 +370,6 @@ export default function SkillSourceList({
   const [reconciliationError, setReconciliationError] = useState<string | null>(null)
   const [hiddenResourceSources, setHiddenResourceSources] = useState<Set<string>>(() => new Set())
 
-  const agents = manifest.config?.targets ?? []
-  const visibleAgents: AgentId[] = agents
   const sourceCount = manifest.skills.sources.length
   const localCount = manifest.skills.skills.length
 
@@ -377,13 +377,13 @@ export default function SkillSourceList({
     sourceUrl: string,
     memberEntry: string,
     agent: AgentId,
-    currentTargets: AgentId[],
+    currentAgents: AgentId[],
   ) => {
-    await operations.toggleSourceSkillTarget(sourceUrl, memberEntry, agent, currentTargets)
+    await operations.toggleSourceSkillAgent(sourceUrl, memberEntry, agent, currentAgents)
   }
 
-  const handleLocalChipToggle = async (id: string, agent: AgentId, currentTargets: AgentId[]) => {
-    await operations.toggleLocalSkillTarget(id, agent, currentTargets)
+  const handleLocalChipToggle = async (id: string, agent: AgentId, currentAgents: AgentId[]) => {
+    await operations.toggleLocalSkillAgent(id, agent, currentAgents)
   }
 
   const handleCheck = async (src: SkillSource) => {
@@ -561,11 +561,11 @@ export default function SkillSourceList({
                   <span className={styles.gacts} onClick={(e) => e.stopPropagation()}>
                     {visibleAgents.length > 0 && (
                       <span
-                        className={cn('target-chips', styles['source-target-chips'])}
+                        className={cn('agent-chips', styles['source-agent-chips'])}
                         aria-label={`${repoId} 批量投影`}
                       >
                         {visibleAgents.map((agent) => {
-                          const { count, total, state } = sourceTargetState(src, agent)
+                          const { count, total, state } = sourceAgentState(src, agent)
                           const status =
                             state === 'on'
                               ? '全部已选择'
@@ -574,17 +574,17 @@ export default function SkillSourceList({
                                 : '全部未选择'
                           const tooltip = state === 'mixed' ? `${status} ${count}/${total}` : status
                           const disabled =
-                            total === 0 || operations.pending.skills.sourceTargets(src, agent)
+                            total === 0 || operations.pending.skills.sourceAgents(src, agent)
                           return (
-                            <TargetChip
+                            <AgentChip
                               key={agent}
                               agent={agent}
-                              className={styles['source-target-chip']}
+                              className={styles['source-agent-chip']}
                               state={state}
                               label={`${repoId} ${agentName[agent]}：${status}`}
                               tooltip={`${repoId}：${tooltip}`}
                               disabled={disabled}
-                              onClick={() => void operations.setSourceSkillTargets(src, agent)}
+                              onClick={() => void operations.setSourceSkillAgents(src, agent)}
                             />
                           )
                         })}
@@ -664,7 +664,7 @@ export default function SkillSourceList({
                 </div>
                 {isExpanded &&
                   sortSkillMembers(src.members ?? []).map((m) => {
-                    const mTargets = (m.targets ?? []) as AgentId[]
+                    const mAgents = (m.agents ?? []) as AgentId[]
                     const memberEntry = typeof m.entry === 'string' ? m.entry : ''
                     const relativePath = sourceSkillRelativePath(m)
                     const displayPath = skillFolderDisplayPath(relativePath)
@@ -683,7 +683,7 @@ export default function SkillSourceList({
                             skillId: formatSourceMemberSkillId(src, m.name, manifest.config),
                             source: src.url,
                             path: (m.path ?? memberEntry) || undefined,
-                            targets: mTargets,
+                            agents: mAgents,
                           })
                         }
                       >
@@ -728,9 +728,9 @@ export default function SkillSourceList({
                           {visibleAgents.map((a) =>
                             renderChip(
                               a,
-                              mTargets.includes(a),
+                              mAgents.includes(a),
                               memberEntry
-                                ? () => handleChipToggle(src.url, memberEntry, a, mTargets)
+                                ? () => handleChipToggle(src.url, memberEntry, a, mAgents)
                                 : undefined,
                             ),
                           )}
@@ -854,12 +854,12 @@ export default function SkillSourceList({
               </div>
               {expandedGroups.has('local') &&
                 manifest.skills.skills.map((s) => {
-                  const lTargets = (s.targets ?? []) as AgentId[]
+                  const lAgents = (s.agents ?? []) as AgentId[]
                   const missing = Boolean(s.path && s.available === false)
                   const filePath = localSkillFilePath(s)
                   const displayPath = localSkillDisplayPath(filePath)
                   const openLocalDetail = () =>
-                    onOpenDetail({ skillId: s.id, path: s.path, targets: lTargets })
+                    onOpenDetail({ skillId: s.id, path: s.path, agents: lAgents })
                   return (
                     <div
                       key={s.id}
@@ -922,8 +922,8 @@ export default function SkillSourceList({
                       </span>
                       <span className={styles.chips} onClick={(e) => e.stopPropagation()}>
                         {visibleAgents.map((a) =>
-                          renderChip(a, lTargets.includes(a), () =>
-                            handleLocalChipToggle(s.id, a, lTargets),
+                          renderChip(a, lAgents.includes(a), () =>
+                            handleLocalChipToggle(s.id, a, lAgents),
                           ),
                         )}
                       </span>
@@ -966,7 +966,7 @@ export default function SkillSourceList({
               确认删除 <strong>{deleteTarget?.label}</strong>？
             </p>
             <p className={styles['danger-confirm-body']}>
-              此操作会移除当前配置里的引用，无法在界面中撤销。删除前请确认没有其他 target 依赖它。
+              此操作会移除当前配置里的引用，无法在界面中撤销。删除前请确认没有其他 agent 依赖它。
             </p>
           </div>
         </div>

@@ -22,7 +22,7 @@ describe('web CSS architecture', () => {
     expect(lines.some((line) => line.includes('./views/'))).toBe(false)
     expect(lines).toContain("@import './styles/global/tokens.css';")
     expect(lines).toContain("@import './styles/app-shell/shell.css';")
-    expect(lines).toContain("@import './styles/shared/target-chips.css';")
+    expect(lines).toContain("@import './styles/shared/agent-chips.css';")
     expect(lines).toContain("@import './styles/shared/markdown-preview.css';")
   })
 
@@ -51,14 +51,14 @@ describe('web CSS architecture', () => {
     )
   })
 
-  it('uses target-chip as the shared target selector contract', async () => {
-    const targetChipsCss = await readCss('../src/styles/shared/target-chips.css')
+  it('uses agent-chip as the shared agent selector contract', async () => {
+    const agentChipsCss = await readCss('../src/styles/shared/agent-chips.css')
 
-    expect(targetChipsCss).toContain('.target-chips')
-    expect(targetChipsCss).toContain('.target-chip')
-    expect(targetChipsCss).toContain('.target-chip-count')
-    expect(targetChipsCss).not.toContain('.cfg-chips')
-    expect(targetChipsCss).not.toContain('.achip')
+    expect(agentChipsCss).toContain('.agent-chips')
+    expect(agentChipsCss).toContain('.agent-chip')
+    expect(agentChipsCss).toContain('.agent-chip-count')
+    expect(agentChipsCss).not.toContain('.cfg-chips')
+    expect(agentChipsCss).not.toContain('.achip')
   })
 
   it('keeps every page layout aligned to the sidebar gutter', async () => {
@@ -95,7 +95,7 @@ describe('web CSS architecture', () => {
     expect(syncCss).toContain('white-space: nowrap;')
   })
 
-  it('keeps legacy target chip selectors out of business CSS Modules', async () => {
+  it('keeps legacy agent chip selectors out of business CSS Modules', async () => {
     const businessModules = [
       '../src/views/skills/SkillSourceList.module.css',
       '../src/views/Memory.module.css',
@@ -208,7 +208,7 @@ describe('web CSS architecture', () => {
     expect(mcpCss).not.toContain('margin: 17px clamp(0px, 3vw, 45px) 14px;')
     expect(mcpCss).not.toContain('calc(8px - var(--page-gutter))')
     expect(mcpCss).toMatch(/\.inventoryHeader\s*\{[^}]*display:\s*grid;/s)
-    expect(mcpCss).toMatch(/\.globalTargets\s*\{[^}]*border-top:\s*1px solid var\(--border\);/s)
+    expect(mcpCss).toMatch(/\.globalAgents\s*\{[^}]*border-top:\s*1px solid var\(--border\);/s)
     for (const selector of [
       'sectionTabs button',
       'transportTabs button',

@@ -15,13 +15,13 @@ const baseManifest = (overrides: Partial<Manifest> = {}): Manifest => ({
 describe('planProjection memory', () => {
   it('memoryPlan.active null when no active memory', () => {
     const mf = baseManifest()
-    const cfg: Config = { targets: ['claude-code'] }
+    const cfg: Config = { agents: ['claude-code'] }
     const plan = planProjection(mf, cfg, new Set(['claude-code']))
     expect(plan.memoryPlan.active).toBeNull()
     expect(plan.memoryPlan.content).toBeNull()
   })
 
-  it('memoryPlan carries active memory + content + global targets', () => {
+  it('memoryPlan carries active memory + content + global agents', () => {
     const mf = baseManifest({
       memory: {
         memories: [{ name: 'v1' }],
@@ -29,50 +29,50 @@ describe('planProjection memory', () => {
         activeContent: '# hi ${LOOM_AGENT}',
       },
     })
-    const cfg: Config = { targets: ['claude-code', 'codex'] }
+    const cfg: Config = { agents: ['claude-code', 'codex'] }
     const plan = planProjection(mf, cfg, new Set(['claude-code', 'codex']))
     expect(plan.memoryPlan.active?.name).toBe('v1')
     expect(plan.memoryPlan.content).toBe('# hi ${LOOM_AGENT}')
-    expect(plan.memoryPlan.targets).toEqual(['claude-code', 'codex'])
+    expect(plan.memoryPlan.agents).toEqual(['claude-code', 'codex'])
   })
 
-  it('memoryPlan.targets filters to installed agents', () => {
+  it('memoryPlan.agents filters to installed agents', () => {
     const mf = baseManifest({
       memory: { memories: [{ name: 'v1' }], active: { name: 'v1' }, activeContent: 'x' },
     })
-    const cfg: Config = { targets: ['claude-code', 'codex', 'opencode'] }
+    const cfg: Config = { agents: ['claude-code', 'codex', 'opencode'] }
     const plan = planProjection(mf, cfg, new Set(['claude-code']))
-    expect(plan.memoryPlan.targets).toEqual(['claude-code'])
+    expect(plan.memoryPlan.agents).toEqual(['claude-code'])
     expect(plan.skippedAgents).toContain('codex')
     expect(plan.skippedAgents).toContain('opencode')
   })
 
-  it('plans different memory content for independently assigned targets', () => {
+  it('plans different memory content for independently assigned agents', () => {
     const mf = baseManifest({
       memory: {
         memories: [
-          { name: 'team', content: '# team', targets: ['codex'] },
-          { name: 'personal', content: '# personal', targets: ['opencode'] },
+          { name: 'team', content: '# team', agents: ['codex'] },
+          { name: 'personal', content: '# personal', agents: ['opencode'] },
         ],
         assignments: { codex: 'team', opencode: 'personal' },
         active: null,
         activeContent: '',
       },
     })
-    const cfg: Config = { targets: ['codex', 'opencode'] }
+    const cfg: Config = { agents: ['codex', 'opencode'] }
 
     const plan = planProjection(mf, cfg, new Set(['codex', 'opencode']))
 
     expect(plan.memoryPlan.entries).toEqual([
       {
-        memory: { name: 'team', content: '# team', targets: ['codex'] },
+        memory: { name: 'team', content: '# team', agents: ['codex'] },
         content: '# team',
-        targets: ['codex'],
+        agents: ['codex'],
       },
       {
-        memory: { name: 'personal', content: '# personal', targets: ['opencode'] },
+        memory: { name: 'personal', content: '# personal', agents: ['opencode'] },
         content: '# personal',
-        targets: ['opencode'],
+        agents: ['opencode'],
       },
     ])
   })
@@ -81,7 +81,7 @@ describe('planProjection memory', () => {
     const mf = baseManifest({
       memory: {
         memories: [
-          { name: 'team', content: '# team', targets: ['codex'] },
+          { name: 'team', content: '# team', agents: ['codex'] },
           { name: 'personal', content: '# personal' },
         ],
         assignments: { codex: 'team' },
@@ -90,8 +90,8 @@ describe('planProjection memory', () => {
       },
     })
     const cfg: Config = {
-      targets: ['codex', 'opencode'],
-      memory_targets: { codex: 'team' },
+      agents: ['codex', 'opencode'],
+      memory_agents: { codex: 'team' },
     }
 
     const plan = planProjection(mf, cfg, new Set(['opencode']))

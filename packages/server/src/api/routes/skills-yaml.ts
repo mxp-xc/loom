@@ -15,7 +15,7 @@ const NonEmptyString = z.string().min(1)
 const LocalSkillBody = z.object({
   id: NonEmptyString,
   path: z.string().optional(),
-  targets: z.array(AgentIdSchema).optional(),
+  agents: z.array(AgentIdSchema).optional(),
 })
 
 const LocalSkillImportItem = z.object({
@@ -98,26 +98,26 @@ const DeleteLocalSkillBody = z.object({
   id: NonEmptyString,
 })
 
-const SetSkillTargetsBody = z.object({
+const SetSkillAgentsBody = z.object({
   repo: RepoField,
   sourceUrl: NonEmptyString,
   memberEntry: NonEmptyString,
-  targets: z.array(AgentIdSchema),
+  agents: z.array(AgentIdSchema),
 })
 
-const SetSourceMemberTargetsBody = z.object({
+const SetSourceMemberAgentsBody = z.object({
   repo: RepoField,
   sourceUrl: NonEmptyString,
   updates: z.array(
     z.object({
       memberEntry: NonEmptyString,
-      targets: z.array(AgentIdSchema),
+      agents: z.array(AgentIdSchema),
     }),
   ),
 })
 
-const SetLocalSkillTargetsBody = DeleteLocalSkillBody.extend({
-  targets: z.array(AgentIdSchema),
+const SetLocalSkillAgentsBody = DeleteLocalSkillBody.extend({
+  agents: z.array(AgentIdSchema),
 })
 
 const ReorderSkillGroupsBody = z.object({
@@ -270,24 +270,24 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   )
 
   app.post(
-    '/skills/targets',
-    jsonValidator(SetSkillTargetsBody, { error: skillTargetsError }),
+    '/skills/agents',
+    jsonValidator(SetSkillAgentsBody, { error: skillAgentsError }),
     async (c) => {
       try {
-        const { repo, sourceUrl, memberEntry, targets } = c.req.valid('json')
+        const { repo, sourceUrl, memberEntry, agents } = c.req.valid('json')
         const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.setSkillTargets(repoPath, { sourceUrl, memberEntry, targets })
+        await skills.setSkillAgents(repoPath, { sourceUrl, memberEntry, agents })
         return c.json({ ok: true })
       } catch (e) {
         if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'update_failed', 'failed to update skill targets'))
+        return c.json(errorBody(e, 'update_failed', 'failed to update skill agents'))
       }
     },
   )
 
   app.post(
-    '/skills/source-targets',
-    jsonValidator(SetSourceMemberTargetsBody, {
+    '/skills/source-agents',
+    jsonValidator(SetSourceMemberAgentsBody, {
       error: (issues) =>
         issues[0]?.path[0] === 'sourceUrl' ? 'invalid_source_url' : 'invalid_updates',
     }),
@@ -295,27 +295,27 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       try {
         const { repo, sourceUrl, updates } = c.req.valid('json')
         const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.setSourceMemberTargets(repoPath, sourceUrl, updates)
+        await skills.setSourceMemberAgents(repoPath, sourceUrl, updates)
         return c.json({ ok: true })
       } catch (e) {
         if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'update_failed', 'failed to update source member targets'))
+        return c.json(errorBody(e, 'update_failed', 'failed to update source member agents'))
       }
     },
   )
 
   app.post(
-    '/skills/local/targets',
-    jsonValidator(SetLocalSkillTargetsBody, { error: localSkillTargetsError }),
+    '/skills/local/agents',
+    jsonValidator(SetLocalSkillAgentsBody, { error: localSkillAgentsError }),
     async (c) => {
       try {
-        const { repo, id, targets } = c.req.valid('json')
+        const { repo, id, agents } = c.req.valid('json')
         const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.setLocalSkillTargets(repoPath, id, targets)
+        await skills.setLocalSkillAgents(repoPath, id, agents)
         return c.json({ ok: true })
       } catch (e) {
         if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'update_failed', 'failed to update local skill targets'))
+        return c.json(errorBody(e, 'update_failed', 'failed to update local skill agents'))
       }
     },
   )
@@ -380,15 +380,15 @@ function updateSourceError(issues: z.ZodIssue[]): string {
   return 'invalid_url'
 }
 
-function skillTargetsError(issues: z.ZodIssue[]): string {
+function skillAgentsError(issues: z.ZodIssue[]): string {
   const field = issues[0]?.path[0]
   if (field === 'sourceUrl') return 'invalid_source_url'
   if (field === 'memberEntry') return 'invalid_member_entry'
-  return 'invalid_targets'
+  return 'invalid_agents'
 }
 
-function localSkillTargetsError(issues: z.ZodIssue[]): string {
-  return issues[0]?.path[0] === 'id' ? 'invalid_id' : 'invalid_targets'
+function localSkillAgentsError(issues: z.ZodIssue[]): string {
+  return issues[0]?.path[0] === 'id' ? 'invalid_id' : 'invalid_agents'
 }
 
 function errorBody(

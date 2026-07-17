@@ -30,11 +30,11 @@ const memFs = {
 }
 
 const debugManager = {
-  createSession: vi.fn(async (input: { previewTarget: 'default' | 'codex' }) => ({
+  createSession: vi.fn(async (input: { previewAgent: 'default' | 'codex' }) => ({
     sessionId: 'debug-1',
     source: 'saved',
     serverFingerprint: 'abc123',
-    previewTarget: input.previewTarget,
+    previewAgent: input.previewAgent,
     tools: [{ name: 'capture_live_filter', inputSchema: { type: 'object' } }],
     createdAt: '2026-07-13T00:00:00.000Z',
     idleExpiresAt: '2026-07-13T00:05:00.000Z',
@@ -96,7 +96,7 @@ describe('MCP debug routes', () => {
         repo: '/repo',
         source: 'saved',
         serverId: 'reqable',
-        previewTarget: 'codex',
+        previewAgent: 'codex',
       }),
     })
 
@@ -108,7 +108,7 @@ describe('MCP debug routes', () => {
     })
     expect(debugManager.createSession).toHaveBeenCalledWith({
       source: 'saved',
-      previewTarget: 'codex',
+      previewAgent: 'codex',
       server: { id: 'reqable', type: 'stdio', command: 'mcp-server', args: ['--debug'] },
     })
     expect(memFs.writeFile).not.toHaveBeenCalled()
@@ -121,7 +121,7 @@ describe('MCP debug routes', () => {
       body: JSON.stringify({
         repo: '/repo',
         source: 'draft',
-        previewTarget: 'codex',
+        previewAgent: 'codex',
         draft: { id: 'draft-browser', type: 'http', url: 'https://example.test/mcp' },
       }),
     })
@@ -129,7 +129,7 @@ describe('MCP debug routes', () => {
     expect(res.status).toBe(200)
     expect(debugManager.createSession).toHaveBeenCalledWith({
       source: 'draft',
-      previewTarget: 'codex',
+      previewAgent: 'codex',
       server: { id: 'draft-browser', type: 'http', url: 'https://example.test/mcp' },
     })
   })
@@ -150,14 +150,14 @@ describe('MCP debug routes', () => {
         repo: '/repo',
         source: 'saved',
         serverId: 'default-server',
-        previewTarget: 'default',
+        previewAgent: 'default',
       }),
     })
 
     expect(res.status).toBe(200)
     expect(debugManager.createSession).toHaveBeenCalledWith({
       source: 'saved',
-      previewTarget: 'default',
+      previewAgent: 'default',
       server: { id: 'default-server', type: 'stdio', command: 'local-command' },
     })
   })

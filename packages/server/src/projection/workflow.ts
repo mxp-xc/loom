@@ -13,6 +13,8 @@ import {
   type SkillSource,
   type SourceTreeNode,
   type VarsContext,
+  AGENT_IDS,
+  getAgent,
 } from '@loom/core'
 import type { IFileSystem } from '../ports/fs.js'
 import type { IGit } from '../ports/git.js'
@@ -28,8 +30,6 @@ import { parseSkillMeta } from '../remote/frontmatter.js'
 import { scanSourceTree } from '../remote/source-tree.js'
 
 const workflowLogger = logger.child('projection.workflow')
-const DEFAULT_AGENTS: AgentId[] = ['claude-code', 'codex', 'opencode']
-
 export interface ProjectionWorkflowDeps {
   fs: IFileSystem
   git: IGit
@@ -192,12 +192,14 @@ export async function annotateLocalSkillAvailability(
 
 async function resolveInstalledAgents(
   proc: IProcess,
-  requestedAgents: AgentId[] = DEFAULT_AGENTS,
+  requestedAgents: AgentId[] = AGENT_IDS,
 ): Promise<Set<AgentId>> {
   const installed = new Set<AgentId>()
   for (const agent of requestedAgents) {
     try {
-      if (await proc.isInstalled(agent)) installed.add(agent)
+      if (await proc.isCommandInstalled(getAgent(agent).command)) {
+        installed.add(agent)
+      }
     } catch (err) {
       workflowLogger.warn('agent install check failed; assuming installed', { err, agent })
       installed.add(agent)

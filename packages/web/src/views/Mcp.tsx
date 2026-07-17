@@ -7,7 +7,13 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react'
-import { normalizeOrder, type McpServer, type McpType } from '@loom/core'
+import {
+  applicableAgents,
+  isAgentId,
+  normalizeOrder,
+  type McpServer,
+  type McpType,
+} from '@loom/core'
 import {
   Activity,
   ArrowLeft,
@@ -43,7 +49,7 @@ import MonacoTextEditor from '@/components/monaco/MonacoTextEditor'
 import { registerVarsCompletionProvider } from '@/components/monaco/varsCompletion'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
-import { TargetChip } from '@/components/ui/TargetChip'
+import { AgentChip } from '@/components/ui/AgentChip'
 import { SortableList } from '@/components/ui/sortable-list'
 import { useManifest } from '@/hooks/useManifest'
 import {
@@ -56,10 +62,10 @@ import { ErrorState, FieldError } from '@/components/ErrorFeedback'
 import {
   api,
   type CreateMcpDebugSessionResponse,
-  type McpDebugPreviewTarget,
+  type McpDebugPreviewAgent,
   type McpDebugTool,
 } from '@/lib/api'
-import { AGENTS, agentColor, agentName, agentShort, type AgentId } from '@/lib/agents'
+import { agentColor, agentName, agentShort, type AgentId } from '@/lib/agents'
 import type { VarsLayerRef, VarsMatrixResponse } from '@/lib/vars'
 import {
   buildMcpSettingsPreview,
@@ -91,7 +97,7 @@ type McpDetailTab = 'config' | 'debug'
 type McpConfigView = 'raw' | McpResolveContext
 
 function isAgentConfigView(view: McpConfigView): view is AgentId {
-  return AGENTS.includes(view as AgentId)
+  return isAgentId(view)
 }
 
 function drawerLocation(): { selected: string | null; editorMode: EditorMode } {
@@ -287,10 +293,10 @@ function highlightTomlLine(line: string, keyPrefix: string): ReactNode[] {
   ]
 }
 
-function renderSettingsPreviewSyntax(text: string, target: AgentId): ReactNode[] {
+function renderSettingsPreviewSyntax(text: string, language: 'json' | 'toml'): ReactNode[] {
   const lines = text.split('\n')
   return lines.flatMap((line, index) => [
-    ...(target === 'codex'
+    ...(language === 'toml'
       ? highlightTomlLine(line, 'line-' + index)
       : highlightJsonLine(line, 'line-' + index)),
     index < lines.length - 1 ? '\n' : null,
@@ -375,14 +381,14 @@ function recordValidationError(value: string, label: string): string | null {
 
 function buildServerFromForm(
   form: McpServerFormState,
-  options: { idOverride?: string; preserveTargets?: AgentId[] } = {},
+  options: { idOverride?: string; preserveAgents?: AgentId[] } = {},
 ): McpServer {
   const id = (options.idOverride ?? form.id).trim()
   if (!id) throw new Error('id 不能为空')
   if (form.type === 'stdio' && !form.command.trim()) throw new Error('command 不能为空')
   if (form.type !== 'stdio' && !form.url.trim()) throw new Error('url 不能为空')
   const env = parseRecordLines(form.env, 'env')
-  const targets = options.preserveTargets?.length ? options.preserveTargets : undefined
+  const agents = options.preserveAgents?.length ? options.preserveAgents : undefined
   if (form.type === 'stdio') {
     return {
       id,
@@ -390,7 +396,7 @@ function buildServerFromForm(
       command: form.command.trim(),
       args: form.args.length > 0 ? [...form.args] : undefined,
       env,
-      targets,
+      agents,
     }
   }
   return {
@@ -399,7 +405,7 @@ function buildServerFromForm(
     url: form.url.trim(),
     env,
     headers: parseRecordLines(form.headers, 'headers'),
-    targets,
+    agents,
   }
 }
 
@@ -438,7 +444,7 @@ function formToSource(form: McpServerFormState): string {
 function formFromSource(source: string, expectedId?: string): McpServerFormState {
   const value: unknown = JSON.parse(source)
   if (!isPlainRecord(value)) throw new Error('Server JSON 必须是对象')
-  if ('targets' in value) throw new Error('targets 只能在列表中配置')
+  if ('agents' in value) throw new Error('agents 只能在列表中配置')
   if (typeof value.id !== 'string') throw new Error('id 必须是字符串')
   if (!MCP_TYPES.includes(value.type as McpType)) throw new Error('type 必须是 stdio、sse 或 http')
   if (expectedId !== undefined && value.id !== expectedId) throw new Error('已保存的 id 不可修改')
@@ -489,7 +495,7 @@ function TypeBadge({ type }: { type: McpType }) {
   )
 }
 
-function PreviewTargetSwitch({
+function PreviewAgentSwitch({
   value,
   agents,
   onChange,
@@ -499,7 +505,7 @@ function PreviewTargetSwitch({
   onChange: (view: McpConfigView) => void
 }) {
   return (
-    <div className={styles.configViewOptions} aria-label="preview target">
+    <div className={styles.configViewOptions} aria-label="preview agent">
       <button
         type="button"
         className={styles.rawModeButton}
@@ -520,8 +526,8 @@ function PreviewTargetSwitch({
         Default
       </button>
       <span className={styles.configViewDivider} aria-hidden="true" />
-      {(agents.length ? agents : AGENTS).map((agent) => (
-        <TargetChip
+      {agents.map((agent) => (
+        <AgentChip
           key={agent}
           agent={agent}
           state={value === agent ? 'on' : 'off'}
@@ -895,14 +901,14 @@ function McpVariableInspector({
 function McpDebugPanel({
   repoPath,
   server,
-  previewTarget,
+  previewAgent,
   needsSave = false,
   onPersist,
   disabledReason,
 }: {
   repoPath: string
   server: McpServer
-  previewTarget: McpDebugPreviewTarget
+  previewAgent: McpDebugPreviewAgent
   needsSave?: boolean
   onPersist?: () => Promise<McpServer | null>
   disabledReason?: string
@@ -927,10 +933,10 @@ function McpDebugPanel({
     () =>
       (disabledReason ?? 'enabled') +
       ':' +
-      previewTarget +
+      previewAgent +
       ':' +
       stableStringify(connectionOnlyServer(server)),
-    [disabledReason, previewTarget, server],
+    [disabledReason, previewAgent, server],
   )
   const connectionKeyRef = useRef(connectionKey)
   const tools = session?.tools ?? []
@@ -1047,7 +1053,7 @@ function McpDebugPanel({
         repo: repoPath,
         source: 'saved',
         serverId: persisted.id,
-        previewTarget,
+        previewAgent,
       })
       if (!mountedRef.current || generation !== connectGenerationRef.current) {
         if (response.ok)
@@ -1138,9 +1144,9 @@ function McpDebugPanel({
   const canCall = !disabledReason && connection === 'connected' && Boolean(activeTool) && !calling
   const connectLabel = needsSave ? '保存并连接 MCP server' : 'Connect debug session'
   const contextDescription =
-    previewTarget === 'default'
+    previewAgent === 'default'
       ? '使用 Base → Local 变量连接当前 Server。'
-      : `使用 ${agentName[previewTarget]} 变量连接当前 Server。`
+      : `使用 ${agentName[previewAgent]} 变量连接当前 Server。`
 
   return (
     <section className={styles.toolsDebug} role="region" aria-label="MCP tools debug">
@@ -1303,7 +1309,7 @@ function McpDebugPanel({
             <pre className={styles.toolResult} data-empty={!result}>
               <code>
                 {result
-                  ? renderSettingsPreviewSyntax(result, 'opencode')
+                  ? renderSettingsPreviewSyntax(result, 'json')
                   : 'Call result will appear here.'}
               </code>
             </pre>
@@ -1383,19 +1389,20 @@ function DetailDefinitionGroup({
 function ServerPreview({
   server,
   configView,
-  target,
+  agent,
   matrix,
 }: {
   server: McpServer
   configView: McpConfigView
-  target: AgentId
+  agent: AgentId | null
   matrix: VarsMatrixResponse | undefined
 }) {
   const raw = configView === 'raw'
   const defaultView = configView === 'default'
-  const resolvedPreview = buildResolvedMcpServer(server, target, matrix)
+  const resolveContext = agent ?? 'default'
+  const resolvedPreview = buildResolvedMcpServer(server, resolveContext, matrix)
   const resolved = resolvedPreview.server
-  const settings = !raw && !defaultView ? buildMcpSettingsPreview(server, target, matrix) : null
+  const settings = agent ? buildMcpSettingsPreview(server, agent, matrix) : null
   const diagnostics = raw ? [] : defaultView ? resolvedPreview.diagnostics : settings!.diagnostics
   const text = raw
     ? formToSource(serverToForm(server))
@@ -1406,12 +1413,12 @@ function ServerPreview({
     ? 'SERVER DEFINITION'
     : defaultView
       ? 'RESOLVED SERVER PREVIEW'
-      : 'TARGET SETTINGS PREVIEW'
+      : 'AGENT SETTINGS PREVIEW'
   const previewTitle = raw
     ? '原始 Server 配置'
     : defaultView
       ? 'Default 解析配置'
-      : `${agentName[target]} 写入预览`
+      : `${agentName[agent!]} 写入预览`
   const previewDescription = raw
     ? '保留 ${...} 变量引用，显示 Loom 中保存的定义。'
     : defaultView
@@ -1422,7 +1429,7 @@ function ServerPreview({
     : defaultView
       ? 'mcp.yaml · 解析结果'
       : settings!.path
-  const previewLabel = raw ? 'RAW' : defaultView ? 'Default' : agentName[target]
+  const previewLabel = raw ? 'RAW' : defaultView ? 'Default' : agentName[agent!]
   const previewStatus = raw
     ? '未解析'
     : defaultView && diagnostics.length > 0
@@ -1430,7 +1437,7 @@ function ServerPreview({
       : defaultView
         ? '变量已解析'
         : '写入后配置'
-  const previewColor = raw || defaultView ? 'var(--primary)' : agentColor[target]
+  const previewColor = raw || defaultView ? 'var(--primary)' : agentColor[agent!]
   return (
     <section className={styles.previewCard}>
       <div className={styles.previewHead}>
@@ -1455,7 +1462,7 @@ function ServerPreview({
         </div>
       )}
       <pre className={styles.syntaxPreview}>
-        <code>{renderSettingsPreviewSyntax(text, raw || defaultView ? 'opencode' : target)}</code>
+        <code>{renderSettingsPreviewSyntax(text, settings?.language ?? 'json')}</code>
       </pre>
     </section>
   )
@@ -1466,6 +1473,7 @@ function McpDetail({
   server,
   configView,
   matrix,
+  agents,
   onConfigView,
   onEdit,
   onCopy,
@@ -1476,6 +1484,7 @@ function McpDetail({
   server: McpServer
   configView: McpConfigView
   matrix: VarsMatrixResponse | undefined
+  agents: AgentId[]
   onConfigView: (view: McpConfigView) => void
   onEdit: () => void
   onCopy: () => void
@@ -1483,9 +1492,9 @@ function McpDetail({
   onClose: () => void
 }) {
   const [detailTab, setDetailTab] = useState<McpDetailTab>('config')
-  const previewTarget = isAgentConfigView(configView) ? configView : 'codex'
-  const debugTarget: McpDebugPreviewTarget = configView === 'raw' ? 'default' : configView
-  const resolved = buildResolvedMcpServer(server, previewTarget, matrix).server
+  const previewAgent = isAgentConfigView(configView) ? configView : null
+  const debugAgent: McpDebugPreviewAgent = configView === 'raw' ? 'default' : configView
+  const resolved = buildResolvedMcpServer(server, previewAgent ?? 'default', matrix).server
   const displayed = configView === 'raw' ? server : resolved
   const displayValue = (value: string) =>
     configView === 'raw' ? renderValueWithTokens(value, onInspect) : value
@@ -1529,7 +1538,7 @@ function McpDetail({
         </div>
         <div className={styles.paneHeaderActions}>
           <TypeBadge type={server.type} />
-          <PreviewTargetSwitch value={configView} agents={AGENTS} onChange={onConfigView} />
+          <PreviewAgentSwitch value={configView} agents={agents} onChange={onConfigView} />
           <IconButton label="Copy server JSON" tooltip="复制" onClick={onCopy}>
             <Copy className="h-3.5 w-3.5" />
           </IconButton>
@@ -1596,12 +1605,12 @@ function McpDetail({
             <ServerPreview
               server={server}
               configView={configView}
-              target={previewTarget}
+              agent={previewAgent}
               matrix={matrix}
             />
           </>
         ) : (
-          <McpDebugPanel repoPath={repoPath} server={server} previewTarget={debugTarget} />
+          <McpDebugPanel repoPath={repoPath} server={server} previewAgent={debugAgent} />
         )}
       </div>
     </div>
@@ -1615,6 +1624,7 @@ function McpEditor({
   configView,
   matrix,
   varsKeys,
+  agents,
   busy,
   error,
   onConfigView,
@@ -1628,6 +1638,7 @@ function McpEditor({
   configView: McpConfigView
   matrix: VarsMatrixResponse | undefined
   varsKeys: string[]
+  agents: AgentId[]
   busy: boolean
   error: string | null
   onConfigView: (view: McpConfigView) => void
@@ -1701,8 +1712,8 @@ function McpEditor({
     setEnvRows(rowsFromRecord(mode === 'edit' ? initial?.env : undefined))
     setHeadersRows(rowsFromRecord(mode === 'edit' ? initial?.headers : undefined))
   }, [initial?.id, mode])
-  const previewTarget = isAgentConfigView(configView) ? configView : 'codex'
-  const debugTarget: McpDebugPreviewTarget = configView === 'raw' ? 'default' : configView
+  const previewAgent = isAgentConfigView(configView) ? configView : null
+  const debugAgent: McpDebugPreviewAgent = configView === 'raw' ? 'default' : configView
   const previewServer = useMemo(() => formToPreviewServer(form, initial?.id), [form, initial?.id])
   const transportLabel =
     form.type === 'stdio' ? 'local process' : form.type === 'sse' ? 'event stream' : 'remote http'
@@ -1774,7 +1785,7 @@ function McpEditor({
         </div>
         <div className={styles.paneHeaderActions}>
           <TypeBadge type={form.type} />
-          <PreviewTargetSwitch value={configView} agents={AGENTS} onChange={onConfigView} />
+          <PreviewAgentSwitch value={configView} agents={agents} onChange={onConfigView} />
         </div>
       </header>
       <div className={`${styles.drawerBody} ${section === 'debug' ? styles.drawerBodyTools : ''}`}>
@@ -1994,7 +2005,7 @@ function McpEditor({
             <ServerPreview
               server={previewServer}
               configView={configView}
-              target={previewTarget}
+              agent={previewAgent}
               matrix={matrix}
             />
           </>
@@ -2002,7 +2013,7 @@ function McpEditor({
           <McpDebugPanel
             repoPath={repoPath}
             server={previewServer}
-            previewTarget={debugTarget}
+            previewAgent={debugAgent}
             needsSave
             onPersist={persist}
             disabledReason={
@@ -2039,7 +2050,7 @@ function McpEditor({
   )
 }
 
-function GlobalTargetsBar({
+function GlobalAgentsBar({
   servers,
   visibleAgents,
   operations,
@@ -2054,7 +2065,11 @@ function GlobalTargetsBar({
 }) {
   if (servers.length === 0) return null
   return (
-    <section className={styles.globalTargets} role="region" aria-label="全局 MCP targets">
+    <section
+      className={styles.globalAgents}
+      role="region"
+      aria-label={visibleAgents.length > 0 ? '全局 MCP agents' : 'MCP server search'}
+    >
       <label className={styles.search}>
         <Search className="h-3.5 w-3.5" aria-hidden="true" />
         <input
@@ -2065,29 +2080,31 @@ function GlobalTargetsBar({
           placeholder="搜索 server"
         />
       </label>
-      <div className={styles.globalTargetsControls}>
-        <span className={styles.globalTargetsLabel}>批量应用</span>
-        <div className="target-chips" role="group" aria-label="批量设置全部 Server targets">
-          {visibleAgents.map((agent) => {
-            const count = servers.filter((server) => (server.targets ?? []).includes(agent)).length
-            const state = count === 0 ? 'off' : count === servers.length ? 'on' : 'mixed'
-            const status =
-              state === 'on' ? '全部已应用' : state === 'mixed' ? '部分已应用' : '全部未应用'
-            return (
-              <TargetChip
-                key={agent}
-                agent={agent}
-                state={state}
-                label={`全部 MCP servers 应用到 ${agentName[agent]}：${status}`}
-                tooltip={`${agentName[agent]}：${status}，点击批量切换`}
-                onClick={() => void operations.setAllMcpTargets(servers, agent)}
-                disabled={operations.pending.mcp.allTargets(agent)}
-                stopPropagation
-              />
-            )
-          })}
+      {visibleAgents.length > 0 && (
+        <div className={styles.globalAgentsControls}>
+          <span className={styles.globalAgentsLabel}>批量应用</span>
+          <div className="agent-chips" role="group" aria-label="批量设置全部 Server agents">
+            {visibleAgents.map((agent) => {
+              const count = servers.filter((server) => (server.agents ?? []).includes(agent)).length
+              const state = count === 0 ? 'off' : count === servers.length ? 'on' : 'mixed'
+              const status =
+                state === 'on' ? '全部已应用' : state === 'mixed' ? '部分已应用' : '全部未应用'
+              return (
+                <AgentChip
+                  key={agent}
+                  agent={agent}
+                  state={state}
+                  label={`全部 MCP servers 应用到 ${agentName[agent]}：${status}`}
+                  tooltip={`${agentName[agent]}：${status}，点击批量切换`}
+                  onClick={() => void operations.setAllMcpAgents(servers, agent)}
+                  disabled={operations.pending.mcp.allAgents(agent)}
+                  stopPropagation
+                />
+              )
+            })}
+          </div>
         </div>
-      </div>
+      )}
     </section>
   )
 }
@@ -2098,6 +2115,10 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     message: '请检查项目配置后重试',
   })
   const { manifest } = useManifest(repoPath, { onError: setError, onSuccess: () => setError(null) })
+  const visibleAgents = useMemo(
+    () => applicableAgents(manifest?.config?.agents, 'mcp'),
+    [manifest?.config?.agents],
+  )
   const { showToast, showErrorToast } = useToast()
   const operations = useManifestOperations(repoPath, {
     onError: (message) =>
@@ -2107,12 +2128,11 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
       }),
     onToast: showToast,
   })
-  const { matrices } = useMcpPreviewVars(repoPath)
+  const { matrices } = useMcpPreviewVars(repoPath, visibleAgents, Boolean(manifest))
   const initialDrawer = useMemo(drawerLocation, [])
   const [selected, setSelected] = useState<string | null>(initialDrawer.selected)
   const [search, setSearch] = useState('')
   const [configView, setConfigView] = useState<McpConfigView>('raw')
-  const [previewTarget, setPreviewTarget] = useState<AgentId>('codex')
   const [editorMode, setEditorMode] = useState<EditorMode>(initialDrawer.editorMode)
   const [editorBusy, setEditorBusy] = useState(false)
   const [editorError, setEditorError] = useState<string | null>(null)
@@ -2135,7 +2155,6 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   )
   const serversById = new Map(manifestServers.map((server) => [server.id, server]))
   const servers = orderedServerIds.map((id) => serversById.get(id)!).filter(Boolean)
-  const visibleAgents = AGENTS
   const selectedServer =
     servers.find((server) => server.id === selected) ??
     (createdServer?.id === selected ? createdServer : undefined)
@@ -2210,8 +2229,12 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   }
   const changeConfigView = (view: McpConfigView) => {
     setConfigView(view)
-    if (isAgentConfigView(view)) setPreviewTarget(view)
   }
+
+  useEffect(() => {
+    if (isAgentConfigView(configView) && !visibleAgents.includes(configView))
+      setConfigView('default')
+  }, [configView, visibleAgents])
   const closeDrawer = () => {
     setDrawerEntered(false)
     setSelected(null)
@@ -2244,7 +2267,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         if (!selectedServer) return null
         const server = buildServerFromForm(form, {
           idOverride: selectedServer.id,
-          preserveTargets: (selectedServer.targets ?? []) as AgentId[],
+          preserveAgents: (selectedServer.agents ?? []) as AgentId[],
         })
         const result = await operations.updateMcpServer(selectedServer.id, server)
         if (result.ok) return server
@@ -2312,7 +2335,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         <div>
           <span className={styles.eyebrow}>CONFIGURATION</span>
           <h1>MCP servers</h1>
-          <p>管理仓库中的 Server 定义与 agent targets。</p>
+          <p>管理仓库中的 Server 定义与 Agent 投影。</p>
         </div>
         <div className={styles.pageActions}>
           <Button
@@ -2376,7 +2399,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                 </IconButton>
               </div>
             </div>
-            <GlobalTargetsBar
+            <GlobalAgentsBar
               servers={servers}
               visibleAgents={visibleAgents}
               operations={operations}
@@ -2387,7 +2410,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           <div className={styles.serverList}>
             <div className={styles.listColumns} aria-hidden="true">
               <span>Server</span>
-              <span>Targets</span>
+              <span>Agents</span>
               <span>操作</span>
             </div>
             <SortableList
@@ -2399,7 +2422,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
               onReorder={reorderServers}
             >
               {(server, sortable) => {
-                const activeTargets = server.targets ?? []
+                const activeAgents = server.agents ?? []
                 const sortingDisabled = search.trim().length > 0
                 return (
                   <article
@@ -2441,17 +2464,17 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                       </span>
                     </span>
                     <div className={styles.serverFoot}>
-                      <div className={styles.targets}>
+                      <div className={styles.agents}>
                         {visibleAgents.map((agent) => (
-                          <TargetChip
+                          <AgentChip
                             key={agent}
                             agent={agent}
-                            state={activeTargets.includes(agent) ? 'on' : 'off'}
+                            state={activeAgents.includes(agent) ? 'on' : 'off'}
                             label={server.id + ' 应用到 ' + agentName[agent]}
                             tooltip={server.id + ' 应用到 ' + agentName[agent]}
                             onClick={() =>
-                              void operations.toggleMcpTarget(
-                                { ...server, targets: server.targets ?? [] },
+                              void operations.toggleMcpAgent(
+                                { ...server, agents: server.agents ?? [] },
                                 agent,
                               )
                             }
@@ -2495,6 +2518,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
         </aside>
         <McpImportDialog
           open={importOpen}
+          sources={visibleAgents}
           operations={operations}
           onClose={() => setImportOpen(false)}
         />
@@ -2527,6 +2551,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                 initial={editorMode === 'edit' ? selectedServer : undefined}
                 configView={configView}
                 matrix={matrices[configView === 'raw' ? 'default' : configView]}
+                agents={visibleAgents}
                 varsKeys={mcpVarsKeys}
                 busy={editorBusy}
                 error={editorError}
@@ -2541,6 +2566,7 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
                 server={selectedServer}
                 configView={configView}
                 matrix={matrices[configView === 'raw' ? 'default' : configView]}
+                agents={visibleAgents}
                 onConfigView={changeConfigView}
                 onEdit={() => {
                   setEditorError(null)

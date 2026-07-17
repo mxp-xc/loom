@@ -8,14 +8,16 @@ Status: active
 Applies to: skills, MCP, memory
 
 Rule:
-Projection 把 Loom 中选择的 desired state 写入支持的 agents。Projection 不能从现有 agent 文件反向推断新的 desired state。
+Projection 把 Loom 中选择的 desired state 写入同时满足 Configured、Applicable 和 Installed 的 agents。Projection 不能从现有 agent 文件反向推断新的 desired state。
 
 Implications:
 
-- 没有 targets 的 item 不应该继续保持 projected。
-- manifest 中选择了 target 且源内容可用时，应投影到该 target。
+- 没有 agents 的 item 不应该继续保持 projected。
+- manifest 中选择了 agent 且源内容可用时，应投影到该 agent。
 - Scoped projection 只准备和写入所选领域；MCP 或 memory projection 不读取、安装或更新 skill sources。
 - Projection error 必须暴露，不能静默假装 reconciliation 已完成。
+- Skills 只删除 marker 或 namespace ownership 能证明为 managed 的 artifacts；MCP 只删除 managed id state 证明的 entries。
+- Memory 不因 agent 从配置移除而删除既有原生文件，直到存在独立 ownership 设计。
 
 Safety:
 
@@ -24,7 +26,7 @@ Safety:
 
 Examples:
 
-- 清空 managed copied source member 的最后一个 target，会删除该 copied member 目录。
+- 清空 managed copied source member 的最后一个 agent，会删除该 copied member 目录。
 - 如果 projection 在创建 link 后失败，rollback 会删除该 link。
 
 Tests:
@@ -54,7 +56,7 @@ Safety:
 
 Examples:
 
-- skills/superpowers/executing-plans/.loom-projection.json 表示 Loom 可以在 targets 清空时删除该 copied skill。
+- skills/superpowers/executing-plans/.loom-projection.json 表示 Loom 可以在 agents 清空时删除该 copied skill。
 - skills/superpowers/executing-plans/SKILL.md 存在但没有 marker 时必须保留。
 
 Tests:
@@ -131,11 +133,11 @@ Implications:
 
 - 同一个 MCP server 投影到 Claude Code、Codex、OpenCode 时，`${var}` 可以解析成不同 agent-specific value。
 - Projection 使用 Base → Base/agent → Local → Local/agent → Runtime 的覆盖语义。
-- 各 agent 配置视图的展示语义必须与真实 projection 的 per-agent vars 渲染语义一致。
+- Preview agent 的展示语义必须与真实 projection 的 per-agent vars 渲染语义一致。
 
 Safety:
 
-- 不能把 UI 当前配置视图用作所有目标 agent 的投影上下文。
+- 不能把 UI 当前 preview agent 用作所有目标 agent 的投影上下文。
 - 缺失变量或解析错误必须暴露为 projection error 或 preview diagnostic，不能静默写入错误值。
 
 Examples:
@@ -153,22 +155,22 @@ Status: active
 Applies to: remote source skills projection
 
 Rule:
-每个 remote source 投影到 `<agent-skills>/<source-name>/` 独立 namespace。Projection planner 对每个 target 收集该 source 的 selected bundle roots 和 selected resource roots，移除它们的最长共同父路径前缀后保留其余目录结构；executor 将该 namespace 作为一个 managed unit 整体替换。
+每个 remote source 投影到 `<agent-skills>/<source-name>/` 独立 namespace。Projection planner 对每个 agent 收集该 source 的 selected bundle roots 和 selected resource roots，移除它们的最长共同父路径前缀后保留其余目录结构；executor 将该 namespace 作为一个 managed unit 整体替换。
 
 Implications:
 
 - 最长共同父路径只移除 selected roots 共同的未选择祖先，不能移除 selected root 自身名称。
 - 未选择的空父目录自然省略；若省略后产生同名 destination collision，必须保留足以消除冲突的父目录。
 - SkillBundle 内部结构始终完整保留；明确选择的 resource directory 保留自身名称和内部相对结构。
-- 不同 target 的 members 不同，因此各自计算 projection base；source-global resources 只投影到至少选择了该 source 一个 member 的 target。
+- 不同 agent 的 members 不同，因此各自计算 projection base；source-global resources 只投影到至少选择了该 source 一个 member 的 agent。
 - 选择或 source 内容变化导致 projection base 改变时，旧路径的清理和新路径的创建属于同一次 desired-state reconcile。
 
 Safety:
 
 - Namespace root 必须有能证明 repo 和 source 归属的 marker；marker 不保存可能包含凭据的原始 Git URL。
-- 同一 target 中，local skill destination 不得与 source namespace 重合或位于其下；planner 必须在任何文件系统写入前拒绝冲突。
+- 同一 agent 中，local skill destination 不得与 source namespace 重合或位于其下；planner 必须在任何文件系统写入前拒绝冲突。
 - 替换或删除现有 namespace 前必须验证 marker ownership；没有 marker、marker 不匹配或 destination collision 时 projection 失败并保留原内容。
-- Namespace staging、替换和跨 target 执行必须可回滚；全部成功前不能删除 backups 或报告成功。
+- Namespace staging、替换和跨 agent 执行必须可回滚；全部成功前不能删除 backups 或报告成功。
 - Executor 只物化 SourceTree commit 中的 tracked files；cache checkout 中的未跟踪文件不得进入 namespace。
 - Projection 前必须将 Loom 管理的 source cache checkout 对齐到 plan 的 SourceTree commit；cache 漂移时只能使用本地已有 Git 对象恢复，不得隐式 fetch。
 - Link projection 必须区分 file/directory link；稀疏目录不得用覆盖 excludes 的整目录 link。Copy 必须保持二进制内容。
@@ -176,8 +178,8 @@ Safety:
 
 Examples:
 
-- 选择 `folder/skill-dir1`、`folder/skill-dir2` 和 `folder/shared` 时，target 省略共同祖先 `folder`，保留三个 selected roots 的相对结构。
-- `team-a/skill` 与 `team-b/skill` 同时选择时，target 保留 `team-a` 和 `team-b`，避免两个 `skill` 冲突。
+- 选择 `folder/skill-dir1`、`folder/skill-dir2` 和 `folder/shared` 时，agent 省略共同祖先 `folder`，保留三个 selected roots 的相对结构。
+- `team-a/skill` 与 `team-b/skill` 同时选择时，agent 保留 `team-a` 和 `team-b`，避免两个 `skill` 冲突。
 
 Tests:
 

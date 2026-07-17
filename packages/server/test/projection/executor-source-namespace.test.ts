@@ -30,7 +30,7 @@ const manifest: Manifest = {
   mcp: [],
   memory: { memories: [], active: null, activeContent: '' },
   vars: { default: {}, active: {} },
-  config: { targets: ['claude-code'] },
+  config: { agents: ['claude-code'] },
   errors: [],
 }
 
@@ -40,7 +40,7 @@ function sourcePlan(overrides: Partial<SourceProjectionPlan> = {}): SourceProjec
     sourceUrl: 'https://example.com/workflow-source.git',
     cacheId: 'workflow-source',
     commit: 'commit-oid',
-    target: 'claude-code',
+    agent: 'claude-code',
     projectionBase: '',
     entries: [],
     ...overrides,
@@ -55,7 +55,7 @@ function projectionPlan(
     links: [],
     sourcePlans,
     mcpEntries: [],
-    memoryPlan: { active: null, content: null, targets: [] },
+    memoryPlan: { active: null, content: null, agents: [] },
     skippedAgents: [],
     strategy,
   }

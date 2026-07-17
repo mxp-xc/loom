@@ -20,6 +20,7 @@ import {
 } from '@loom/core'
 import { logger } from '../lib/logger.js'
 import type { IFileSystem } from '../ports/fs.js'
+import { runtimeAgentPathContext } from '../adapters/paths.js'
 import { VarsStore } from './store.js'
 import {
   builtinForAgent,
@@ -286,7 +287,7 @@ export class VarsApplication {
           )
         : agent === 'default'
           ? {}
-          : builtinForAgent(agent),
+          : builtinForAgent(agent, runtimeAgentPathContext(this.home)),
     ).sort()
     const userKeys = [
       ...new Set([
@@ -311,7 +312,7 @@ export class VarsApplication {
 
   async setBaseKey(repoPath: string, key: string, definition: VarDefinition): Promise<void> {
     this.assertUserKey(key)
-    const snapshot = await readAgentAwareVars(this.fs, this.home, repoPath, 'codex')
+    const snapshot = (await readDefaultVarsWithDiagnostics(this.fs, this.home, repoPath)).snapshot
     snapshot.base[key] = definition
     const diagnostics = await validateAgentAwareBaseDefinitions(
       this.fs,
@@ -352,12 +353,10 @@ export class VarsApplication {
   }
 
   async setOverride(repoPath: string, command: SetVarsOverrideCommand): Promise<void> {
-    const snapshot = await readAgentAwareVars(
-      this.fs,
-      this.home,
-      repoPath,
-      command.layer === 'local' ? 'codex' : command.agent,
-    )
+    const snapshot =
+      command.layer === 'local'
+        ? (await readDefaultVarsWithDiagnostics(this.fs, this.home, repoPath)).snapshot
+        : await readAgentAwareVars(this.fs, this.home, repoPath, command.agent)
     const definition = snapshot.base[command.key]
     if (!definition) throw new VarsApplicationError(404, 'not_found', '变量不存在')
     assertOverrideMatchesDefinition(definition, command.override)
@@ -374,12 +373,10 @@ export class VarsApplication {
   }
 
   async clearOverride(repoPath: string, command: ClearVarsOverrideCommand): Promise<void> {
-    const snapshot = await readAgentAwareVars(
-      this.fs,
-      this.home,
-      repoPath,
-      command.layer === 'local' ? 'codex' : command.agent,
-    )
+    const snapshot =
+      command.layer === 'local'
+        ? (await readDefaultVarsWithDiagnostics(this.fs, this.home, repoPath)).snapshot
+        : await readAgentAwareVars(this.fs, this.home, repoPath, command.agent)
     const target = layerSnapshot(snapshot, command.layer)
     delete target[command.key]
     await writeAgentAwareOverride(

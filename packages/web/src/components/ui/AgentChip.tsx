@@ -1,14 +1,16 @@
 import type { CSSProperties, MouseEvent, ReactNode } from 'react'
 import { agentColor, agentName, type AgentId } from '@/lib/agents'
+import { resolveAgentIcon } from '@/lib/agent-icons'
+import { getAgent } from '@loom/core'
 import { cn } from '@/lib/utils'
 
-export type TargetChipState = 'on' | 'off' | 'mixed'
+export type AgentChipState = 'on' | 'off' | 'mixed'
 
-interface TargetChipProps {
+interface AgentChipProps {
   agent?: AgentId
   label?: string
   children?: ReactNode
-  state: TargetChipState
+  state: AgentChipState
   tooltip?: string
   color?: string
   count?: ReactNode
@@ -18,7 +20,7 @@ interface TargetChipProps {
   onClick?: (event: MouseEvent<HTMLButtonElement>) => void
 }
 
-export function TargetChip({
+export function AgentChip({
   agent,
   label,
   children,
@@ -30,14 +32,23 @@ export function TargetChip({
   disabled,
   stopPropagation,
   onClick,
-}: TargetChipProps) {
+}: AgentChipProps) {
+  const icon = agent ? resolveAgentIcon(getAgent(agent).display.icon) : null
   const content =
-    children ?? (agent ? <span className="target-chip-icon" aria-hidden="true" /> : null)
+    children ??
+    (icon?.kind === 'asset' ? (
+      <span className="agent-chip-icon" aria-hidden="true" />
+    ) : icon?.kind === 'text' ? (
+      <span className="agent-chip-text" aria-hidden="true">
+        {icon.text}
+      </span>
+    ) : null)
   const style = {
     '--c': color ?? (agent ? agentColor[agent] : 'var(--primary)'),
+    ...(icon?.kind === 'asset' ? { '--agent-icon': `url("${icon.url}")` } : {}),
   } as CSSProperties
   const sharedProps = {
-    className: cn('target-chip', className),
+    className: cn('agent-chip', className),
     style,
     'data-agent-chip': agent ? 'true' : undefined,
     'data-agent': agent,
@@ -49,7 +60,7 @@ export function TargetChip({
   const renderedContent = (
     <>
       {content}
-      {count != null && <span className="target-chip-count">{count}</span>}
+      {count != null && <span className="agent-chip-count">{count}</span>}
     </>
   )
 

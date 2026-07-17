@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronRight, Files, Plus, Search, Trash2 } from 'lucide-react'
+import { AGENT_IDS, applicableAgents, type AgentId } from '@loom/core'
 import { api } from '@/lib/api'
-import { AGENTS, agentName, type AgentId } from '@/lib/agents'
+import { agentName } from '@/lib/agents'
 import MemoryEditor from '@/components/MemoryEditor'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
-import { TargetChip } from '@/components/ui/TargetChip'
+import { AgentChip } from '@/components/ui/AgentChip'
 import { useToast } from '@/hooks/useToast'
 import { useManifest } from '@/hooks/useManifest'
 import styles from './Memory.module.css'
@@ -17,11 +18,11 @@ interface Props {
 
 interface MemoryEntry {
   name: string
-  targets: AgentId[]
+  agents: AgentId[]
 }
 
-interface TargetConflict {
-  target: AgentId
+interface AgentConflict {
+  agent: AgentId
   previous: string
   next: string
 }
@@ -36,18 +37,16 @@ export default function Memory({ repoPath }: Props) {
   const [creating, setCreating] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
-  const [conflict, setConflict] = useState<TargetConflict | null>(null)
+  const [conflict, setConflict] = useState<AgentConflict | null>(null)
   const [draftName, setDraftName] = useState('')
-  const [updatingTarget, setUpdatingTarget] = useState<AgentId | null>(null)
+  const [updatingAgent, setUpdatingAgent] = useState<AgentId | null>(null)
   const [editorDirty, setEditorDirty] = useState(false)
   const [pendingSelection, setPendingSelection] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const contentRequestRef = useRef(0)
   const { showToast, showErrorToast } = useToast()
   const { manifest } = useManifest(repoPath)
-  const targets = ((manifest?.config?.targets ?? []) as AgentId[]).filter((agent) =>
-    AGENTS.includes(agent),
-  )
+  const agents = applicableAgents(manifest?.config?.agents, 'memory')
 
   const readContent = async (name: string) => {
     const response = await api.getMemoryContent(repoPath, name)
@@ -60,14 +59,14 @@ export default function Memory({ repoPath }: Props) {
       const response = await api.getMemory(repoPath)
       const nextMemories = response.memories.map((memory) => ({
         name: memory.name,
-        targets: (memory.targets ?? []).filter((agent): agent is AgentId =>
-          AGENTS.includes(agent as AgentId),
+        agents: (memory.agents ?? []).filter((agent): agent is AgentId =>
+          AGENT_IDS.includes(agent as AgentId),
         ),
       }))
       const nextSelected =
         (preferred && nextMemories.some((memory) => memory.name === preferred)
           ? preferred
-          : nextMemories.find((memory) => memory.targets.length > 0)?.name) ??
+          : nextMemories.find((memory) => memory.agents.length > 0)?.name) ??
         nextMemories[0]?.name ??
         null
       const nextContent = reloadContent && nextSelected ? await readContent(nextSelected) : null
@@ -101,8 +100,10 @@ export default function Memory({ repoPath }: Props) {
     [memories, search],
   )
   const selectedMemory = memories.find((memory) => memory.name === selected) ?? null
-  const assignedMemory = (target: AgentId) =>
-    memories.find((memory) => memory.targets.includes(target))?.name ?? null
+  const selectedApplicableAgents =
+    selectedMemory?.agents.filter((agent) => agents.includes(agent)) ?? []
+  const assignedMemory = (agent: AgentId) =>
+    memories.find((memory) => memory.agents.includes(agent))?.name ?? null
 
   const performSelection = async (name: string) => {
     const requestId = ++contentRequestRef.current
@@ -129,10 +130,10 @@ export default function Memory({ repoPath }: Props) {
     void performSelection(name)
   }
 
-  const applyTarget = async (target: AgentId, name: string | null) => {
-    setUpdatingTarget(target)
+  const applyAgent = async (agent: AgentId, name: string | null) => {
+    setUpdatingAgent(agent)
     try {
-      await api.updateMemoryTarget({ repo: repoPath, target, name })
+      await api.updateMemoryAgent({ repo: repoPath, agent, name })
       const projected = (await api.project({ repo: repoPath, scope: 'memory' })) as {
         ok?: boolean
         message?: string
@@ -141,30 +142,29 @@ export default function Memory({ repoPath }: Props) {
       if (projected.ok === false)
         throw new Error(projected.message ?? projected.error ?? '投影失败')
       await load(selected, false)
-      showToast('投影目标已更新')
+      showToast('Agent 投影已更新')
     } catch (error) {
-      console.error({ err: error }, 'Failed to update memory target')
+      console.error({ err: error }, 'Failed to update memory agent')
       await load(selected, false)
-      showErrorToast(error, { title: '投影目标更新失败', message: '请检查配置后重试' })
+      showErrorToast(error, { title: 'Agent 投影更新失败', message: '请检查配置后重试' })
     } finally {
-      setUpdatingTarget(null)
+      setUpdatingAgent(null)
       setConflict(null)
     }
   }
 
-  const toggleTarget = (name: string, target: AgentId) => {
-    const previous = assignedMemory(target)
+  const toggleAgent = (name: string, agent: AgentId) => {
+    const previous = assignedMemory(agent)
     if (previous === name) {
-      void applyTarget(target, null)
+      void applyAgent(agent, null)
       return
     }
     if (previous) {
-      setConflict({ target, previous, next: name })
+      setConflict({ agent, previous, next: name })
       return
     }
-    void applyTarget(target, name)
+    void applyAgent(agent, name)
   }
-
   const create = async () => {
     const name = draftName.trim()
     if (!name) return
@@ -213,7 +213,7 @@ export default function Memory({ repoPath }: Props) {
     try {
       await api.saveMemoryContent({ repo: repoPath, name: selected, content })
       setSelectedContent(content)
-      if (selectedMemory?.targets.length) {
+      if (selectedMemory?.agents.length) {
         const projected = (await api.project({ repo: repoPath, scope: 'memory' })) as {
           ok?: boolean
           message?: string
@@ -274,30 +274,30 @@ export default function Memory({ repoPath }: Props) {
                     <span>{selected === memory.name ? <Check /> : <Files />}</span>
                     <strong>{memory.name}</strong>
                   </button>
-                  <div className={styles.memoryRowTargets}>
-                    {targets.map((target) => {
-                      const assigned = assignedMemory(target)
+                  <div className={styles.memoryRowAgents}>
+                    {agents.map((agent) => {
+                      const assigned = assignedMemory(agent)
                       const active = assigned === memory.name
                       return (
-                        <TargetChip
-                          key={target}
-                          agent={target}
+                        <AgentChip
+                          key={agent}
+                          agent={agent}
                           state={active ? 'on' : 'off'}
-                          className={!active && assigned ? styles.occupiedTarget : undefined}
+                          className={!active && assigned ? styles.occupiedAgent : undefined}
                           label={
                             active
-                              ? `${memory.name} 已投影到 ${agentName[target]}`
-                              : `${memory.name} 投影到 ${agentName[target]}`
+                              ? `${memory.name} 已投影到 ${agentName[agent]}`
+                              : `${memory.name} 投影到 ${agentName[agent]}`
                           }
                           tooltip={
                             active
-                              ? `取消投影到 ${agentName[target]}`
+                              ? `取消投影到 ${agentName[agent]}`
                               : assigned
-                                ? `${agentName[target]} 当前使用 ${assigned}，点击切换`
-                                : `投影到 ${agentName[target]}`
+                                ? `${agentName[agent]} 当前使用 ${assigned}，点击切换`
+                                : `投影到 ${agentName[agent]}`
                           }
-                          disabled={updatingTarget !== null}
-                          onClick={() => toggleTarget(memory.name, target)}
+                          disabled={updatingAgent !== null}
+                          onClick={() => toggleAgent(memory.name, agent)}
                         />
                       )
                     })}
@@ -343,25 +343,25 @@ export default function Memory({ repoPath }: Props) {
           </div>
         )}
       </div>
-      {selectedMemory && (
-        <div className={styles.currentTargets} aria-label="当前 Memory 投影目标">
+      {selectedMemory && agents.length > 0 && (
+        <div className={styles.currentAgents} aria-label="当前 Memory 投影 Agent">
           <span>投影到</span>
-          {targets.map((target) => {
-            const assigned = assignedMemory(target)
+          {agents.map((agent) => {
+            const assigned = assignedMemory(agent)
             return (
-              <TargetChip
-                key={target}
-                agent={target}
+              <AgentChip
+                key={agent}
+                agent={agent}
                 state={assigned === selected ? 'on' : 'off'}
-                className={assigned && assigned !== selected ? styles.occupiedTarget : undefined}
-                label={`${selected} 投影到 ${agentName[target]}`}
+                className={assigned && assigned !== selected ? styles.occupiedAgent : undefined}
+                label={`${selected} 投影到 ${agentName[agent]}`}
                 tooltip={
                   assigned && assigned !== selected
-                    ? `${agentName[target]} 当前使用 ${assigned}，点击切换`
-                    : agentName[target]
+                    ? `${agentName[agent]} 当前使用 ${assigned}，点击切换`
+                    : agentName[agent]
                 }
-                disabled={updatingTarget !== null}
-                onClick={() => toggleTarget(selected!, target)}
+                disabled={updatingAgent !== null}
+                onClick={() => toggleAgent(selected!, agent)}
               />
             )
           })}
@@ -379,8 +379,8 @@ export default function Memory({ repoPath }: Props) {
           content={selectedContent}
           onSave={save}
           onDirtyChange={setEditorDirty}
-          targets={targets}
-          assignedTargets={selectedMemory?.targets ?? []}
+          agents={agents}
+          assignedAgents={selectedApplicableAgents}
           contextLabel={selected}
           toolbarStart={toolbarStart}
           onRename={() => {
@@ -496,7 +496,7 @@ export default function Memory({ repoPath }: Props) {
         width={380}
       >
         <p className={styles.modalText}>
-          确认删除 <strong>{deleting}</strong>？它占用的 Target 将同时释放。
+          确认删除 <strong>{deleting}</strong>？它占用的 Agent 将同时释放。
         </p>
         <div className={styles.modalActions}>
           <Button variant="ghost" size="sm" onClick={() => setDeleting(null)}>
@@ -516,14 +516,14 @@ export default function Memory({ repoPath }: Props) {
       <Modal
         open={conflict !== null}
         onClose={() => setConflict(null)}
-        title={conflict ? `切换 ${agentName[conflict.target]} 的 Memory` : ''}
+        title={conflict ? `切换 ${agentName[conflict.agent]} 的 Memory` : ''}
         width={420}
       >
         {conflict && (
           <>
             <p className={styles.modalText}>
-              <strong>{agentName[conflict.target]}</strong> 当前使用{' '}
-              <code>{conflict.previous}</code>，切换后将改为 <code>{conflict.next}</code>。
+              <strong>{agentName[conflict.agent]}</strong> 当前使用 <code>{conflict.previous}</code>
+              ，切换后将改为 <code>{conflict.next}</code>。
             </p>
             <div className={styles.modalActions}>
               <Button variant="ghost" size="sm" onClick={() => setConflict(null)}>
@@ -532,7 +532,7 @@ export default function Memory({ repoPath }: Props) {
               <Button
                 variant="primary"
                 size="sm"
-                onClick={() => void applyTarget(conflict.target, conflict.next)}
+                onClick={() => void applyAgent(conflict.agent, conflict.next)}
               >
                 确认切换
               </Button>

@@ -8,14 +8,7 @@ import MonacoTextEditor from '@/components/monaco/MonacoTextEditor'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
 import { Check, Code2, Copy, FileText, LoaderCircle } from 'lucide-react'
-import {
-  AGENTS,
-  agentColor,
-  agentName,
-  agentShort,
-  agentSkillPath,
-  type AgentId,
-} from '@/lib/agents'
+import { agentColor, agentName, agentShort, agentSkillPath, type AgentId } from '@/lib/agents'
 import type { SkillDetail } from './types'
 import SkillWorkbench, { SkillWorkbenchTitle } from './SkillWorkbench'
 import styles from './SkillDetailEditor.module.css'
@@ -23,6 +16,7 @@ import styles from './SkillDetailEditor.module.css'
 interface Props {
   repoPath: string
   detail: SkillDetail | null
+  agents?: AgentId[]
   showToast: (msg: string) => void
   onClose: () => void
 }
@@ -35,7 +29,13 @@ function skillDocumentPath(path?: string): string {
   return `${path.replace(/[\\/]+$/, '')}/SKILL.md`
 }
 
-export default function SkillDetailEditor({ repoPath, detail, showToast, onClose }: Props) {
+export default function SkillDetailEditor({
+  repoPath,
+  detail,
+  agents = [],
+  showToast,
+  onClose,
+}: Props) {
   const [skillContent, setSkillContent] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [mode, setMode] = useState<DocumentMode>('preview')
@@ -143,7 +143,7 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
     }
   }
 
-  const activeTargets = detail ? AGENTS.filter((agent) => detail.targets.includes(agent)).length : 0
+  const activeAgents = detail ? agents.filter((agent) => detail.agents.includes(agent)).length : 0
   const isLocal = Boolean(detail && !detail.source)
   const savedState = detail?.source ? 'Read only' : saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'
   const savedTone = saving ? 'saving' : dirty ? 'dirty' : 'saved'
@@ -201,34 +201,36 @@ export default function SkillDetailEditor({ repoPath, detail, showToast, onClose
                 </dl>
               </section>
 
-              <section>
-                <div className={styles.sectionHeading}>
-                  <span className={styles.kicker}>Projected links</span>
-                  <span>
-                    {activeTargets} of {AGENTS.length}
-                  </span>
-                </div>
-                <div className={styles.targetList}>
-                  {AGENTS.map((agent: AgentId) => {
-                    const active = detail.targets.includes(agent)
-                    return (
-                      <div
-                        key={agent}
-                        className={styles.targetRow}
-                        data-active={active}
-                        style={{ '--agent-color': agentColor[agent] } as CSSProperties}
-                      >
-                        <span className={styles.agentBadge}>{agentShort[agent]}</span>
-                        <div>
-                          <strong>{agentName[agent]}</strong>
-                          <code>{agentSkillPath(agent, detail.skillId)}</code>
+              {agents.length > 0 && (
+                <section>
+                  <div className={styles.sectionHeading}>
+                    <span className={styles.kicker}>Projected links</span>
+                    <span>
+                      {activeAgents} of {agents.length}
+                    </span>
+                  </div>
+                  <div className={styles.agentList}>
+                    {agents.map((agent: AgentId) => {
+                      const active = detail.agents.includes(agent)
+                      return (
+                        <div
+                          key={agent}
+                          className={styles.agentRow}
+                          data-active={active}
+                          style={{ '--agent-color': agentColor[agent] } as CSSProperties}
+                        >
+                          <span className={styles.agentBadge}>{agentShort[agent]}</span>
+                          <div>
+                            <strong>{agentName[agent]}</strong>
+                            <code>{agentSkillPath(agent, detail.skillId)}</code>
+                          </div>
+                          <span className={styles.agentState}>{active ? 'linked' : 'off'}</span>
                         </div>
-                        <span className={styles.targetState}>{active ? 'linked' : 'off'}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </section>
+                      )
+                    })}
+                  </div>
+                </section>
+              )}
             </div>
           }
           results={

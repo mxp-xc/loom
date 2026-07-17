@@ -86,7 +86,7 @@ describe('Vars diagnostics actions', () => {
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex'] },
+      config: { agents: ['codex'] },
       errors: [],
     } as never)
   })

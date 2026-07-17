@@ -15,9 +15,11 @@
   --warn: #a8731a;
   --error: #dc2626;
   --info: #0284c7;
-  --cc: #d97757;
-  --cx: #06b6d4;
-  --oc: #8b5cf6;
+  --transport-stdio: #06b6d4;
+  --transport-sse: #8b5cf6;
+  --field-connection: #06b6d4;
+  --field-headers: #8b5cf6;
+  --source-tag: #8b5cf6;
   --radius: 8px;
   --radius-card: 10px;
   --page-gutter: clamp(12px, 1.8vw, 28px);

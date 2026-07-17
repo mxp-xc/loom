@@ -1,17 +1,18 @@
 import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import yaml from 'js-yaml'
-import { parse as parseToml } from 'smol-toml'
-import type { AgentId, McpServer, McpType } from '@loom/core'
-import { agentMcpFile } from '../adapters/paths.js'
+import {
+  AGENT_IDS,
+  configuredAgents,
+  getMcpCodec,
+  getAgent,
+  type AgentId,
+  type McpServer,
+  type McpType,
+} from '@loom/core'
+import { agentMcpFile, type AgentPathContext } from '../adapters/paths.js'
 import type { IFileSystem } from '../ports/fs.js'
 
-const AGENTS: AgentId[] = ['claude-code', 'codex', 'opencode']
-const SOURCE_SUFFIX: Record<AgentId, string> = {
-  'claude-code': 'cc',
-  codex: 'cx',
-  opencode: 'oc',
-}
 const SUPPORTED_TYPES = new Set<McpType>(['stdio', 'sse', 'http'])
 
 export type McpImportSourceStatus = 'ready' | 'missing_file' | 'parse_failed'
@@ -36,7 +37,7 @@ export interface McpImportItem {
   finalId: string
   server?: McpServer
   sourceAgents: AgentId[]
-  targets: AgentId[]
+  agents: AgentId[]
   status: McpImportItemStatus
   selectedByDefault: boolean
   ignoredFields: string[]
@@ -70,6 +71,7 @@ export interface ScanMcpImportsInput {
   fs: IFileSystem
   repoPath: string
   sources?: AgentId[]
+  pathContext?: AgentPathContext
   logger?: McpImportLogger
 }
 
@@ -107,10 +109,10 @@ interface ImportGroup {
 }
 
 export async function scanMcpImports(input: ScanMcpImportsInput): Promise<McpImportScanResult> {
-  const sources = normalizeSources(input.sources)
+  const sources = configuredAgents(input.sources)
   const existing = await readMcpYaml(input.fs, input.repoPath)
   const sourceEntries = await Promise.all(
-    sources.map((agent) => readSourceEntries(input.fs, agent, input.logger)),
+    sources.map((agent) => readSourceEntries(input.fs, agent, input.logger, input.pathContext)),
   )
   const groups = groupEnabledEntries(sourceEntries.flatMap((entry) => entry.enabled))
   const disabled = sourceEntries.flatMap((entry) => entry.disabled).map(disabledItem)
@@ -145,13 +147,13 @@ export async function applyMcpImports(input: ApplyMcpImportsInput): Promise<McpI
     const idx = entries.findIndex((entry) => entry.id === item.finalId)
     if (idx >= 0) {
       if (!sameDefinition(entries[idx], item.server)) return stalePreview()
-      const nextTargets = mergeTargets(entries[idx].targets ?? [], item.targets)
-      if (!sameTargets(entries[idx].targets ?? [], nextTargets)) {
-        entries[idx] = { ...entries[idx], targets: nextTargets }
+      const nextAgents = mergeAgents(entries[idx].agents ?? [], item.agents)
+      if (!sameAgents(entries[idx].agents ?? [], nextAgents)) {
+        entries[idx] = { ...entries[idx], agents: nextAgents }
         changed = true
       }
     } else {
-      entries.push({ ...item.server, id: item.finalId, targets: item.targets })
+      entries.push({ ...item.server, id: item.finalId, agents: item.agents })
       changed = true
     }
     imported++
@@ -167,17 +169,13 @@ export async function applyMcpImports(input: ApplyMcpImportsInput): Promise<McpI
   return { ok: true, imported, renamed, ignoredFields, entries }
 }
 
-function normalizeSources(sources: AgentId[] | undefined): AgentId[] {
-  if (!sources?.length) return AGENTS
-  return AGENTS.filter((agent) => sources.includes(agent))
-}
-
 async function readSourceEntries(
   fs: IFileSystem,
   agent: AgentId,
   logger?: McpImportLogger,
+  pathContext?: AgentPathContext,
 ): Promise<SourceEntries> {
-  const path = agentMcpFile(agent)
+  const path = agentMcpFile(agent, pathContext)
   if (!(await fs.exists(path))) {
     return {
       source: {
@@ -225,14 +223,12 @@ function parseSourceConfig(
   agent: AgentId,
   raw: string,
 ): { container: string; entries: Record<string, unknown> } {
-  if (agent === 'codex') {
-    const parsed = parseToml(raw) as Record<string, unknown>
-    return { container: 'mcp_servers', entries: asRecord(parsed.mcp_servers) }
+  const mcp = getAgent(agent).mcp!
+  const codec = getMcpCodec(mcp.codec)
+  return {
+    container: mcp.rootKey,
+    entries: codec.readEntries(codec.parse(raw), mcp.rootKey),
   }
-  const parsed = JSON.parse(raw) as Record<string, unknown>
-  if (agent === 'claude-code')
-    return { container: 'mcpServers', entries: asRecord(parsed.mcpServers) }
-  return { container: 'mcp', entries: asRecord(parsed.mcp) }
 }
 
 function normalizeSourceEntry(
@@ -299,12 +295,14 @@ function normalizeSourceEntry(
 
 function groupEnabledEntries(entries: EnabledSourceEntry[]): ImportGroup[] {
   const groups: ImportGroup[] = []
-  for (const entry of entries.sort((a, b) => AGENTS.indexOf(a.agent) - AGENTS.indexOf(b.agent))) {
+  for (const entry of entries.sort(
+    (a, b) => AGENT_IDS.indexOf(a.agent) - AGENT_IDS.indexOf(b.agent),
+  )) {
     const existing = groups.find(
       (group) => group.id === entry.id && sameDefinition(group.server, entry.server),
     )
     if (existing) {
-      existing.sourceAgents = mergeTargets(existing.sourceAgents, [entry.agent])
+      existing.sourceAgents = mergeAgents(existing.sourceAgents, [entry.agent])
       existing.ignoredFields.push(...entry.ignoredFields)
       existing.diagnostics.push(...entry.diagnostics)
     } else {
@@ -338,15 +336,15 @@ function planGroups(existing: McpServer[], groups: ImportGroup[]): McpImportItem
       renameReason = 'source_conflict'
     }
 
-    const server = { ...group.server, id: finalId, targets: targetsFor(group.sourceAgents) }
+    const server = { ...group.server, id: finalId, agents: agentsFor(group.sourceAgents) }
     const status = itemStatus(finalId, group.id, existingSameId, server)
     planned.push({
       key: itemKey(group.id, finalId, group.sourceAgents, server),
       id: group.id,
       finalId,
       server,
-      sourceAgents: targetsFor(group.sourceAgents),
-      targets: targetsFor(group.sourceAgents),
+      sourceAgents: agentsFor(group.sourceAgents),
+      agents: agentsFor(group.sourceAgents),
       status,
       selectedByDefault: status === 'ready' || status === 'renamed',
       ignoredFields: group.ignoredFields,
@@ -360,13 +358,13 @@ function planGroups(existing: McpServer[], groups: ImportGroup[]): McpImportItem
 }
 
 function disabledItem(entry: DisabledSourceEntry): McpImportItem {
-  const sourceAgents = targetsFor([entry.agent])
+  const sourceAgents = agentsFor([entry.agent])
   return {
     key: itemKey(entry.id, entry.id, sourceAgents, { id: entry.id, type: 'stdio' }),
     id: entry.id,
     finalId: entry.id,
     sourceAgents,
-    targets: sourceAgents,
+    agents: sourceAgents,
     status: 'disabled',
     selectedByDefault: false,
     ignoredFields: entry.ignoredFields,
@@ -382,12 +380,12 @@ function itemStatus(
 ): McpImportItemStatus {
   if (finalId !== originalId) return 'renamed'
   if (!existingSameId) return 'ready'
-  const nextTargets = mergeTargets(existingSameId.targets ?? [], server.targets ?? [])
-  return sameTargets(existingSameId.targets ?? [], nextTargets) ? 'unchanged' : 'ready'
+  const nextAgents = mergeAgents(existingSameId.agents ?? [], server.agents ?? [])
+  return sameAgents(existingSameId.agents ?? [], nextAgents) ? 'unchanged' : 'ready'
 }
 
 function allocateId(id: string, agent: AgentId, occupied: Map<string, McpServer>): string {
-  const base = id + '-' + SOURCE_SUFFIX[agent]
+  const base = id + '-' + getAgent(agent).mcp!.importSuffix
   if (!occupied.has(base)) return base
   for (let i = 2; ; i++) {
     const candidate = base + '-' + i
@@ -401,7 +399,7 @@ function itemKey(id: string, finalId: string, sourceAgents: AgentId[], server: M
       JSON.stringify({
         id,
         finalId,
-        sourceAgents: targetsFor(sourceAgents),
+        sourceAgents: agentsFor(sourceAgents),
         server: comparable(server),
       }),
     )
@@ -426,17 +424,17 @@ function sortRecord(record: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(record).sort(([a], [b]) => a.localeCompare(b)))
 }
 
-function targetsFor(agents: AgentId[]): AgentId[] {
-  return AGENTS.filter((agent) => agents.includes(agent))
+function agentsFor(agents: AgentId[]): AgentId[] {
+  return configuredAgents(agents)
 }
 
-function mergeTargets(a: readonly AgentId[], b: readonly AgentId[]): AgentId[] {
-  return AGENTS.filter((agent) => a.includes(agent) || b.includes(agent))
+function mergeAgents(a: readonly AgentId[], b: readonly AgentId[]): AgentId[] {
+  return AGENT_IDS.filter((agent) => a.includes(agent) || b.includes(agent))
 }
 
-function sameTargets(a: readonly AgentId[], b: readonly AgentId[]): boolean {
-  const left = targetsFor([...a])
-  const right = targetsFor([...b])
+function sameAgents(a: readonly AgentId[], b: readonly AgentId[]): boolean {
+  const left = agentsFor([...a])
+  const right = agentsFor([...b])
   return left.length === right.length && left.every((agent, index) => agent === right[index])
 }
 

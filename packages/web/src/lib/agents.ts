@@ -1,34 +1,30 @@
-import type { AgentId } from '@loom/core'
+import { AGENTS, AGENT_IDS, formatAgentFallbackPath, getAgent, type AgentId } from '@loom/core'
 
 export type { AgentId } from '@loom/core'
 
-export const AGENTS: AgentId[] = ['claude-code', 'codex', 'opencode']
+export const agentIds: AgentId[] = [...AGENT_IDS]
 
-export const agentShort: Record<AgentId, string> = {
-  'claude-code': 'CC',
-  codex: 'CX',
-  opencode: 'OC',
-}
+export const agentShort = Object.fromEntries(
+  AGENTS.map((agent) => [agent.id, agent.display.short]),
+) as Record<AgentId, string>
 
-export const agentColor: Record<AgentId, string> = {
-  'claude-code': 'var(--cc)',
-  codex: 'var(--cx)',
-  opencode: 'var(--oc)',
-}
+export const agentColor = Object.fromEntries(
+  AGENTS.map((agent) => [agent.id, agent.display.color]),
+) as Record<AgentId, string>
 
-export const agentName: Record<AgentId, string> = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-  opencode: 'OpenCode',
-}
+export const agentName = Object.fromEntries(
+  AGENTS.map((agent) => [agent.id, agent.display.name]),
+) as Record<AgentId, string>
 
-export const agentMcpPath: Record<AgentId, string> = {
-  'claude-code': '~/.claude.json',
-  codex: '~/.codex/config.toml',
-  opencode: '~/.config/opencode/opencode.json',
-}
+export const agentMcpPath = Object.fromEntries(
+  AGENTS.filter((agent) => agent.mcp).map((agent) => [
+    agent.id,
+    formatAgentFallbackPath(agent.id, agent.mcp!.path),
+  ]),
+) as Partial<Record<AgentId, string>>
 
 export function agentSkillPath(agent: AgentId, skillId: string): string {
-  const dir = agent === 'claude-code' ? '~/.claude' : agent === 'codex' ? '~/.codex' : '~/.opencode'
-  return `${dir}/skills/${skillId}`
+  const definition = getAgent(agent)
+  if (!definition.skills) throw new Error(`Agent ${agent} does not support skills`)
+  return `${formatAgentFallbackPath(agent, definition.skills.path)}/${skillId}`
 }

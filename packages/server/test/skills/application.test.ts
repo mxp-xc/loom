@@ -135,7 +135,7 @@ describe('SkillsApplication', () => {
     expect(existsSync(externalDir)).toBe(true)
   })
 
-  it('updates multiple source member targets with one yaml write', async () => {
+  it('updates multiple source member agents with one yaml write', async () => {
     await writeFile(
       join(repoPath, 'skills.yaml'),
       [
@@ -145,20 +145,20 @@ describe('SkillsApplication', () => {
         '    members:',
         '      - name: alpha',
         '        entry: alpha/SKILL.md',
-        '        targets:',
+        '        agents:',
         '          - claude-code',
         '      - name: beta',
         '        entry: beta/SKILL.md',
-        '        targets: []',
+        '        agents: []',
         'skills: []',
         '',
       ].join('\n'),
     )
     const writeSpy = vi.spyOn(fs, 'writeFile')
 
-    await app.setSourceMemberTargets(repoPath, 'https://example.test/skills.git', [
-      { memberEntry: 'alpha/SKILL.md', targets: ['codex'] },
-      { memberEntry: 'beta/SKILL.md', targets: ['codex', 'opencode'] },
+    await app.setSourceMemberAgents(repoPath, 'https://example.test/skills.git', [
+      { memberEntry: 'alpha/SKILL.md', agents: ['codex'] },
+      { memberEntry: 'beta/SKILL.md', agents: ['codex', 'opencode'] },
     ])
 
     expect(writeSpy).toHaveBeenCalledTimes(1)
@@ -260,7 +260,7 @@ describe('SkillsApplication', () => {
     ).rejects.toMatchObject({ status: 400, code: 'invalid_source_name' })
   })
 
-  it('renames a source while preserving members and targets', async () => {
+  it('renames a source while preserving members and agents', async () => {
     await writeFile(
       join(repoPath, 'skills.yaml'),
       [
@@ -271,7 +271,7 @@ describe('SkillsApplication', () => {
         '    members:',
         '      - name: alpha',
         '        entry: alpha/SKILL.md',
-        '        targets:',
+        '        agents:',
         '          - codex',
         'skills: []',
         '',
@@ -293,7 +293,7 @@ describe('SkillsApplication', () => {
       url: 'https://example.test/skills.git',
       ref: 'main',
       pinned_commit: 'abc123',
-      members: [{ name: 'alpha', entry: 'alpha/SKILL.md', targets: ['codex'] }],
+      members: [{ name: 'alpha', entry: 'alpha/SKILL.md', agents: ['codex'] }],
       resources: { include: [], exclude: [] },
     })
     expect(git.clone).not.toHaveBeenCalled()
@@ -357,7 +357,7 @@ describe('SkillsApplication', () => {
     expect(git.clone).not.toHaveBeenCalled()
   })
 
-  it('previews removed members and preserves selected ones as local with targets', async () => {
+  it('previews removed members and preserves selected ones as local with agents', async () => {
     await mkdir(join(repoPath, 'remote-cache', 'skills', 'nested', 'removed'), { recursive: true })
     await writeFile(
       join(repoPath, 'remote-cache', 'skills', 'nested', 'removed', 'SKILL.md'),
@@ -375,7 +375,7 @@ describe('SkillsApplication', () => {
         '        entry: keep/SKILL.md',
         '      - name: removed',
         '        entry: nested/removed/SKILL.md',
-        '        targets:',
+        '        agents:',
         '          - codex',
         'skills: []',
         '',
@@ -397,7 +397,7 @@ describe('SkillsApplication', () => {
 
     await expect(app.reconcileSource(repoPath, command)).resolves.toMatchObject({
       finalized: false,
-      changes: { added: [{ name: 'added' }], removed: [{ name: 'removed', targets: ['codex'] }] },
+      changes: { added: [{ name: 'added' }], removed: [{ name: 'removed', agents: ['codex'] }] },
     })
     await app.reconcileSource(repoPath, { ...command, preserve: ['removed'] })
 
@@ -406,7 +406,7 @@ describe('SkillsApplication', () => {
       { name: 'keep', entry: 'keep/SKILL.md' },
       { name: 'added', entry: 'added/SKILL.md' },
     ])
-    expect(parsed.skills).toEqual([{ id: 'removed', targets: ['codex'] }])
+    expect(parsed.skills).toEqual([{ id: 'removed', agents: ['codex'] }])
     await expect(
       readFile(join(repoPath, 'assets', 'skills', 'removed', 'SKILL.md'), 'utf8'),
     ).resolves.toBe('# Removed')
@@ -443,7 +443,7 @@ describe('SkillsApplication', () => {
     await mkdir(join(repoPath, 'remote-cache', 'skills', 'removed'), { recursive: true })
     await writeFile(join(repoPath, 'remote-cache', 'skills', 'removed', 'SKILL.md'), '# Removed')
     const original =
-      'sources:\n  - url: https://example.test/skills.git\n    ref: main\n    members:\n      - name: removed\n        entry: removed/SKILL.md\n        targets: [codex]\nskills: []\n'
+      'sources:\n  - url: https://example.test/skills.git\n    ref: main\n    members:\n      - name: removed\n        entry: removed/SKILL.md\n        agents: [codex]\nskills: []\n'
     await writeFile(join(repoPath, 'skills.yaml'), original)
     mockRemoteSource({})
 
@@ -457,7 +457,7 @@ describe('SkillsApplication', () => {
 
     const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
     expect(parsed.sources[0].members).toEqual([
-      { name: 'removed', entry: 'removed/SKILL.md', targets: ['codex'] },
+      { name: 'removed', entry: 'removed/SKILL.md', agents: ['codex'] },
     ])
     expect(parsed.skills).toEqual([])
     expect(existsSync(join(repoPath, 'assets', 'skills', 'removed'))).toBe(false)

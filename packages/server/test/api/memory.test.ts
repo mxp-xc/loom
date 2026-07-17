@@ -124,35 +124,35 @@ describe('memory routes', () => {
     )
   })
 
-  it('PUT /memory/target creates a unique target assignment and removes legacy active memory', async () => {
+  it('PUT /memory/agent creates a unique agent assignment and removes legacy active memory', async () => {
     const repo = join(home, '.loom', 'repos', 'default')
     writeFileSync(join(repo, 'memories', 'v1.md'), '# v1')
     writeFileSync(join(repo, 'memories', 'v2.md'), '# v2')
-    writeFileSync(join(repo, 'config.yaml'), 'active_memory: v1\ntargets:\n  - codex\n')
+    writeFileSync(join(repo, 'config.yaml'), 'active_memory: v1\nagents:\n  - codex\n')
 
-    const assigned = await req('PUT', '/api/memory/target', {
+    const assigned = await req('PUT', '/api/memory/agent', {
       repo: 'default',
-      target: 'codex',
+      agent: 'codex',
       name: 'v1',
     })
     expect(await assigned.json()).toEqual({ ok: true, assignments: { codex: 'v1' } })
 
-    const moved = await req('PUT', '/api/memory/target', {
+    const moved = await req('PUT', '/api/memory/agent', {
       repo: 'default',
-      target: 'codex',
+      agent: 'codex',
       name: 'v2',
     })
     expect(await moved.json()).toEqual({ ok: true, assignments: { codex: 'v2' } })
 
     const cfg = readFileSync(join(repo, 'config.yaml'), 'utf8')
-    expect(cfg).toContain('memory_targets:\n  codex: v2')
+    expect(cfg).toContain('memory_agents:\n  codex: v2')
     expect(cfg).not.toContain('active_memory')
     const listed = await req('GET', '/api/memory?repo=default')
     expect(await listed.json()).toMatchObject({
       assignments: { codex: 'v2' },
       memories: [
-        { name: 'v1', targets: [] },
-        { name: 'v2', targets: ['codex'] },
+        { name: 'v1', agents: [] },
+        { name: 'v2', agents: ['codex'] },
       ],
     })
   })
@@ -172,13 +172,13 @@ describe('memory routes', () => {
     expect(cfg).not.toContain('active_memory')
   })
 
-  it('POST /memory/active remains effective after memory_targets migration', async () => {
+  it('POST /memory/active remains effective after memory_agents assignment', async () => {
     const repo = join(home, '.loom', 'repos', 'default')
     writeFileSync(join(repo, 'memories', 'v1.md'), '# v1')
     writeFileSync(join(repo, 'memories', 'v2.md'), '# v2')
     writeFileSync(
       join(repo, 'config.yaml'),
-      'targets:\n  - codex\n  - opencode\nmemory_targets:\n  codex: v2\n',
+      'agents:\n  - codex\n  - opencode\nmemory_agents:\n  codex: v2\n',
     )
 
     await req('POST', '/api/memory/active', { repo: 'default', name: 'v1' })
@@ -201,10 +201,10 @@ describe('memory routes', () => {
     expect(cfg).not.toContain('active_memory: v1')
   })
 
-  it('DELETE /memory removes every target assignment for the deleted memory', async () => {
+  it('DELETE /memory removes every agent assignment for the deleted memory', async () => {
     const repo = join(home, '.loom', 'repos', 'default')
     writeFileSync(join(repo, 'memories', 'team.md'), '# team')
-    writeFileSync(join(repo, 'config.yaml'), 'memory_targets:\n  codex: team\n  opencode: team\n')
+    writeFileSync(join(repo, 'config.yaml'), 'memory_agents:\n  codex: team\n  opencode: team\n')
 
     await req('DELETE', '/api/memory?repo=default&name=team')
 
@@ -231,10 +231,10 @@ describe('memory routes', () => {
     expect(cfg).toContain('active_memory: v2')
   })
 
-  it('POST /memory/rename updates every target assignment', async () => {
+  it('POST /memory/rename updates every agent assignment', async () => {
     const repo = join(home, '.loom', 'repos', 'default')
     writeFileSync(join(repo, 'memories', 'team.md'), '# team')
-    writeFileSync(join(repo, 'config.yaml'), 'memory_targets:\n  codex: team\n  opencode: team\n')
+    writeFileSync(join(repo, 'config.yaml'), 'memory_agents:\n  codex: team\n  opencode: team\n')
 
     await req('POST', '/api/memory/rename', {
       repo: 'default',

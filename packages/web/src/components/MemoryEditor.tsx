@@ -18,7 +18,7 @@ import { ApiError, api } from '@/lib/api'
 import type { AgentId } from '@/lib/agents'
 import { MarkdownDocument } from '@/components/MarkdownPreview'
 import { IconButton } from '@/components/ui/IconButton'
-import { TargetChip } from '@/components/ui/TargetChip'
+import { AgentChip } from '@/components/ui/AgentChip'
 import { useToast } from '@/hooks/useToast'
 import { cn } from '@/lib/utils'
 import type { VarsDiagnostic } from '@/lib/vars'
@@ -34,8 +34,8 @@ interface Props {
   content: string
   onSave: (content: string) => Promise<void>
   onDirtyChange?: (dirty: boolean) => void
-  targets: AgentId[]
-  assignedTargets?: AgentId[]
+  agents: AgentId[]
+  assignedAgents?: AgentId[]
   contextLabel?: string
   toolbarStart?: ReactNode
   onRename?: () => void
@@ -69,8 +69,8 @@ export default function MemoryEditor({
   content,
   onSave,
   onDirtyChange,
-  targets,
-  assignedTargets = [],
+  agents,
+  assignedAgents = [],
   contextLabel,
   toolbarStart,
   onRename,
@@ -80,7 +80,7 @@ export default function MemoryEditor({
   const [edit, setEdit] = useState(content)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [agent, setAgent] = useState<AgentId>(targets[0] ?? 'claude-code')
+  const [agent, setAgent] = useState<AgentId | null>(agents[0] ?? null)
   const [resolved, setResolved] = useState('')
   const [resolveErr, setResolveErr] = useState<string | null>(null)
   const [diagnostics, setDiagnostics] = useState<VarsDiagnostic[]>([])
@@ -124,13 +124,19 @@ export default function MemoryEditor({
   }, [])
 
   useEffect(() => {
-    if (targets.length && !targets.includes(agent)) setAgent(targets[0])
-  }, [targets, agent])
+    if (agent !== null && agents.includes(agent)) return
+    setAgent(agents[0] ?? null)
+  }, [agents, agent])
 
-  const completionCacheKey = repo + '\0' + agent
+  useEffect(() => {
+    if (agent === null && view === 'resolved') setView('compose')
+  }, [agent, view])
+
+  const completionCacheKey = agent === null ? '' : repo + '\0' + agent
   const varKeys = varKeyState.cacheKey === completionCacheKey ? varKeyState.keys : []
 
   useEffect(() => {
+    if (agent === null) return
     if (varKeyState.cacheKey === completionCacheKey) return
     let active = true
     api.vars
@@ -152,7 +158,7 @@ export default function MemoryEditor({
   }, [agent, completionCacheKey, repo, varKeyState.cacheKey])
 
   useEffect(() => {
-    if (view !== 'resolved') return
+    if (view !== 'resolved' || agent === null) return
     let active = true
     setResolveErr(null)
     setDiagnostics([])
@@ -226,7 +232,7 @@ export default function MemoryEditor({
           )}
         >
           <div className={styles['mem-document-content']}>
-            <DocumentHeader name={name} targets={assignedTargets} />
+            <DocumentHeader name={name} agents={assignedAgents} />
             <MarkdownDocument
               content={showMarkdownComments(edit)}
               className={styles['mem-rendered-editor']}
@@ -239,7 +245,7 @@ export default function MemoryEditor({
       return <MemorySourceMarkdownEditor value={edit} onChange={updateEdit} varsKeys={varKeys} />
     }
     return null
-  }, [assignedTargets, edit, name, varKeys, view])
+  }, [assignedAgents, edit, name, varKeys, view])
 
   const tab = (v: View, label: string, icon: ReactNode) => (
     <button
@@ -261,15 +267,15 @@ export default function MemoryEditor({
         <div className={styles['cfg-seg']} role="tablist" aria-label="Memory 视图">
           {tab('compose', '所见', <Eye />)}
           {tab('source', '源码', <Braces />)}
-          {tab('resolved', '解析', <Sparkles />)}
+          {agent !== null && tab('resolved', '解析', <Sparkles />)}
         </div>
         <div className={styles['mem-toolbar-actions']}>
           {view === 'resolved' && (
-            <div className={styles['mem-preview-targets']}>
+            <div className={styles['mem-preview-agents']}>
               <span className="label">预览为</span>
-              <div className="target-chips">
-                {targets.map((a) => (
-                  <TargetChip
+              <div className="agent-chips">
+                {agents.map((a) => (
+                  <AgentChip
                     key={a}
                     agent={a}
                     state={agent === a ? 'on' : 'off'}
@@ -354,7 +360,7 @@ export default function MemoryEditor({
         </div>
         <div className={styles['mem-document-facts']} aria-label="Memory 状态">
           <span>
-            <CircleDot /> {assignedTargets.length} 个 Target
+            <CircleDot /> {assignedAgents.length} 个 Agent
           </span>
           <span>{edit.length} 字符</span>
         </div>
@@ -362,7 +368,7 @@ export default function MemoryEditor({
 
       {editor}
 
-      {view === 'resolved' && (
+      {view === 'resolved' && agent !== null && (
         <div className={styles['mem-pane']}>
           {resolveErr && <div className={styles['mem-err']}>{resolveErr}</div>}
           {diagnostics.length > 0 && (
@@ -375,7 +381,7 @@ export default function MemoryEditor({
             </div>
           )}
           <div className={styles['mem-document-content']}>
-            <DocumentHeader name={name} targets={assignedTargets} />
+            <DocumentHeader name={name} agents={assignedAgents} />
             <div className={cn('md-preview', styles['mem-rendered-preview'])}>
               <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
                 {resolved}
@@ -388,14 +394,14 @@ export default function MemoryEditor({
   )
 }
 
-function DocumentHeader({ name, targets }: { name: string; targets: AgentId[] }) {
+function DocumentHeader({ name, agents }: { name: string; agents: AgentId[] }) {
   return (
     <header className={styles['mem-document-header']}>
       <h1>{name}</h1>
-      <div className={styles['mem-document-targets']}>
-        <span>{targets.length ? '投影到' : '尚未分配投影目标'}</span>
-        {targets.map((target) => (
-          <TargetChip key={target} agent={target} state="on" label={target} />
+      <div className={styles['mem-document-agents']}>
+        <span>{agents.length ? '投影到' : '尚未分配 Agent'}</span>
+        {agents.map((agent) => (
+          <AgentChip key={agent} agent={agent} state="on" />
         ))}
       </div>
     </header>

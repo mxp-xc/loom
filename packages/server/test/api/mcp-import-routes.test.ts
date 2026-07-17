@@ -61,6 +61,39 @@ beforeEach(() => {
 })
 
 describe('MCP import routes', () => {
+  it('uses effective configured agents when sources are omitted', async () => {
+    files['/repo/config.yaml'] = 'agents: [codex]\n'
+    files['/home/tester/.codex/config.toml'] = '[mcp_servers.browser]\ncommand = "npx"\n'
+    files['/home/tester/.claude.json'] = JSON.stringify({
+      mcpServers: { hidden: { type: 'stdio', command: 'node' } },
+    })
+
+    const res = await app().request('/api/mcp/import/scan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/repo' }),
+    })
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.sources.map((source: { agent: string }) => source.agent)).toEqual(['codex'])
+    expect(body.items.map((item: { id: string }) => item.id)).toEqual(['browser'])
+  })
+
+  it('keeps an explicit empty source set empty', async () => {
+    files['/repo/config.yaml'] = 'agents: [codex]\n'
+    files['/home/tester/.codex/config.toml'] = '[mcp_servers.browser]\ncommand = "npx"\n'
+
+    const res = await app().request('/api/mcp/import/scan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/repo', sources: [] }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ sources: [], items: [] })
+  })
+
   it('scans native agent configs without writing mcp.yaml', async () => {
     files['/home/tester/.codex/config.toml'] =
       '[mcp_servers.browser]\n' + 'transport = "http"\n' + 'url = "https://codex.example/mcp"\n'
@@ -77,7 +110,7 @@ describe('MCP import routes', () => {
     expect(body.items[0]).toMatchObject({
       id: 'browser',
       finalId: 'browser',
-      targets: ['codex'],
+      agents: ['codex'],
       status: 'ready',
       selectedByDefault: true,
       server: { id: 'browser', type: 'http', url: 'https://codex.example/mcp' },
@@ -105,7 +138,7 @@ describe('MCP import routes', () => {
 
     expect(applyRes.status).toBe(200)
     expect(yaml.load(files['/repo/mcp.yaml'])).toEqual([
-      { id: 'browser', type: 'stdio', command: 'npx', targets: ['claude-code'] },
+      { id: 'browser', type: 'stdio', command: 'npx', agents: ['claude-code'] },
     ])
 
     files['/home/tester/.claude.json'] = JSON.stringify({

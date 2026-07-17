@@ -84,5 +84,5 @@ describe('classifySkillMemberChanges', () => {
 })
 
 function member(name: string, path = `${name}/SKILL.md`) {
-  return { name, path, targets: name === 'removed' ? (['codex'] as const) : undefined }
+  return { name, path, agents: name === 'removed' ? (['codex'] as const) : undefined }
 }

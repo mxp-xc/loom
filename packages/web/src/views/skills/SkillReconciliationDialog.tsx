@@ -58,8 +58,8 @@ export default function SkillReconciliationDialog({
             </div>
             <div className={styles.list}>
               {state.pathMoves!.map((move) => (
-                <div key={`${move.target}:${move.kind}:${move.sourcePath}`} className={styles.row}>
-                  <span>{move.target}</span>
+                <div key={`${move.agent}:${move.kind}:${move.sourcePath}`} className={styles.row}>
+                  <span>{move.agent}</span>
                   <code>
                     {move.previousTargetPath ?? 'new'} → {move.nextTargetPath ?? 'removed'}
                   </code>

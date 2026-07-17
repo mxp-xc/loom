@@ -2,20 +2,24 @@ import { useEffect, useMemo, useState } from 'react'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import type { ManifestOperations } from '@/hooks/useManifestOperations'
-import { AGENTS, agentName, agentShort, type AgentId } from '@/lib/agents'
+import { agentName, agentShort, type AgentId } from '@/lib/agents'
 import type { McpImportItem, McpImportScanResponse, McpImportSourceResult } from '@/lib/api'
 import { FieldError } from '@/components/ErrorFeedback'
 import styles from './McpImportDialog.module.css'
 
-const IMPORT_SOURCES = AGENTS
-
 interface McpImportDialogProps {
   open: boolean
+  sources: AgentId[]
   operations: ManifestOperations
   onClose: () => void
 }
 
-export default function McpImportDialog({ open, operations, onClose }: McpImportDialogProps) {
+export default function McpImportDialog({
+  open,
+  sources,
+  operations,
+  onClose,
+}: McpImportDialogProps) {
   const [scan, setScan] = useState<McpImportScanResponse | null>(null)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [error, setError] = useState<string | null>(null)
@@ -26,7 +30,7 @@ export default function McpImportDialog({ open, operations, onClose }: McpImport
     setError(null)
     setScan(null)
     setSelected(new Set())
-    operations.scanMcpImports(IMPORT_SOURCES).then((result) => {
+    operations.scanMcpImports(sources).then((result) => {
       if (cancelled) return
       if (result.ok && result.result) {
         setScan(result.result)
@@ -42,7 +46,7 @@ export default function McpImportDialog({ open, operations, onClose }: McpImport
     return () => {
       cancelled = true
     }
-  }, [open, operations.scanMcpImports])
+  }, [open, operations.scanMcpImports, sources])
 
   const selectedKeys = useMemo(() => Array.from(selected), [selected])
   const busy = operations.pending.mcp.importScan || operations.pending.mcp.importApply
@@ -59,7 +63,7 @@ export default function McpImportDialog({ open, operations, onClose }: McpImport
 
   const confirm = async () => {
     setError(null)
-    const result = await operations.applyMcpImports(selectedKeys, IMPORT_SOURCES)
+    const result = await operations.applyMcpImports(selectedKeys, sources)
     if (result.ok) {
       onClose()
     } else {
@@ -70,15 +74,17 @@ export default function McpImportDialog({ open, operations, onClose }: McpImport
   return (
     <Modal open={open} onClose={onClose} title="Import MCP servers" width={760} busy={busy}>
       <div className={styles.dialog}>
-        <section className={styles.sources} aria-label="MCP import sources">
-          {IMPORT_SOURCES.map((agent) => (
-            <SourcePill
-              key={agent}
-              agent={agent}
-              source={scan?.sources.find((item) => item.agent === agent)}
-            />
-          ))}
-        </section>
+        {sources.length > 0 && (
+          <section className={styles.sources} aria-label="MCP import sources">
+            {sources.map((agent) => (
+              <SourcePill
+                key={agent}
+                agent={agent}
+                source={scan?.sources.find((item) => item.agent === agent)}
+              />
+            ))}
+          </section>
+        )}
 
         {error && <FieldError id="mcp-import-error">{error}</FieldError>}
 
@@ -106,7 +112,7 @@ export default function McpImportDialog({ open, operations, onClose }: McpImport
                   <span className={styles.itemMeta}>
                     {item.sourceAgents.map((agent) => agentShort[agent]).join(' + ')}
                     {' -> '}
-                    {item.targets.map((agent) => agentShort[agent]).join(' + ')}
+                    {item.agents.map((agent) => agentShort[agent]).join(' + ')}
                     {item.server?.type ? ' · ' + item.server.type : ''}
                   </span>
                   {item.ignoredFields.length > 0 && (

@@ -6,7 +6,7 @@
 
 - [设计系统](design-system.md) — 当前色彩、字体、圆角、阴影、动效和主题 token
 - [页面布局契约](layout.md) — `PageLayout` variants、宽度 token、滚动边界与溢出规则
-- [组件规范](components.md) — 按钮、tooltip、target chip、toast、modal、错误反馈、tabs 和 app shell
+- [组件规范](components.md) — 按钮、tooltip、agent chip、toast、modal、错误反馈、tabs 和 app shell
 - [Vars 管理](vars.md) — `Builtin / Base / Local` profiles、agent 查看范围与最终结果
 - [MCP Workbench](mcp.md) — MCP server 列表、detail/editor、配置视图、Tools 与变量信息弹窗
 

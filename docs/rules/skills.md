@@ -1,6 +1,6 @@
 # Skills 规则
 
-这些规则定义 local skills、remote sources、source members、target controls 和 skills projection 行为。
+这些规则定义 local skills、remote sources、source members、agent controls 和 skills projection 行为。
 
 ## R-SKILLS-001 assets/skills 是仓库内置 local skill home
 
@@ -56,19 +56,21 @@ Tests:
 - packages/web/test/skill-member-order.test.ts
 - packages/web/test/views.test.tsx
 
-## R-SKILLS-003 Source-level target controls 只作用于 selected members
+## R-SKILLS-003 Source-level agent controls 只作用于 selected members
 
 Status: active
 Applies to: source members, skills UI
 
 Rule:
-Source 级 target chip 只作用于该 source 的 `members` 中已选择的 bundles。
+Source 级 agent chip 只作用于该 source 的 `members` 中已选择的 bundles。
 
 Implications:
 
-- 如果每个 selected member 都已有该 target，点击 source chip 会从 selected members 移除该 target。
-- 否则，点击 source chip 会把该 target 添加到 selected members。
+- 如果每个 selected member 都已有该 agent，点击 source chip 会从 selected members 移除该 agent。
+- 否则，点击 source chip 会把该 agent 添加到 selected members。
 - 未写入 `members` 的 bundles 不会因为 source-level bulk action 被选择或投影。
+- Global、source、item 和 detail agent controls 只枚举 Applicable Skills agents；隐藏 agent 的已保存选择保持不变。
+- Applicable Skills agents 为空时，内容浏览、source 管理和编辑仍可用，但不显示 agent controls。
 
 Safety:
 
@@ -84,19 +86,19 @@ Tests:
 - packages/web/test/manifest-operations.test.tsx
 - packages/web/test/views.test.tsx
 
-## R-SKILLS-004 Bulk scope 的 target chip 是三态
+## R-SKILLS-004 Bulk scope 的 agent chip 是三态
 
 Status: active
 Applies to: skills UI, MCP UI
 
 Rule:
-Bulk target chips 表达其 scope 内的全部选择、全部未选择或部分选择状态。
+Bulk agent chips 表达其 scope 内的全部选择、全部未选择或部分选择状态。
 
 Implications:
 
-- on 表示 scope 内每个 applicable item 都有该 target。
-- off 表示 scope 内没有 applicable item 有该 target。
-- mixed 表示 scope 内部分但非全部 applicable items 有该 target。
+- on 表示 scope 内每个 applicable item 都有该 agent。
+- off 表示 scope 内没有 applicable item 有该 agent。
+- mixed 表示 scope 内部分但非全部 applicable items 有该 agent。
 - 有帮助时，mixed chip 应展示计数。
 
 Safety:
@@ -105,7 +107,7 @@ Safety:
 
 Examples:
 
-- 如果 12 个 source members 中有 2 个 target OpenCode，source 或 global chip 可以显示 2/12。
+- 如果 12 个 source members 中有 2 个 agent OpenCode，source 或 global chip 可以显示 2/12。
 
 Tests:
 
@@ -191,7 +193,7 @@ Status: active
 Applies to: remote source updates, source scan, source members, local skills
 
 Rule:
-远端更新或 SourceTree 变化导致已保存 member 缺失时，Loom 必须展示缺失项并让用户决定删除或保留为 local skill。缺失项默认选择保留；保留项复制到 assets/skills/<id>，并继承原 targets。
+远端更新或 SourceTree 变化导致已保存 member 缺失时，Loom 必须展示缺失项并让用户决定删除或保留为 local skill。缺失项默认选择保留；保留项复制到 assets/skills/<id>，并继承原 agents。
 
 Implications:
 
@@ -215,7 +217,7 @@ Safety:
 
 Examples:
 
-- Source 更新后远端删除 alpha；用户保留 alpha 时，它复制到 assets/skills/alpha 并继续使用原 targets。
+- Source 更新后远端删除 alpha；用户保留 alpha 时，它复制到 assets/skills/alpha 并继续使用原 agents。
 - SourceTree 更新后 beta 对应的 entry 缺失；保存前必须要求用户决定保留或删除 beta。
 
 Tests:
@@ -244,7 +246,7 @@ Implications:
 Safety:
 
 - `group_order` 不能创建、删除、隐藏或恢复任何 skill 实体。
-- Reorder 不修改 targets、source/member 定义，也不触发 projection。
+- Reorder 不修改 agents、source/member 定义，也不触发 projection。
 
 Examples:
 
@@ -296,21 +298,21 @@ Rule:
 
 Implications:
 
-- Member 使用 `{ name, entry, targets? }`；是否被选择由它是否存在于 `members` 表达，不存在独立 `enabled`。
-- `entry` 是 member identity；API 和 target mutation 必须按 `entry` 定位，`name` 只保存当前展示快照。
+- Member 使用 `{ name, entry, agents? }`；是否被选择由它是否存在于 `members` 表达，不存在独立 `enabled`。
+- `entry` 是 member identity；API 和 agent mutation 必须按 `entry` 定位，`name` 只保存当前展示快照。
 - Resource rule 使用规范化的 source-relative `path` 和 `kind: file | directory`；路径优先采用最具体规则，相同路径下 exclude 优先。
 - Resource directory 的选择遇到 SkillBundle root 时停止，不会自动选择当前或以后新增的 bundles。
 - Bundle 视图默认打开，只展示 SkillBundles；Tree 视图同时展示 bundles、containers 和 resources。
 - 普通 resources 默认未选择；搜索只影响查找和祖先展开，不改变 desired state。
-- Add/Edit Source 内只编辑 source 内容选择，不配置 member targets；targets 由 Skills 外层 controls 管理。
-- Skills source 列表必须展示已保存的 resource include/exclude 规则，并允许独立折叠 resources，不与 SkillBundle 或 target 状态混淆。
+- Add/Edit Source 内只编辑 source 内容选择，不配置 member agents；agents 由 Skills 外层 controls 管理。
+- Skills source 列表必须展示已保存的 resource include/exclude 规则，并允许独立折叠 resources，不与 SkillBundle 或 agent 状态混淆。
 - Edit Source 可以从当前 live cache 内嵌只读预览 SkillBundle；隔离扫描但尚未保存的其他 commit 只提供对应远端文件链接，不能用旧 cache 内容冒充预览。
 
 Safety:
 
 - 新发现的 SkillBundle 必须由用户明确选择，不能因祖先 resource directory 已选择而自动加入 `members`。
 - Resource path 的实际类型与保存的 `kind` 不一致时标记 unavailable，不自动改变选择范围。
-- Resource 选择属于整个 source，不配置 targets；仅当某 target 至少有一个该 source member 时才向该 target 投影 resources。
+- Resource 选择属于整个 source，不配置 agents；仅当某 agent 至少有一个该 source member 时才向该 agent 投影 resources。
 
 Examples:
 

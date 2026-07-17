@@ -59,7 +59,7 @@ const prepareSourceUpdateMock = vi.hoisted(() =>
         {
           name: 'old-skill',
           previousPath: 'skills/old-skill/SKILL.md',
-          targets: ['codex'],
+          agents: ['codex'],
         },
       ],
       unchanged: [],
@@ -619,7 +619,7 @@ describe('source updates', () => {
       '    members:',
       '      - name: old-skill',
       '        entry: skills/old-skill/SKILL.md',
-      '        targets: [codex]',
+      '        agents: [codex]',
       '    resources:',
       '      include:',
       '        - path: shared',
@@ -652,7 +652,7 @@ describe('source updates', () => {
           url: 'https://github.com/mattpocock/skills',
           ref: 'main',
           pinned_commit: 'old-commit',
-          members: [{ name: 'old-skill', entry: 'skills/old-skill/SKILL.md', targets: ['codex'] }],
+          members: [{ name: 'old-skill', entry: 'skills/old-skill/SKILL.md', agents: ['codex'] }],
           resources: {
             include: [{ path: 'shared', kind: 'directory' }],
             exclude: [],
@@ -698,7 +698,7 @@ describe('source updates', () => {
     ).toEqual([{ name: 'new-skill', entry: 'shared/new-skill/SKILL.md' }])
   })
 
-  it('preserves target edits made after update prepare when finalize writes members', async () => {
+  it('preserves agent edits made after update prepare when finalize writes members', async () => {
     memFiles['/tmp/source-concurrent/skills.yaml'] = [
       'sources:',
       '  - url: https://github.com/mattpocock/skills',
@@ -706,7 +706,7 @@ describe('source updates', () => {
       '    members:',
       '      - name: retained',
       '        entry: skills/retained/SKILL.md',
-      '        targets: [codex]',
+      '        agents: [codex]',
       'skills: []',
       '',
     ].join('\n')
@@ -731,7 +731,7 @@ describe('source updates', () => {
             {
               name: 'retained',
               entry: 'skills/retained/SKILL.md',
-              targets: ['codex'],
+              agents: ['codex'],
             },
           ],
         },
@@ -761,7 +761,7 @@ describe('source updates', () => {
       {
         name: 'retained',
         entry: 'skills/retained/SKILL.md',
-        targets: ['opencode'],
+        agents: ['opencode'],
       },
     ])
   })
@@ -781,7 +781,7 @@ describe('source updates', () => {
         '    members:',
         '      - name: old-skill',
         '        entry: skills/old-skill/SKILL.md',
-        '        targets: [codex]',
+        '        agents: [codex]',
         'skills: []',
         '',
       ].join('\n')
@@ -806,7 +806,7 @@ describe('source updates', () => {
               {
                 name: 'old-skill',
                 entry: 'skills/old-skill/SKILL.md',
-                targets: ['codex'],
+                agents: ['codex'],
               },
             ],
           },
@@ -825,7 +825,7 @@ describe('source updates', () => {
       expect(projectRepositoryMock).toHaveBeenCalledTimes(1)
       expect((yaml.load(memFiles[`${repo}/skills.yaml`]) as any).sources[0]).toMatchObject({
         pinned_commit: 'old-commit',
-        members: [{ name: 'old-skill', entry: 'skills/old-skill/SKILL.md', targets: ['codex'] }],
+        members: [{ name: 'old-skill', entry: 'skills/old-skill/SKILL.md', agents: ['codex'] }],
       })
 
       const retried = await app.request('/api/update/finalize', {
@@ -952,11 +952,11 @@ describe('source metadata', () => {
   })
 })
 
-describe('targets update', () => {
+describe('agents update', () => {
   const app = new Hono().route('/api', registerRoutes())
 
-  it('POST /api/skills/source-targets keeps separate invalid field error codes', async () => {
-    const res = await app.request('/api/skills/source-targets', {
+  it('POST /api/skills/source-agents keeps separate invalid field error codes', async () => {
+    const res = await app.request('/api/skills/source-agents', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -970,19 +970,19 @@ describe('targets update', () => {
     expect(await res.json()).toEqual({ ok: false, error: 'invalid_updates' })
   })
 
-  it('POST /api/mcp/targets updates targets for an mcp server', async () => {
+  it('POST /api/mcp/agents updates agents for an mcp server', async () => {
     memFiles['/tmp/r5/mcp.yaml'] =
-      '- id: srv1\n  type: stdio\n  command: echo\n  targets:\n    - claude-code\n'
-    const res = await app.request('/api/mcp/targets', {
+      '- id: srv1\n  type: stdio\n  command: echo\n  agents:\n    - claude-code\n'
+    const res = await app.request('/api/mcp/agents', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repo: '/tmp/r5', id: 'srv1', targets: ['claude-code', 'codex'] }),
+      body: JSON.stringify({ repo: '/tmp/r5', id: 'srv1', agents: ['claude-code', 'codex'] }),
     })
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.ok).toBe(true)
     const parsed = yaml.load(memFiles['/tmp/r5/mcp.yaml']) as any
-    expect(parsed[0].targets).toEqual(['claude-code', 'codex'])
+    expect(parsed[0].agents).toEqual(['claude-code', 'codex'])
   })
 
   it('PUT /api/mcp updates an existing server without changing its id', async () => {
@@ -1019,7 +1019,7 @@ describe('PUT /config', () => {
   const app = new Hono().route('/api', registerRoutes())
 
   it('PUT /api/config updates a repo-level config field', async () => {
-    memFiles['/tmp/r6/config.yaml'] = 'profile: local\ntargets:\n  - claude-code\n'
+    memFiles['/tmp/r6/config.yaml'] = 'profile: local\nagents:\n  - claude-code\n'
     const res = await app.request('/api/config', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },

@@ -84,7 +84,7 @@ vi.mock('@loom/core', async () => {
   return {
     ...actual,
     loadRepoManifest: vi.fn(() => ({
-      repoConfig: { targets: ['claude-code'] },
+      repoConfig: { agents: ['claude-code'] },
       errors: [],
       varsFiles: { default: {} },
     })),

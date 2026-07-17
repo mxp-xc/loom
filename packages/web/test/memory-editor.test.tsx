@@ -142,6 +142,24 @@ describe('MemoryEditor', () => {
     vi.clearAllMocks()
   })
 
+  it('keeps editing available without agent preview when agents are empty', () => {
+    render(
+      <MemoryEditor
+        repo="/repo"
+        name="default"
+        content="# Default"
+        agents={[]}
+        onSave={async () => {}}
+      />,
+    )
+
+    expect(screen.getByRole('tab', { name: '所见' })).toBeDefined()
+    expect(screen.getByRole('tab', { name: '源码' })).toBeDefined()
+    expect(screen.queryByRole('tab', { name: '解析预览' })).toBeNull()
+    expect(api.vars.getMatrix).not.toHaveBeenCalled()
+    expect(api.previewMemory).not.toHaveBeenCalled()
+  })
+
   it('uses the standard Markdown preview and Monaco for source editing', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
     const content = '| 场景 | 规则 |\n|---|---|\n| Memory | 使用 rich editor |'
@@ -150,7 +168,7 @@ describe('MemoryEditor', () => {
         repo="/repo"
         name="default"
         content={content}
-        targets={['codex']}
+        agents={['codex']}
         onSave={onSave}
       />,
     )
@@ -184,7 +202,7 @@ describe('MemoryEditor', () => {
         repo="/repo"
         name="default"
         content="# Original"
-        targets={['codex']}
+        agents={['codex']}
         onSave={onSave}
       />,
     )
@@ -207,7 +225,7 @@ describe('MemoryEditor', () => {
         repo="/repo"
         name="default"
         content=""
-        targets={['codex']}
+        agents={['codex']}
         onSave={async () => {}}
       />,
     )
@@ -254,7 +272,7 @@ describe('MemoryEditor', () => {
         repo="/repo"
         name="default"
         content=""
-        targets={['codex']}
+        agents={['codex']}
         onSave={async () => {}}
       />,
     )
@@ -276,7 +294,7 @@ describe('MemoryEditor', () => {
         repo="/repo"
         name="default"
         content="# Preview first"
-        targets={['codex']}
+        agents={['codex']}
         onSave={async () => {}}
       />,
     )
@@ -293,7 +311,7 @@ describe('MemoryEditor', () => {
         repo="/repo"
         name="default"
         content="<!-- CODEGRAPH_START -->\n\nVisible notes\n\n<!-- CODEGRAPH_END -->"
-        targets={['codex']}
+        agents={['codex']}
         onSave={async () => {}}
       />,
     )
@@ -311,7 +329,7 @@ describe('MemoryEditor', () => {
         repo="/repo"
         name="default"
         content={'[My Report](</abs/path/My Project/My Report.md:3>)\n\nContent after the link'}
-        targets={['codex']}
+        agents={['codex']}
         onSave={async () => {}}
       />,
     )
@@ -332,7 +350,7 @@ describe('MemoryEditor', () => {
         repo="/repo"
         name="default"
         content="# Saved"
-        targets={['codex']}
+        agents={['codex']}
         onSave={async () => {}}
       />,
     )
@@ -362,7 +380,7 @@ describe('MemoryEditor', () => {
           repo="/repo"
           name="default"
           content="raw"
-          targets={['codex']}
+          agents={['codex']}
           onSave={async () => {}}
         />,
       )
@@ -402,7 +420,7 @@ describe('MemoryEditor', () => {
           repo="/repo"
           name="default"
           content={missingMemory}
-          targets={['codex']}
+          agents={['codex']}
           onSave={async () => {}}
         />,
       )
@@ -437,7 +455,7 @@ describe('MemoryEditor', () => {
         repo="/repo"
         name="default"
         content="Memory"
-        targets={['codex']}
+        agents={['codex']}
         onSave={async () => {}}
       />,
     )
@@ -473,7 +491,7 @@ describe('MemoryEditor', () => {
           repo="/repo"
           name="default"
           content={'Use ' + '$' + '{ok}'}
-          targets={['codex']}
+          agents={['codex']}
           onSave={async () => {}}
         />,
       )

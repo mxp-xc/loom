@@ -6,10 +6,15 @@ import { useManifestOperations } from '@/hooks/useManifestOperations'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
 import { ErrorState } from '@/components/ErrorFeedback'
-import { normalizeOrder, normalizeSkillGroupOrder, type SkillSource } from '@loom/core'
+import {
+  applicableAgents,
+  normalizeOrder,
+  normalizeSkillGroupOrder,
+  type SkillSource,
+} from '@loom/core'
 import { api } from '@/lib/api'
 import SkillSourceList from './SkillSourceList'
-import GlobalTargetsBar from './GlobalTargetsBar'
+import GlobalAgentsBar from './GlobalAgentsBar'
 import SkillDetailEditor from './SkillDetailEditor'
 import EditSourceModal from './EditSourceModal'
 import AddSkillModal from './AddSkillModal'
@@ -53,6 +58,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
   const normalizedGroupOrder = manifest
     ? normalizeOrder(groupOrder, normalizeSkillGroupOrder(manifest.skills))
     : []
+  const visibleAgents = applicableAgents(manifest?.config?.agents, 'skills')
 
   const reorderGroups = async (ids: string[]) => {
     const previous = normalizedGroupOrder
@@ -163,9 +169,10 @@ export default function Skills({ repoPath }: { repoPath: string }) {
 
       {manifest && (
         <>
-          <GlobalTargetsBar manifest={manifest} operations={operations} />
+          <GlobalAgentsBar manifest={manifest} agents={visibleAgents} operations={operations} />
           <SkillSourceList
             manifest={manifest}
+            visibleAgents={visibleAgents}
             operations={operations}
             onOpenDetail={setDetail}
             onOpenScan={setEditSource}
@@ -181,6 +188,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
       <SkillDetailEditor
         repoPath={repoPath}
         detail={detail}
+        agents={visibleAgents}
         showToast={showToast}
         onClose={() => setDetail(null)}
       />

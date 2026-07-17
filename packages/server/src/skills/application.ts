@@ -11,10 +11,10 @@ import {
   removeLocalSkill as removeLocalSkillMutation,
   removeSource as removeSourceMutation,
   SOURCE_NAME_REGEX,
-  setLocalSkillTargets as setLocalSkillTargetsMutation,
-  setSkillTargets as setSkillTargetsMutation,
+  setLocalSkillAgents as setLocalSkillAgentsMutation,
+  setSkillAgents as setSkillAgentsMutation,
   setSourceMembers as setSourceMembersMutation,
-  setSourceMemberTargets as setSourceMemberTargetsMutation,
+  setSourceMemberAgents as setSourceMemberAgentsMutation,
   updateSourceMeta as updateSourceMetaMutation,
   type AgentId,
   type LocalSkill,
@@ -84,10 +84,10 @@ export interface ReconcileSourceCommand extends SourceMetaFields {
   preserve?: string[]
 }
 
-export interface SetSkillTargetsCommand {
+export interface SetSkillAgentsCommand {
   sourceUrl: string
   memberEntry: string
-  targets: AgentId[]
+  agents: AgentId[]
 }
 
 export class SkillsApplication {
@@ -325,7 +325,7 @@ export class SkillsApplication {
           name: member.name,
           path: member.entry,
           entry: member.entry,
-          targets: member.targets,
+          agents: member.agents,
         })),
         command.members.map((member) => ({
           name: member.name,
@@ -377,7 +377,7 @@ export class SkillsApplication {
         copied.push(dest)
         currentManifest.skills.push({
           id: name,
-          ...(previous?.targets ? { targets: previous.targets } : {}),
+          ...(previous?.agents ? { agents: previous.agents } : {}),
         })
       }
       const liveCacheMatchesCandidate =
@@ -477,31 +477,31 @@ export class SkillsApplication {
     }
   }
 
-  async setSkillTargets(repoPath: string, command: SetSkillTargetsCommand): Promise<void> {
+  async setSkillAgents(repoPath: string, command: SetSkillAgentsCommand): Promise<void> {
     const result = await this.updateManifest(repoPath, (manifest) =>
-      setSkillTargetsMutation(manifest, command.sourceUrl, command.memberEntry, command.targets),
+      setSkillAgentsMutation(manifest, command.sourceUrl, command.memberEntry, command.agents),
     )
     if (!result.changed) throw sourceNotFound(command.sourceUrl)
   }
 
-  async setSourceMemberTargets(
+  async setSourceMemberAgents(
     repoPath: string,
     sourceUrl: string,
-    updates: Array<{ memberEntry: string; targets: AgentId[] }>,
+    updates: Array<{ memberEntry: string; agents: AgentId[] }>,
   ): Promise<void> {
     const memberUpdates = updates.map((update) => ({
       memberEntry: String(update?.memberEntry ?? ''),
-      targets: Array.isArray(update?.targets) ? update.targets : [],
+      agents: Array.isArray(update?.agents) ? update.agents : [],
     }))
     const result = await this.updateManifest(repoPath, (manifest) =>
-      setSourceMemberTargetsMutation(manifest, sourceUrl, memberUpdates),
+      setSourceMemberAgentsMutation(manifest, sourceUrl, memberUpdates),
     )
     if (!result.changed) throw sourceNotFound(sourceUrl)
   }
 
-  async setLocalSkillTargets(repoPath: string, id: string, targets: AgentId[]): Promise<void> {
+  async setLocalSkillAgents(repoPath: string, id: string, agents: AgentId[]): Promise<void> {
     await this.updateManifest(repoPath, (manifest) =>
-      setLocalSkillTargetsMutation(manifest, id, targets),
+      setLocalSkillAgentsMutation(manifest, id, agents),
     )
   }
 

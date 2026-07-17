@@ -9,7 +9,7 @@ import type {
 } from '@loom/core'
 import {
   compareVersion,
-  planSourceProjectionForTargets,
+  planSourceProjectionForAgents,
   resourceSelectionState,
   type RemoteRef,
   type VersionStatus,
@@ -67,7 +67,7 @@ export interface ResourceBoundaryChange {
 }
 
 export interface ProjectionPathMove {
-  target: AgentId
+  agent: AgentId
   kind: SourceProjectionEntry['kind']
   sourcePath: string
   previousTargetPath?: string
@@ -190,18 +190,18 @@ export function compareProjectionPaths(
   nextTree: SourceTree,
   nextBundles: readonly ScannedSourceBundle[],
 ): ProjectionPathMove[] {
-  const targets = new Set(
-    (source.members ?? []).flatMap((member) => member.targets ?? []),
+  const agents = new Set(
+    (source.members ?? []).flatMap((member) => member.agents ?? []),
   ) as Set<AgentId>
-  if (targets.size === 0) return []
+  if (agents.size === 0) return []
   const previousEntries = new Set(bundleMembers(previousTree.nodes).map(({ entry }) => entry))
-  const previousPlans = planSourceProjectionForTargets(
+  const previousPlans = planSourceProjectionForAgents(
     {
       ...source,
       members: (source.members ?? []).filter(({ entry }) => previousEntries.has(entry)),
       sourceTree: previousTree,
     },
-    targets,
+    agents,
   )
   const nextBundleEntries = new Set(nextBundles.map(({ entry }) => entry))
   const nextMembers = (source.members ?? [])
@@ -210,9 +210,9 @@ export function compareProjectionPaths(
       ...member,
       name: nextBundles.find(({ entry }) => entry === member.entry)?.name ?? member.name,
     }))
-  const nextPlans = planSourceProjectionForTargets(
+  const nextPlans = planSourceProjectionForAgents(
     { ...source, members: nextMembers, sourceTree: nextTree },
-    targets,
+    agents,
   )
   const previous = projectionEntryMap(previousPlans)
   const next = projectionEntryMap(nextPlans)
@@ -223,14 +223,14 @@ export function compareProjectionPaths(
     const before = previous.get(key)
     const after = next.get(key)
     if (before?.targetPath === after?.targetPath) return []
-    const [target, kind, sourcePath] = key.split('\0') as [
+    const [agent, kind, sourcePath] = key.split('\0') as [
       AgentId,
       SourceProjectionEntry['kind'],
       string,
     ]
     return [
       {
-        target,
+        agent,
         kind,
         sourcePath,
         ...(before ? { previousTargetPath: before.targetPath } : {}),
@@ -241,12 +241,12 @@ export function compareProjectionPaths(
 }
 
 function projectionEntryMap(
-  plans: ReturnType<typeof planSourceProjectionForTargets>,
+  plans: ReturnType<typeof planSourceProjectionForAgents>,
 ): Map<string, SourceProjectionEntry> {
   return new Map(
     plans.flatMap((plan) =>
       plan.entries.map(
-        (entry) => [`${plan.target}\0${entry.kind}\0${entry.sourcePath}`, entry] as const,
+        (entry) => [`${plan.agent}\0${entry.kind}\0${entry.sourcePath}`, entry] as const,
       ),
     ),
   )

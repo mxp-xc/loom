@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { executeProjection } from '../../src/projection/executor'
 import { createProjectionDeps } from '../../src/projection/deps'
 import { NodeFileSystem } from '../../src/platform/node/fs'
-import { ClaudeCodeAdapter } from '../../src/adapters/claude-code'
+import { GenericMcpAdapter } from '../../src/adapters/mcp'
+import { agentMcpFile } from '../../src/adapters/paths'
 import {
   resolveLayeredVars,
   type ProjectionPlan,
@@ -16,6 +17,12 @@ import {
 
 let home: string
 let srcDir: string
+class ClaudeCodeAdapter extends GenericMcpAdapter {
+  constructor() {
+    super('claude-code', agentMcpFile('claude-code'))
+  }
+}
+
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'home-'))
   vi.stubEnv('HOME', home)
@@ -33,18 +40,18 @@ afterEach(async () => {
 })
 
 const plan: ProjectionPlan = {
-  links: [{ skillId: 'frontend-design', source: 'local', targets: ['claude-code'] }],
-  mcpEntries: [{ id: 'playwright', targets: ['claude-code'] }],
-  memoryPlan: { active: null, content: null, targets: [] },
+  links: [{ skillId: 'frontend-design', source: 'local', agents: ['claude-code'] }],
+  mcpEntries: [{ id: 'playwright', agents: ['claude-code'] }],
+  memoryPlan: { active: null, content: null, agents: [] },
   skippedAgents: [],
   strategy: 'link',
 }
 const manifest: Manifest = {
   skills: { sources: [], skills: [{ id: 'frontend-design' }] },
-  mcp: [{ id: 'playwright', type: 'stdio', command: 'npx', args: ['p'], targets: ['claude-code'] }],
+  mcp: [{ id: 'playwright', type: 'stdio', command: 'npx', args: ['p'], agents: ['claude-code'] }],
   memory: { memories: [], active: null, activeContent: '' },
   vars: { default: {}, active: {} },
-  config: { targets: ['claude-code'] },
+  config: { agents: ['claude-code'] },
   errors: [],
 }
 const varsCtx = { env: {}, activeProfile: {}, defaultProfile: {} }
@@ -75,11 +82,11 @@ describe('executeProjection', () => {
         {
           skillId: 'superpowers/finishing-a-development-branch',
           source: { repoId: 'superpowers', memberName: 'finishing-a-development-branch' },
-          targets: ['claude-code'],
+          agents: ['claude-code'],
         },
       ],
       mcpEntries: [],
-      memoryPlan: { active: null, content: null, targets: [] },
+      memoryPlan: { active: null, content: null, agents: [] },
       skippedAgents: [],
       strategy: 'link',
     }
@@ -129,9 +136,9 @@ describe('executeProjection', () => {
     )
     expect(await fs.isLink(join(home, '.claude', 'skills', 'frontend-design'))).toBe(true)
     const disabledPlan: ProjectionPlan = {
-      links: [{ skillId: 'frontend-design', source: 'local', targets: [] }],
+      links: [{ skillId: 'frontend-design', source: 'local', agents: [] }],
       mcpEntries: [],
-      memoryPlan: { active: null, content: null, targets: [] },
+      memoryPlan: { active: null, content: null, agents: [] },
       skippedAgents: [],
       strategy: 'link',
     }
@@ -150,17 +157,17 @@ describe('executeProjection', () => {
     const manifestUndef: Manifest = {
       ...manifest,
       mcp: [
-        { id: 'broken', type: 'stdio', command: '${NOPE}', targets: ['claude-code'] },
-        { id: 'ok', type: 'stdio', command: 'npx', targets: ['claude-code'] },
+        { id: 'broken', type: 'stdio', command: '${NOPE}', agents: ['claude-code'] },
+        { id: 'ok', type: 'stdio', command: 'npx', agents: ['claude-code'] },
       ],
     }
     const planUndef: ProjectionPlan = {
       links: [],
       mcpEntries: [
-        { id: 'broken', targets: ['claude-code'] },
-        { id: 'ok', targets: ['claude-code'] },
+        { id: 'broken', agents: ['claude-code'] },
+        { id: 'ok', agents: ['claude-code'] },
       ],
-      memoryPlan: { active: null, content: null, targets: [] },
+      memoryPlan: { active: null, content: null, agents: [] },
       skippedAgents: [],
       strategy: 'link',
     }
@@ -181,7 +188,7 @@ describe('executeProjection', () => {
     const fs = new NodeFileSystem()
     const manifestVars: Manifest = {
       ...manifest,
-      mcp: [{ id: 'playwright', type: 'stdio', command: '${command}', targets: ['claude-code'] }],
+      mcp: [{ id: 'playwright', type: 'stdio', command: '${command}', agents: ['claude-code'] }],
     }
     const res = await executeProjection(
       plan,
@@ -264,7 +271,7 @@ describe('executeProjection', () => {
     expect(await fs.isLink(dest)).toBe(false)
     expect(await fs.exists(join(dest, 'SKILL.md'))).toBe(true)
   })
-  it('strategy:copy removes stale copied source members when targets are cleared', async () => {
+  it('strategy:copy removes stale copied source members when agents are cleared', async () => {
     const fs = new NodeFileSystem()
     const remoteSkillDir = join(srcDir, 'remote-member')
     await mkdir(remoteSkillDir, { recursive: true })
@@ -274,11 +281,11 @@ describe('executeProjection', () => {
         {
           skillId: 'superpowers/executing-plans',
           source: { repoId: 'superpowers', memberName: 'executing-plans' },
-          targets: ['claude-code'],
+          agents: ['claude-code'],
         },
       ],
       mcpEntries: [],
-      memoryPlan: { active: null, content: null, targets: [] },
+      memoryPlan: { active: null, content: null, agents: [] },
       skippedAgents: [],
       strategy: 'copy',
     }
@@ -295,7 +302,7 @@ describe('executeProjection', () => {
     expect(await fs.exists(join(dest, 'SKILL.md'))).toBe(true)
 
     const cleared = await executeProjection(
-      { ...sourcePlan, links: [{ ...sourcePlan.links[0], targets: [] }] },
+      { ...sourcePlan, links: [{ ...sourcePlan.links[0], agents: [] }] },
       { ...manifest, mcp: [] },
       varsCtx,
       {
@@ -322,11 +329,11 @@ describe('executeProjection', () => {
         {
           skillId: 'openai-skills/brainstorming',
           source: { repoId: 'openai-skills', cacheId: 'superpowers', memberName: 'brainstorming' },
-          targets: ['claude-code'],
+          agents: ['claude-code'],
         },
       ],
       mcpEntries: [],
-      memoryPlan: { active: null, content: null, targets: [] },
+      memoryPlan: { active: null, content: null, agents: [] },
       skippedAgents: [],
       strategy: 'copy',
     }
@@ -366,7 +373,7 @@ describe('executeProjection', () => {
       sourceUrl: 'https://example.test/superpowers.git',
       cacheId: 'superpowers',
       commit: 'planned-commit',
-      target: 'claude-code',
+      agent: 'claude-code',
       projectionBase: '',
       entries: [],
     }
@@ -399,7 +406,7 @@ describe('executeProjection', () => {
       sourceUrl: 'https://example.test/superpowers.git',
       cacheId: 'superpowers',
       commit: 'planned-commit',
-      target: 'claude-code',
+      agent: 'claude-code',
       projectionBase: '',
       entries: [],
     }
@@ -419,11 +426,11 @@ describe('executeProjection', () => {
         {
           skillId: 'superpowers/executing-plans',
           source: { repoId: 'superpowers', memberName: 'executing-plans' },
-          targets: [],
+          agents: [],
         },
       ],
       mcpEntries: [],
-      memoryPlan: { active: null, content: null, targets: [] },
+      memoryPlan: { active: null, content: null, agents: [] },
       skippedAgents: [],
       strategy: 'copy',
     }

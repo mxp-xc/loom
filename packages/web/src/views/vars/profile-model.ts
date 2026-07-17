@@ -52,14 +52,13 @@ export type VarsProfileState = {
 }
 
 export type BuildVarsProfileStateInput = {
-  matricesByAgent: Record<AgentId, VarsMatrixResponse>
-  activeAgent: AgentId
-  definitionAgent: AgentId
+  defaultMatrix: VarsMatrixResponse
+  matricesByAgent: Partial<Record<AgentId, VarsMatrixResponse>>
+  agents: AgentId[]
+  activeAgent: AgentId | null
   definitionScope: VarsViewScope
   showAvailable: boolean
 }
-
-const agents: AgentId[] = ['claude-code', 'codex', 'opencode']
 
 export function entryValuePreview(
   entry: VarEntryInput | VarOverride | ResolvedVarEntry | undefined,
@@ -117,11 +116,12 @@ function diagnosticsFor(matrix: VarsMatrixResponse, key: string): VarsDiagnostic
 }
 
 function agentSlotsFor(
-  matricesByAgent: Record<AgentId, VarsMatrixResponse>,
+  matricesByAgent: Partial<Record<AgentId, VarsMatrixResponse>>,
+  agents: AgentId[],
   layer: 'baseAgent' | 'localAgent',
   key: string,
 ): AgentId[] {
-  return agents.filter((agent) => Boolean(matricesByAgent[agent].snapshot[layer][key]))
+  return agents.filter((agent) => Boolean(matricesByAgent[agent]?.snapshot[layer][key]))
 }
 
 function formatFor(entry: VarEntryInput | ResolvedVarEntry): StringFormat | undefined {
@@ -146,7 +146,8 @@ function buildBuiltinEntries(activeMatrix: VarsMatrixResponse): VarsProfileEntry
 }
 
 function buildBaseEntries(
-  matricesByAgent: Record<AgentId, VarsMatrixResponse>,
+  matricesByAgent: Partial<Record<AgentId, VarsMatrixResponse>>,
+  agents: AgentId[],
   activeMatrix: VarsMatrixResponse,
   scope: VarsViewScope,
 ): VarsProfileEntry[] {
@@ -160,21 +161,22 @@ function buildBaseEntries(
       format: formatFor(definition),
       valuePreview: entryValuePreview(value),
       state: 'configured',
-      agentSlots: agentSlotsFor(matricesByAgent, 'baseAgent', key),
+      agentSlots: agentSlotsFor(matricesByAgent, agents, 'baseAgent', key),
       diagnostics: diagnosticsFor(activeMatrix, key),
     }
   })
 }
 
 function buildLocalEntries(
-  matricesByAgent: Record<AgentId, VarsMatrixResponse>,
+  matricesByAgent: Partial<Record<AgentId, VarsMatrixResponse>>,
+  agents: AgentId[],
   activeMatrix: VarsMatrixResponse,
   scope: VarsViewScope,
   showAvailable: boolean,
 ): VarsProfileEntry[] {
   const configuredKeys = new Set<string>(Object.keys(activeMatrix.snapshot.local))
   for (const agent of agents) {
-    for (const key of Object.keys(matricesByAgent[agent].snapshot.localAgent))
+    for (const key of Object.keys(matricesByAgent[agent]?.snapshot.localAgent ?? {}))
       configuredKeys.add(key)
   }
 
@@ -191,7 +193,7 @@ function buildLocalEntries(
         format: formatFor(definition),
         valuePreview: entryValuePreview(localAgentValue ?? localValue),
         state: 'configured' as const,
-        agentSlots: agentSlotsFor(matricesByAgent, 'localAgent', key),
+        agentSlots: agentSlotsFor(matricesByAgent, agents, 'localAgent', key),
         diagnostics: diagnosticsFor(activeMatrix, key),
       }
     })
@@ -234,16 +236,20 @@ function buildResolvedRows(activeMatrix: VarsMatrixResponse): VarsResolvedRow[] 
 }
 
 export function buildVarsProfileState(input: BuildVarsProfileStateInput): VarsProfileState {
-  const activeMatrix = input.matricesByAgent[input.activeAgent]
-  const definitionMatrix = input.matricesByAgent[input.definitionAgent] ?? activeMatrix
+  const activeMatrix = input.activeAgent
+    ? (input.matricesByAgent[input.activeAgent] ?? input.defaultMatrix)
+    : input.defaultMatrix
+  const definitionMatrix = activeMatrix
   const builtinEntries = buildBuiltinEntries(definitionMatrix)
   const baseEntries = buildBaseEntries(
     input.matricesByAgent,
+    input.agents,
     definitionMatrix,
     input.definitionScope,
   )
   const localEntries = buildLocalEntries(
     input.matricesByAgent,
+    input.agents,
     definitionMatrix,
     input.definitionScope,
     input.showAvailable,

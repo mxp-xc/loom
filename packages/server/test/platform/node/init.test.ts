@@ -25,7 +25,7 @@ describe('initLoom', () => {
 
     const repoConfig = await fs.readFile(join(home, '.loom', 'repos', 'default', 'config.yaml'))
     expect(repoConfig).toContain('profile: local')
-    expect(repoConfig).toContain('targets:')
+    expect(repoConfig).toContain('agents:')
     expect(repoConfig).toContain('projection:')
 
     expect(await fs.exists(join(home, '.loom', 'repos', 'default', 'skills.yaml'))).toBe(true)

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import yaml from 'js-yaml'
 import { applyMcpImports, scanMcpImports, type McpImportScanResult } from '../../src/mcp/importer'
 import type { IFileSystem } from '../../src/ports/fs'
+import { AGENT_IDS } from '@loom/core'
 
 const files: Record<string, string> = {}
 
@@ -33,7 +34,19 @@ beforeEach(() => {
 })
 
 describe('scanMcpImports', () => {
-  it('merges same definitions by source targets and renames conflicting definitions', async () => {
+  it('treats an explicit empty source set as zero native reads', async () => {
+    files['/home/tester/.claude.json'] = JSON.stringify({
+      mcpServers: { browser: { type: 'stdio', command: 'npx' } },
+    })
+
+    const result = await scanMcpImports({ fs, repoPath: '/repo', sources: [], logger })
+
+    expect(result.sources).toEqual([])
+    expect(result.items).toEqual([])
+    expect(fs.readFile).not.toHaveBeenCalledWith('/home/tester/.claude.json')
+  })
+
+  it('merges same definitions by source agents and renames conflicting definitions', async () => {
     files['/home/tester/.claude.json'] = JSON.stringify({
       mcpServers: {
         browser: {
@@ -59,7 +72,7 @@ describe('scanMcpImports', () => {
       },
     })
 
-    const result = await scanMcpImports({ fs, repoPath: '/repo', logger })
+    const result = await scanMcpImports({ fs, repoPath: '/repo', sources: AGENT_IDS, logger })
 
     expect(result.ok).toBe(true)
     expect(result.sources.map((source) => [source.agent, source.status])).toEqual([
@@ -72,7 +85,7 @@ describe('scanMcpImports', () => {
         id: 'browser',
         finalId: 'browser',
         sourceAgents: ['claude-code', 'opencode'],
-        targets: ['claude-code', 'opencode'],
+        agents: ['claude-code', 'opencode'],
         status: 'ready',
         selectedByDefault: true,
         type: 'stdio',
@@ -83,7 +96,7 @@ describe('scanMcpImports', () => {
         id: 'browser',
         finalId: 'browser-cx',
         sourceAgents: ['codex'],
-        targets: ['codex'],
+        agents: ['codex'],
         status: 'renamed',
         selectedByDefault: true,
         type: 'http',
@@ -97,7 +110,7 @@ describe('scanMcpImports', () => {
 
   it('keeps existing desired entries and reports missing or broken sources without aborting scan', async () => {
     files['/repo/mcp.yaml'] = yaml.dump([
-      { id: 'browser', type: 'stdio', command: 'npx', targets: ['codex'] },
+      { id: 'browser', type: 'stdio', command: 'npx', agents: ['codex'] },
       { id: 'remote', type: 'http', url: 'https://existing.example/mcp' },
     ])
     files['/home/tester/.claude.json'] = JSON.stringify({
@@ -108,7 +121,7 @@ describe('scanMcpImports', () => {
     })
     files['/home/tester/.codex/config.toml'] = 'not = [valid'
 
-    const result = await scanMcpImports({ fs, repoPath: '/repo', logger })
+    const result = await scanMcpImports({ fs, repoPath: '/repo', sources: AGENT_IDS, logger })
 
     expect(result.sources.map((source) => [source.agent, source.status])).toEqual([
       ['claude-code', 'ready'],
@@ -124,7 +137,7 @@ describe('scanMcpImports', () => {
         id: 'browser',
         finalId: 'browser',
         sourceAgents: ['claude-code'],
-        targets: ['claude-code'],
+        agents: ['claude-code'],
         status: 'ready',
         selectedByDefault: true,
         type: 'stdio',
@@ -135,7 +148,7 @@ describe('scanMcpImports', () => {
         id: 'remote',
         finalId: 'remote-cc',
         sourceAgents: ['claude-code'],
-        targets: ['claude-code'],
+        agents: ['claude-code'],
         status: 'renamed',
         selectedByDefault: true,
         type: 'sse',
@@ -194,7 +207,7 @@ describe('applyMcpImports', () => {
     expect(result).toMatchObject({ ok: true, imported: 1, renamed: 0, ignoredFields: 0 })
     expect(files['/home/tester/.claude.json']).toBe(nativeBefore)
     expect(yaml.load(files['/repo/mcp.yaml'])).toEqual([
-      { id: 'browser', type: 'stdio', command: 'npx', targets: ['claude-code'] },
+      { id: 'browser', type: 'stdio', command: 'npx', agents: ['claude-code'] },
     ])
   })
 
@@ -234,7 +247,7 @@ function simplifyItems(result: McpImportScanResult) {
     id: item.id,
     finalId: item.finalId,
     sourceAgents: item.sourceAgents,
-    targets: item.targets,
+    agents: item.agents,
     status: item.status,
     selectedByDefault: item.selectedByDefault,
     type: item.server?.type,

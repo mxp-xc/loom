@@ -1,6 +1,7 @@
 import type { IFileSystem } from '../../ports/fs.js'
 import type { IGit } from '../../ports/git.js'
 import { join } from 'node:path'
+import { AGENT_IDS } from '@loom/core'
 
 const SKELETON = {
   configLocal: `active_repo: default\n`,
@@ -8,7 +9,7 @@ const SKELETON = {
   skills: `sources: []\nskills: []\n`,
   mcp: `[]\n`,
   varsBase: `# base vars\n# browsers_path:\n#   type: string\n#   format: path\n#   value: ~/.cache/ms-playwright\n`,
-  repoConfig: `# repo-level config (synced via git)\nprofile: local\ntargets: [claude-code, codex, opencode]\nprojection:\n  strategy: link\nupdate_check:\n  enabled: true\n  interval: 6h\n`,
+  repoConfig: `# repo-level config (synced via git)\nprofile: local\nagents: [${AGENT_IDS.join(', ')}]\nprojection:\n  strategy: link\nupdate_check:\n  enabled: true\n  interval: 6h\n`,
 }
 
 export async function initLoom(homePath: string, fs: IFileSystem, git: IGit): Promise<void> {

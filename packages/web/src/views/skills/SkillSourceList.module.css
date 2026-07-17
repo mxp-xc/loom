@@ -126,11 +126,11 @@
   flex-shrink: 0;
   flex-wrap: nowrap;
 }
-.source-target-chips {
+.source-agent-chips {
   gap: 5px;
   flex-wrap: nowrap;
 }
-.source-target-chip {
+.source-agent-chip {
   flex-shrink: 0;
 }
 .source-actions-divider {
@@ -489,8 +489,8 @@
 }
 .source-type-badge.tag {
   background: rgba(139, 92, 246, 0.14);
-  color: var(--oc);
-  border-color: color-mix(in srgb, var(--oc) 30%, transparent);
+  color: var(--source-tag);
+  border-color: color-mix(in srgb, var(--source-tag) 30%, transparent);
 }
 .danger-confirm {
   display: grid;

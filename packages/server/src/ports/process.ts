@@ -1,3 +1,3 @@
 export interface IProcess {
-  isInstalled(agentId: string): Promise<boolean>
+  isCommandInstalled(command: string): Promise<boolean>
 }

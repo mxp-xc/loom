@@ -4,7 +4,15 @@ import { applyMcpImports, scanMcpImports } from '../../mcp/importer.js'
 import { logger } from '../../lib/logger.js'
 import { resolveRepoPath } from '../repo.js'
 import type { RouteDeps } from '../router.js'
-import { AgentIdSchema } from '@loom/core'
+import {
+  AgentIdSchema,
+  applicableAgents,
+  loadRepoManifest,
+  mergeConfig,
+  type AgentId,
+} from '@loom/core'
+import { readLocalConfig, readRepoFiles } from '../repo-config.js'
+import { runtimeAgentPathContext } from '../../adapters/paths.js'
 
 const apiLogger = logger.child('api.mcp-import')
 const NonEmptyString = z.string().min(1)
@@ -29,7 +37,16 @@ export function createMcpImportRoutes(deps: RouteDeps): Hono {
     try {
       const { repo, sources } = parseImportBody(await c.req.json(), ImportScanBody, 'scan')
       const repoPath = await resolveImportRepo(deps, repo, 'scan')
-      return c.json(await scanMcpImports({ fs: deps.fs, repoPath, sources, logger: importLogger }))
+      const resolvedSources = await resolveImportSources(deps, repoPath, sources)
+      return c.json(
+        await scanMcpImports({
+          fs: deps.fs,
+          repoPath,
+          sources: resolvedSources,
+          pathContext: runtimeAgentPathContext(deps.home),
+          logger: importLogger,
+        }),
+      )
     } catch (err) {
       if (err instanceof ImportRouteError) {
         apiLogger.error(err.logMessage, { err, ...(err.context ?? {}) })
@@ -47,11 +64,13 @@ export function createMcpImportRoutes(deps: RouteDeps): Hono {
     try {
       const { repo, sources, keys } = parseImportBody(await c.req.json(), ImportApplyBody, 'apply')
       const repoPath = await resolveImportRepo(deps, repo, 'apply')
+      const resolvedSources = await resolveImportSources(deps, repoPath, sources)
       const result = await applyMcpImports({
         fs: deps.fs,
         repoPath,
-        sources,
+        sources: resolvedSources,
         keys,
+        pathContext: runtimeAgentPathContext(deps.home),
         logger: importLogger,
       })
       if (!result.ok) return c.json(result, 409)
@@ -70,6 +89,17 @@ export function createMcpImportRoutes(deps: RouteDeps): Hono {
   })
 
   return app
+}
+
+async function resolveImportSources(
+  deps: RouteDeps,
+  repoPath: string,
+  sources: AgentId[] | undefined,
+): Promise<AgentId[]> {
+  if (sources !== undefined) return applicableAgents(sources, 'mcp')
+  const repo = loadRepoManifest(await readRepoFiles(deps.fs, repoPath))
+  const local = await readLocalConfig(deps.fs, deps.home)
+  return applicableAgents(mergeConfig(repo.repoConfig, local).agents, 'mcp')
 }
 
 async function resolveImportRepo(

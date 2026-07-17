@@ -9,7 +9,7 @@ export interface McpFragment {
   env?: Record<string, string>
   url?: string
   headers?: Record<string, string>
-  targets?: AgentId[]
+  agents?: AgentId[]
 }
 export type UndoAction =
   | { kind: 'unlink'; path: string }
@@ -26,6 +26,7 @@ export interface ProjectionFailure {
 }
 export interface IAgentAdapter {
   readonly agent: AgentId
+  readonly path: string
   readMcp(fs: IFileSystem): Promise<Record<string, McpFragment>>
   writeMcp(fs: IFileSystem, merged: Record<string, McpFragment>): Promise<void>
 }

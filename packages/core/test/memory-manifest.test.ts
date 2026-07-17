@@ -33,14 +33,14 @@ describe('memory manifest', () => {
     expect(mf.errors.some((e) => e.includes('active_memory'))).toBe(true)
   })
 
-  it('derives target assignments for multiple memories', () => {
+  it('derives agent assignments for multiple memories', () => {
     const rm = loadRepoManifest({
       'config.yaml': [
-        'targets:',
+        'agents:',
         '  - claude-code',
         '  - codex',
         '  - opencode',
-        'memory_targets:',
+        'memory_agents:',
         '  claude-code: team',
         '  codex: team',
         '  opencode: personal',
@@ -56,26 +56,26 @@ describe('memory manifest', () => {
       codex: 'team',
       opencode: 'personal',
     })
-    expect(mf.memory.memories.find((memory) => memory.name === 'team')?.targets).toEqual([
+    expect(mf.memory.memories.find((memory) => memory.name === 'team')?.agents).toEqual([
       'claude-code',
       'codex',
     ])
-    expect(mf.memory.memories.find((memory) => memory.name === 'personal')?.targets).toEqual([
+    expect(mf.memory.memories.find((memory) => memory.name === 'personal')?.agents).toEqual([
       'opencode',
     ])
   })
 
-  it('records invalid memory target references without assigning them', () => {
+  it('records invalid memory agent references without assigning them', () => {
     const rm = loadRepoManifest({
-      'config.yaml': ['memory_targets:', '  codex: missing', '  unknown-agent: team'].join('\n'),
+      'config.yaml': ['memory_agents:', '  codex: missing', '  unknown-agent: team'].join('\n'),
       'memories/team.md': '# team',
     })
 
     const mf = buildManifest(rm, {})
 
     expect(mf.memory.assignments).toEqual({})
-    expect(mf.errors).toContain('memory_targets.codex references unknown memory: missing')
-    expect(mf.errors).toContain('memory_targets references unknown target: unknown-agent')
+    expect(mf.errors).toContain('memory_agents.codex references unknown memory: missing')
+    expect(mf.errors).toContain('memory_agents references unknown agent: unknown-agent')
   })
 
   it('no memories dir: empty list, active=null, no error', () => {

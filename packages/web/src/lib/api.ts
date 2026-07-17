@@ -40,7 +40,7 @@ export interface McpImportItem {
   finalId: string
   server?: McpServer
   sourceAgents: AgentId[]
-  targets: AgentId[]
+  agents: AgentId[]
   status: 'ready' | 'renamed' | 'disabled' | 'unchanged'
   selectedByDefault: boolean
   ignoredFields: string[]
@@ -65,7 +65,7 @@ export interface McpDebugTool {
   inputSchema?: unknown
 }
 
-export type McpDebugPreviewTarget = 'default' | AgentId
+export type McpDebugPreviewAgent = 'default' | AgentId
 
 export type CreateMcpDebugSessionResponse =
   | {
@@ -73,7 +73,7 @@ export type CreateMcpDebugSessionResponse =
       sessionId: string
       source: 'saved' | 'draft'
       serverFingerprint: string
-      previewTarget: McpDebugPreviewTarget
+      previewAgent: McpDebugPreviewAgent
       tools: McpDebugTool[]
       createdAt: string
       idleExpiresAt: string
@@ -305,11 +305,11 @@ export const api = {
       changes: {
         added: Array<{ name: string }>
         updated: Array<{ name: string }>
-        removed: Array<{ name: string; targets?: string[] }>
+        removed: Array<{ name: string; agents?: string[] }>
       }
       resourceBoundaryChanges: Array<{ name: string; entry: string; path: string }>
       pathMoves: Array<{
-        target: AgentId
+        agent: AgentId
         kind: 'bundle' | 'resource-file' | 'resource-directory'
         sourcePath: string
         previousTargetPath?: string
@@ -399,7 +399,7 @@ export const api = {
       url?: string
       headers?: Record<string, string>
       env?: Record<string, string>
-      targets?: string[]
+      agents?: string[]
     }
   }) => post('/mcp', body).then(json),
   updateMcpServer: (body: { repo: string; id: string; server: unknown }) =>
@@ -414,8 +414,8 @@ export const api = {
     post('/mcp/import/apply', body).then(json) as Promise<McpImportApplyResponse>,
   createMcpDebugSession: (
     body:
-      | { repo: string; source: 'saved'; serverId: string; previewTarget: McpDebugPreviewTarget }
-      | { repo: string; source: 'draft'; draft: McpServer; previewTarget: McpDebugPreviewTarget },
+      | { repo: string; source: 'saved'; serverId: string; previewAgent: McpDebugPreviewAgent }
+      | { repo: string; source: 'draft'; draft: McpServer; previewAgent: McpDebugPreviewAgent },
   ) => post('/mcp/debug/sessions', body).then(json) as Promise<CreateMcpDebugSessionResponse>,
   callMcpDebugTool: (
     sessionId: string,
@@ -501,25 +501,25 @@ export const api = {
       changes: {
         added: Array<{ name: string }>
         updated: Array<{ name: string }>
-        removed: Array<{ name: string; targets?: string[] }>
+        removed: Array<{ name: string; agents?: string[] }>
       }
       preserved?: string[]
     }>,
-  updateMcpTargets: (body: { repo: string; id: string; targets: string[] }) =>
-    post('/mcp/targets', body).then(json),
-  updateSkillTargets: (body: {
+  updateMcpAgents: (body: { repo: string; id: string; agents: string[] }) =>
+    post('/mcp/agents', body).then(json),
+  updateSkillAgents: (body: {
     repo: string
     sourceUrl: string
     memberEntry: string
-    targets: string[]
-  }) => post('/skills/targets', body).then(json),
-  updateSourceSkillTargets: (body: {
+    agents: string[]
+  }) => post('/skills/agents', body).then(json),
+  updateSourceSkillAgents: (body: {
     repo: string
     sourceUrl: string
-    updates: Array<{ memberEntry: string; targets: string[] }>
-  }) => post('/skills/source-targets', body).then(json),
-  updateLocalSkillTargets: (body: { repo: string; id: string; targets: string[] }) =>
-    post('/skills/local/targets', body).then(json),
+    updates: Array<{ memberEntry: string; agents: string[] }>
+  }) => post('/skills/source-agents', body).then(json),
+  updateLocalSkillAgents: (body: { repo: string; id: string; agents: string[] }) =>
+    post('/skills/local/agents', body).then(json),
   reorderSkillGroups: (body: { repo: string; ids: string[] }) =>
     put('/skills/order', body).then(json) as Promise<{ ok: true; ids: string[] }>,
   reorderMcpServers: (body: { repo: string; ids: string[] }) =>
@@ -527,7 +527,7 @@ export const api = {
 
   getMemory: (repo: string) =>
     fetch(`${base}/memory?repo=${encodeURIComponent(repo)}`).then(json) as Promise<{
-      memories: Array<{ name: string; targets: string[] }>
+      memories: Array<{ name: string; agents: string[] }>
       assignments: Partial<Record<string, string>>
       active: string | null
       activeContent: string
@@ -551,8 +551,8 @@ export const api = {
     post('/memory/rename', body).then(json),
   setMemoryActive: (body: { repo: string; name: string | null }) =>
     post('/memory/active', body).then(json),
-  updateMemoryTarget: (body: { repo: string; target: string; name: string | null }) =>
-    put('/memory/target', body).then(json) as Promise<{
+  updateMemoryAgent: (body: { repo: string; agent: string; name: string | null }) =>
+    put('/memory/agent', body).then(json) as Promise<{
       ok: true
       assignments: Partial<Record<string, string>>
     }>,

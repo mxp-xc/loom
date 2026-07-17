@@ -1,15 +1,14 @@
 import { join, dirname, isAbsolute, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
-import { ClaudeCodeAdapter } from '../adapters/claude-code.js'
-import { CodexAdapter } from '../adapters/codex.js'
-import { OpenCodeAdapter } from '../adapters/opencode.js'
+import { createAgentMcpAdapter } from '../adapters/mcp.js'
 import type { ProjectionDeps } from './executor.js'
-import type { AgentId } from '@loom/core'
+import { agentsSupporting, type AgentId } from '@loom/core'
 import { logger } from '../lib/logger.js'
 import { cacheDirFor, skillPathFor } from '../remote/cache.js'
 import type { IFileSystem } from '../ports/fs.js'
 import type { IGit } from '../ports/git.js'
 import type { IProcess } from '../ports/process.js'
+import { runtimeAgentPathContext } from '../adapters/paths.js'
 
 const projectionLogger = logger.child('projection')
 
@@ -21,6 +20,7 @@ export function createProjectionDeps(
 ): ProjectionDeps {
   const stateFile = join(home, '.loom', 'state', basenameRepo(repoPath), 'projected-mcp.json')
   const fs = platform.fs
+  const pathContext = runtimeAgentPathContext(home)
   const readState = async (): Promise<Record<string, string[]>> => {
     try {
       return JSON.parse(await fs.readFile(stateFile)) as Record<string, string[]>
@@ -37,11 +37,10 @@ export function createProjectionDeps(
   return {
     fs,
     ownerRepo: sha256(resolve(repoPath)),
-    adapters: {
-      'claude-code': new ClaudeCodeAdapter(),
-      codex: new CodexAdapter(),
-      opencode: new OpenCodeAdapter(),
-    },
+    adapters: Object.fromEntries(
+      agentsSupporting('mcp').map((agent) => [agent, createAgentMcpAdapter(agent, pathContext)]),
+    ),
+    pathContext,
     installedAgents,
     resolveSkillSrc: (link) => {
       if (link.source === 'local') return join(repoPath, 'assets', 'skills', link.skillId)

@@ -46,6 +46,8 @@ Implications:
 - Override value 必须符合 base definition 的类型。
 - Builtin runtime vars 不写入磁盘，且用户不能定义 `LOOM_*` key。
 - Default 解析上下文只合并 base 与 local，不包含 agent override 或 builtin runtime。
+- Vars 页面始终加载 Default matrix，并只加载 Configured agents 的 agent matrices；空配置时仍可编辑 Base/Local Default 槽位。
+- Vars 的 agent slots 和 modal choices 只枚举 Configured agents；隐藏的 agent override 文件不删除，重新配置后恢复显示。
 
 Safety:
 

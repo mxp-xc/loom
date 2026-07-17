@@ -48,14 +48,14 @@ function matrix(agent: AgentId, overrides: Partial<VarsMatrixResponse['resolutio
 }
 
 describe('MCP preview model', () => {
-  it('renders server fields with the selected target vars without mutating targets', () => {
+  it('renders server fields with the selected agent vars without mutating agents', () => {
     const server: McpServer = {
       id: 'playwright',
       type: 'stdio',
       command: 'npx',
       args: ['${browsers_path}'],
       env: { PLAYWRIGHT_BROWSERS_PATH: '${browsers_path}', LOOM_AGENT: '${LOOM_AGENT}' },
-      targets: ['codex'],
+      agents: ['codex'],
     }
     const preview = buildResolvedMcpServer(server, 'opencode', matrix('opencode'))
     expect(preview.server.args).toContain('/preview/opencode/browsers')
@@ -63,7 +63,7 @@ describe('MCP preview model', () => {
       PLAYWRIGHT_BROWSERS_PATH: '/preview/opencode/browsers',
       LOOM_AGENT: 'opencode',
     })
-    expect(server.targets).toEqual(['codex'])
+    expect(server.agents).toEqual(['codex'])
     expect(preview.diagnostics).toEqual([])
   })
 
@@ -74,7 +74,7 @@ describe('MCP preview model', () => {
       url: 'https://example.test/${workspace}',
       env: { REQUEST_TIMEOUT: '15s' },
       headers: { Authorization: 'Bearer ${LOOM_AGENT}' },
-      targets: [],
+      agents: [],
     }
     const cc = buildMcpSettingsPreview(server, 'claude-code', matrix('claude-code')).text
     const cx = buildMcpSettingsPreview(server, 'codex', matrix('codex')).text

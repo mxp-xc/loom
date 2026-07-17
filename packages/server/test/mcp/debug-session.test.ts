@@ -33,14 +33,14 @@ describe('McpDebugSessionManager', () => {
 
     const session = await manager.createSession({
       source: 'saved',
-      previewTarget: 'codex',
+      previewAgent: 'codex',
       server: { id: 'reqable', type: 'stdio', command: 'mcp-server' },
     })
 
     expect(session).toMatchObject({
       sessionId: 'debug-1',
       source: 'saved',
-      previewTarget: 'codex',
+      previewAgent: 'codex',
       tools: [{ name: 'capture_live_filter', description: 'Filter captures' }],
       createdAt: '1970-01-01T00:00:01.000Z',
       idleExpiresAt: '1970-01-01T00:00:06.000Z',
@@ -82,7 +82,7 @@ describe('McpDebugSessionManager', () => {
     await expect(
       manager.createSession({
         source: 'saved',
-        previewTarget: 'codex',
+        previewAgent: 'codex',
         server: { id: 'broken', type: 'stdio', command: 'missing' },
       }),
     ).rejects.toMatchObject({ code: 'list_tools_failed' })
@@ -110,13 +110,13 @@ describe('McpDebugSessionManager', () => {
 
     await manager.createSession({
       source: 'saved',
-      previewTarget: 'codex',
+      previewAgent: 'codex',
       server: { id: 'idle-server', type: 'stdio', command: 'mcp-server' },
     })
     now += 500
     await manager.createSession({
       source: 'draft',
-      previewTarget: 'codex',
+      previewAgent: 'codex',
       server: { id: 'hard-server', type: 'stdio', command: 'mcp-server' },
     })
 
@@ -152,7 +152,7 @@ describe('McpDebugSessionManager', () => {
 
     await manager.createSession({
       source: 'saved',
-      previewTarget: 'codex',
+      previewAgent: 'codex',
       server: { id: 'reqable', type: 'stdio', command: 'mcp-server' },
     })
     await manager.disconnect('cleanup')

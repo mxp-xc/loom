@@ -6,9 +6,9 @@ const files = {
   'skills.yaml':
     'sources:\n  - url: github:obra/superpowers\n    ref: v5.1.4\nskills:\n  - id: frontend-design\n',
   'mcp.yaml':
-    '- id: playwright\n  type: stdio\n  command: npx\n  args: ["p"]\n  targets: [claude-code]\n',
+    '- id: playwright\n  type: stdio\n  command: npx\n  args: ["p"]\n  agents: [claude-code]\n',
   'vars/default.yaml': 'browsers_path: ~/.cache/ms-playwright\n',
-  'config.yaml': 'profile: local\ntargets: [claude-code, codex]\nprojection:\n  strategy: link\n',
+  'config.yaml': 'profile: local\nagents: [claude-code, codex]\nprojection:\n  strategy: link\n',
 }
 
 describe('loadRepoManifest', () => {
@@ -20,7 +20,7 @@ describe('loadRepoManifest', () => {
       format: 'legacy',
       entries: { browsers_path: { type: 'string', value: '~/.cache/ms-playwright' } },
     })
-    expect(m.repoConfig.targets).toEqual(['claude-code', 'codex'])
+    expect(m.repoConfig.agents).toEqual(['claude-code', 'codex'])
   })
 })
 
@@ -53,12 +53,28 @@ describe('validateManifest (zod discriminatedUnion)', () => {
     })
     expect(validateManifest(m).some((e) => e.includes('url'))).toBe(true)
   })
-  it('accepts mcp without targets', () => {
+  it('accepts mcp without agents', () => {
     const m = loadRepoManifest({
       'mcp.yaml': '- id: x\n  type: stdio\n  command: c\n',
       'skills.yaml': 'sources: []\nskills: []\n',
     })
     expect(validateManifest(m)).toHaveLength(0)
+  })
+  it('rejects unknown fields in mcp definitions', () => {
+    const m = loadRepoManifest({
+      'mcp.yaml': '- id: x\n  type: stdio\n  command: c\n  agentz: [codex]\n',
+      'skills.yaml': 'sources: []\nskills: []\n',
+    })
+    expect(validateManifest(m)).toEqual([
+      expect.stringContaining("mcp[0].: Unrecognized key(s) in object: 'agentz'"),
+    ])
+  })
+  it('rejects unknown agents in local skills', () => {
+    const m = loadRepoManifest({
+      'mcp.yaml': '[]\n',
+      'skills.yaml': 'sources: []\nskills:\n  - id: local\n    agents: [hermes]\n',
+    })
+    expect(validateManifest(m)).toEqual([expect.stringContaining('skills.skills[0].agents.0')])
   })
   it('flags source missing ref', () => {
     const m = loadRepoManifest({
@@ -174,7 +190,7 @@ describe('validateManifest (zod discriminatedUnion)', () => {
 
 describe('mergeConfig (two-level, deep merge)', () => {
   it('local overrides repo top-level field', () => {
-    expect(mergeConfig({ profile: 'a', targets: ['claude-code'] }, { profile: 'b' }).profile).toBe(
+    expect(mergeConfig({ profile: 'a', agents: ['claude-code'] }, { profile: 'b' }).profile).toBe(
       'b',
     )
   })
@@ -186,7 +202,7 @@ describe('mergeConfig (two-level, deep merge)', () => {
     expect(r.proxy).toEqual({ http: 'L', https: 'r', no_proxy: 'n' })
   })
   it('array is replaced wholesale, not element-merged', () => {
-    expect(mergeConfig({ targets: ['claude-code'] }, { targets: ['codex'] }).targets).toEqual([
+    expect(mergeConfig({ agents: ['claude-code'] }, { agents: ['codex'] }).agents).toEqual([
       'codex',
     ])
   })
@@ -216,11 +232,11 @@ describe('buildManifest (RepoManifest -> Manifest)', () => {
           },
         },
       },
-      repoConfig: { profile: 'local', targets: ['claude-code'] },
+      repoConfig: { profile: 'local', agents: ['claude-code'] },
       memoriesFiles: {},
     }
-    const m = buildManifest(repo, { targets: ['codex'] })
-    expect(m.config.targets).toEqual(['codex'])
+    const m = buildManifest(repo, { agents: ['codex'] })
+    expect(m.config.agents).toEqual(['codex'])
     expect(m.config.profile).toBe('local')
     expect(m.vars.default).toEqual({ a: 'd' })
     expect(m.vars.active).toEqual({ a: '2', b: 'true', c: '{"nested":"x"}' })

@@ -1,4 +1,11 @@
-import type { AgentId, McpServer } from '@loom/core'
+import {
+  formatAgentFallbackPath,
+  getMcpCodec,
+  getAgent,
+  toNativeMcpEntry,
+  type AgentId,
+  type McpServer,
+} from '@loom/core'
 import type { VarsDiagnostic, VarsLayerRef, VarsMatrixResponse } from '@/lib/vars'
 import { agentName } from '@/lib/agents'
 
@@ -20,8 +27,9 @@ export interface ResolvedMcpPreview {
 }
 
 export interface McpSettingsPreview {
-  target: AgentId
+  agent: AgentId
   path: string
+  language: 'json' | 'toml'
   text: string
   diagnostics: VarsDiagnostic[]
 }
@@ -124,7 +132,7 @@ function renderRecord(
 
 export function buildResolvedMcpServer(
   server: McpServer,
-  target: AgentId,
+  context: 'default' | AgentId,
   matrix: VarsMatrixResponse | null | undefined,
 ): ResolvedMcpPreview {
   const diagnostics: VarsDiagnostic[] = []
@@ -153,64 +161,33 @@ export function buildResolvedMcpServer(
     url: url.value,
     env: env.value,
     headers: headers.value,
-    targets: server.targets ? [...server.targets] : undefined,
+    agents: server.agents ? [...server.agents] : undefined,
   }
   const sections: ResolvedMcpPreview['sections'] = ['transport']
   if (resolved.env) sections.push('env')
   if (resolved.headers) sections.push('headers')
-  void target
+  void context
   return { server: resolved, sections, diagnostics }
-}
-
-function toAgentEntry(server: McpServer): Record<string, unknown> {
-  const entry: Record<string, unknown> = { type: server.type }
-  if (server.command !== undefined) entry.command = server.command
-  if (server.args !== undefined) entry.args = server.args
-  if (server.env !== undefined) entry.env = server.env
-  if (server.url !== undefined) entry.url = server.url
-  if (server.headers !== undefined && server.type !== 'stdio') entry.headers = server.headers
-  return entry
-}
-
-function quoteToml(value: unknown): string {
-  return JSON.stringify(value)
-}
-
-function formatTomlTable(id: string, entry: Record<string, unknown>): string {
-  const lines = [`[mcp_servers.${id}]`]
-  for (const [key, value] of Object.entries(entry)) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      lines.push(`${key} = ${JSON.stringify(value)}`)
-    } else if (value && typeof value === 'object') {
-      lines.push(`${key} = ${JSON.stringify(value)}`)
-    } else {
-      lines.push(`${key} = ${quoteToml(value)}`)
-    }
-  }
-  return lines.join('\n')
 }
 
 export function buildMcpSettingsPreview(
   server: McpServer,
-  target: AgentId,
+  agent: AgentId,
   matrix: VarsMatrixResponse | null | undefined,
 ): McpSettingsPreview {
-  const resolved = buildResolvedMcpServer(server, target, matrix)
-  const entry = toAgentEntry(resolved.server)
-  const text =
-    target === 'claude-code'
-      ? JSON.stringify({ mcpServers: { [server.id]: entry } }, null, 2)
-      : target === 'codex'
-        ? formatTomlTable(server.id, entry)
-        : JSON.stringify({ mcp: { [server.id]: entry } }, null, 2)
-  const path =
-    target === 'claude-code'
-      ? '~/.claude.json'
-      : target === 'codex'
-        ? '~/.codex/config.toml'
-        : '~/.config/opencode/opencode.json'
-  return { target, path, text, diagnostics: resolved.diagnostics }
+  const resolved = buildResolvedMcpServer(server, agent, matrix)
+  const definition = getAgent(agent)
+  if (!definition.mcp) throw new Error(`Agent ${agent} does not support MCP`)
+  const codec = getMcpCodec(definition.mcp.codec)
+  const entry = toNativeMcpEntry(resolved.server)
+  if (resolved.server.type === 'stdio') delete entry.headers
+  return {
+    agent,
+    path: formatAgentFallbackPath(agent, definition.mcp.path),
+    language: codec.language,
+    text: codec.preview(definition.mcp.rootKey, server.id, entry),
+    diagnostics: resolved.diagnostics,
+  }
 }
 
 export function formatMcpTraceLayer(layer: VarsLayerRef): string {

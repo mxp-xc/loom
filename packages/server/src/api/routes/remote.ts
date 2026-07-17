@@ -116,7 +116,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
             name: member.name,
             entry: member.entry,
             path: member.entry,
-            targets: member.targets,
+            agents: member.agents,
           })),
         )
         const session = await updateSessions.create({
@@ -300,7 +300,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
           const removed = session.changes.removed.find((member) => member.name === name)
           if (!removed?.previousPath) throw new Error(`Removed skill path not found: ${name}`)
           await deps.fs.copyDir(join(session.stagingDir, dirname(removed.previousPath)), dest)
-          data.skills.push({ id: name, ...(removed?.targets ? { targets: removed.targets } : {}) })
+          data.skills.push({ id: name, ...(removed?.agents ? { agents: removed.agents } : {}) })
         }
         if (hadLiveCache) {
           await deps.fs.move(liveCacheDir, backupCacheDir)

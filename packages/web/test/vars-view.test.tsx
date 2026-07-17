@@ -131,7 +131,7 @@ describe('Vars view', () => {
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex'] },
+      config: { agents: ['codex'] },
       errors: [],
     } as never)
   })
@@ -150,34 +150,34 @@ describe('Vars view', () => {
     expect(screen.getByText('Agent')).toBeDefined()
   })
 
-  it('shows default configuration values while listing only Settings targets', async () => {
+  it('shows default configuration values while listing only Settings agents', async () => {
     render(<Vars repoPath="/repo" />)
     await screen.findByText('agent_name')
 
     const defaultScope = screen.getByRole('button', { name: 'default' })
     expect(defaultScope.getAttribute('data-state')).toBe('on')
-    const targetChips = screen.getByLabelText('目标 agent')
-    expect(within(targetChips).getByRole('button', { name: 'Codex' })).toBeDefined()
-    expect(within(targetChips).queryByRole('button', { name: 'CC' })).toBeNull()
-    expect(within(targetChips).queryByRole('button', { name: 'OC' })).toBeNull()
+    const agentChips = screen.getByLabelText('目标 agent')
+    expect(within(agentChips).getByRole('button', { name: 'Codex' })).toBeDefined()
+    expect(within(agentChips).queryByRole('button', { name: 'CC' })).toBeNull()
+    expect(within(agentChips).queryByRole('button', { name: 'OC' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /Local/ }))
     await waitFor(() => {
       const row = screen.getByRole('row', { name: /agent_name/ })
       expect(row.textContent).toContain('未配置')
-      const codexTarget = within(row).getByLabelText('Codex')
-      expect(codexTarget.textContent).toBe('')
-      expect(codexTarget.querySelector('.target-chip-icon')).not.toBeNull()
+      const codexAgent = within(row).getByLabelText('Codex')
+      expect(codexAgent.textContent).toBe('')
+      expect(codexAgent.querySelector('.agent-chip-icon')).not.toBeNull()
       expect(row.textContent).not.toContain('Local Codex agent')
     })
   })
 
-  it('switches configuration current values by target without leaving the current tab', async () => {
+  it('switches configuration current values by agent without leaving the current tab', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex', 'opencode'] },
+      config: { agents: ['codex', 'opencode'] },
       errors: [],
     } as never)
     vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => {
@@ -249,7 +249,7 @@ describe('Vars view', () => {
     expect(row.textContent).not.toContain('default')
   })
 
-  it('loads all agent matrices through the profile vars hook', async () => {
+  it('loads only Default and configured agent matrices through the profile vars hook', async () => {
     function ProfileVarsHarness() {
       const { loading } = useProfileVars('/repo')
       return <div>{loading ? 'loading' : 'loaded'}</div>
@@ -257,16 +257,42 @@ describe('Vars view', () => {
 
     render(<ProfileVarsHarness />)
 
-    await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledTimes(3))
-    expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'claude-code')
+    await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledTimes(2))
+    expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'default')
     expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'codex')
-    expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'opencode')
+    expect(api.vars.getMatrix).not.toHaveBeenCalledWith('/repo', 'claude-code')
+    expect(api.vars.getMatrix).not.toHaveBeenCalledWith('/repo', 'opencode')
+  })
+
+  it('loads only Default and keeps Default editing when configured agents are empty', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: [] },
+      errors: [],
+    } as never)
+
+    render(<Vars repoPath="/empty" />)
+
+    await screen.findByText('agent_name')
+    expect(api.vars.getMatrix).toHaveBeenCalledTimes(1)
+    expect(api.vars.getMatrix).toHaveBeenCalledWith('/empty', 'default')
+    expect(screen.queryByRole('columnheader', { name: /^专属/ })).toBeNull()
+    expect(within(screen.getByLabelText('目标 agent')).queryAllByRole('button')).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: '编辑 agent_name' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
+    expect(within(dialog).getByRole('button', { name: 'default' })).toBeDefined()
+    expect(within(dialog).queryByRole('button', { name: 'Codex' })).toBeNull()
   })
 
   it('shows final resolved values for the selected agent', async () => {
     render(<Vars repoPath="/repo" />)
     await screen.findByText('agent_name')
 
+    fireEvent.click(
+      within(screen.getByLabelText('目标 agent')).getByRole('button', { name: 'Codex' }),
+    )
     fireEvent.click(screen.getByRole('button', { name: '最终结果' }))
 
     expect(screen.getByText('当前 agent 的最终变量')).toBeDefined()
@@ -281,12 +307,12 @@ describe('Vars view', () => {
     ).toBe(true)
   })
 
-  it('uses the first Settings target as the initial resolved-result agent', async () => {
+  it('uses the first Settings agent as the initial resolved-result agent', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['claude-code'] },
+      config: { agents: ['claude-code'] },
       errors: [],
     } as never)
 
@@ -294,15 +320,15 @@ describe('Vars view', () => {
     await screen.findByText('agent_name')
 
     expect(screen.getByRole('button', { name: 'default' }).getAttribute('data-state')).toBe('on')
-    const targetChips = screen.getByLabelText('目标 agent')
-    expect(within(targetChips).getByRole('button', { name: 'Claude Code' })).toBeDefined()
-    expect(within(targetChips).queryByRole('button', { name: 'CX' })).toBeNull()
+    const agentChips = screen.getByLabelText('目标 agent')
+    expect(within(agentChips).getByRole('button', { name: 'Claude Code' })).toBeDefined()
+    expect(within(agentChips).queryByRole('button', { name: 'CX' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '最终结果' }))
 
     expect(screen.getByRole('button', { name: 'default' }).getAttribute('data-state')).toBe('on')
     expect(
-      within(targetChips).getByRole('button', { name: 'Claude Code' }).getAttribute('data-state'),
+      within(agentChips).getByRole('button', { name: 'Claude Code' }).getAttribute('data-state'),
     ).toBe('off')
   })
 
@@ -311,7 +337,7 @@ describe('Vars view', () => {
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex', 'opencode'] },
+      config: { agents: ['codex', 'opencode'] },
       errors: [],
     } as never)
 
@@ -356,7 +382,7 @@ describe('Vars view', () => {
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex', 'claude-code'] },
+      config: { agents: ['codex', 'claude-code'] },
       errors: [],
     } as never)
     render(<Vars repoPath="/repo" />)
@@ -374,12 +400,12 @@ describe('Vars view', () => {
     expect(agentNameRow.textContent).not.toContain('Local Codex agent')
   })
 
-  it('returns final resolved values to the default target when selecting default scope', async () => {
+  it('returns final resolved values to the default context when selecting default scope', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex', 'opencode'] },
+      config: { agents: ['codex', 'opencode'] },
       errors: [],
     } as never)
     render(<Vars repoPath="/repo" />)
@@ -393,8 +419,8 @@ describe('Vars view', () => {
 
     const resolvedTable = screen.getByRole('region', { name: '解析结果' })
     const agentNameRow = within(resolvedTable).getByRole('row', { name: /agent_name/ })
-    expect(agentNameRow.textContent).toContain('Local Codex agent')
-    expect(agentNameRow.textContent).toContain('local/codex')
+    expect(agentNameRow.textContent).toContain('Agent')
+    expect(agentNameRow.textContent).toContain('base')
   })
 
   it('opens edit modal and saves a local agent config', async () => {
@@ -445,6 +471,13 @@ describe('Vars view', () => {
   })
 
   it('reads and saves a non-active agent slot from that agent matrix', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: ['codex', 'claude-code'] },
+      errors: [],
+    } as never)
     vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => {
       const response = matrix(agent)
       if (agent === 'codex')
@@ -723,6 +756,13 @@ describe('Vars view', () => {
   })
 
   it('renders resolved preview from the selected slot matrix when the raw value has references', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: ['codex', 'claude-code'] },
+      errors: [],
+    } as never)
     vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => {
       const response = matrix(agent)
       return {

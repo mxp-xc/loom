@@ -4,17 +4,17 @@ import { threeWayMerge } from '../src/merge'
 describe('threeWayMerge', () => {
   it('both add different mcp servers -> auto merge both', () => {
     const base = '[]'
-    const ours = '- id: a\n  type: stdio\n  command: c\n  targets: [claude-code]\n'
-    const theirs = '- id: b\n  type: stdio\n  command: c\n  targets: [claude-code]\n'
+    const ours = '- id: a\n  type: stdio\n  command: c\n  agents: [claude-code]\n'
+    const theirs = '- id: b\n  type: stdio\n  command: c\n  agents: [claude-code]\n'
     const r = threeWayMerge(base, ours, theirs, 'mcp')
     expect(r.merged).toContain('id: a')
     expect(r.merged).toContain('id: b')
     expect(r.conflicts).toHaveLength(0)
   })
   it('both change same mcp id same field -> conflict', () => {
-    const base = '- id: a\n  type: stdio\n  command: old\n  targets: [claude-code]\n'
-    const ours = '- id: a\n  type: stdio\n  command: ours\n  targets: [claude-code]\n'
-    const theirs = '- id: a\n  type: stdio\n  command: theirs\n  targets: [claude-code]\n'
+    const base = '- id: a\n  type: stdio\n  command: old\n  agents: [claude-code]\n'
+    const ours = '- id: a\n  type: stdio\n  command: ours\n  agents: [claude-code]\n'
+    const theirs = '- id: a\n  type: stdio\n  command: theirs\n  agents: [claude-code]\n'
     const r = threeWayMerge(base, ours, theirs, 'mcp')
     expect(r.conflicts.length).toBeGreaterThan(0)
     expect(r.conflicts[0].path).toContain('a')
@@ -40,23 +40,23 @@ describe('threeWayMerge', () => {
   it('config: both add different top-level fields -> auto merge', () => {
     const r = threeWayMerge(
       'profile: local\n',
-      'profile: local\ntargets: [claude-code]\n',
+      'profile: local\nagents: [claude-code]\n',
       'profile: local\nupdate_check:\n  enabled: true\n',
       'config',
     )
-    expect(r.merged).toContain('targets')
+    expect(r.merged).toContain('agents')
     expect(r.merged).toContain('update_check')
     expect(r.conflicts).toHaveLength(0)
   })
   it('config: both change same top-level field -> conflict', () => {
     const r = threeWayMerge(
-      'targets: [claude-code]\n',
-      'targets: [codex]\n',
-      'targets: [opencode]\n',
+      'agents: [claude-code]\n',
+      'agents: [codex]\n',
+      'agents: [opencode]\n',
       'config',
     )
     expect(r.conflicts.length).toBeGreaterThan(0)
-    expect(r.conflicts[0].path).toBe('targets')
+    expect(r.conflicts[0].path).toBe('agents')
   })
   it('config: nested object deep merge, sibling subfield no conflict', () => {
     const base = 'proxy:\n  http: r\n  https: r\n'
@@ -83,7 +83,7 @@ describe('threeWayMerge', () => {
   })
   it('mcp: both delete same id -> not in merged', () => {
     const r = threeWayMerge(
-      '- id: x\n  type: stdio\n  command: c\n  targets: [claude-code]\n',
+      '- id: x\n  type: stdio\n  command: c\n  agents: [claude-code]\n',
       '[]',
       '[]',
       'mcp',

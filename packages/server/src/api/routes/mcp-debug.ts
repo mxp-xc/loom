@@ -13,7 +13,7 @@ import {
   McpDebugSessionError,
   McpDebugSessionManager,
   type McpDebugCallResult,
-  type McpDebugPreviewTarget,
+  type McpDebugPreviewAgent,
   type McpDebugSessionSnapshot,
 } from '../../mcp/debug-session.js'
 import { VarsApplication, VarsApplicationError } from '../../vars/application.js'
@@ -26,7 +26,7 @@ export interface McpDebugSessionManagerLike {
   createSession(input: {
     source: 'saved' | 'draft'
     server: McpServer
-    previewTarget: McpDebugPreviewTarget
+    previewAgent: McpDebugPreviewAgent
   }): Promise<McpDebugSessionSnapshot>
   callTool(
     sessionId: string,
@@ -42,19 +42,19 @@ export interface McpDebugRouteDeps extends RouteDeps {
 const mcpDebugLogger = logger.child('mcp-debug-route')
 const NonEmptyString = z.string().min(1)
 const RepoField = z.unknown()
-const McpDebugPreviewTargetSchema = z.union([z.literal('default'), AgentIdSchema])
+const McpDebugPreviewAgentSchema = z.union([z.literal('default'), AgentIdSchema])
 const CreateMcpDebugSessionBody = z.discriminatedUnion('source', [
   z.object({
     repo: RepoField,
     source: z.literal('saved'),
     serverId: NonEmptyString,
-    previewTarget: McpDebugPreviewTargetSchema,
+    previewAgent: McpDebugPreviewAgentSchema,
   }),
   z.object({
     repo: RepoField,
     source: z.literal('draft'),
     draft: McpServerSchema,
-    previewTarget: McpDebugPreviewTargetSchema,
+    previewAgent: McpDebugPreviewAgentSchema,
   }),
 ])
 const SessionParams = z.object({ id: NonEmptyString })
@@ -96,11 +96,11 @@ export function createMcpDebugRoutes(deps: McpDebugRouteDeps): Hono {
           deps,
           repoPath,
           sourceServer,
-          body.previewTarget,
+          body.previewAgent,
         )
         const session = await deps.mcpDebug.createSession({
           source: body.source,
-          previewTarget: body.previewTarget,
+          previewAgent: body.previewAgent,
           server,
         })
         return c.json({ ok: true, ...session })
@@ -186,7 +186,7 @@ async function resolveMcpServerForDebug(
   deps: RouteDeps,
   repoPath: string,
   server: McpServer,
-  previewTarget: McpDebugPreviewTarget,
+  previewAgent: McpDebugPreviewAgent,
 ): Promise<McpServer> {
   if (!serverHasVariables(server)) return connectionOnlyServer(server)
 
@@ -194,7 +194,7 @@ async function resolveMcpServerForDebug(
     const resolution = await new VarsApplication(
       deps.fs,
       deps.home,
-    ).resolveUnmaskedForInterpolation(repoPath, previewTarget)
+    ).resolveUnmaskedForInterpolation(repoPath, previewAgent)
     const diagnostics: VarsDiagnostic[] = []
     const render = (value: string | undefined): string | undefined => {
       if (value === undefined) return undefined
@@ -237,7 +237,7 @@ async function resolveMcpServerForDebug(
     mcpDebugLogger.error('MCP debug variable resolution failed', {
       err,
       serverId: server.id,
-      previewTarget,
+      previewAgent,
     })
     throw new McpDebugRouteError('resolution_failed', normalizeErrorMessage(err, '变量解析失败'))
   }

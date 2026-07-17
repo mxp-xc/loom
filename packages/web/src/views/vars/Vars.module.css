@@ -967,7 +967,7 @@
     justify-self: start;
   }
 
-  .vars-topbar :global(.target-chips) {
+  .vars-topbar :global(.agent-chips) {
     justify-self: end;
   }
 
@@ -996,8 +996,22 @@
     grid-template-columns: 1fr;
   }
 
-  .vars-topbar :global(.target-chips) {
+  .vars-topbar :global(.agent-chips) {
     justify-self: start;
+  }
+
+  .vars-agent-view {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .vars-agent-view > :global(.agent-chip) {
+    flex: 0 0 auto;
+  }
+
+  .vars-agent-view :global(.agent-chips) {
+    min-width: 0;
+    flex-wrap: wrap;
   }
 
   .vars-shell {

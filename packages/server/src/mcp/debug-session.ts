@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { AgentId, McpServer } from '@loom/core'
 
 export type McpDebugSource = 'saved' | 'draft'
-export type McpDebugPreviewTarget = 'default' | AgentId
+export type McpDebugPreviewAgent = 'default' | AgentId
 
 export interface McpDebugTool {
   name: string
@@ -20,7 +20,7 @@ export interface McpDebugSessionSnapshot {
   sessionId: string
   source: McpDebugSource
   serverFingerprint: string
-  previewTarget: McpDebugPreviewTarget
+  previewAgent: McpDebugPreviewAgent
   tools: McpDebugTool[]
   createdAt: string
   idleExpiresAt: string
@@ -56,7 +56,7 @@ interface McpDebugSession {
   source: McpDebugSource
   serverId: string
   serverFingerprint: string
-  previewTarget: McpDebugPreviewTarget
+  previewAgent: McpDebugPreviewAgent
   client: McpDebugClient
   tools: McpDebugTool[]
   createdAt: number
@@ -109,7 +109,7 @@ export class McpDebugSessionManager {
   async createSession(input: {
     source: McpDebugSource
     server: McpServer
-    previewTarget: McpDebugPreviewTarget
+    previewAgent: McpDebugPreviewAgent
   }): Promise<McpDebugSessionSnapshot> {
     this.sweepExpired()
     if (this.sessions.size >= this.maxSessions)
@@ -153,7 +153,7 @@ export class McpDebugSessionManager {
       source: input.source,
       serverId: input.server.id,
       serverFingerprint: fingerprintServer(input.server),
-      previewTarget: input.previewTarget,
+      previewAgent: input.previewAgent,
       client,
       tools,
       createdAt,
@@ -259,7 +259,7 @@ export class McpDebugSessionManager {
       sessionId: session.id,
       source: session.source,
       serverFingerprint: session.serverFingerprint,
-      previewTarget: session.previewTarget,
+      previewAgent: session.previewAgent,
       tools: session.tools,
       createdAt: toIso(session.createdAt),
       idleExpiresAt: toIso(session.lastUsedAt + this.idleMs),
@@ -348,8 +348,8 @@ function fingerprintServer(server: McpServer): string {
     .slice(0, 16)
 }
 
-function sanitizeServer(server: McpServer): Omit<McpServer, 'targets'> {
-  const { targets: _targets, ...connection } = server
+function sanitizeServer(server: McpServer): Omit<McpServer, 'agents'> {
+  const { agents: _agents, ...connection } = server
   return connection
 }
 

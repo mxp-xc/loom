@@ -64,7 +64,7 @@ describe('loadProjectionManifest', () => {
         '    members:',
         '      - name: selected',
         '        entry: skills/selected/SKILL.md',
-        '        targets: [codex]',
+        '        agents: [codex]',
         'skills: []',
         '',
       ].join('\n'),
@@ -83,7 +83,7 @@ describe('loadProjectionManifest', () => {
       {
         name: 'selected',
         entry: 'skills/selected/SKILL.md',
-        targets: ['codex'],
+        agents: ['codex'],
         path: 'skills/selected/SKILL.md',
         description: 'selected description',
       },
@@ -133,7 +133,7 @@ describe('projectRepository', () => {
           '    members:',
           '      - name: selected',
           '        entry: skills/selected/SKILL.md',
-          '        targets: [codex]',
+          '        agents: [codex]',
           'skills: []',
           '',
         ].join('\n'),
@@ -194,7 +194,7 @@ function deps(git: IGit) {
   return {
     fs: new NodeFileSystem(),
     git,
-    proc: { isInstalled: async () => false },
+    proc: { isCommandInstalled: async () => false },
     home: root,
   }
 }

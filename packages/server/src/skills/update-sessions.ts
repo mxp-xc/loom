@@ -164,6 +164,6 @@ export function persistedMembers(
     const member = previous.get(entry)
     if (!member && !enabledEntries.has(entry)) return []
     if (!member) return [{ name, entry }]
-    return [{ name, entry, ...(member.targets ? { targets: member.targets } : {}) }]
+    return [{ name, entry, ...(member.agents ? { agents: member.agents } : {}) }]
   })
 }

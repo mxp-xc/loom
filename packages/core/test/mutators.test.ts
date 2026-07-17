@@ -5,14 +5,14 @@ import {
   addSource,
   removeSource,
   setSourceMembers,
-  setSourceMemberTargets,
-  setSkillTargets,
-  setLocalSkillTargets,
+  setSourceMemberAgents,
+  setSkillAgents,
+  setLocalSkillAgents,
   pinSourceCommit,
   addMcpServer,
   removeMcpServer,
   updateMcpServer,
-  setMcpTargets,
+  setMcpAgents,
   setConfigField,
   updateSourceMeta,
 } from '../src/mutators.js'
@@ -96,7 +96,7 @@ describe('updateSourceMeta', () => {
           url: 'https://github.com/test/repo',
           ref: 'main',
           members: [
-            { name: 'skill-a', entry: 'skills/skill-a/SKILL.md', targets: ['codex' as AgentId] },
+            { name: 'skill-a', entry: 'skills/skill-a/SKILL.md', agents: ['codex' as AgentId] },
           ],
         },
       ],
@@ -109,7 +109,7 @@ describe('updateSourceMeta', () => {
       name: 'new-name',
       url: 'https://github.com/test/repo',
       ref: 'main',
-      members: [{ name: 'skill-a', entry: 'skills/skill-a/SKILL.md', targets: ['codex'] }],
+      members: [{ name: 'skill-a', entry: 'skills/skill-a/SKILL.md', agents: ['codex'] }],
     })
   })
 })
@@ -136,14 +136,14 @@ describe('removeSource', () => {
 })
 
 describe('setSourceMembers', () => {
-  it('preserves existing member targets for retained entries and refreshes names', () => {
+  it('preserves existing member agents for retained entries and refreshes names', () => {
     const skills: SkillsManifest = {
       sources: [
         {
           url: 'https://github.com/test/repo',
           ref: 'main',
           members: [
-            { name: 'old-name', entry: 'skills/skill-a/SKILL.md', targets: ['codex' as AgentId] },
+            { name: 'old-name', entry: 'skills/skill-a/SKILL.md', agents: ['codex' as AgentId] },
           ],
         },
       ],
@@ -157,7 +157,7 @@ describe('setSourceMembers', () => {
     expect(members[0]).toEqual({
       name: 'skill-a',
       entry: 'skills/skill-a/SKILL.md',
-      targets: ['codex'],
+      agents: ['codex'],
     })
     expect(members[1]).toEqual({ name: 'skill-b', entry: 'skills/skill-b/SKILL.md' })
   })
@@ -168,7 +168,7 @@ describe('setSourceMembers', () => {
           url: 'https://github.com/test/repo',
           ref: 'main',
           members: [
-            { name: 'skill-a', entry: 'skills/skill-a/SKILL.md', targets: ['codex' as AgentId] },
+            { name: 'skill-a', entry: 'skills/skill-a/SKILL.md', agents: ['codex' as AgentId] },
             { name: 'skill-b', entry: 'skills/skill-b/SKILL.md' },
           ],
         },
@@ -188,8 +188,8 @@ describe('setSourceMembers', () => {
   })
 })
 
-describe('setSkillTargets', () => {
-  it('sets targets on an existing member', () => {
+describe('setSkillAgents', () => {
+  it('sets agents on an existing member', () => {
     const skills: SkillsManifest = {
       sources: [
         {
@@ -200,21 +200,21 @@ describe('setSkillTargets', () => {
       ],
       skills: [],
     }
-    const result = setSkillTargets(
+    const result = setSkillAgents(
       skills,
       'https://github.com/test/repo',
       'skills/skill-a/SKILL.md',
       ['codex' as AgentId],
     )
     expect(result.changed).toBe(true)
-    expect(result.data.sources[0].members![0].targets).toEqual(['codex'])
+    expect(result.data.sources[0].members![0].agents).toEqual(['codex'])
   })
   it('does not create an unknown member entry', () => {
     const skills: SkillsManifest = {
       sources: [{ url: 'https://github.com/test/repo', ref: 'main' }],
       skills: [],
     }
-    const result = setSkillTargets(
+    const result = setSkillAgents(
       skills,
       'https://github.com/test/repo',
       'skills/skill-a/SKILL.md',
@@ -224,7 +224,7 @@ describe('setSkillTargets', () => {
     expect(result.data).toBe(skills)
   })
   it('returns changed=false when source not found', () => {
-    const result = setSkillTargets(emptySkills, 'missing', 'skills/skill-a/SKILL.md', [
+    const result = setSkillAgents(emptySkills, 'missing', 'skills/skill-a/SKILL.md', [
       'codex' as AgentId,
     ])
     expect(result.changed).toBe(false)
@@ -232,7 +232,7 @@ describe('setSkillTargets', () => {
   })
 })
 
-describe('setSourceMemberTargets', () => {
+describe('setSourceMemberAgents', () => {
   it('updates multiple existing source members in one mutation', () => {
     const skills: SkillsManifest = {
       sources: [
@@ -240,31 +240,31 @@ describe('setSourceMemberTargets', () => {
           url: 'https://github.com/test/repo',
           ref: 'main',
           members: [
-            { name: 'skill-a', entry: 'a/SKILL.md', targets: ['claude-code' as AgentId] },
-            { name: 'skill-b', entry: 'b/SKILL.md', targets: [] },
-            { name: 'skill-c', entry: 'c/SKILL.md', targets: [] },
+            { name: 'skill-a', entry: 'a/SKILL.md', agents: ['claude-code' as AgentId] },
+            { name: 'skill-b', entry: 'b/SKILL.md', agents: [] },
+            { name: 'skill-c', entry: 'c/SKILL.md', agents: [] },
           ],
         },
       ],
       skills: [],
     }
 
-    const result = setSourceMemberTargets(skills, 'https://github.com/test/repo', [
-      { memberEntry: 'a/SKILL.md', targets: ['codex' as AgentId] },
-      { memberEntry: 'c/SKILL.md', targets: ['codex' as AgentId, 'opencode' as AgentId] },
+    const result = setSourceMemberAgents(skills, 'https://github.com/test/repo', [
+      { memberEntry: 'a/SKILL.md', agents: ['codex' as AgentId] },
+      { memberEntry: 'c/SKILL.md', agents: ['codex' as AgentId, 'opencode' as AgentId] },
     ])
 
     expect(result.changed).toBe(true)
     expect(result.data.sources[0].members).toEqual([
-      { name: 'skill-a', entry: 'a/SKILL.md', targets: ['codex'] },
-      { name: 'skill-b', entry: 'b/SKILL.md', targets: [] },
-      { name: 'skill-c', entry: 'c/SKILL.md', targets: ['codex', 'opencode'] },
+      { name: 'skill-a', entry: 'a/SKILL.md', agents: ['codex'] },
+      { name: 'skill-b', entry: 'b/SKILL.md', agents: [] },
+      { name: 'skill-c', entry: 'c/SKILL.md', agents: ['codex', 'opencode'] },
     ])
   })
 
   it('returns changed=false when source not found', () => {
-    const result = setSourceMemberTargets(emptySkills, 'missing', [
-      { memberEntry: 'a/SKILL.md', targets: ['codex' as AgentId] },
+    const result = setSourceMemberAgents(emptySkills, 'missing', [
+      { memberEntry: 'a/SKILL.md', agents: ['codex' as AgentId] },
     ])
 
     expect(result.changed).toBe(false)
@@ -272,26 +272,26 @@ describe('setSourceMemberTargets', () => {
   })
 })
 
-describe('setLocalSkillTargets', () => {
-  it('sets targets on an existing local skill', () => {
+describe('setLocalSkillAgents', () => {
+  it('sets agents on an existing local skill', () => {
     const skills: SkillsManifest = { sources: [], skills: [{ id: 'my-skill' }] }
-    const result = setLocalSkillTargets(skills, 'my-skill', ['codex' as AgentId])
+    const result = setLocalSkillAgents(skills, 'my-skill', ['codex' as AgentId])
     expect(result.changed).toBe(true)
-    expect(result.data.skills[0].targets).toEqual(['codex'])
+    expect(result.data.skills[0].agents).toEqual(['codex'])
   })
-  it('registers an auto-discovered local skill when first assigning targets', () => {
-    const result = setLocalSkillTargets(emptySkills, 'frontend-design', ['codex' as AgentId])
+  it('registers an auto-discovered local skill when first assigning agents', () => {
+    const result = setLocalSkillAgents(emptySkills, 'frontend-design', ['codex' as AgentId])
     expect(result.changed).toBe(true)
-    expect(result.data.skills).toEqual([{ id: 'frontend-design', targets: ['codex'] }])
+    expect(result.data.skills).toEqual([{ id: 'frontend-design', agents: ['codex'] }])
   })
   it('preserves other fields on the skill via spread', () => {
     const skills: SkillsManifest = {
       sources: [],
       skills: [{ id: 'my-skill', path: '/some/path' } as any],
     }
-    const result = setLocalSkillTargets(skills, 'my-skill', ['codex' as AgentId])
+    const result = setLocalSkillAgents(skills, 'my-skill', ['codex' as AgentId])
     expect(result.data.skills[0].path).toBe('/some/path')
-    expect(result.data.skills[0].targets).toEqual(['codex'])
+    expect(result.data.skills[0].agents).toEqual(['codex'])
   })
 })
 
@@ -357,7 +357,7 @@ describe('updateMcpServer', () => {
       id: 'a',
       type: 'http',
       url: 'https://example.test/mcp',
-      targets: ['codex'],
+      agents: ['codex'],
     }
 
     const result = updateMcpServer(mcp, 'a', replacement)
@@ -379,22 +379,22 @@ describe('updateMcpServer', () => {
   })
 })
 
-describe('setMcpTargets', () => {
-  it('sets targets on an existing server', () => {
+describe('setMcpAgents', () => {
+  it('sets agents on an existing server', () => {
     const mcp: McpServer[] = [{ id: 'a', type: 'stdio', command: 'c' }]
-    const result = setMcpTargets(mcp, 'a', ['codex' as AgentId])
+    const result = setMcpAgents(mcp, 'a', ['codex' as AgentId])
     expect(result.changed).toBe(true)
-    expect(result.data[0].targets).toEqual(['codex'])
+    expect(result.data[0].agents).toEqual(['codex'])
   })
   it('preserves other fields via spread', () => {
     const mcp: McpServer[] = [{ id: 'a', type: 'stdio', command: 'c', args: ['x'] }]
-    const result = setMcpTargets(mcp, 'a', ['codex' as AgentId])
+    const result = setMcpAgents(mcp, 'a', ['codex' as AgentId])
     expect(result.data[0].command).toBe('c')
     expect(result.data[0].args).toEqual(['x'])
   })
   it('returns changed=false when server not found', () => {
     const mcp: McpServer[] = [{ id: 'a', type: 'stdio', command: 'c' }]
-    const result = setMcpTargets(mcp, 'missing', ['codex' as AgentId])
+    const result = setMcpAgents(mcp, 'missing', ['codex' as AgentId])
     expect(result.changed).toBe(false)
     expect(result.data).toBe(mcp)
   })
@@ -420,9 +420,9 @@ describe('setConfigField', () => {
     expect(result.changed).toBe(false)
   })
   it('preserves other fields via spread', () => {
-    const result = setConfigField({ profile: 'default', targets: ['codex'] }, 'active_repo', 'r')
+    const result = setConfigField({ profile: 'default', agents: ['codex'] }, 'active_repo', 'r')
     expect(result.data.profile).toBe('default')
-    expect(result.data.targets).toEqual(['codex'])
+    expect(result.data.agents).toEqual(['codex'])
   })
   it('sets a nested field via dot path', () => {
     const result = setConfigField(

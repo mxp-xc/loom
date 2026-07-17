@@ -17,7 +17,7 @@ vi.mock('../src/lib/api', () => ({
     project: vi.fn(async () => ({ ok: true })),
     addMcpServer: vi.fn(async () => ({ ok: true })),
     updateMcpServer: vi.fn(async () => ({ ok: true })),
-    updateMcpTargets: vi.fn(async () => ({ ok: true })),
+    updateMcpAgents: vi.fn(async () => ({ ok: true })),
     deleteMcpServer: vi.fn(async () => ({ ok: true })),
     scanMcpImports: vi.fn(async () => ({
       ok: true,
@@ -33,7 +33,7 @@ vi.mock('../src/lib/api', () => ({
           finalId: 'browser',
           server: { id: 'browser', type: 'stdio', command: 'npx' },
           sourceAgents: ['claude-code'],
-          targets: ['claude-code'],
+          agents: ['claude-code'],
           status: 'ready',
           selectedByDefault: true,
           ignoredFields: [],
@@ -45,7 +45,7 @@ vi.mock('../src/lib/api', () => ({
           finalId: 'browser-cx',
           server: { id: 'browser-cx', type: 'http', url: 'https://codex.example/mcp' },
           sourceAgents: ['codex'],
-          targets: ['codex'],
+          agents: ['codex'],
           status: 'renamed',
           selectedByDefault: true,
           ignoredFields: ['mcp_servers.browser.description'],
@@ -56,7 +56,7 @@ vi.mock('../src/lib/api', () => ({
           id: 'broken',
           finalId: 'broken',
           sourceAgents: ['claude-code'],
-          targets: ['claude-code'],
+          agents: ['claude-code'],
           status: 'disabled',
           selectedByDefault: false,
           ignoredFields: [],
@@ -77,7 +77,7 @@ vi.mock('../src/lib/api', () => ({
       sessionId: 'debug-1',
       source: 'saved',
       serverFingerprint: 'fingerprint-1',
-      previewTarget: 'codex',
+      previewAgent: 'codex',
       tools: [
         {
           name: 'capture_live_filter',
@@ -113,7 +113,7 @@ vi.mock('../src/lib/api', () => ({
           command: 'npx',
           args: ['@playwright/mcp', '--browser-path', '${browsers_path}'],
           env: { PLAYWRIGHT_BROWSERS_PATH: '${browsers_path}' },
-          targets: ['codex'],
+          agents: ['codex'],
         },
         {
           id: 'remote-auth',
@@ -121,11 +121,11 @@ vi.mock('../src/lib/api', () => ({
           url: 'https://example.test/${workspace}/sse',
           env: { REQUEST_TIMEOUT: '15s' },
           headers: { Authorization: 'Bearer ${token}' },
-          targets: [],
+          agents: [],
         },
       ],
       vars: { default: {}, active: {} },
-      config: { targets: ['claude-code', 'codex', 'opencode'] },
+      config: { agents: ['claude-code', 'codex', 'opencode'] },
       errors: [],
     })),
     vars: {
@@ -218,29 +218,29 @@ describe('MCP workbench view', () => {
     expect(screen.getByText('ID 已锁定，保存后不可修改')).toBeDefined()
   })
 
-  it('separates the server title and bulk targets into a two-tier inventory toolbar', async () => {
+  it('separates the server title and bulk agents into a two-tier inventory toolbar', async () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
     const workbench = await screen.findByRole('region', { name: 'MCP workbench' })
     const inventory = within(workbench).getByRole('complementary', { name: 'MCP inventory' })
 
     expect(within(inventory).queryByText(/configured/)).toBeNull()
-    const globalTargets = screen.getByRole('region', { name: '全局 MCP targets' })
-    expect(inventory.contains(globalTargets)).toBe(true)
+    const globalAgents = screen.getByRole('region', { name: '全局 MCP agents' })
+    expect(inventory.contains(globalAgents)).toBe(true)
     expect(within(inventory).queryByText('全部 servers')).toBeNull()
-    expect(within(globalTargets).getByText('批量应用')).toBeDefined()
+    expect(within(globalAgents).getByText('批量应用')).toBeDefined()
     expect(
-      within(globalTargets).getByRole('group', { name: '批量设置全部 Server targets' }),
+      within(globalAgents).getByRole('group', { name: '批量设置全部 Server agents' }),
     ).toBeDefined()
     expect(
-      within(globalTargets)
+      within(globalAgents)
         .getByRole('button', { name: '全部 MCP servers 应用到 OpenCode：全部未应用' })
         .getAttribute('data-tooltip'),
     ).toBe('OpenCode：全部未应用，点击批量切换')
-    expect(within(globalTargets).queryByText(/0\/2/)).toBeNull()
+    expect(within(globalAgents).queryByText(/0\/2/)).toBeNull()
 
     const toolbar = within(inventory).getByRole('toolbar', { name: 'MCP inventory actions' })
-    expect(globalTargets.parentElement).toBe(toolbar.parentElement?.parentElement)
+    expect(globalAgents.parentElement).toBe(toolbar.parentElement?.parentElement)
     expect(
       within(toolbar).getByRole('button', { name: '新增 MCP server' }).textContent?.trim(),
     ).toBe('')
@@ -254,51 +254,92 @@ describe('MCP workbench view', () => {
     expect(add.compareDocumentPosition(project) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
   })
 
-  it('keeps all MCP target controls available independently of configured global targets', async () => {
+  it('shows only configured applicable MCP agent controls', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
       skills: { sources: [], skills: [] },
       mcp: [
         {
-          id: 'target-matrix',
+          id: 'agent-matrix',
           type: 'stdio',
           command: 'node',
           args: [],
           env: {},
-          targets: [],
+          agents: [],
         },
       ],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex', 'opencode'] },
+      config: { agents: ['codex', 'opencode'] },
       errors: [],
     } as never)
 
-    render(<Mcp repoPath="/tmp/mcp-target-matrix" />)
+    render(<Mcp repoPath="/tmp/mcp-agent-matrix" />)
 
-    const globalTargets = await screen.findByRole('region', { name: '全局 MCP targets' })
+    const globalAgents = await screen.findByRole('region', { name: '全局 MCP agents' })
     expect(
-      within(globalTargets).getByRole('button', {
+      within(globalAgents).queryByRole('button', {
         name: '全部 MCP servers 应用到 Claude Code：全部未应用',
       }),
+    ).toBeNull()
+    expect(
+      within(globalAgents).getByRole('button', {
+        name: '全部 MCP servers 应用到 Codex：全部未应用',
+      }),
     ).toBeDefined()
-    expect(screen.getByRole('button', { name: 'target-matrix 应用到 Claude Code' })).toBeDefined()
+    expect(
+      within(globalAgents).getByRole('button', {
+        name: '全部 MCP servers 应用到 OpenCode：全部未应用',
+      }),
+    ).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'agent-matrix 应用到 Claude Code' })).toBeNull()
   })
 
-  it('updates global target controls without projecting', async () => {
+  it('keeps RAW, Default, CRUD, and zero-source import when agents are empty', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [{ id: 'empty-scope', type: 'stdio', command: 'node', agents: ['codex'] }],
+      vars: { default: {}, active: {} },
+      config: { agents: [] },
+      errors: [],
+    } as never)
+
+    render(<Mcp repoPath="/tmp/mcp-empty" />)
+
+    expect(await screen.findByRole('button', { name: '选择 empty-scope' })).toBeDefined()
+    expect(screen.queryByRole('region', { name: '全局 MCP agents' })).toBeNull()
+    expect(screen.getByRole('searchbox', { name: '搜索 MCP server' })).toBeDefined()
+    expect(screen.queryByRole('group', { name: '批量设置全部 Server agents' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'empty-scope 应用到 Codex' })).toBeNull()
+    expect(api.vars.getMatrix).toHaveBeenCalledWith('/tmp/mcp-empty', 'default')
+    expect(api.vars.getMatrix).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '选择 empty-scope' }))
+    expect(screen.getByRole('button', { name: 'RAW' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Default' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Preview as Codex' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import MCP' }))
+    await waitFor(() =>
+      expect(api.scanMcpImports).toHaveBeenCalledWith({ repo: '/tmp/mcp-empty', sources: [] }),
+    )
+    expect(screen.queryByLabelText('MCP import sources')).toBeNull()
+  })
+
+  it('updates global agent controls without projecting', async () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
-    const globalTargets = await screen.findByRole('region', { name: '全局 MCP targets' })
+    const globalAgents = await screen.findByRole('region', { name: '全局 MCP agents' })
 
     fireEvent.click(
-      within(globalTargets).getByRole('button', {
+      within(globalAgents).getByRole('button', {
         name: '全部 MCP servers 应用到 OpenCode：全部未应用',
       }),
     )
 
-    await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalled())
+    await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalled())
     expect(api.project).not.toHaveBeenCalled()
   })
 
-  it('keeps create/edit in the workbench and saves create without targets', async () => {
+  it('keeps create/edit in the workbench and saves create without agents', async () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add server' }))
@@ -316,7 +357,7 @@ describe('MCP workbench view', () => {
     await waitFor(() =>
       expect(api.addMcpServer).toHaveBeenCalledWith({
         repo: '/tmp/mcp-view',
-        server: expect.not.objectContaining({ targets: expect.anything() }),
+        server: expect.not.objectContaining({ agents: expect.anything() }),
       }),
     )
   })
@@ -347,7 +388,7 @@ describe('MCP workbench view', () => {
             '',
             '--last=${token}',
           ],
-          targets: ['codex'],
+          agents: ['codex'],
         }),
       }),
     )
@@ -383,7 +424,7 @@ describe('MCP workbench view', () => {
     expect(screen.getByLabelText('Argument 2')).toMatchObject({ value: '@playwright/mcp' })
   })
 
-  it('round-trips complete Server JSON and blocks invalid source without changing targets', async () => {
+  it('round-trips complete Server JSON and blocks invalid source without changing agents', async () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑 playwright' }))
@@ -471,7 +512,7 @@ describe('MCP workbench view', () => {
       expect(api.updateMcpServer).toHaveBeenCalledWith({
         repo: '/tmp/mcp-canonical-json',
         id: 'playwright',
-        server: expect.objectContaining({ command: 'node', targets: ['codex'] }),
+        server: expect.objectContaining({ command: 'node', agents: ['codex'] }),
       }),
     )
     await waitFor(() => expect(JSON.parse(source.value).command).toBe('node'))
@@ -541,7 +582,7 @@ describe('MCP workbench view', () => {
     expect(screen.queryByRole('complementary', { name: '编辑 Server' })).toBeNull()
   })
 
-  it('preserves edit targets while letting target chips project only when requested', async () => {
+  it('preserves edit agents while letting agent chips project only when requested', async () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑 playwright' }))
@@ -552,12 +593,12 @@ describe('MCP workbench view', () => {
       expect(api.updateMcpServer).toHaveBeenCalledWith({
         repo: '/tmp/mcp-view',
         id: 'playwright',
-        server: expect.objectContaining({ command: 'node', targets: ['codex'] }),
+        server: expect.objectContaining({ command: 'node', agents: ['codex'] }),
       }),
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'playwright 应用到 Claude Code' }))
-    await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalled())
+    await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalled())
     expect(api.project).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Project changes' }))
@@ -566,7 +607,7 @@ describe('MCP workbench view', () => {
     )
   })
 
-  it('uses preview target for transport/env/headers/settings and variable inspector', async () => {
+  it('uses preview agent for transport/env/headers/settings and variable inspector', async () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
     fireEvent.click(await screen.findByRole('button', { name: '选择 playwright' }))
@@ -606,11 +647,11 @@ describe('MCP workbench view', () => {
           type: 'stdio',
           command: 'node',
           args: ['${missing}'],
-          targets: [],
+          agents: [],
         },
       ],
       vars: { default: {}, active: {} },
-      config: { targets: ['claude-code', 'codex', 'opencode'] },
+      config: { agents: ['claude-code', 'codex', 'opencode'] },
       errors: [],
     } as never)
 
@@ -695,7 +736,7 @@ describe('MCP workbench view', () => {
         repo: '/tmp/mcp-view',
         source: 'saved',
         serverId: 'playwright',
-        previewTarget: 'codex',
+        previewAgent: 'codex',
       }),
     )
     await waitFor(() => expect(within(panel).getAllByText('capture_live_filter')).toHaveLength(2))
@@ -773,7 +814,7 @@ describe('MCP workbench view', () => {
         repo: '/tmp/mcp-default-tools',
         source: 'saved',
         serverId: 'playwright',
-        previewTarget: 'default',
+        previewAgent: 'default',
       }),
     )
   })
@@ -794,7 +835,7 @@ describe('MCP workbench view', () => {
         id: 'playwright',
         server: expect.objectContaining({
           command: 'node',
-          targets: ['codex'],
+          agents: ['codex'],
         }),
       }),
     )
@@ -803,7 +844,7 @@ describe('MCP workbench view', () => {
         repo: '/tmp/mcp-view',
         source: 'saved',
         serverId: 'playwright',
-        previewTarget: 'codex',
+        previewAgent: 'codex',
       }),
     )
     for (const [request] of vi.mocked(api.createMcpDebugSession).mock.calls) {
@@ -840,7 +881,7 @@ describe('MCP workbench view', () => {
         repo: '/tmp/mcp-view',
         source: 'saved',
         serverId: 'new-server',
-        previewTarget: 'codex',
+        previewAgent: 'codex',
       }),
     )
     expect(screen.getByRole('tab', { name: 'Tools' }).getAttribute('aria-selected')).toBe('true')
@@ -885,7 +926,7 @@ describe('MCP workbench view', () => {
       sessionId: 'late-session',
       source: 'saved',
       serverFingerprint: 'late-fingerprint',
-      previewTarget: 'codex',
+      previewAgent: 'codex',
       tools: [],
       createdAt: '2026-07-13T00:00:00.000Z',
       idleExpiresAt: '2026-07-13T00:05:00.000Z',

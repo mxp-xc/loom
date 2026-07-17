@@ -9,7 +9,7 @@ export interface SkillDetail {
   skillId: string
   source?: string
   path?: string
-  targets: string[]
+  agents: string[]
 }
 
 export interface RefreshMember {

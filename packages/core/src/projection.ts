@@ -1,26 +1,27 @@
 import type { Manifest, AgentId, Config, Memory, SkillSource, SourceTreeNode } from './types.js'
+import { applicableAgents } from './agents.js'
 import { normalizeSourceResources, projectionBase, resourceSelectionState } from './source-tree.js'
 
 export interface LinkPlan {
   skillId: string
   source: 'local' | { repoId: string; cacheId?: string; memberName: string; path?: string }
-  targets: AgentId[]
+  agents: AgentId[]
 }
 export interface McpPlanEntry {
   id: string
-  targets: AgentId[]
+  agents: AgentId[]
 }
 export interface MemoryPlanEntry {
   memory: Memory
   content: string
-  targets: AgentId[]
+  agents: AgentId[]
 }
 export interface MemoryPlan {
   entries?: MemoryPlanEntry[]
   /** Legacy compatibility fields. New executors use entries. */
   active: Memory | null
   content: string | null
-  targets: AgentId[]
+  agents: AgentId[]
 }
 export interface SourceProjectionEntry {
   kind: 'bundle' | 'resource-file' | 'resource-directory'
@@ -32,7 +33,7 @@ export interface SourceProjectionPlan {
   sourceUrl: string
   cacheId: string
   commit: string
-  target: AgentId
+  agent: AgentId
   projectionBase: string
   entries: SourceProjectionEntry[]
 }
@@ -88,16 +89,12 @@ export function planProjection(
   effectiveConfig: Config,
   installedAgents: Set<AgentId>,
 ): ProjectionPlan {
-  const globalTargets = effectiveConfig.targets ?? []
-  const globalTargetSet = new Set(globalTargets)
   const skippedAgents: AgentId[] = []
-  const activeTargets = (ts: AgentId[]): AgentId[] => {
+  const activeAgents = (ts: AgentId[], capability: 'skills' | 'mcp' | 'memory'): AgentId[] => {
     const out: AgentId[] = []
-    const seen = new Set<AgentId>()
-    for (const a of ts) {
-      if (seen.has(a)) continue
-      seen.add(a)
-      if (!globalTargetSet.has(a)) continue
+    const requested = new Set(ts)
+    for (const a of applicableAgents(effectiveConfig.agents, capability)) {
+      if (!requested.has(a)) continue
       if (installedAgents.has(a)) out.push(a)
       else skippedAgents.push(a)
     }
@@ -106,42 +103,49 @@ export function planProjection(
 
   const links: LinkPlan[] = []
   for (const s of manifest.skills.skills) {
-    links.push({ skillId: s.id, source: 'local', targets: activeTargets(s.targets ?? []) })
+    links.push({
+      skillId: s.id,
+      source: 'local',
+      agents: activeAgents(s.agents ?? [], 'skills'),
+    })
   }
   const sourcePlans = manifest.skills.sources.flatMap((source) =>
-    planSourceProjection(source, activeTargets),
+    planSourceProjection(source, (agents) => activeAgents(agents, 'skills')),
   )
   assertSkillDestinationCollisions(links, sourcePlans)
 
   const mcpEntries: McpPlanEntry[] = manifest.mcp.map((m) => ({
     id: m.id,
-    targets: activeTargets(m.targets ?? []),
+    agents: activeAgents(m.agents ?? [], 'mcp'),
   }))
 
   const explicitMemoryEntries = manifest.memory.memories.flatMap((memory) => {
-    const targets = activeTargets(memory.targets ?? [])
-    return targets.length && memory.content !== undefined
-      ? [{ memory, content: memory.content, targets }]
+    const agents = activeAgents(memory.agents ?? [], 'memory')
+    return agents.length && memory.content !== undefined
+      ? [{ memory, content: memory.content, agents }]
       : []
   })
-  const legacyMemoryTargets = activeTargets(globalTargets)
+  const legacyMemoryAgents = activeAgents(
+    applicableAgents(effectiveConfig.agents, 'memory'),
+    'memory',
+  )
   const legacyMemory = manifest.memory.active
-  const usesExplicitMemoryTargets = effectiveConfig.memory_targets !== undefined
+  const usesExplicitMemoryAgents = effectiveConfig.memory_agents !== undefined
   const memoryEntries =
-    usesExplicitMemoryTargets || !legacyMemory
+    usesExplicitMemoryAgents || !legacyMemory
       ? explicitMemoryEntries
       : [
           {
             memory: legacyMemory,
             content: manifest.memory.activeContent,
-            targets: legacyMemoryTargets,
+            agents: legacyMemoryAgents,
           },
         ]
   const memoryPlan: MemoryPlan = {
     entries: memoryEntries,
     active: legacyMemory,
     content: legacyMemory ? manifest.memory.activeContent : null,
-    targets: legacyMemoryTargets,
+    agents: legacyMemoryAgents,
   }
 
   return {
@@ -158,17 +162,17 @@ function assertSkillDestinationCollisions(
   links: LinkPlan[],
   sourcePlans: SourceProjectionPlan[],
 ): void {
-  const namespacesByTarget = new Map<AgentId, SourceProjectionPlan[]>()
+  const namespacesByAgent = new Map<AgentId, SourceProjectionPlan[]>()
   for (const sourcePlan of sourcePlans) {
-    const plans = namespacesByTarget.get(sourcePlan.target) ?? []
+    const plans = namespacesByAgent.get(sourcePlan.agent) ?? []
     plans.push(sourcePlan)
-    namespacesByTarget.set(sourcePlan.target, plans)
+    namespacesByAgent.set(sourcePlan.agent, plans)
   }
 
   for (const link of links) {
     const localPath = normalizeProjectionDestination(link.skillId)
-    for (const target of link.targets) {
-      for (const sourcePlan of namespacesByTarget.get(target) ?? []) {
+    for (const agent of link.agents) {
+      for (const sourcePlan of namespacesByAgent.get(agent) ?? []) {
         const namespace = normalizeProjectionDestination(sourcePlan.sourceName)
         if (
           localPath === namespace ||
@@ -176,7 +180,7 @@ function assertSkillDestinationCollisions(
           namespace.startsWith(`${localPath}/`)
         ) {
           throw new Error(
-            `Local skill destination "${link.skillId}" overlaps source namespace "${sourcePlan.sourceName}" for ${target}`,
+            `Local skill destination "${link.skillId}" overlaps source namespace "${sourcePlan.sourceName}" for ${agent}`,
           )
         }
       }
@@ -193,7 +197,7 @@ function normalizeProjectionDestination(path: string): string {
 
 function planSourceProjection(
   source: SkillSource,
-  activeTargets: (targets: AgentId[]) => AgentId[],
+  activeAgents: (agents: AgentId[]) => AgentId[],
 ): SourceProjectionPlan[] {
   const sourceTree = source.sourceTree
   const members = source.members ?? []
@@ -212,20 +216,20 @@ function planSourceProjection(
     (node) =>
       node.kind === 'resource' && resourceSelectionState(node.path, 'file', resources).selected,
   )
-  const targets = new Map<AgentId, typeof members>()
+  const agents = new Map<AgentId, typeof members>()
   for (const member of members) {
     if (!bundles.has(member.entry)) throw new Error(`Selected bundle unavailable: ${member.entry}`)
-    for (const target of activeTargets(member.targets ?? [])) {
-      const current = targets.get(target) ?? []
+    for (const agent of activeAgents(member.agents ?? [])) {
+      const current = agents.get(agent) ?? []
       current.push(member)
-      targets.set(target, current)
+      agents.set(agent, current)
     }
   }
 
   const sourceName = sourceIdentity(source).repoId
   const cacheId = deriveRepoId(source.url)
-  return [...targets.entries()].map(([target, targetMembers]) => {
-    const bundleEntries: SourceProjectionEntry[] = targetMembers.map((member) => {
+  return [...agents.entries()].map(([agent, agentMembers]) => {
+    const bundleEntries: SourceProjectionEntry[] = agentMembers.map((member) => {
       const bundle = bundles.get(member.entry)!
       return { kind: 'bundle', sourcePath: bundle.path, targetPath: '' }
     })
@@ -248,20 +252,18 @@ function planSourceProjection(
       sourceUrl: source.url,
       cacheId,
       commit: sourceTree.commit,
-      target,
+      agent,
       projectionBase: base,
       entries,
     }
   })
 }
 
-export function planSourceProjectionForTargets(
+export function planSourceProjectionForAgents(
   source: SkillSource,
-  targets: ReadonlySet<AgentId>,
+  agents: ReadonlySet<AgentId>,
 ): SourceProjectionPlan[] {
-  return planSourceProjection(source, (requested) =>
-    requested.filter((target) => targets.has(target)),
-  )
+  return planSourceProjection(source, (requested) => requested.filter((agent) => agents.has(agent)))
 }
 
 function planResourceEntries(

@@ -160,18 +160,18 @@
   white-space: nowrap;
 }
 
-.memoryRowTargets {
+.memoryRowAgents {
   display: flex;
   gap: 4px;
   padding-left: 6px;
   border-left: 1px solid var(--border);
 }
 
-.memoryRowTargets :global(.target-chip)::after {
+.memoryRowAgents :global(.agent-chip)::after {
   display: none;
 }
 
-.occupiedTarget {
+.occupiedAgent {
   opacity: 0.72;
 }
 
@@ -216,7 +216,7 @@
   border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
 }
 
-.currentTargets {
+.currentAgents {
   height: 32px;
   display: inline-flex;
   align-items: center;
@@ -224,7 +224,7 @@
   flex: 0 0 auto;
 }
 
-.currentTargets > span {
+.currentAgents > span {
   padding-left: 2px;
   color: var(--m2);
   font-size: 10.5px;
@@ -295,11 +295,11 @@
     min-height: 44px;
   }
 
-  .currentTargets > span {
+  .currentAgents > span {
     display: none;
   }
 
-  .currentTargets :global(.target-chip)::after {
+  .currentAgents :global(.agent-chip)::after {
     display: none;
   }
 }

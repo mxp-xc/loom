@@ -171,8 +171,8 @@ describe('compareProjectionPaths', () => {
       url: 'https://example.test/skills.git',
       ref: 'main',
       members: [
-        { name: 'alpha', entry: 'group/alpha/SKILL.md', targets: ['codex'] },
-        { name: 'beta', entry: 'other/beta/SKILL.md', targets: ['codex'] },
+        { name: 'alpha', entry: 'group/alpha/SKILL.md', agents: ['codex'] },
+        { name: 'beta', entry: 'other/beta/SKILL.md', agents: ['codex'] },
       ],
     }
     const bundle = (name: string, path: string) => ({
@@ -200,14 +200,14 @@ describe('compareProjectionPaths', () => {
       ]),
     ).toEqual([
       {
-        target: 'codex',
+        agent: 'codex',
         kind: 'bundle',
         sourcePath: 'group/alpha',
         previousTargetPath: 'group/alpha',
         nextTargetPath: 'alpha',
       },
       {
-        target: 'codex',
+        agent: 'codex',
         kind: 'bundle',
         sourcePath: 'other/beta',
         previousTargetPath: 'other/beta',

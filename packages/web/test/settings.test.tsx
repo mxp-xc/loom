@@ -7,8 +7,8 @@ import { api } from '../src/lib/api'
 vi.mock('../src/lib/api', () => ({
   api: {
     getConfig: vi.fn(async () => ({
-      effective: { active_repo: 'default', targets: ['claude-code'] },
-      repo: { targets: ['claude-code'] },
+      effective: { active_repo: 'default', agents: ['claude-code'] },
+      repo: { agents: ['claude-code'] },
       local: { active_repo: 'default' },
     })),
     putConfig: vi.fn(async () => ({ ok: true })),
@@ -16,7 +16,7 @@ vi.mock('../src/lib/api', () => ({
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['claude-code'] },
+      config: { agents: ['claude-code'] },
       errors: [],
     })),
   },
@@ -30,7 +30,7 @@ describe('Settings', () => {
     expect(screen.getByText('本地级')).toBeDefined()
   })
 
-  it('sdot: effective tab active_repo=fixed, targets=repo', async () => {
+  it('sdot: effective tab active_repo=fixed, agents=repo', async () => {
     render(<Settings repoPath="/tmp/r" />)
     await screen.findByText('最终结果')
     expect(screen.getByTitle('固定本地级')).toBeDefined()
@@ -45,7 +45,7 @@ describe('Settings', () => {
     expect(screen.getByTitle('固定本地级')).toBeDefined()
   })
 
-  it('refreshes shared manifest after saving targets', async () => {
+  it('refreshes shared manifest after saving agents', async () => {
     const getConfigCallsBefore = vi.mocked(api.getConfig).mock.calls.length
     render(<Settings repoPath="/tmp/r" />)
     await screen.findByText('最终结果')

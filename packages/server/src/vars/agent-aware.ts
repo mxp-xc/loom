@@ -8,6 +8,7 @@ import {
   resolveLayeredVars,
   serializeVarsBaseDefinitions,
   serializeVarsOverrides,
+  supportsAgentCapability,
   VarsCodecError,
   type AgentId,
   type LayeredVarsResolution,
@@ -16,7 +17,13 @@ import {
   type VarsDiagnostic,
 } from '@loom/core'
 import type { IFileSystem } from '../ports/fs.js'
-import { agentConfigDir, agentSkillsDir } from '../adapters/paths.js'
+import {
+  agentConfigDir,
+  agentMemoryFile,
+  agentSkillsDir,
+  runtimeAgentPathContext,
+  type AgentPathContext,
+} from '../adapters/paths.js'
 
 export type VarsLayerKind = 'base' | 'base-agent' | 'local' | 'local-agent'
 
@@ -238,12 +245,17 @@ export async function readAgentAwareVarsWithDiagnostics(
   }
 }
 
-export function builtinForAgent(agent: AgentId) {
+export function builtinForAgent(
+  agent: AgentId,
+  context: AgentPathContext = runtimeAgentPathContext(),
+) {
   return createBuiltinVars({
     agent,
-    configDir: agentConfigDir(agent),
-    skillsDir: agentSkillsDir(agent),
-    agentFile: agent === 'claude-code' ? 'CLAUDE.md' : 'AGENTS.md',
+    configDir: agentConfigDir(agent, context),
+    skillsDir: supportsAgentCapability(agent, 'skills') ? agentSkillsDir(agent, context) : '',
+    agentFile: supportsAgentCapability(agent, 'memory')
+      ? basename(agentMemoryFile(agent, context))
+      : '',
   })
 }
 
@@ -266,7 +278,7 @@ export async function resolveAgentAwareVars(
     baseAgent: snapshot.baseAgent,
     local: snapshot.local,
     localAgent: snapshot.localAgent,
-    builtin: builtinForAgent(agent),
+    builtin: builtinForAgent(agent, runtimeAgentPathContext(home)),
   })
 }
 

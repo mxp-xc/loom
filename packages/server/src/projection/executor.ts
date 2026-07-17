@@ -21,10 +21,16 @@ import {
   resolveVars,
   renderText,
   renderTextWithResolvedVars,
+  supportsAgentCapability,
   type LayeredVarsResolution,
   type VarsContext,
 } from '@loom/core'
-import { agentMcpFile, agentSkillsDir, agentMemoryFile, agentConfigDir } from '../adapters/paths.js'
+import {
+  agentSkillsDir,
+  agentMemoryFile,
+  agentConfigDir,
+  type AgentPathContext,
+} from '../adapters/paths.js'
 import { mergeMcp } from './mcp-merge.js'
 
 export interface ProjectionDeps {
@@ -32,6 +38,7 @@ export interface ProjectionDeps {
   ownerRepo?: string
   adapters: Partial<Record<AgentId, IAgentAdapter>>
   installedAgents: Set<AgentId>
+  pathContext?: AgentPathContext
   resolveSkillSrc: (link: ProjectionPlan['links'][number]) => string | null
   resolveSourceRoot?: (sourcePlan: SourceProjectionPlan) => string | null
   resolveSourceFiles?: (sourcePlan: SourceProjectionPlan) => Promise<string[]>
@@ -72,6 +79,10 @@ export async function executeProjection(
   }
   const journal: ProjectionJournal = { undos: [] }
   const { fs, adapters, installedAgents } = deps
+  const installedSkillAgents = new Set(
+    [...installedAgents].filter((agent) => supportsAgentCapability(agent, 'skills')),
+  )
+  const pathContext = deps.pathContext
   const agentAwareVars = varsCtx as AgentAwareVarsContext
   try {
     // Phase A: build enabled links
@@ -79,9 +90,9 @@ export async function executeProjection(
       const builtDests = new Set<string>()
       for (const link of plan.links) {
         const src = deps.resolveSkillSrc(link)
-        if (!src || link.targets.length === 0) continue
-        for (const agent of link.targets) {
-          const skillsDir = agentSkillsDir(agent)
+        if (!src || link.agents.length === 0) continue
+        for (const agent of link.agents) {
+          const skillsDir = agentSkillsDir(agent, pathContext)
           await fs.mkdir(skillsDir, true)
           const dest = join(skillsDir, link.skillId)
           await fs.mkdir(join(dest, '..'), true)
@@ -110,16 +121,17 @@ export async function executeProjection(
       }
       // Phase B: clean stale links for skills still in manifest but no longer projected.
       for (const link of plan.links) {
-        for (const agent of installedAgents) {
-          const dest = join(agentSkillsDir(agent), link.skillId)
+        for (const agent of installedSkillAgents) {
+          const skillsDir = agentSkillsDir(agent, pathContext)
+          const dest = join(skillsDir, link.skillId)
           if (builtDests.has(dest)) continue
           if (await fs.isLink(dest)) {
             await fs.removeLink(dest)
-            await removeEmptySkillParents(fs, agentSkillsDir(agent), dest)
+            await removeEmptySkillParents(fs, skillsDir, dest)
           } else if (await fs.exists(dest)) {
             if (await shouldRemoveRealSkillDir(fs, dest, link)) {
               await fs.removeDir(dest)
-              await removeEmptySkillParents(fs, agentSkillsDir(agent), dest)
+              await removeEmptySkillParents(fs, skillsDir, dest)
             } else {
               deps.logger?.warn?.('skip cleanup: target is real file/dir', {
                 dest,
@@ -132,7 +144,7 @@ export async function executeProjection(
       // Phase C: clean orphaned links — skills deleted from manifest entirely.
       // Scan each installed agent's skills dir; any loom-projected link whose id is
       // not in the current plan's link set is removed. Non-link real dirs are skipped.
-      await cleanOrphanedLinks(plan, installedAgents, fs, deps.logger)
+      await cleanOrphanedLinks(plan, installedSkillAgents, fs, deps.logger, pathContext)
       await projectSourceNamespaces(plan, deps, journal)
     }
     // MCP config
@@ -140,7 +152,7 @@ export async function executeProjection(
       for (const agent of Object.keys(adapters) as AgentId[]) {
         const adapter = adapters[agent]
         if (!adapter) continue
-        const file = agentMcpFile(agent)
+        const file = adapter.path
         const fragments = await resolveMcpFragments(
           plan.mcpEntries,
           manifest.mcp,
@@ -168,19 +180,21 @@ export async function executeProjection(
       const entries =
         mp.entries ??
         (mp.active && mp.content !== null
-          ? [{ memory: mp.active, content: mp.content, targets: mp.targets }]
+          ? [{ memory: mp.active, content: mp.content, agents: mp.agents }]
           : [])
       if (entries.length > 0) {
-        const renderedTargets: Array<{ agent: AgentId; path: string; rendered: string }> = []
+        const renderedAgents: Array<{ agent: AgentId; path: string; rendered: string }> = []
         for (const entry of entries) {
-          for (const agent of entry.targets) {
+          for (const agent of entry.agents) {
             const ctx: VarsContext = {
               env: {
                 ...varsCtx.env,
                 LOOM_AGENT: agent,
-                LOOM_CONFIG_DIR: agentConfigDir(agent),
-                LOOM_SKILLS_DIR: agentSkillsDir(agent),
-                LOOM_AGENT_FILE: agent === 'claude-code' ? 'CLAUDE.md' : 'AGENTS.md',
+                LOOM_CONFIG_DIR: agentConfigDir(agent, pathContext),
+                LOOM_SKILLS_DIR: supportsAgentCapability(agent, 'skills')
+                  ? agentSkillsDir(agent, pathContext)
+                  : '',
+                LOOM_AGENT_FILE: basename(agentMemoryFile(agent, pathContext)),
               },
               activeProfile: varsCtx.activeProfile,
               defaultProfile: varsCtx.defaultProfile,
@@ -202,11 +216,15 @@ export async function executeProjection(
               deps.logger?.error('memory var resolve failed', { err: e, agent })
               throw e
             }
-            renderedTargets.push({ agent, path: agentMemoryFile(agent), rendered })
+            renderedAgents.push({
+              agent,
+              path: agentMemoryFile(agent, pathContext),
+              rendered,
+            })
           }
         }
-        for (const { path, rendered } of renderedTargets) {
-          await fs.mkdir(join(path, '..'), true).catch(() => {})
+        for (const { path, rendered } of renderedAgents) {
+          await fs.mkdir(dirname(path), true)
           const backup = (await fs.exists(path)) ? await fs.readFile(path) : null
           journal.undos.push({ kind: 'restoreMemory', path, backup })
           await fs.writeFile(path, rendered)
@@ -267,7 +285,10 @@ async function projectSourceNamespaces(
       sourceFilesByTree.set(sourceTreeKey, sourceFilesPromise)
     }
     const sourceFiles = await sourceFilesPromise
-    const namespace = join(agentSkillsDir(sourcePlan.target), sourcePlan.sourceName)
+    const namespace = join(
+      agentSkillsDir(sourcePlan.agent, deps.pathContext),
+      sourcePlan.sourceName,
+    )
     desired.add(namespace)
     await replaceSourceNamespace(
       sourcePlan,
@@ -289,6 +310,7 @@ async function projectSourceNamespaces(
       deps.fs,
       journal,
       deps.logger,
+      deps.pathContext,
     )
   }
 }
@@ -317,7 +339,7 @@ async function replaceSourceNamespace(
   try {
     await fs.mkdir(staging, true)
     const trackedFiles = normalizeTrackedSourceFiles(sourceFiles)
-    const materializedTargets = new Set<string>()
+    const materializedDestinations = new Set<string>()
     for (const entry of plan.entries) {
       const entryFiles = trackedFilesForEntry(entry, trackedFiles)
       if (entryFiles.length === 0) {
@@ -341,10 +363,10 @@ async function replaceSourceNamespace(
           )
         }
         const destination = targetPath.toLowerCase()
-        if (materializedTargets.has(destination)) {
+        if (materializedDestinations.has(destination)) {
           throw new Error(`Projection destination collision: ${targetPath}`)
         }
-        materializedTargets.add(destination)
+        materializedDestinations.add(destination)
         const source = join(sourceRoot, sourcePath)
         const target = join(staging, targetPath)
         if (strategy === 'copy') await fs.copyFile(source, target)
@@ -491,9 +513,11 @@ async function cleanOrphanedSourceNamespaces(
   fs: IFileSystem,
   journal: ProjectionJournal,
   logger?: ProjectionDeps['logger'],
+  pathContext?: AgentPathContext,
 ): Promise<void> {
   for (const agent of installedAgents) {
-    const skillsDir = agentSkillsDir(agent)
+    if (!supportsAgentCapability(agent, 'skills')) continue
+    const skillsDir = agentSkillsDir(agent, pathContext)
     let entries: string[]
     try {
       entries = await fs.readDir(skillsDir)
@@ -596,11 +620,12 @@ async function cleanOrphanedLinks(
   installedAgents: Set<AgentId>,
   fs: IFileSystem,
   logger?: ProjectionDeps['logger'],
+  pathContext?: AgentPathContext,
 ): Promise<void> {
   // Collect skill ids that the current plan references (projected or not).
   const planSkillIds = new Set(plan.links.map((l) => l.skillId))
   for (const agent of installedAgents) {
-    const skillsDir = agentSkillsDir(agent)
+    const skillsDir = agentSkillsDir(agent, pathContext)
     const skillIds = await collectProjectedSkillIds(fs, skillsDir)
     for (const skillId of skillIds) {
       if (planSkillIds.has(skillId)) continue
@@ -666,7 +691,7 @@ async function resolveMcpFragments(
     resolution = resolved
   }
   for (const e of entries) {
-    if (!e.targets.includes(agent)) continue
+    if (!e.agents.includes(agent)) continue
     const s = byId.get(e.id)
     if (!s) continue
     try {
@@ -684,7 +709,7 @@ async function resolveMcpFragments(
       out.push({
         id: s.id,
         type: s.type,
-        targets: e.targets,
+        agents: e.agents,
         command: rv(s.command),
         args: rva(s.args),
         env: rvm(s.env),

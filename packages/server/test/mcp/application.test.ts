@@ -57,17 +57,17 @@ describe('McpApplication', () => {
     })
   })
 
-  it('updates targets and maps missing servers to not_found', async () => {
+  it('updates agents and maps missing servers to not_found', async () => {
     await writeFile(join(repoPath, 'mcp.yaml'), '- id: srv1\n  type: stdio\n  command: echo\n')
 
-    await expect(app.setTargets(repoPath, 'missing', [])).rejects.toMatchObject({
+    await expect(app.setAgents(repoPath, 'missing', [])).rejects.toMatchObject({
       status: 404,
       code: 'not_found',
     })
-    await app.setTargets(repoPath, 'srv1', ['claude-code', 'codex'])
+    await app.setAgents(repoPath, 'srv1', ['claude-code', 'codex'])
 
     const parsed = yaml.load(await readFile(join(repoPath, 'mcp.yaml'), 'utf8')) as any
-    expect(parsed[0].targets).toEqual(['claude-code', 'codex'])
+    expect(parsed[0].agents).toEqual(['claude-code', 'codex'])
   })
 
   it('removes existing servers and ignores absent ones', async () => {

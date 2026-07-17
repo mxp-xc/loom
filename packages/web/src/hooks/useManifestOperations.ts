@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   deriveRepoId,
   sourceIdentity,
+  AGENT_IDS,
   type AgentId,
   type Manifest,
   type McpServer,
@@ -10,7 +11,6 @@ import {
   type SkillSource,
 } from '@loom/core'
 import { api } from '@/lib/api'
-import { AGENTS } from '@/lib/agents'
 import { refreshManifest } from './useManifest'
 
 type MaybeOkResponse = {
@@ -57,7 +57,7 @@ export type SourceUpdateState = 'repair' | { label: string; newRef?: string }
 export interface SkillMemberChanges {
   added: Array<{ name: string }>
   updated: Array<{ name: string }>
-  removed: Array<{ name: string; targets?: string[] }>
+  removed: Array<{ name: string; agents?: string[] }>
 }
 
 export interface ResourceBoundaryChange {
@@ -72,7 +72,7 @@ export interface PreparedSkillReconciliation {
   changes: SkillMemberChanges
   resourceBoundaryChanges: ResourceBoundaryChange[]
   pathMoves?: Array<{
-    target: AgentId
+    agent: AgentId
     kind: 'bundle' | 'resource-file' | 'resource-directory'
     sourcePath: string
     previousTargetPath?: string
@@ -118,17 +118,17 @@ const pendingKey = {
   performSourceUpdate: (url: string) => 'source:update:' + url,
   deleteSource: (url: string) => 'source:delete:' + url,
   deleteLocalSkill: (id: string) => 'skills:delete-local:' + id,
-  sourceSkillTarget: (sourceUrl: string, memberEntry: string) =>
-    'skills:target:' + sourceUrl + ':' + memberEntry,
-  localSkillTarget: (id: string) => 'skills:local-target:' + id,
-  allSkillTargets: (agent: AgentId) => 'skills:all-targets:' + agent,
-  sourceSkillTargets: (sourceUrl: string, agent: AgentId) =>
-    'skills:source-targets:' + sourceUrl + ':' + agent,
+  sourceSkillAgent: (sourceUrl: string, memberEntry: string) =>
+    'skills:agent:' + sourceUrl + ':' + memberEntry,
+  localSkillAgent: (id: string) => 'skills:local-agent:' + id,
+  allSkillAgents: (agent: AgentId) => 'skills:all-agents:' + agent,
+  sourceSkillAgents: (sourceUrl: string, agent: AgentId) =>
+    'skills:source-agents:' + sourceUrl + ':' + agent,
   addMcpServer: (id: string) => 'mcp:add:' + id,
   updateMcpServer: (id: string) => 'mcp:update:' + id,
   deleteMcpServer: (id: string) => 'mcp:delete:' + id,
-  mcpTarget: (id: string) => 'mcp:target:' + id,
-  allMcpTargets: (agent: AgentId) => 'mcp:all-targets:' + agent,
+  mcpAgent: (id: string) => 'mcp:agent:' + id,
+  allMcpAgents: (agent: AgentId) => 'mcp:all-agents:' + agent,
   scanMcpImports: () => 'mcp:import:scan',
   applyMcpImports: () => 'mcp:import:apply',
 }
@@ -181,10 +181,10 @@ function persistedSourceDto(source: SkillSource): SkillSource {
     ...(source.pinned_commit ? { pinned_commit: source.pinned_commit } : {}),
     ...(source.members
       ? {
-          members: source.members.map(({ name, entry, targets }) => ({
+          members: source.members.map(({ name, entry, agents }) => ({
             name,
             entry,
-            ...(targets ? { targets } : {}),
+            ...(agents ? { agents } : {}),
           })),
         }
       : {}),
@@ -226,10 +226,10 @@ async function refreshAfterFailure<T>(
   }
 }
 
-function toggleTarget(currentTargets: readonly AgentId[], agent: AgentId): AgentId[] {
-  return currentTargets.includes(agent)
-    ? currentTargets.filter((item) => item !== agent)
-    : [...currentTargets, agent]
+function toggleAgent(currentAgents: readonly AgentId[], agent: AgentId): AgentId[] {
+  return currentAgents.includes(agent)
+    ? currentAgents.filter((item) => item !== agent)
+    : [...currentAgents, agent]
 }
 
 function sortByName<T extends { name: string }>(items: readonly T[]): T[] {
@@ -654,48 +654,48 @@ export function useManifestOperations(
     [repoPath, run],
   )
 
-  const toggleSourceSkillTarget = useCallback(
-    (sourceUrl: string, memberEntry: string, agent: AgentId, currentTargets: readonly AgentId[]) =>
+  const toggleSourceSkillAgent = useCallback(
+    (sourceUrl: string, memberEntry: string, agent: AgentId, currentAgents: readonly AgentId[]) =>
       run(
-        pendingKey.sourceSkillTarget(sourceUrl, memberEntry),
+        pendingKey.sourceSkillAgent(sourceUrl, memberEntry),
         () =>
           projectSkillsAfterManifestUpdate(
             () =>
-              api.updateSkillTargets({
+              api.updateSkillAgents({
                 repo: repoPath,
                 sourceUrl,
                 memberEntry,
-                targets: toggleTarget(currentTargets, agent),
+                agents: toggleAgent(currentAgents, agent),
               }) as Promise<MaybeOkResponse>,
-            '保存 targets 失败',
+            '保存 agents 失败',
           ),
-        { failureMessage: '保存 targets 失败' },
+        { failureMessage: '保存 agents 失败' },
       ),
     [projectSkillsAfterManifestUpdate, repoPath, run],
   )
 
-  const toggleLocalSkillTarget = useCallback(
-    (id: string, agent: AgentId, currentTargets: readonly AgentId[]) =>
+  const toggleLocalSkillAgent = useCallback(
+    (id: string, agent: AgentId, currentAgents: readonly AgentId[]) =>
       run(
-        pendingKey.localSkillTarget(id),
+        pendingKey.localSkillAgent(id),
         () =>
           projectSkillsAfterManifestUpdate(
             () =>
-              api.updateLocalSkillTargets({
+              api.updateLocalSkillAgents({
                 repo: repoPath,
                 id,
-                targets: toggleTarget(currentTargets, agent),
+                agents: toggleAgent(currentAgents, agent),
               }) as Promise<MaybeOkResponse>,
-            '保存 targets 失败',
+            '保存 agents 失败',
           ),
-        { failureMessage: '保存 targets 失败' },
+        { failureMessage: '保存 agents 失败' },
       ),
     [projectSkillsAfterManifestUpdate, repoPath, run],
   )
 
-  const setAllSkillTargets = useCallback(
+  const setAllSkillAgents = useCallback(
     (manifest: Manifest, agent: AgentId) => {
-      let targetsUpdated = false
+      let agentsUpdated = false
       const skills = [
         ...(manifest.skills?.sources.flatMap((source) =>
           (source.members ?? []).map((member) => ({ kind: 'source' as const, source, member })),
@@ -705,35 +705,35 @@ export function useManifestOperations(
       const allOn =
         skills.length > 0 &&
         skills.every((item) => {
-          const targets = item.kind === 'source' ? item.member.targets : item.skill.targets
-          return (targets ?? []).includes(agent)
+          const agents = item.kind === 'source' ? item.member.agents : item.skill.agents
+          return (agents ?? []).includes(agent)
         })
       return run(
-        pendingKey.allSkillTargets(agent),
+        pendingKey.allSkillAgents(agent),
         async () => {
           for (const item of skills) {
-            const targets =
-              item.kind === 'source' ? (item.member.targets ?? []) : (item.skill.targets ?? [])
+            const agents =
+              item.kind === 'source' ? (item.member.agents ?? []) : (item.skill.agents ?? [])
             const next = allOn
-              ? targets.filter((target) => target !== agent)
-              : AGENTS.filter((target) => target === agent || targets.includes(target))
+              ? agents.filter((candidate) => candidate !== agent)
+              : AGENT_IDS.filter((candidate) => candidate === agent || agents.includes(candidate))
             if (item.kind === 'source') {
-              const result = (await api.updateSkillTargets({
+              const result = (await api.updateSkillAgents({
                 repo: repoPath,
                 sourceUrl: item.source.url,
                 memberEntry: item.member.entry,
-                targets: next,
+                agents: next,
               })) as MaybeOkResponse
-              if (responseFailureMessage(result, '批量更新 targets 失败')) return result
-              targetsUpdated = true
+              if (responseFailureMessage(result, '批量更新 agents 失败')) return result
+              agentsUpdated = true
             } else {
-              const result = (await api.updateLocalSkillTargets({
+              const result = (await api.updateLocalSkillAgents({
                 repo: repoPath,
                 id: item.skill.id,
-                targets: next,
+                agents: next,
               })) as MaybeOkResponse
-              if (responseFailureMessage(result, '批量更新 targets 失败')) return result
-              targetsUpdated = true
+              if (responseFailureMessage(result, '批量更新 agents 失败')) return result
+              agentsUpdated = true
             }
           }
           const projected = (await api.project({
@@ -743,35 +743,35 @@ export function useManifestOperations(
           const projectError = responseFailureMessage(projected, '投影失败')
           return projectError ? { ok: false, message: projectError } : projected
         },
-        { failureMessage: '批量更新 targets 失败', reloadOnFailure: () => targetsUpdated },
+        { failureMessage: '批量更新 agents 失败', reloadOnFailure: () => agentsUpdated },
       )
     },
     [repoPath, run],
   )
 
-  const setSourceSkillTargets = useCallback(
+  const setSourceSkillAgents = useCallback(
     (source: SkillSource, agent: AgentId) => {
-      let targetsUpdated = false
+      let agentsUpdated = false
       const members = source.members ?? []
       const allOn =
-        members.length > 0 && members.every((member) => (member.targets ?? []).includes(agent))
+        members.length > 0 && members.every((member) => (member.agents ?? []).includes(agent))
       return run(
-        pendingKey.sourceSkillTargets(source.url, agent),
+        pendingKey.sourceSkillAgents(source.url, agent),
         async () => {
           const updates = members.map((member) => {
-            const targets = member.targets ?? []
+            const agents = member.agents ?? []
             const next = allOn
-              ? targets.filter((target) => target !== agent)
-              : AGENTS.filter((target) => target === agent || targets.includes(target))
-            return { memberEntry: member.entry, targets: next }
+              ? agents.filter((candidate) => candidate !== agent)
+              : AGENT_IDS.filter((candidate) => candidate === agent || agents.includes(candidate))
+            return { memberEntry: member.entry, agents: next }
           })
-          const result = (await api.updateSourceSkillTargets({
+          const result = (await api.updateSourceSkillAgents({
             repo: repoPath,
             sourceUrl: source.url,
             updates,
           })) as MaybeOkResponse
-          if (responseFailureMessage(result, '批量更新 targets 失败')) return result
-          targetsUpdated = updates.length > 0
+          if (responseFailureMessage(result, '批量更新 agents 失败')) return result
+          agentsUpdated = updates.length > 0
           const projected = (await api.project({
             repo: repoPath,
             scope: 'skills',
@@ -779,7 +779,7 @@ export function useManifestOperations(
           const projectError = responseFailureMessage(projected, '投影失败')
           return projectError ? { ok: false, message: projectError } : projected
         },
-        { failureMessage: '批量更新 targets 失败', reloadOnFailure: () => targetsUpdated },
+        { failureMessage: '批量更新 agents 失败', reloadOnFailure: () => agentsUpdated },
       )
     },
     [repoPath, run],
@@ -815,53 +815,53 @@ export function useManifestOperations(
     [repoPath, run],
   )
 
-  const toggleMcpTarget = useCallback(
+  const toggleMcpAgent = useCallback(
     (server: McpServer, agent: AgentId) =>
       run(
-        pendingKey.mcpTarget(server.id),
+        pendingKey.mcpAgent(server.id),
         () =>
-          api.updateMcpTargets({
+          api.updateMcpAgents({
             repo: repoPath,
             id: server.id,
-            targets: toggleTarget(server.targets ?? [], agent),
+            agents: toggleAgent(server.agents ?? [], agent),
           }) as Promise<MaybeOkResponse>,
-        { failureMessage: '保存 targets 失败' },
+        { failureMessage: '保存 agents 失败' },
       ),
     [repoPath, run],
   )
 
-  const setAllMcpTargets = useCallback(
+  const setAllMcpAgents = useCallback(
     (servers: McpServer[], agent: AgentId) => {
-      let targetsUpdated = false
-      const allOn = servers.every((server) => (server.targets ?? []).includes(agent))
+      let agentsUpdated = false
+      const allOn = servers.every((server) => (server.agents ?? []).includes(agent))
       return run(
-        pendingKey.allMcpTargets(agent),
+        pendingKey.allMcpAgents(agent),
         async () => {
           for (const server of servers) {
-            const targets = server.targets ?? []
+            const agents = server.agents ?? []
             const next = allOn
-              ? targets.filter((item) => item !== agent)
-              : targets.includes(agent)
-                ? targets
-                : [...targets, agent]
-            const result = (await api.updateMcpTargets({
+              ? agents.filter((item) => item !== agent)
+              : agents.includes(agent)
+                ? agents
+                : [...agents, agent]
+            const result = (await api.updateMcpAgents({
               repo: repoPath,
               id: server.id,
-              targets: next,
+              agents: next,
             })) as MaybeOkResponse
-            if (responseFailureMessage(result, '批量更新 targets 失败')) return result
-            targetsUpdated = true
+            if (responseFailureMessage(result, '批量更新 agents 失败')) return result
+            agentsUpdated = true
           }
           return { ok: true }
         },
-        { failureMessage: '批量更新 targets 失败', reloadOnFailure: () => targetsUpdated },
+        { failureMessage: '批量更新 agents 失败', reloadOnFailure: () => agentsUpdated },
       )
     },
     [repoPath, run],
   )
 
   const scanMcpImports = useCallback(
-    (sources: AgentId[] = AGENTS) =>
+    (sources: AgentId[]) =>
       run(pendingKey.scanMcpImports(), () => api.scanMcpImports({ repo: repoPath, sources }), {
         reload: false,
         failureMessage: '扫描 MCP 配置失败',
@@ -870,7 +870,7 @@ export function useManifestOperations(
   )
 
   const applyMcpImports = useCallback(
-    (keys: string[], sources: AgentId[] = AGENTS) =>
+    (keys: string[], sources: AgentId[]) =>
       run(
         pendingKey.applyMcpImports(),
         () => api.applyMcpImports({ repo: repoPath, sources, keys }),
@@ -895,12 +895,12 @@ export function useManifestOperations(
       },
       skills: {
         deleteLocal: (id: string) => pending.has(pendingKey.deleteLocalSkill(id)),
-        allTargets: (agent: AgentId) => pending.has(pendingKey.allSkillTargets(agent)),
-        sourceTargets: (source: SkillSource | string, agent: AgentId) =>
-          pending.has(pendingKey.sourceSkillTargets(sourceRef(source), agent)),
+        allAgents: (agent: AgentId) => pending.has(pendingKey.allSkillAgents(agent)),
+        sourceAgents: (source: SkillSource | string, agent: AgentId) =>
+          pending.has(pendingKey.sourceSkillAgents(sourceRef(source), agent)),
       },
       mcp: {
-        allTargets: (agent: AgentId) => pending.has(pendingKey.allMcpTargets(agent)),
+        allAgents: (agent: AgentId) => pending.has(pendingKey.allMcpAgents(agent)),
         importScan: pending.has(pendingKey.scanMcpImports()),
         importApply: pending.has(pendingKey.applyMcpImports()),
       },
@@ -926,17 +926,17 @@ export function useManifestOperations(
       finalizeSourceUpdate,
       deleteSource,
       deleteLocalSkill,
-      toggleSourceSkillTarget,
-      toggleLocalSkillTarget,
-      setAllSkillTargets,
-      setSourceSkillTargets,
+      toggleSourceSkillAgent,
+      toggleLocalSkillAgent,
+      setAllSkillAgents,
+      setSourceSkillAgents,
       addMcpServer,
       updateMcpServer,
       deleteMcpServer,
       scanMcpImports,
       applyMcpImports,
-      toggleMcpTarget,
-      setAllMcpTargets,
+      toggleMcpAgent,
+      setAllMcpAgents,
     }),
     [
       pendingStatus,
@@ -955,17 +955,17 @@ export function useManifestOperations(
       finalizeSourceUpdate,
       deleteSource,
       deleteLocalSkill,
-      toggleSourceSkillTarget,
-      toggleLocalSkillTarget,
-      setAllSkillTargets,
-      setSourceSkillTargets,
+      toggleSourceSkillAgent,
+      toggleLocalSkillAgent,
+      setAllSkillAgents,
+      setSourceSkillAgents,
       addMcpServer,
       updateMcpServer,
       deleteMcpServer,
       scanMcpImports,
       applyMcpImports,
-      toggleMcpTarget,
-      setAllMcpTargets,
+      toggleMcpAgent,
+      setAllMcpAgents,
     ],
   )
 }

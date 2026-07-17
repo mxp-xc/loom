@@ -98,8 +98,8 @@ describe('local skill scan path', () => {
   })
 })
 
-describe('source skill target routes', () => {
-  it('updates multiple source member targets with one request and one yaml write', async () => {
+describe('source skill agent routes', () => {
+  it('updates multiple source member agents with one request and one yaml write', async () => {
     const files = new Map<string, string>()
     const fs = {
       readDir: vi.fn(async () => ['demo']),
@@ -115,11 +115,11 @@ describe('source skill target routes', () => {
           '    members:',
           '      - name: alpha',
           '        entry: skills/alpha/SKILL.md',
-          '        targets:',
+          '        agents:',
           '          - claude-code',
           '      - name: beta',
           '        entry: skills/beta/SKILL.md',
-          '        targets: []',
+          '        agents: []',
           'skills: []',
           '',
         ].join('\n')
@@ -140,15 +140,15 @@ describe('source skill target routes', () => {
       createSkillsYamlRoutes({ fs, git: {}, proc: {}, home: '/home/tester' } as never),
     )
 
-    const response = await app.request('/api/skills/source-targets', {
+    const response = await app.request('/api/skills/source-agents', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         repo: 'demo',
         sourceUrl: 'https://example.test/skills.git',
         updates: [
-          { memberEntry: 'skills/alpha/SKILL.md', targets: ['codex'] },
-          { memberEntry: 'skills/beta/SKILL.md', targets: ['codex', 'opencode'] },
+          { memberEntry: 'skills/alpha/SKILL.md', agents: ['codex'] },
+          { memberEntry: 'skills/beta/SKILL.md', agents: ['codex', 'opencode'] },
         ],
       }),
     })

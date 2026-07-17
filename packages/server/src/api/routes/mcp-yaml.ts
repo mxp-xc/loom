@@ -27,10 +27,10 @@ const UpdateMcpServerBody = z.object({
   server: z.unknown().refine((value) => Boolean(value) && typeof value === 'object'),
 })
 
-const SetMcpTargetsBody = z.object({
+const SetMcpAgentsBody = z.object({
   repo: RepoField,
   id: NonEmptyString,
-  targets: z.array(AgentIdSchema),
+  agents: z.array(AgentIdSchema),
 })
 
 const ReorderMcpServersBody = z.object({
@@ -91,21 +91,17 @@ export function createMcpYamlRoutes(deps: RouteDeps): Hono {
     },
   )
 
-  app.post(
-    '/mcp/targets',
-    jsonValidator(SetMcpTargetsBody, { error: mcpTargetsError }),
-    async (c) => {
-      try {
-        const { repo, id, targets } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        await mcp.setTargets(repoPath, id, targets)
-        return c.json({ ok: true })
-      } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'update_failed', 'failed to update MCP targets'))
-      }
-    },
-  )
+  app.post('/mcp/agents', jsonValidator(SetMcpAgentsBody, { error: mcpAgentsError }), async (c) => {
+    try {
+      const { repo, id, agents } = c.req.valid('json')
+      const repoPath = await resolveRequestRepo(deps, repo)
+      await mcp.setAgents(repoPath, id, agents)
+      return c.json({ ok: true })
+    } catch (e) {
+      if (isInvalidRepo(e)) return invalidRepo(c, e)
+      return c.json(errorBody(e, 'update_failed', 'failed to update MCP agents'))
+    }
+  })
 
   app.put(
     '/mcp/order',
@@ -157,8 +153,8 @@ function invalidRepo(
   )
 }
 
-function mcpTargetsError(issues: z.ZodIssue[]): string {
-  return issues[0]?.path[0] === 'id' ? 'invalid_id' : 'invalid_targets'
+function mcpAgentsError(issues: z.ZodIssue[]): string {
+  return issues[0]?.path[0] === 'id' ? 'invalid_id' : 'invalid_agents'
 }
 
 function errorBody(

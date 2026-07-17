@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { Eye, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
 import { IconButton } from '@/components/ui/IconButton'
-import { TargetChip } from '@/components/ui/TargetChip'
+import { AgentChip } from '@/components/ui/AgentChip'
 import { agentName } from '../../lib/agents'
 import type { AgentId } from '../../lib/agents'
 import type { VarsProfileEntry } from './profile-model'
@@ -11,6 +11,7 @@ import styles from './Vars.module.css'
 type VarsProfileTableProps = {
   entries: VarsProfileEntry[]
   search: string
+  showAgentSlots: boolean
   onView: (entry: VarsProfileEntry) => void
   onEdit: (entry: VarsProfileEntry) => void
   onAdd: (entry: VarsProfileEntry) => void
@@ -20,9 +21,9 @@ type VarsProfileTableProps = {
 function AgentChips({ slots }: { slots: AgentId[] }) {
   if (slots.length === 0) return <span className={styles['vars-slot-dash']}>—</span>
   return (
-    <span className={styles['vars-slots']} aria-label="已配置 targets">
+    <span className={styles['vars-slots']} aria-label="已配置 agents">
       {slots.map((slot) => (
-        <TargetChip key={slot} agent={slot} state="on" label={agentName[slot]} />
+        <AgentChip key={slot} agent={slot} state="on" label={agentName[slot]} />
       ))}
     </span>
   )
@@ -46,7 +47,9 @@ function RowActions({
   onEdit,
   onAdd,
   onClear,
-}: Omit<VarsProfileTableProps, 'entries' | 'search'> & { entry: VarsProfileEntry }) {
+}: Omit<VarsProfileTableProps, 'entries' | 'search' | 'showAgentSlots'> & {
+  entry: VarsProfileEntry
+}) {
   if (entry.state === 'readonly') {
     return (
       <span className={styles['vars-row-actions']}>
@@ -95,6 +98,7 @@ function RowActions({
 export default function VarsProfileTable({
   entries,
   search,
+  showAgentSlots,
   onView,
   onEdit,
   onAdd,
@@ -110,8 +114,8 @@ export default function VarsProfileTable({
         return text.includes(query)
       })
     : entries
-  const columns = useMemo<Array<DataTableColumn<VarsProfileEntry>>>(
-    () => [
+  const columns = useMemo<Array<DataTableColumn<VarsProfileEntry>>>(() => {
+    const nextColumns: Array<DataTableColumn<VarsProfileEntry>> = [
       {
         id: 'key',
         header: 'key',
@@ -130,15 +134,6 @@ export default function VarsProfileTable({
         minSize: 160,
       },
       {
-        id: 'slots',
-        header: '专属',
-        cell: (entry) => <AgentChips slots={entry.agentSlots} />,
-        className: styles['vars-col-slots'],
-        cellClassName: styles['vars-slots-cell'],
-        size: 75,
-        minSize: 68,
-      },
-      {
         id: 'actions',
         header: '操作',
         cell: (entry) => (
@@ -155,9 +150,22 @@ export default function VarsProfileTable({
         size: 85,
         minSize: 78,
       },
-    ],
-    [onAdd, onClear, onEdit, onView],
-  )
+    ]
+
+    if (showAgentSlots) {
+      nextColumns.splice(2, 0, {
+        id: 'slots',
+        header: '专属',
+        cell: (entry) => <AgentChips slots={entry.agentSlots} />,
+        className: styles['vars-col-slots'],
+        cellClassName: styles['vars-slots-cell'],
+        size: 75,
+        minSize: 68,
+      })
+    }
+
+    return nextColumns
+  }, [onAdd, onClear, onEdit, onView, showAgentSlots])
 
   return (
     <DataTable

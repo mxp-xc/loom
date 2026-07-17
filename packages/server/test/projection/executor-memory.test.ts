@@ -37,7 +37,7 @@ describe('executeProjection memory phase', () => {
         activeContent: 'agent=${LOOM_AGENT} file=${LOOM_AGENT_FILE} dir=${LOOM_CONFIG_DIR}',
       },
       vars: { default: {}, active: {} },
-      config: { targets: ['claude-code', 'codex'] },
+      config: { agents: ['claude-code', 'codex'] },
       errors: [],
     }
     const plan = buildPlan(mf, ['claude-code', 'codex'])
@@ -71,7 +71,7 @@ describe('executeProjection memory phase', () => {
       mcp: [],
       memory: { memories: [], active: null, activeContent: '' },
       vars: { default: {}, active: {} },
-      config: { targets: ['claude-code'] },
+      config: { agents: ['claude-code'] },
       errors: [],
     }
     const plan = buildPlan(mf, ['claude-code'])
@@ -91,21 +91,21 @@ describe('executeProjection memory phase', () => {
     expect(existsSync(join(home, 'claude', 'CLAUDE.md'))).toBe(false)
   })
 
-  it('writes each assigned memory only to its target agents', async () => {
+  it('writes each assigned memory only to its assigned agents', async () => {
     const mf: Manifest = {
       skills: { sources: [], skills: [] },
       mcp: [],
       memory: {
         memories: [
-          { name: 'team', content: '# team rules', targets: ['codex'] },
-          { name: 'personal', content: '# personal rules', targets: ['opencode'] },
+          { name: 'team', content: '# team rules', agents: ['codex'] },
+          { name: 'personal', content: '# personal rules', agents: ['opencode'] },
         ],
         assignments: { codex: 'team', opencode: 'personal' },
         active: null,
         activeContent: '',
       },
       vars: { default: {}, active: {} },
-      config: { targets: ['codex', 'opencode'] },
+      config: { agents: ['codex', 'opencode'] },
       errors: [],
     }
 
@@ -127,18 +127,18 @@ describe('executeProjection memory phase', () => {
     expect(readFileSync(join(home, 'opencode', 'AGENTS.md'), 'utf8')).toBe('# personal rules')
   })
 
-  it('writes one memory to multiple assigned targets', async () => {
+  it('writes one memory to multiple assigned agents', async () => {
     const mf: Manifest = {
       skills: { sources: [], skills: [] },
       mcp: [],
       memory: {
-        memories: [{ name: 'shared', content: '# shared', targets: ['codex', 'opencode'] }],
+        memories: [{ name: 'shared', content: '# shared', agents: ['codex', 'opencode'] }],
         assignments: { codex: 'shared', opencode: 'shared' },
         active: null,
         activeContent: '',
       },
       vars: { default: {}, active: {} },
-      config: { targets: ['codex', 'opencode'] },
+      config: { agents: ['codex', 'opencode'] },
       errors: [],
     }
 
@@ -160,7 +160,7 @@ describe('executeProjection memory phase', () => {
     expect(readFileSync(join(home, 'opencode', 'AGENTS.md'), 'utf8')).toBe('# shared')
   })
 
-  it('scope=memory renders with the agent-aware resolver before writing targets', async () => {
+  it('scope=memory renders with the agent-aware resolver before writing agents', async () => {
     const mf: Manifest = {
       skills: { sources: [], skills: [] },
       mcp: [],
@@ -170,7 +170,7 @@ describe('executeProjection memory phase', () => {
         activeContent: '# ${agent_name}\\n@${rtk}',
       },
       vars: { default: {}, active: {} },
-      config: { targets: ['claude-code', 'codex'] },
+      config: { agents: ['claude-code', 'codex'] },
       errors: [],
     }
     const plan = buildPlan(mf, ['claude-code', 'codex'])
@@ -229,7 +229,7 @@ describe('executeProjection memory phase', () => {
       mcp: [],
       memory: { memories: [{ name: 'v1' }], active: { name: 'v1' }, activeContent: '${missing}' },
       vars: { default: {}, active: {} },
-      config: { targets: ['claude-code', 'codex'] },
+      config: { agents: ['claude-code', 'codex'] },
       errors: [],
     }
     const plan = buildPlan(mf, ['claude-code', 'codex'])
@@ -263,7 +263,7 @@ describe('executeProjection memory phase', () => {
       mcp: [],
       memory: { memories: [{ name: 'v1' }], active: { name: 'v1' }, activeContent: 'x' },
       vars: { default: {}, active: {} },
-      config: { targets: ['claude-code'] },
+      config: { agents: ['claude-code'] },
       errors: [],
     }
     const plan = buildPlan(mf, ['claude-code'])

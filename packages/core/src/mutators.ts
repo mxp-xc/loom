@@ -58,7 +58,7 @@ export function updateSourceMeta(
   return { changed: true, data: { ...skills, sources } }
 }
 
-// Keep targets for retained entries; names are snapshots refreshed by the latest scan.
+// Keep agents for retained entries; names are snapshots refreshed by the latest scan.
 export function setSourceMembers(
   skills: SkillsManifest,
   url: string,
@@ -70,18 +70,18 @@ export function setSourceMembers(
   const prev = new Map((source.members ?? []).map((member) => [member.entry, member]))
   const members = selectedMembers.map((member) => ({
     ...member,
-    ...(prev.get(member.entry)?.targets ? { targets: prev.get(member.entry)!.targets } : {}),
+    ...(prev.get(member.entry)?.agents ? { agents: prev.get(member.entry)!.agents } : {}),
   }))
   const sources = skills.sources.slice()
   sources[idx] = { ...source, members }
   return { changed: true, data: { ...skills, sources } }
 }
 
-export function setSkillTargets(
+export function setSkillAgents(
   skills: SkillsManifest,
   sourceUrl: string,
   memberEntry: string,
-  targets: AgentId[],
+  agents: AgentId[],
 ): MutationResult<SkillsManifest> {
   const idx = skills.sources.findIndex((s) => s.url === sourceUrl)
   if (idx === -1) return { changed: false, data: skills }
@@ -89,17 +89,17 @@ export function setSkillTargets(
   const members = source.members ? source.members.slice() : []
   const memberIdx = members.findIndex((member) => member.entry === memberEntry)
   if (memberIdx === -1) return { changed: false, data: skills }
-  members[memberIdx] = { ...members[memberIdx], targets }
+  members[memberIdx] = { ...members[memberIdx], agents }
   const next: typeof source = { ...source, members }
   const sources = skills.sources.slice()
   sources[idx] = next
   return { changed: true, data: { ...skills, sources } }
 }
 
-export function setSourceMemberTargets(
+export function setSourceMemberAgents(
   skills: SkillsManifest,
   sourceUrl: string,
-  updates: Array<{ memberEntry: string; targets: AgentId[] }>,
+  updates: Array<{ memberEntry: string; agents: AgentId[] }>,
 ): MutationResult<SkillsManifest> {
   const idx = skills.sources.findIndex((s) => s.url === sourceUrl)
   if (idx === -1) return { changed: false, data: skills }
@@ -111,7 +111,7 @@ export function setSourceMemberTargets(
     if (!memberEntry) continue
     const memberIdx = members.findIndex((member) => member.entry === memberEntry)
     if (memberIdx !== -1) {
-      members[memberIdx] = { ...members[memberIdx], targets: update.targets }
+      members[memberIdx] = { ...members[memberIdx], agents: update.agents }
     }
   }
 
@@ -120,17 +120,17 @@ export function setSourceMemberTargets(
   return { changed: true, data: { ...skills, sources } }
 }
 
-export function setLocalSkillTargets(
+export function setLocalSkillAgents(
   skills: SkillsManifest,
   id: string,
-  targets: AgentId[],
+  agents: AgentId[],
 ): MutationResult<SkillsManifest> {
   const idx = skills.skills.findIndex((s) => s.id === id)
   if (idx === -1) {
-    return { changed: true, data: { ...skills, skills: [...skills.skills, { id, targets }] } }
+    return { changed: true, data: { ...skills, skills: [...skills.skills, { id, agents }] } }
   }
   const list = skills.skills.slice()
-  list[idx] = { ...skills.skills[idx], targets }
+  list[idx] = { ...skills.skills[idx], agents }
   return { changed: true, data: { ...skills, skills: list } }
 }
 
@@ -176,15 +176,15 @@ export function updateMcpServer(
   return { changed: true, data: list }
 }
 
-export function setMcpTargets(
+export function setMcpAgents(
   mcp: McpServer[],
   id: string,
-  targets: AgentId[],
+  agents: AgentId[],
 ): MutationResult<McpServer[]> {
   const idx = mcp.findIndex((s) => s.id === id)
   if (idx === -1) return { changed: false, data: mcp }
   const list = mcp.slice()
-  list[idx] = { ...mcp[idx], targets }
+  list[idx] = { ...mcp[idx], agents }
   return { changed: true, data: list }
 }
 

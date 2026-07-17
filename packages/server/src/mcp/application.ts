@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import {
   addMcpServer,
   removeMcpServer,
-  setMcpTargets,
+  setMcpAgents,
   updateMcpServer,
   normalizeOrder,
   sameOrder,
@@ -48,9 +48,9 @@ export class McpApplication {
     return { server: next }
   }
 
-  async setTargets(repoPath: string, id: string, targets: AgentId[]): Promise<void> {
+  async setAgents(repoPath: string, id: string, agents: AgentId[]): Promise<void> {
     const result = await this.updateServers(repoPath, (servers) =>
-      setMcpTargets(servers, id, targets),
+      setMcpAgents(servers, id, agents),
     )
     if (!result.changed) throw notFound(id)
   }

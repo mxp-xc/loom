@@ -16,7 +16,7 @@ vi.mock('../src/lib/api', () => ({
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: [], profile: 'local' },
+      config: { agents: [], profile: 'local' },
       errors: [],
     })),
     getConfig: vi.fn(async () => ({ effective: {}, repo: {}, local: {} })),

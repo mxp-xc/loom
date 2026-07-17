@@ -5,7 +5,7 @@
 @import './styles/app-shell/page-layout.css';
 @import './styles/shared/typography.css';
 @import './styles/shared/page-heading.css';
-@import './styles/shared/target-chips.css';
+@import './styles/shared/agent-chips.css';
 @import './styles/shared/markdown-preview.css';
 @import './styles/shared/highlight-overrides.css';
 @import './components/ui/IconButton.css';

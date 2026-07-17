@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "js-yaml": "^4.1.0",
+    "smol-toml": "^1.7.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {

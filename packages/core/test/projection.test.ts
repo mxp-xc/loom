@@ -30,7 +30,7 @@ const manifest: Manifest = {
         members: [
           { name: 'brainstorming', entry: 'skills/brainstorming/SKILL.md' },
           { name: 'tdd', entry: 'skills/tdd/SKILL.md' },
-          { name: 'writing', entry: 'skills/writing/SKILL.md', targets: ['codex'] },
+          { name: 'writing', entry: 'skills/writing/SKILL.md', agents: ['codex'] },
         ],
         sourceTree: sourceTreeFor([
           'skills/brainstorming/SKILL.md',
@@ -47,14 +47,14 @@ const manifest: Manifest = {
       type: 'stdio',
       command: 'npx',
       args: ['p'],
-      targets: ['claude-code', 'codex'],
+      agents: ['claude-code', 'codex'],
     },
     { id: 'zhipu', type: 'sse', url: 'https://x' },
   ],
   vars: { default: {}, active: {} },
   memory: { memories: [], active: null, activeContent: '' },
   config: {
-    targets: ['claude-code', 'codex', 'opencode'],
+    agents: ['claude-code', 'codex', 'opencode'],
     projection: { strategy: 'link' },
     skill_naming: 'hyphen',
   },
@@ -62,14 +62,14 @@ const manifest: Manifest = {
 }
 
 describe('planProjection', () => {
-  it('local skill without targets is not projected', () => {
+  it('local skill without agents is not projected', () => {
     const p = planProjection(
       manifest,
       manifest.config,
       new Set(['claude-code', 'codex', 'opencode']),
     )
     const fd = p.links.find((l) => l.skillId === 'frontend-design')!
-    expect(fd.targets).toEqual([])
+    expect(fd.agents).toEqual([])
   })
   it('source member is planned inside its source namespace', () => {
     const p = planProjection(
@@ -82,7 +82,7 @@ describe('planProjection', () => {
       expect.objectContaining({
         sourceName: 'superpowers',
         commit: 'aaa',
-        target: 'codex',
+        agent: 'codex',
         projectionBase: 'skills',
         entries: [{ kind: 'bundle', sourcePath: 'skills/writing', targetPath: 'writing' }],
       }),
@@ -100,7 +100,7 @@ describe('planProjection', () => {
               {
                 name: 'diagnosing-bugs',
                 entry: 'skills/engineering/diagnosing-bugs/SKILL.md',
-                targets: ['codex'],
+                agents: ['codex'],
               },
             ],
             sourceTree: sourceTreeFor(['skills/engineering/diagnosing-bugs/SKILL.md']),
@@ -135,7 +135,7 @@ describe('planProjection', () => {
               {
                 name: 'brainstorming',
                 entry: 'skills/brainstorming/SKILL.md',
-                targets: ['codex'],
+                agents: ['codex'],
               },
             ],
             sourceTree: sourceTreeFor(['skills/brainstorming/SKILL.md']),
@@ -149,7 +149,7 @@ describe('planProjection', () => {
       expect.objectContaining({ sourceName: 'openai-skills', cacheId: 'superpowers' }),
     )
   })
-  it('member without targets is not projected', () => {
+  it('member without agents is not projected', () => {
     const p = planProjection(
       manifest,
       manifest.config,
@@ -159,52 +159,52 @@ describe('planProjection', () => {
       p.sourcePlans.some((plan) => plan.entries.some((entry) => entry.sourcePath.endsWith('/tdd'))),
     ).toBe(false)
   })
-  it('member override targets生效', () => {
+  it('member override agents 生效', () => {
     const p = planProjection(
       manifest,
       manifest.config,
       new Set(['claude-code', 'codex', 'opencode']),
     )
-    expect(p.sourcePlans.find((plan) => plan.target === 'codex')?.entries).toContainEqual({
+    expect(p.sourcePlans.find((plan) => plan.agent === 'codex')?.entries).toContainEqual({
       kind: 'bundle',
       sourcePath: 'skills/writing',
       targetPath: 'writing',
     })
   })
-  it('mcp server projected to its own targets, not global', () => {
+  it('mcp server projected to its own agents, not global', () => {
     const p = planProjection(manifest, manifest.config, new Set(['claude-code', 'codex']))
     const m = p.mcpEntries.find((m) => m.id === 'playwright')!
-    expect(m.targets).toEqual(['claude-code', 'codex'])
+    expect(m.agents).toEqual(['claude-code', 'codex'])
   })
-  it('mcp server without targets is not projected', () => {
+  it('mcp server without agents is not projected', () => {
     const p = planProjection(
       manifest,
       manifest.config,
       new Set(['claude-code', 'codex', 'opencode']),
     )
     const z = p.mcpEntries.find((m) => m.id === 'zhipu')!
-    expect(z.targets).toEqual([])
+    expect(z.agents).toEqual([])
   })
   it('uninstalled agent skipped, marked in skipped', () => {
     const p = planProjection(manifest, manifest.config, new Set(['claude-code']))
     expect(p.skippedAgents).toContain('codex')
     const fd = p.links.find((l) => l.skillId === 'frontend-design')!
-    expect(fd.targets).toEqual([])
+    expect(fd.agents).toEqual([])
   })
 
-  it('intersects explicit targets with configured and installed targets', () => {
+  it('intersects explicit agents with configured and installed agents', () => {
     const m: Manifest = {
       ...manifest,
       skills: {
         ...manifest.skills,
-        skills: [{ id: 'frontend-design', targets: ['claude-code', 'opencode'] }],
+        skills: [{ id: 'frontend-design', agents: ['claude-code', 'opencode'] }],
       },
-      config: { ...manifest.config, targets: ['claude-code', 'codex'] },
+      config: { ...manifest.config, agents: ['claude-code', 'codex'] },
     }
     const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
-    expect(p.links.find((l) => l.skillId === 'frontend-design')?.targets).toEqual(['claude-code'])
+    expect(p.links.find((l) => l.skillId === 'frontend-design')?.agents).toEqual(['claude-code'])
   })
-  it('filters hidden targets for remote skills and MCP without mutating the manifest', () => {
+  it('filters hidden agents for remote skills and MCP without mutating the manifest', () => {
     const m: Manifest = {
       ...manifest,
       skills: {
@@ -215,7 +215,7 @@ describe('planProjection', () => {
               {
                 name: 'writing',
                 entry: 'skills/writing/SKILL.md',
-                targets: ['claude-code', 'opencode'],
+                agents: ['claude-code', 'opencode'],
               },
             ],
             sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
@@ -223,17 +223,17 @@ describe('planProjection', () => {
         ],
         skills: [],
       },
-      mcp: [{ id: 'playwright', type: 'stdio', command: 'npx', targets: ['codex', 'opencode'] }],
-      config: { ...manifest.config, targets: ['claude-code', 'codex'] },
+      mcp: [{ id: 'playwright', type: 'stdio', command: 'npx', agents: ['codex', 'opencode'] }],
+      config: { ...manifest.config, agents: ['claude-code', 'codex'] },
     }
     const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
 
-    expect(p.sourcePlans.map((plan) => plan.target)).toEqual(['claude-code'])
-    expect(p.mcpEntries[0].targets).toEqual(['codex'])
-    expect(m.skills.sources[0].members?.[0].targets).toEqual(['claude-code', 'opencode'])
-    expect(m.mcp[0].targets).toEqual(['codex', 'opencode'])
+    expect(p.sourcePlans.map((plan) => plan.agent)).toEqual(['claude-code'])
+    expect(p.mcpEntries[0].agents).toEqual(['codex'])
+    expect(m.skills.sources[0].members?.[0].agents).toEqual(['claude-code', 'opencode'])
+    expect(m.mcp[0].agents).toEqual(['codex', 'opencode'])
   })
-  it('deduplicates repeated targets before building source projection entries', () => {
+  it('deduplicates repeated agents before building source projection entries', () => {
     const m: Manifest = {
       ...manifest,
       skills: {
@@ -245,7 +245,7 @@ describe('planProjection', () => {
               {
                 name: 'writing',
                 entry: 'skills/writing/SKILL.md',
-                targets: ['codex', 'codex'],
+                agents: ['codex', 'codex'],
               },
             ],
             sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
@@ -262,7 +262,7 @@ describe('planProjection', () => {
     ])
   })
   it.each(['superpowers', 'superpowers/custom'])(
-    'rejects local skill destination %s overlapping a source namespace on the same target',
+    'rejects local skill destination %s overlapping a source namespace on the same agent',
     (localSkillId) => {
       const m: Manifest = {
         ...manifest,
@@ -274,13 +274,13 @@ describe('planProjection', () => {
                 {
                   name: 'writing',
                   entry: 'skills/writing/SKILL.md',
-                  targets: ['codex'],
+                  agents: ['codex'],
                 },
               ],
               sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
             },
           ],
-          skills: [{ id: localSkillId, targets: ['codex'] }],
+          skills: [{ id: localSkillId, agents: ['codex'] }],
         },
       }
 
@@ -290,7 +290,7 @@ describe('planProjection', () => {
     },
   )
 
-  it('allows matching local and source names when their targets do not overlap', () => {
+  it('allows matching local and source names when their agents do not overlap', () => {
     const m: Manifest = {
       ...manifest,
       skills: {
@@ -301,13 +301,13 @@ describe('planProjection', () => {
               {
                 name: 'writing',
                 entry: 'skills/writing/SKILL.md',
-                targets: ['codex'],
+                agents: ['codex'],
               },
             ],
             sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
           },
         ],
-        skills: [{ id: 'superpowers', targets: ['claude-code'] }],
+        skills: [{ id: 'superpowers', agents: ['claude-code'] }],
       },
     }
 
@@ -316,15 +316,11 @@ describe('planProjection', () => {
   it('strategy: copy透传;无 projection 默认 link', () => {
     const pCopy = planProjection(
       manifest,
-      { targets: ['claude-code'], projection: { strategy: 'copy' } },
+      { agents: ['claude-code'], projection: { strategy: 'copy' } },
       new Set(['claude-code']),
     )
     expect(pCopy.strategy).toBe('copy')
-    const pDefault = planProjection(
-      manifest,
-      { targets: ['claude-code'] },
-      new Set(['claude-code']),
-    )
+    const pDefault = planProjection(manifest, { agents: ['claude-code'] }, new Set(['claude-code']))
     expect(pDefault.strategy).toBe('link')
   })
 
@@ -334,8 +330,8 @@ describe('planProjection', () => {
       url: 'https://example.test/workflow-kit.git',
       ref: 'main',
       members: [
-        { name: 'skill-a', entry: 'folder/skill-a/SKILL.md', targets: ['codex' as const] },
-        { name: 'skill-b', entry: 'folder/skill-b/SKILL.md', targets: ['codex' as const] },
+        { name: 'skill-a', entry: 'folder/skill-a/SKILL.md', agents: ['codex' as const] },
+        { name: 'skill-b', entry: 'folder/skill-b/SKILL.md', agents: ['codex' as const] },
       ],
       resources: {
         include: [{ path: 'folder/shared', kind: 'directory' as const }],
@@ -404,7 +400,7 @@ describe('planProjection', () => {
       name: 'root-skill',
       url: 'https://example.test/root-skill.git',
       ref: 'main',
-      members: [{ name: 'root-skill', entry: 'SKILL.md', targets: ['codex' as const] }],
+      members: [{ name: 'root-skill', entry: 'SKILL.md', agents: ['codex' as const] }],
       sourceTree: sourceTreeFor(['SKILL.md']),
     }
     const planned = planProjection(

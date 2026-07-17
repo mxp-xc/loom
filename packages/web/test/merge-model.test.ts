@@ -7,14 +7,14 @@ import {
 } from '../src/views/sync/merge-model'
 
 const base = `profile: local
-targets:
+agents:
   - claude-code
 projection:
   strategy: link
 `
 
 const local = `profile: local
-targets:
+agents:
   - claude-code
   - codex
   - opencode
@@ -23,7 +23,7 @@ projection:
 `
 
 const remote = `profile: local
-targets: []
+agents: []
 projection:
   strategy: link
 proxy:
@@ -53,10 +53,10 @@ describe('three-way merge model', () => {
     expect(model.blocks).toHaveLength(1)
     expect(model.blocks[0]).toMatchObject({
       localText: expect.stringContaining('opencode'),
-      remoteText: 'targets: []\n',
-      localFrom: local.indexOf('targets:'),
+      remoteText: 'agents: []\n',
+      localFrom: local.indexOf('agents:'),
       localTo: local.indexOf('\nprojection:'),
-      remoteFrom: remote.indexOf('targets:'),
+      remoteFrom: remote.indexOf('agents:'),
       remoteTo: remote.indexOf('\nprojection:'),
       localState: 'pending',
       remoteState: 'pending',

@@ -13,8 +13,8 @@ import {
 } from 'lucide-react'
 import { Button } from '../../components/ui/button'
 import { IconButton } from '../../components/ui/IconButton'
-import { TargetChip } from '@/components/ui/TargetChip'
-import { AGENTS, agentName, agentShort, type AgentId } from '../../lib/agents'
+import { AgentChip } from '@/components/ui/AgentChip'
+import { agentIds, agentName, agentShort, type AgentId } from '../../lib/agents'
 import { cn } from '@/lib/utils'
 import styles from './VarsProfileDemo.module.css'
 
@@ -234,19 +234,19 @@ function AgentChips({
   label?: string
 }) {
   return (
-    <div className={cn('target-chips', styles['vars-lab-agent-chips'])} aria-label={label}>
+    <div className={cn('agent-chips', styles['vars-lab-agent-chips'])} aria-label={label}>
       {includeDefault && (
-        <TargetChip
+        <AgentChip
           state={activeAgent === 'default' ? 'on' : 'off'}
           color="var(--primary)"
           label="default"
           onClick={() => onChange('default')}
         >
           default
-        </TargetChip>
+        </AgentChip>
       )}
-      {AGENTS.map((agent) => (
-        <TargetChip
+      {agentIds.map((agent) => (
+        <AgentChip
           key={agent}
           agent={agent}
           state={activeAgent === agent ? 'on' : 'off'}
@@ -259,7 +259,7 @@ function AgentChips({
 }
 
 function EntrySlots({ slots }: { slots: Slot[] }) {
-  const configuredAgentSlots = AGENTS.filter((agent) => slots.includes(agent))
+  const configuredAgentSlots = agentIds.filter((agent) => slots.includes(agent))
 
   return (
     <div className={styles['vars-lab-slots']} aria-label="已配置槽位">

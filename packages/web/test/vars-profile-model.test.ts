@@ -61,13 +61,19 @@ const matricesByAgent = Object.fromEntries(agents.map((agent) => [agent, matrix(
   AgentId,
   VarsMatrixResponse
 >
+const defaultMatrix = matrix('codex')
+defaultMatrix.agent = 'default'
+defaultMatrix.builtinKeys = []
+defaultMatrix.snapshot.baseAgent = {}
+defaultMatrix.snapshot.localAgent = {}
 
 describe('profile vars view model', () => {
   it('builds builtin, base, and local profile summaries', () => {
     const state = buildVarsProfileState({
+      defaultMatrix,
       matricesByAgent,
-      activeAgent: 'codex',
-      definitionAgent: 'codex',
+      agents: agents,
+      activeAgent: null,
       definitionScope: 'default',
       showAvailable: false,
     })
@@ -80,9 +86,10 @@ describe('profile vars view model', () => {
 
   it('hides default from list slots and keeps type/format beside key', () => {
     const state = buildVarsProfileState({
+      defaultMatrix,
       matricesByAgent,
-      activeAgent: 'codex',
-      definitionAgent: 'codex',
+      agents: agents,
+      activeAgent: null,
       definitionScope: 'default',
       showAvailable: false,
     })
@@ -97,9 +104,10 @@ describe('profile vars view model', () => {
 
   it('adds available Base keys only when requested', () => {
     const state = buildVarsProfileState({
+      defaultMatrix,
       matricesByAgent,
-      activeAgent: 'codex',
-      definitionAgent: 'codex',
+      agents: agents,
+      activeAgent: null,
       definitionScope: 'default',
       showAvailable: true,
     })
@@ -109,10 +117,11 @@ describe('profile vars view model', () => {
 
   it('builds resolved rows for the active agent', () => {
     const state = buildVarsProfileState({
+      defaultMatrix,
       matricesByAgent,
+      agents: agents,
       activeAgent: 'codex',
-      definitionAgent: 'codex',
-      definitionScope: 'default',
+      definitionScope: 'codex',
       showAvailable: false,
     })
     expect(state.resolvedRows.find((row) => row.key === 'agent_name')).toMatchObject({
@@ -136,10 +145,11 @@ describe('profile vars view model', () => {
       }
     }
     const state = buildVarsProfileState({
+      defaultMatrix,
       matricesByAgent: { ...matricesByAgent, codex: maskedMatrix },
+      agents: agents,
       activeAgent: 'codex',
-      definitionAgent: 'codex',
-      definitionScope: 'default',
+      definitionScope: 'codex',
       showAvailable: false,
     })
 
@@ -152,9 +162,10 @@ describe('profile vars view model', () => {
 
   it('shows default local values in profile entries instead of the selected agent override', () => {
     const state = buildVarsProfileState({
+      defaultMatrix,
       matricesByAgent,
-      activeAgent: 'codex',
-      definitionAgent: 'codex',
+      agents: agents,
+      activeAgent: null,
       definitionScope: 'default',
       showAvailable: false,
     })

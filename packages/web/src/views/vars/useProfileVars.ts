@@ -1,20 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { configuredAgents as resolveConfiguredAgents, type AgentId } from '@loom/core'
 import { api } from '../../lib/api'
-import { AGENTS, type AgentId } from '../../lib/agents'
 import type { VarsMatrixResponse } from '../../lib/vars'
 import { buildVarsProfileState, type VarsViewScope } from './profile-model'
 
 export function useProfileVars(repoPath: string) {
-  const [activeAgent, setActiveAgent] = useState<AgentId>('codex')
-  const [defaultAgent, setDefaultAgent] = useState<AgentId>('codex')
+  const [activeAgent, setActiveAgent] = useState<AgentId | null>(null)
   const [viewScope, setViewScope] = useState<VarsViewScope>('default')
-  const [configuredTargets, setConfiguredTargets] = useState<AgentId[]>([])
-  const loadedDefaultAgent = useRef(false)
+  const [configuredAgents, setConfiguredAgents] = useState<AgentId[]>([])
   const [showAvailable, setShowAvailable] = useState(false)
-  const [matricesByAgent, setMatricesByAgent] = useState<Record<
-    AgentId,
-    VarsMatrixResponse
-  > | null>(null)
+  const [defaultMatrix, setDefaultMatrix] = useState<VarsMatrixResponse | null>(null)
+  const [matricesByAgent, setMatricesByAgent] = useState<
+    Partial<Record<AgentId, VarsMatrixResponse>>
+  >({})
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -23,31 +21,23 @@ export function useProfileVars(repoPath: string) {
     setLoading(true)
     setError(null)
     try {
-      const [manifest, entries] = await Promise.all([
-        api.getManifest(repoPath) as Promise<{ config?: { targets?: string[] } }>,
+      const manifest = (await api.getManifest(repoPath)) as { config?: { agents?: unknown[] } }
+      const agents = resolveConfiguredAgents(manifest.config?.agents)
+      const [nextDefaultMatrix, entries] = await Promise.all([
+        api.vars.getMatrix(repoPath, 'default'),
         Promise.all(
-          AGENTS.map(async (agent) => [agent, await api.vars.getMatrix(repoPath, agent)] as const),
+          agents.map(async (agent) => [agent, await api.vars.getMatrix(repoPath, agent)] as const),
         ),
       ])
-      const targets =
-        manifest.config?.targets?.filter((target): target is AgentId =>
-          AGENTS.includes(target as AgentId),
-        ) ?? []
-      const nextDefaultAgent = targets[0] ?? 'codex'
-      setConfiguredTargets(targets)
-      setDefaultAgent(nextDefaultAgent)
-      setActiveAgent((currentAgent) => {
-        if (!loadedDefaultAgent.current) return nextDefaultAgent
-        if (targets.length === 0) return nextDefaultAgent
-        if (targets.length > 0 && !targets.includes(currentAgent)) return nextDefaultAgent
-        return currentAgent
-      })
-      setViewScope((currentScope) => {
-        if (currentScope === 'default') return currentScope
-        return targets.includes(currentScope) ? currentScope : 'default'
-      })
-      loadedDefaultAgent.current = true
-      setMatricesByAgent(Object.fromEntries(entries) as Record<AgentId, VarsMatrixResponse>)
+      setConfiguredAgents(agents)
+      setDefaultMatrix(nextDefaultMatrix)
+      setMatricesByAgent(Object.fromEntries(entries))
+      setActiveAgent((currentAgent) =>
+        currentAgent && agents.includes(currentAgent) ? currentAgent : (agents[0] ?? null),
+      )
+      setViewScope((currentScope) =>
+        currentScope === 'default' || agents.includes(currentScope) ? currentScope : 'default',
+      )
     } catch (cause) {
       console.error('Failed to load profile vars', cause)
       setError(cause instanceof Error ? cause.message : '变量加载失败')
@@ -62,28 +52,29 @@ export function useProfileVars(repoPath: string) {
 
   const state = useMemo(
     () =>
-      matricesByAgent
+      defaultMatrix
         ? buildVarsProfileState({
+            defaultMatrix,
             matricesByAgent,
-            activeAgent: viewScope === 'default' ? defaultAgent : activeAgent,
-            definitionAgent: viewScope === 'default' ? defaultAgent : viewScope,
+            agents: configuredAgents,
+            activeAgent: viewScope === 'default' ? null : activeAgent,
             definitionScope: viewScope,
             showAvailable,
           })
         : null,
-    [activeAgent, defaultAgent, matricesByAgent, showAvailable, viewScope],
+    [activeAgent, configuredAgents, defaultMatrix, matricesByAgent, showAvailable, viewScope],
   )
 
   return {
     activeAgent,
-    defaultAgent,
     viewScope,
     setViewScope,
-    configuredTargets,
+    configuredAgents,
     setActiveAgent,
     showAvailable,
     setShowAvailable,
     state,
+    defaultMatrix,
     matricesByAgent,
     loading,
     pending,

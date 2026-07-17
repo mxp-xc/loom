@@ -1,8 +1,8 @@
 import { CheckCircle2, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../lib/api.js'
-import { AGENTS, agentName, agentShort, type AgentId } from '../../lib/agents.js'
-import { TargetChip } from '@/components/ui/TargetChip'
+import { agentName, agentShort, type AgentId } from '../../lib/agents.js'
+import { AgentChip } from '@/components/ui/AgentChip'
 import { cn } from '@/lib/utils.js'
 import type {
   StringFormat,
@@ -32,14 +32,14 @@ type VarsConfigModalProps = {
   baseEntries: VarsProfileEntry[]
   viewScope: 'default' | AgentId
   definitionMatrix: VarsMatrixResponse
-  matricesByAgent: Record<AgentId, VarsMatrixResponse>
+  matricesByAgent: Partial<Record<AgentId, VarsMatrixResponse>>
+  agents: AgentId[]
   onClose: () => void
   onSaved: () => Promise<void>
   onError: (message: string) => void
   setPending: (pending: boolean) => void
 }
 
-const slotOptions: Slot[] = ['default', ...AGENTS]
 const varTypeOptions: Array<VarEntryInput['type']> = [
   'string',
   'number',
@@ -64,7 +64,7 @@ function slotLabel(slot: Slot) {
 
 function valueForSlot(
   definitionMatrix: VarsMatrixResponse,
-  matricesByAgent: Record<AgentId, VarsMatrixResponse>,
+  matricesByAgent: Partial<Record<AgentId, VarsMatrixResponse>>,
   profileId: VarsProfileSummary['id'],
   key: string,
   slot: Slot,
@@ -208,6 +208,7 @@ export default function VarsConfigModal({
   viewScope,
   definitionMatrix,
   matricesByAgent,
+  agents,
   onClose,
   onSaved,
   onError,
@@ -231,6 +232,7 @@ export default function VarsConfigModal({
       ? viewScope
       : 'default'
   const [slot, setSlot] = useState<Slot>(initialSlot)
+  const slotOptions: Slot[] = ['default', ...agents]
   const [previewMode, setPreviewMode] = useState<PreviewMode>('edit')
   const [draft, setDraft] = useState(() =>
     selectedEntry
@@ -433,9 +435,9 @@ export default function VarsConfigModal({
             {!isReadonly && (
               <div className={styles['vars-agent-switch']} aria-label="配置槽位">
                 <span>配置槽位</span>
-                <div className="target-chips">
+                <div className="agent-chips">
                   {slotOptions.map((option) => (
-                    <TargetChip
+                    <AgentChip
                       key={option}
                       agent={option === 'default' ? undefined : option}
                       state={slot === option ? 'on' : 'off'}
@@ -444,7 +446,7 @@ export default function VarsConfigModal({
                       onClick={() => setSlot(option)}
                     >
                       {option === 'default' ? 'default' : undefined}
-                    </TargetChip>
+                    </AgentChip>
                   ))}
                 </div>
               </div>

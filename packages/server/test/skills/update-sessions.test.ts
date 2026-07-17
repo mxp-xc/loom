@@ -206,7 +206,7 @@ describe('persistedMembers', () => {
         {
           url: 'https://example.test/skills.git',
           ref: 'main',
-          members: [{ name: 'old-name', entry: 'skills/selected/SKILL.md', targets: ['codex'] }],
+          members: [{ name: 'old-name', entry: 'skills/selected/SKILL.md', agents: ['codex'] }],
         },
         [
           {
@@ -219,7 +219,7 @@ describe('persistedMembers', () => {
           },
         ],
       ),
-    ).toEqual([{ name: 'renamed', entry: 'skills/selected/SKILL.md', targets: ['codex'] }])
+    ).toEqual([{ name: 'renamed', entry: 'skills/selected/SKILL.md', agents: ['codex'] }])
   })
 
   it('adds only newly discovered bundles explicitly enabled during boundary reconciliation', () => {

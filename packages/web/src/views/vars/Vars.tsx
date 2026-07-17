@@ -1,7 +1,7 @@
 import { RefreshCw, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '@/hooks/useToast'
-import { TargetChip } from '@/components/ui/TargetChip'
+import { AgentChip } from '@/components/ui/AgentChip'
 import { ErrorState } from '@/components/ErrorFeedback'
 import { cn } from '@/lib/utils'
 import type { VarsProfileId } from './profile-model'
@@ -120,20 +120,17 @@ export default function Vars({ repoPath }: { repoPath: string }) {
         </div>
         <div className={styles['vars-agent-view']}>
           <span className={styles['vars-agent-label']}>查看范围</span>
-          <TargetChip
+          <AgentChip
             state={vars.viewScope === 'default' ? 'on' : 'off'}
             color="var(--primary)"
             label="default"
-            onClick={() => {
-              vars.setActiveAgent(vars.defaultAgent)
-              vars.setViewScope('default')
-            }}
+            onClick={() => vars.setViewScope('default')}
           >
             default
-          </TargetChip>
-          <div className="target-chips" aria-label="目标 agent">
-            {vars.configuredTargets.map((agent) => (
-              <TargetChip
+          </AgentChip>
+          <div className="agent-chips" aria-label="目标 agent">
+            {vars.configuredAgents.map((agent) => (
+              <AgentChip
                 key={agent}
                 agent={agent}
                 state={vars.viewScope === agent ? 'on' : 'off'}
@@ -192,6 +189,7 @@ export default function Vars({ repoPath }: { repoPath: string }) {
             <VarsProfileTable
               entries={activeProfile.entries}
               search={search}
+              showAgentSlots={vars.configuredAgents.length > 0}
               onView={(entry) => setModal({ kind: 'view', entry })}
               onEdit={(entry) => setModal({ kind: 'edit', entry })}
               onAdd={(entry) => setModal({ kind: 'add', entry })}
@@ -213,7 +211,8 @@ export default function Vars({ repoPath }: { repoPath: string }) {
           baseEntries={state.profiles.find((profile) => profile.id === 'base')?.entries ?? []}
           viewScope={vars.viewScope}
           definitionMatrix={state.definitionMatrix}
-          matricesByAgent={vars.matricesByAgent!}
+          matricesByAgent={vars.matricesByAgent}
+          agents={vars.configuredAgents}
           setPending={vars.setPending}
           onClose={() => setModal(null)}
           onSaved={vars.reload}

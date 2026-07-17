@@ -1,12 +1,13 @@
 import type { VarsEnvironment } from './vars-types.js'
+import type { AgentId } from './agents.js'
 
-export type AgentId = 'claude-code' | 'codex' | 'opencode'
+export type { AgentId } from './agents.js'
 export type McpType = 'stdio' | 'sse' | 'http'
 
 export interface SkillMemberOverride {
   name: string
   entry: string
-  targets?: AgentId[]
+  agents?: AgentId[]
   /** Runtime-only source SKILL.md path relative to the source repository root. */
   path?: string
   /** Runtime-only source SKILL.md frontmatter description. */
@@ -98,7 +99,7 @@ export interface SkillSource {
 export interface LocalSkill {
   id: string
   path?: string
-  targets?: AgentId[]
+  agents?: AgentId[]
   /** Runtime-only status added to manifest responses for referenced skills. */
   available?: boolean
   /** Runtime-only local SKILL.md path relative to the repo root when possible. */
@@ -116,7 +117,7 @@ export interface SkillsManifest {
 export interface Memory {
   name: string
   content?: string
-  targets?: AgentId[]
+  agents?: AgentId[]
 }
 
 export interface MemoryManifest {
@@ -135,7 +136,7 @@ export interface McpServer {
   env?: Record<string, string>
   url?: string
   headers?: Record<string, string>
-  targets?: AgentId[]
+  agents?: AgentId[]
 }
 
 export interface ProjectionConfig {
@@ -153,14 +154,14 @@ export interface ProxyConfig {
 
 export interface Config {
   profile?: string
-  targets?: AgentId[]
+  agents?: AgentId[]
   projection?: ProjectionConfig
   update_check?: UpdateCheckConfig
   active_repo?: string
   proxy?: ProxyConfig
   skill_naming?: 'dir' | 'hyphen'
   active_memory?: string
-  memory_targets?: Partial<Record<AgentId, string>>
+  memory_agents?: Partial<Record<AgentId, string>>
   memory_order?: string[]
 }
 

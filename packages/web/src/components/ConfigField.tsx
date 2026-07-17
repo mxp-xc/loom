@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { AGENTS, agentName } from '@/lib/agents'
+import { agentIds, agentName } from '@/lib/agents'
 import { IconButton } from '@/components/ui/IconButton'
-import { TargetChip } from '@/components/ui/TargetChip'
+import { AgentChip } from '@/components/ui/AgentChip'
 import { Check, Eraser, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import styles from './ConfigField.module.css'
@@ -58,8 +58,8 @@ export const FIELD_SCHEMA: FieldSchema[] = [
     },
   },
   {
-    key: 'targets',
-    label: 'Targets',
+    key: 'agents',
+    label: 'Agents',
     group: 'Projection',
     control: 'chips',
     helpByLevel: {
@@ -228,8 +228,8 @@ export function ConfigField({
     const set = new Set(cur)
     if (set.has(agent)) set.delete(agent)
     else set.add(agent)
-    // Emit in canonical AGENTS order so local overrides match repo config order
-    const next = AGENTS.filter((a) => set.has(a))
+    // Emit in canonical agent order so local overrides match repo config order.
+    const next = agentIds.filter((agent) => set.has(agent))
     onControlClick(next)
   }
 
@@ -283,15 +283,15 @@ export function ConfigField({
           {field.control === 'chips' && (
             <div
               className={cn(
-                'target-chips',
-                styles['cfg-target-chips'],
+                'agent-chips',
+                styles['cfg-agent-chips'],
                 isDisabled && styles['cfg-ctrl-disabled'],
               )}
             >
-              {AGENTS.map((agent) => {
+              {agentIds.map((agent) => {
                 const on = Array.isArray(value) && (value as string[]).includes(agent)
                 return (
-                  <TargetChip
+                  <AgentChip
                     key={agent}
                     agent={agent}
                     state={on ? 'on' : 'off'}

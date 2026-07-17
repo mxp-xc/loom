@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { StrictMode, useState, type ReactNode } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
@@ -16,6 +16,7 @@ import Mcp from '../src/views/Mcp'
 import Memory from '../src/views/Memory'
 import { useManifestOperations } from '../src/hooks/useManifestOperations'
 import { createMonacoEditorMock } from './monaco-test-utils'
+import { agentIds } from '../src/lib/agents'
 
 const monacoEditorMock = createMonacoEditorMock()
 
@@ -98,16 +99,16 @@ vi.mock('../src/lib/api', () => ({
       finalized: true,
       changes: { added: [], updated: [], removed: [] },
     })),
-    updateSkillTargets: vi.fn(async () => ({ ok: true })),
-    updateSourceSkillTargets: vi.fn(async () => ({ ok: true })),
-    updateLocalSkillTargets: vi.fn(async () => ({ ok: true })),
+    updateSkillAgents: vi.fn(async () => ({ ok: true })),
+    updateSourceSkillAgents: vi.fn(async () => ({ ok: true })),
+    updateLocalSkillAgents: vi.fn(async () => ({ ok: true })),
     getSkillContent: vi.fn(async () => ({ ok: true, content: '# Skill' })),
     deleteSource: vi.fn(async () => ({ ok: true })),
     deleteLocalSkill: vi.fn(async () => ({ ok: true })),
     saveSkillContent: vi.fn(async () => ({ ok: true })),
     addMcpServer: vi.fn(async () => ({ ok: true })),
     updateMcpServer: vi.fn(async () => ({ ok: true })),
-    updateMcpTargets: vi.fn(async () => ({ ok: true })),
+    updateMcpAgents: vi.fn(async () => ({ ok: true })),
     deleteMcpServer: vi.fn(async () => ({ ok: true })),
     reorderMcpServers: vi.fn(async ({ ids }: { ids: string[] }) => ({ ok: true, ids })),
     getMemory: vi.fn(async () => ({
@@ -117,7 +118,7 @@ vi.mock('../src/lib/api', () => ({
       activeContent: '',
     })),
     getMemoryContent: vi.fn(async (_repo: string, name: string) => ({ content: `# ${name}` })),
-    updateMemoryTarget: vi.fn(async () => ({ ok: true, assignments: {} })),
+    updateMemoryAgent: vi.fn(async () => ({ ok: true, assignments: {} })),
     setMemoryActive: vi.fn(async () => ({ ok: true })),
     createMemory: vi.fn(async () => ({ ok: true })),
     renameMemory: vi.fn(async () => ({ ok: true })),
@@ -153,18 +154,18 @@ vi.mock('../src/lib/api', () => ({
                 command: 'echo',
                 args: ['hello'],
                 env: { FOO: 'bar' },
-                targets: ['codex'],
+                agents: ['codex'],
               },
               {
                 id: 'remote-mcp',
                 type: 'http',
                 url: 'https://example.test/mcp',
                 headers: { Authorization: 'Bearer token' },
-                targets: [],
+                agents: [],
               },
             ],
             vars: { default: {}, active: {} },
-            config: { targets: ['claude-code', 'codex', 'opencode'] },
+            config: { agents: ['claude-code', 'codex', 'opencode'] },
             errors: [],
           }
         : repoPath === '/tmp/skills-layout'
@@ -182,7 +183,7 @@ vi.mock('../src/lib/api', () => ({
                         entry: 'skills/systematic-debugging/SKILL.md',
                         description: 'A disciplined debugging loop for bugs and regressions.',
                         path: 'skills/systematic-debugging/SKILL.md',
-                        targets: ['claude-code', 'codex', 'opencode'],
+                        agents: ['claude-code', 'codex', 'opencode'],
                       },
                     ],
                   },
@@ -192,31 +193,35 @@ vi.mock('../src/lib/api', () => ({
                     id: 'test-qa-skill',
                     path: './assets/skills/test-qa-skill',
                     available: false,
-                    targets: ['claude-code', 'codex', 'opencode'],
+                    agents: ['claude-code', 'codex', 'opencode'],
                   },
                   {
                     id: 'frontend-design',
                     description: 'Design guidance for distinctive front-end UI.',
                     skillFilePath: 'assets/skills/frontend-design/SKILL.md',
-                    targets: [],
+                    agents: [],
                   },
                 ],
               },
               mcp: [],
               vars: { default: {}, active: {} },
-              config: { targets: ['claude-code', 'codex'] },
+              config: { agents: ['claude-code', 'codex'] },
               errors: [],
             }
           : {
               skills: { sources: [], skills: [] },
               mcp: [],
               vars: { default: {}, active: {} },
-              config: { targets: ['claude-code', 'codex'] },
+              config: { agents: ['claude-code', 'codex'] },
               errors: [],
             },
     ),
   },
 }))
+
+const defaultGetManifest = vi.mocked(api.getManifest).getMockImplementation()!
+const defaultGetMemory = vi.mocked(api.getMemory).getMockImplementation()!
+const defaultGetMemoryContent = vi.mocked(api.getMemoryContent).getMockImplementation()!
 
 function SkillSourceListHarness({
   repoPath,
@@ -247,6 +252,7 @@ function SkillSourceListHarness({
   return (
     <SkillSourceList
       manifest={manifest}
+      visibleAgents={agentIds}
       operations={operations}
       onOpenDetail={onOpenDetail}
       onOpenScan={onOpenScan}
@@ -397,7 +403,7 @@ describe('MCP view', () => {
     expect(screen.getByText('ID 已锁定，保存后不可修改')).toBeDefined()
 
     fireEvent.change(screen.getByLabelText('command'), { target: { value: 'node' } })
-    expect(screen.queryByText('targets')).toBeNull()
+    expect(screen.queryByText('agents')).toBeNull()
 
     fireEvent.change(screen.getByLabelText('env value 1'), { target: { value: 'baz' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -412,7 +418,7 @@ describe('MCP view', () => {
           command: 'node',
           args: ['hello'],
           env: { FOO: 'baz' },
-          targets: ['codex'],
+          agents: ['codex'],
         }),
       }),
     )
@@ -464,7 +470,7 @@ describe('MCP view', () => {
         id: 'test-mcp',
         server: expect.objectContaining({
           env: { TOKEN: 'abc 123' },
-          targets: ['codex'],
+          agents: ['codex'],
         }),
       }),
     )
@@ -492,29 +498,33 @@ describe('MCP view', () => {
     }
   })
 
-  it('bulk toggles MCP server targets without projecting', async () => {
+  it('bulk toggles MCP server agents without projecting', async () => {
     render(<Mcp repoPath="/tmp/mcp-layout" />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '全部 MCP servers 应用到 Codex' }))
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: '全部 MCP servers 应用到 Codex：部分已应用',
+      }),
+    )
 
-    await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalledTimes(2))
     expect(api.project).not.toHaveBeenCalled()
-    expect(api.updateMcpTargets).toHaveBeenCalledWith({
+    expect(api.updateMcpAgents).toHaveBeenCalledWith({
       repo: '/tmp/mcp-layout',
       id: 'test-mcp',
-      targets: ['codex'],
+      agents: ['codex'],
     })
-    expect(api.updateMcpTargets).toHaveBeenCalledWith({
+    expect(api.updateMcpAgents).toHaveBeenCalledWith({
       repo: '/tmp/mcp-layout',
       id: 'remote-mcp',
-      targets: ['codex'],
+      agents: ['codex'],
     })
   })
 
-  it('updates MCP bulk targets one server at a time', async () => {
+  it('updates MCP bulk agents one server at a time', async () => {
     let releaseFirst!: () => void
-    const callsBefore = vi.mocked(api.updateMcpTargets).mock.calls.length
-    vi.mocked(api.updateMcpTargets).mockImplementationOnce(
+    const callsBefore = vi.mocked(api.updateMcpAgents).mock.calls.length
+    vi.mocked(api.updateMcpAgents).mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           releaseFirst = () => resolve({ ok: true })
@@ -523,12 +533,16 @@ describe('MCP view', () => {
 
     render(<Mcp repoPath="/tmp/mcp-layout" />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '全部 MCP servers 应用到 Codex' }))
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: '全部 MCP servers 应用到 Codex：部分已应用',
+      }),
+    )
 
-    await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(callsBefore + 1))
+    await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalledTimes(callsBefore + 1))
     releaseFirst()
-    await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(callsBefore + 2))
-    vi.mocked(api.updateMcpTargets).mockResolvedValue({ ok: true } as never)
+    await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalledTimes(callsBefore + 2))
+    vi.mocked(api.updateMcpAgents).mockResolvedValue({ ok: true } as never)
   })
 
   it('keeps selection while reordering to the end and disables sorting while searching', async () => {
@@ -568,6 +582,34 @@ describe('MCP view', () => {
 })
 
 describe('Skill detail modal', () => {
+  it('keeps location metadata without projected links when agents are empty', async () => {
+    vi.mocked(api.getSkillContent).mockResolvedValueOnce({
+      ok: true,
+      content: '# Source skill',
+    } as never)
+
+    render(
+      <SkillDetailEditor
+        repoPath="/tmp/skills-empty-agents"
+        agents={[]}
+        detail={{
+          skillId: 'source-skill',
+          source: 'https://example.test/skills.git',
+          path: 'source-skill/SKILL.md',
+          agents: ['codex'],
+        }}
+        showToast={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = await screen.findByRole('dialog', { name: 'source-skill' })
+    expect(within(dialog).getByText('Location')).toBeDefined()
+    expect(within(dialog).getByText('https://example.test/skills.git')).toBeDefined()
+    expect(within(dialog).getByText('source-skill/SKILL.md')).toBeDefined()
+    expect(within(dialog).queryByText('Projected links')).toBeNull()
+  })
+
   it('matches the approved Edit Skill workbench structure', async () => {
     vi.mocked(api.getSkillContent).mockResolvedValueOnce({
       ok: true,
@@ -577,10 +619,11 @@ describe('Skill detail modal', () => {
     render(
       <SkillDetailEditor
         repoPath="/tmp/skills-workbench"
+        agents={agentIds}
         detail={{
           skillId: 'production-skill',
           path: '/skills/production-skill/SKILL.md',
-          targets: ['codex'],
+          agents: ['codex'],
         }}
         showToast={vi.fn()}
         onClose={vi.fn()}
@@ -623,10 +666,11 @@ describe('Skill detail modal', () => {
     render(
       <SkillDetailEditor
         repoPath="/tmp/skills-layout"
+        agents={agentIds}
         detail={{
           skillId: 'superpowers/receiving-code-review',
           source: 'https://github.com/obra/superpowers.git',
-          targets: ['codex'],
+          agents: ['codex'],
         }}
         showToast={vi.fn()}
         onClose={vi.fn()}
@@ -662,11 +706,12 @@ describe('Skill detail modal', () => {
     render(
       <SkillDetailEditor
         repoPath="/tmp/source-skill"
+        agents={agentIds}
         detail={{
           skillId: 'source-skill',
           source: 'https://github.com/example/skills.git',
           path: 'skills/source-skill/SKILL.md',
-          targets: ['codex', 'opencode'],
+          agents: ['codex', 'opencode'],
         }}
         showToast={vi.fn()}
         onClose={vi.fn()}
@@ -688,7 +733,8 @@ describe('Skill detail modal', () => {
     render(
       <SkillDetailEditor
         repoPath="/tmp/empty-local-skill"
-        detail={{ skillId: 'empty-local-skill', path: './skills/empty', targets: [] }}
+        agents={agentIds}
+        detail={{ skillId: 'empty-local-skill', path: './skills/empty', agents: [] }}
         showToast={vi.fn()}
         onClose={vi.fn()}
       />,
@@ -701,18 +747,24 @@ describe('Skill detail modal', () => {
 })
 
 describe('Memory view', () => {
+  afterEach(() => {
+    vi.mocked(api.getManifest).mockReset().mockImplementation(defaultGetManifest)
+    vi.mocked(api.getMemory).mockReset().mockImplementation(defaultGetMemory)
+    vi.mocked(api.getMemoryContent).mockReset().mockImplementation(defaultGetMemoryContent)
+  })
+
   it('uses the approved dropdown manager and preview-first workbench layout', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex', 'opencode'] },
+      config: { agents: ['codex', 'opencode'] },
       errors: [],
     } as never)
     vi.mocked(api.getMemory).mockResolvedValueOnce({
       memories: [
-        { name: 'v1', targets: ['codex'] },
-        { name: 'review-rules', targets: ['opencode'] },
+        { name: 'v1', agents: ['codex'] },
+        { name: 'review-rules', agents: ['opencode'] },
       ],
       assignments: { codex: 'v1', opencode: 'review-rules' },
       active: null,
@@ -726,7 +778,7 @@ describe('Memory view', () => {
     expect(layout).toBeDefined()
     expect(screen.getByRole('tab', { name: '所见' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByRole('heading', { name: 'v1', level: 1 })).toBeDefined()
-    expect(screen.getByLabelText('Memory 状态').textContent).toContain('1 个 Target')
+    expect(screen.getByLabelText('Memory 状态').textContent).toContain('1 个 Agent')
     expect(screen.getByRole('article').textContent).toContain('Active memory')
     expect(screen.getByRole('button', { name: '管理 Memory' })).toBeDefined()
 
@@ -738,13 +790,37 @@ describe('Memory view', () => {
     expect(within(menu).getByRole('button', { name: 'v1 已投影到 Codex' })).toBeDefined()
   })
 
+  it('hides preserved assignments for agents outside the configured scope', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: ['codex'] },
+      errors: [],
+    } as never)
+    vi.mocked(api.getMemory).mockResolvedValueOnce({
+      memories: [{ name: 'v1', agents: ['codex', 'opencode'] }],
+      assignments: { codex: 'v1', opencode: 'v1' },
+      active: null,
+      activeContent: '',
+    } as never)
+    vi.mocked(api.getMemoryContent).mockResolvedValueOnce({ content: '# Scoped memory' })
+
+    render(<Memory repoPath="/tmp/memory-configured-scope" />)
+
+    expect(await screen.findByRole('heading', { name: 'v1', level: 1 })).toBeDefined()
+    expect(screen.getByLabelText('Memory 状态').textContent).toContain('1 个 Agent')
+    expect(document.querySelector('[data-agent="codex"]')).not.toBeNull()
+    expect(document.querySelector('[data-agent="opencode"]')).toBeNull()
+  })
+
   it('ignores stale content when memory selections resolve out of order', async () => {
     let resolveV2!: (value: { content: string }) => void
     vi.mocked(api.getMemory).mockResolvedValue({
       memories: [
-        { name: 'v1', targets: ['codex'] },
-        { name: 'v2', targets: [] },
-        { name: 'v3', targets: [] },
+        { name: 'v1', agents: ['codex'] },
+        { name: 'v2', agents: [] },
+        { name: 'v3', agents: [] },
       ],
       assignments: { codex: 'v1' },
       active: null,
@@ -775,8 +851,8 @@ describe('Memory view', () => {
   it('asks before discarding an unsaved draft when switching memories', async () => {
     vi.mocked(api.getMemory).mockResolvedValue({
       memories: [
-        { name: 'v1', targets: ['codex'] },
-        { name: 'v2', targets: [] },
+        { name: 'v1', agents: ['codex'] },
+        { name: 'v2', agents: [] },
       ],
       assignments: { codex: 'v1' },
       active: null,
@@ -813,56 +889,56 @@ describe('Memory view', () => {
     ).toBe('# v2')
   })
 
-  it('assigns an unoccupied target and reconciles projection immediately', async () => {
+  it('assigns an unoccupied agent and reconciles projection immediately', async () => {
     vi.mocked(api.getManifest).mockResolvedValue({
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex', 'opencode'] },
+      config: { agents: ['codex', 'opencode'] },
       errors: [],
     } as never)
     vi.mocked(api.getMemory)
       .mockResolvedValueOnce({
-        memories: [{ name: 'v1', targets: ['codex'] }],
+        memories: [{ name: 'v1', agents: ['codex'] }],
         assignments: { codex: 'v1' },
         active: null,
         activeContent: '',
       } as never)
       .mockResolvedValueOnce({
-        memories: [{ name: 'v1', targets: ['codex', 'opencode'] }],
+        memories: [{ name: 'v1', agents: ['codex', 'opencode'] }],
         assignments: { codex: 'v1', opencode: 'v1' },
         active: null,
         activeContent: '',
       } as never)
     vi.mocked(api.getMemoryContent).mockResolvedValue({ content: '# v1' })
 
-    render(<Memory repoPath="/tmp/memory-targets" />)
+    render(<Memory repoPath="/tmp/memory-agents" />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'v1 投影到 OpenCode' }))
 
     await waitFor(() =>
-      expect(api.updateMemoryTarget).toHaveBeenCalledWith({
-        repo: '/tmp/memory-targets',
-        target: 'opencode',
+      expect(api.updateMemoryAgent).toHaveBeenCalledWith({
+        repo: '/tmp/memory-agents',
+        agent: 'opencode',
         name: 'v1',
       }),
     )
-    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/memory-targets', scope: 'memory' })
+    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/memory-agents', scope: 'memory' })
   })
 
-  it('confirms before moving an occupied target to another memory', async () => {
-    vi.mocked(api.updateMemoryTarget).mockClear()
+  it('confirms before moving an occupied agent to another memory', async () => {
+    vi.mocked(api.updateMemoryAgent).mockClear()
     vi.mocked(api.getManifest).mockResolvedValue({
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex', 'opencode'] },
+      config: { agents: ['codex', 'opencode'] },
       errors: [],
     } as never)
     vi.mocked(api.getMemory).mockResolvedValue({
       memories: [
-        { name: 'v1', targets: ['codex'] },
-        { name: 'v2', targets: ['opencode'] },
+        { name: 'v1', agents: ['codex'] },
+        { name: 'v2', agents: ['opencode'] },
       ],
       assignments: { codex: 'v1', opencode: 'v2' },
       active: null,
@@ -876,13 +952,13 @@ describe('Memory view', () => {
     const dialog = await screen.findByRole('dialog', { name: '切换 OpenCode 的 Memory' })
     expect(dialog.textContent).toContain('v2')
     expect(dialog.textContent).toContain('v1')
-    expect(api.updateMemoryTarget).not.toHaveBeenCalled()
+    expect(api.updateMemoryAgent).not.toHaveBeenCalled()
     fireEvent.click(within(dialog).getByRole('button', { name: '确认切换' }))
 
     await waitFor(() =>
-      expect(api.updateMemoryTarget).toHaveBeenCalledWith({
+      expect(api.updateMemoryAgent).toHaveBeenCalledWith({
         repo: '/tmp/memory-conflict',
-        target: 'opencode',
+        agent: 'opencode',
         name: 'v1',
       }),
     )
@@ -891,8 +967,8 @@ describe('Memory view', () => {
   it('deletes a specific memory from the dropdown', async () => {
     vi.mocked(api.getMemory).mockResolvedValue({
       memories: [
-        { name: 'v1', targets: ['codex'] },
-        { name: 'v2', targets: [] },
+        { name: 'v1', agents: ['codex'] },
+        { name: 'v2', agents: [] },
       ],
       assignments: { codex: 'v1' },
       active: null,
@@ -924,6 +1000,31 @@ describe('Skills view', () => {
     expect(addButton.querySelector('.lucide-plus')).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Add skill' })).toBeNull()
     expect(screen.queryByText(/source 级操作/)).toBeNull()
+  })
+
+  it('keeps content and source management without agent controls when agents are empty', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: {
+        sources: [],
+        skills: [{ id: 'kept-skill', path: './assets/skills/kept-skill', agents: ['codex'] }],
+      },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: [] },
+      errors: [],
+    } as never)
+
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-empty-agents" />
+      </TestRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: '添加 Skill 或 Source' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '投影' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '全部展开' }))
+    expect(screen.getAllByText('kept-skill').length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-agent-chip="true"]')).toBeNull()
   })
 
   it('clears stale project errors after a successful project mutation refreshes manifest', async () => {
@@ -974,7 +1075,7 @@ describe('Skills view', () => {
 
     const expandAll = await screen.findByRole('button', { name: '全部展开' })
     expect(screen.getByText('批量设置 · 应用于全部 skills')).toBeDefined()
-    expect(screen.queryByRole('link', { name: '在 Settings 中修改 targets' })).toBeNull()
+    expect(screen.queryByRole('link', { name: '在 Settings 中修改 agents' })).toBeNull()
     expect(screen.queryByText('systematic-debugging')).toBeNull()
     expect(screen.queryByText('test-qa-skill')).toBeNull()
 
@@ -1036,10 +1137,10 @@ describe('Skills view', () => {
     ).toBeNull()
     fireEvent.click(within(frontendRow).getByRole('button', { name: 'Codex' }))
     await waitFor(() =>
-      expect(api.updateLocalSkillTargets).toHaveBeenCalledWith({
+      expect(api.updateLocalSkillAgents).toHaveBeenCalledWith({
         repo: '/tmp/skills-layout',
         id: 'frontend-design',
-        targets: ['codex'],
+        agents: ['codex'],
       }),
     )
 
@@ -1052,7 +1153,7 @@ describe('Skills view', () => {
     expect(screen.queryByText('test-qa-skill')).toBeNull()
   })
 
-  it('projects skills after an individual target chip is toggled', async () => {
+  it('projects skills after an individual agent chip is toggled', async () => {
     const projectCallsBefore = vi.mocked(api.project).mock.calls.length
     render(
       <TestRouter>
@@ -1065,10 +1166,10 @@ describe('Skills view', () => {
     fireEvent.click(within(frontendRow).getByRole('button', { name: 'Codex' }))
 
     await waitFor(() =>
-      expect(api.updateLocalSkillTargets).toHaveBeenCalledWith({
+      expect(api.updateLocalSkillAgents).toHaveBeenCalledWith({
         repo: '/tmp/skills-layout',
         id: 'frontend-design',
-        targets: ['codex'],
+        agents: ['codex'],
       }),
     )
     await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 1))
@@ -1077,8 +1178,8 @@ describe('Skills view', () => {
 
   it('supports source-level bulk projection chips in the source header', async () => {
     const projectCallsBefore = vi.mocked(api.project).mock.calls.length
-    const updateCallsBefore = vi.mocked(api.updateSkillTargets).mock.calls.length
-    const sourceUpdateCallsBefore = vi.mocked(api.updateSourceSkillTargets).mock.calls.length
+    const updateCallsBefore = vi.mocked(api.updateSkillAgents).mock.calls.length
+    const sourceUpdateCallsBefore = vi.mocked(api.updateSourceSkillAgents).mock.calls.length
     const manifest = {
       skills: {
         sources: [
@@ -1088,17 +1189,17 @@ describe('Skills view', () => {
             ref: 'v6.1.1',
             type: 'tag',
             members: [
-              { name: 'brainstorming', entry: 'brainstorming/SKILL.md', targets: ['codex'] },
-              { name: 'executing-plans', entry: 'executing-plans/SKILL.md', targets: [] },
-              { name: 'disabled-skill', entry: 'disabled-skill/SKILL.md', targets: [] },
+              { name: 'brainstorming', entry: 'brainstorming/SKILL.md', agents: ['codex'] },
+              { name: 'executing-plans', entry: 'executing-plans/SKILL.md', agents: [] },
+              { name: 'disabled-skill', entry: 'disabled-skill/SKILL.md', agents: [] },
             ],
           },
         ],
-        skills: [{ id: 'local-only', targets: [] }],
+        skills: [{ id: 'local-only', agents: [] }],
       },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['claude-code', 'codex', 'opencode'] },
+      config: { agents: ['claude-code', 'codex', 'opencode'] },
       errors: [],
     }
 
@@ -1123,30 +1224,30 @@ describe('Skills view', () => {
     fireEvent.click(sourceBulkCodex)
 
     await waitFor(() =>
-      expect(api.updateSourceSkillTargets).toHaveBeenCalledTimes(sourceUpdateCallsBefore + 1),
+      expect(api.updateSourceSkillAgents).toHaveBeenCalledTimes(sourceUpdateCallsBefore + 1),
     )
-    expect(api.updateSourceSkillTargets).toHaveBeenLastCalledWith({
+    expect(api.updateSourceSkillAgents).toHaveBeenLastCalledWith({
       repo: '/tmp/skills-layout',
       sourceUrl: 'https://github.com/obra/superpowers.git',
       updates: [
-        { memberEntry: 'brainstorming/SKILL.md', targets: ['codex'] },
-        { memberEntry: 'executing-plans/SKILL.md', targets: ['codex'] },
-        { memberEntry: 'disabled-skill/SKILL.md', targets: ['codex'] },
+        { memberEntry: 'brainstorming/SKILL.md', agents: ['codex'] },
+        { memberEntry: 'executing-plans/SKILL.md', agents: ['codex'] },
+        { memberEntry: 'disabled-skill/SKILL.md', agents: ['codex'] },
       ],
     })
-    expect(api.updateSkillTargets).toHaveBeenCalledTimes(updateCallsBefore)
-    expect(api.updateLocalSkillTargets).not.toHaveBeenCalledWith(
+    expect(api.updateSkillAgents).toHaveBeenCalledTimes(updateCallsBefore)
+    expect(api.updateLocalSkillAgents).not.toHaveBeenCalledWith(
       expect.objectContaining({ id: 'local-only' }),
     )
     await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 1))
     expect(api.project).toHaveBeenLastCalledWith({ repo: '/tmp/skills-layout', scope: 'skills' })
   })
 
-  it('updates skill bulk targets one item at a time', async () => {
+  it('updates skill bulk agents one item at a time', async () => {
     let releaseFirst!: () => void
-    const sourceCallsBefore = vi.mocked(api.updateSkillTargets).mock.calls.length
-    const localCallsBefore = vi.mocked(api.updateLocalSkillTargets).mock.calls.length
-    vi.mocked(api.updateSkillTargets).mockImplementationOnce(
+    const sourceCallsBefore = vi.mocked(api.updateSkillAgents).mock.calls.length
+    const localCallsBefore = vi.mocked(api.updateLocalSkillAgents).mock.calls.length
+    vi.mocked(api.updateSkillAgents).mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           releaseFirst = () => resolve({ ok: true })
@@ -1161,14 +1262,14 @@ describe('Skills view', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Codex：部分已选择' }))
 
-    await waitFor(() => expect(api.updateSkillTargets).toHaveBeenCalledTimes(sourceCallsBefore + 1))
-    expect(api.updateLocalSkillTargets).toHaveBeenCalledTimes(localCallsBefore)
+    await waitFor(() => expect(api.updateSkillAgents).toHaveBeenCalledTimes(sourceCallsBefore + 1))
+    expect(api.updateLocalSkillAgents).toHaveBeenCalledTimes(localCallsBefore)
 
     releaseFirst()
     await waitFor(() =>
-      expect(api.updateLocalSkillTargets).toHaveBeenCalledTimes(localCallsBefore + 2),
+      expect(api.updateLocalSkillAgents).toHaveBeenCalledTimes(localCallsBefore + 2),
     )
-    vi.mocked(api.updateSkillTargets).mockResolvedValue({ ok: true } as never)
+    vi.mocked(api.updateSkillAgents).mockResolvedValue({ ok: true } as never)
   })
 })
 
@@ -1382,7 +1483,7 @@ describe('Add Skill modal', () => {
     )
   })
 
-  it('selects discovered bundles without exposing target controls in Add Source', async () => {
+  it('selects discovered bundles without exposing agent controls in Add Source', async () => {
     vi.mocked(api.scanSource).mockResolvedValueOnce({
       ok: true,
       tree: {
@@ -1416,7 +1517,7 @@ describe('Add Skill modal', () => {
     expect(
       (screen.getByRole('checkbox', { name: 'Select fresh' }) as HTMLInputElement).checked,
     ).toBe(true)
-    expect(screen.queryByText('Projection targets')).toBeNull()
+    expect(screen.queryByText('Projection agents')).toBeNull()
   })
 
   it('clears an Add Source scan error when the repository configuration changes', async () => {
@@ -1703,7 +1804,7 @@ describe('Skill source updates', () => {
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: [] },
+            config: { agents: [] },
             errors: [],
           } as never
         }
@@ -1733,11 +1834,11 @@ describe('Skill source updates', () => {
           {
             skills: {
               sources: [],
-              skills: [{ id: 'frontend-design', targets: ['codex'] }],
+              skills: [{ id: 'frontend-design', agents: ['codex'] }],
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: ['codex'] },
+            config: { agents: ['codex'] },
             errors: [],
           } as never
         }
@@ -1754,7 +1855,7 @@ describe('Skill source updates', () => {
     expect(onOpenDetail).toHaveBeenCalledWith({
       skillId: 'frontend-design',
       path: undefined,
-      targets: ['codex'],
+      agents: ['codex'],
     })
   })
 
@@ -1772,10 +1873,11 @@ describe('Skill source updates', () => {
     render(
       <SkillDetailEditor
         repoPath="/tmp/skills-layout"
+        agents={agentIds}
         detail={{
           skillId: 'test-qa-skill',
           path: './assets/skills/test-qa-skill',
-          targets: ['codex'],
+          agents: ['codex'],
         }}
         showToast={showToast}
         onClose={vi.fn()}
@@ -1808,7 +1910,7 @@ describe('Skill source updates', () => {
       },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex'] },
+      config: { agents: ['codex'] },
       errors: [],
     } as never)
     const showToast = vi.fn()
@@ -1816,10 +1918,11 @@ describe('Skill source updates', () => {
     render(
       <SkillDetailEditor
         repoPath="/tmp/skill-save-refresh"
+        agents={agentIds}
         detail={{
           skillId: 'frontend-design',
           path: './assets/skills/frontend-design',
-          targets: ['codex'],
+          agents: ['codex'],
         }}
         showToast={showToast}
         onClose={vi.fn()}
@@ -1893,7 +1996,7 @@ describe('Skill source updates', () => {
                     {
                       name: 'systematic-debugging',
                       entry: 'skills/engineering/systematic-debugging/SKILL.md',
-                      targets: ['codex'],
+                      agents: ['codex'],
                       path: 'skills/engineering/systematic-debugging/SKILL.md',
                     },
                   ],
@@ -1903,7 +2006,7 @@ describe('Skill source updates', () => {
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: ['codex'], skill_naming: 'hyphen' },
+            config: { agents: ['codex'], skill_naming: 'hyphen' },
             errors: [],
           } as never
         }
@@ -1921,7 +2024,7 @@ describe('Skill source updates', () => {
       skillId: 'superpowers-systematic-debugging',
       source: 'https://github.com/obra/superpowers.git',
       path: 'skills/engineering/systematic-debugging/SKILL.md',
-      targets: ['codex'],
+      agents: ['codex'],
     })
   })
 
@@ -1936,14 +2039,14 @@ describe('Skill source updates', () => {
                 {
                   url: 'https://github.com/obra/superpowers.git',
                   ref: 'v6.1.1',
-                  members: [{ name: 'brainstorming', targets: [] }],
+                  members: [{ name: 'brainstorming', agents: [] }],
                 },
               ],
               skills: [],
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: ['codex'] },
+            config: { agents: ['codex'] },
             errors: ['source[0].members.0.entry: Required'],
           } as never
         }
@@ -1977,7 +2080,7 @@ describe('Skill source updates', () => {
                     {
                       name: 'so-apply',
                       entry: 'plugins/plm-harness/skills/so-apply/SKILL.md',
-                      targets: [],
+                      agents: [],
                     },
                   ],
                   resources: {
@@ -1993,7 +2096,7 @@ describe('Skill source updates', () => {
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: [] },
+            config: { agents: [] },
             errors: [],
           } as never
         }
@@ -2030,14 +2133,14 @@ describe('Skill source updates', () => {
                 {
                   url: 'https://example.test/source',
                   ref: 'main',
-                  members: [{ name: 'member', entry: 'member/SKILL.md', targets: [] }],
+                  members: [{ name: 'member', entry: 'member/SKILL.md', agents: [] }],
                 },
               ],
-              skills: [{ id: 'local-skill', targets: [] }],
+              skills: [{ id: 'local-skill', agents: [] }],
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: [] },
+            config: { agents: [] },
             errors: [],
           } as never
         }
@@ -2076,11 +2179,11 @@ describe('Skill source updates', () => {
                   members: [],
                 },
               ],
-              skills: [{ id: 'local-skill', targets: [] }],
+              skills: [{ id: 'local-skill', agents: [] }],
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: [] },
+            config: { agents: [] },
             errors: [],
           } as never
         }
@@ -2118,11 +2221,11 @@ describe('Skill source updates', () => {
                   members: [],
                 },
               ],
-              skills: [{ id: 'local-skill', targets: [] }],
+              skills: [{ id: 'local-skill', agents: [] }],
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: [] },
+            config: { agents: [] },
             errors: [],
           } as never
         }
@@ -2172,9 +2275,9 @@ describe('Skill source updates', () => {
                   url: 'https://github.com/obra/superpowers.git',
                   ref: 'main',
                   members: [
-                    { name: 'writing-plans', entry: 'writing-plans/SKILL.md', targets: [] },
-                    { name: 'brainstorming', entry: 'brainstorming/SKILL.md', targets: [] },
-                    { name: 'executing-plans', entry: 'executing-plans/SKILL.md', targets: [] },
+                    { name: 'writing-plans', entry: 'writing-plans/SKILL.md', agents: [] },
+                    { name: 'brainstorming', entry: 'brainstorming/SKILL.md', agents: [] },
+                    { name: 'executing-plans', entry: 'executing-plans/SKILL.md', agents: [] },
                   ],
                 },
               ],
@@ -2182,7 +2285,7 @@ describe('Skill source updates', () => {
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: ['opencode'] },
+            config: { agents: ['opencode'] },
             errors: [],
           } as never
         }
@@ -2220,7 +2323,7 @@ describe('Skill source updates', () => {
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: ['claude-code'] },
+            config: { agents: ['claude-code'] },
             errors: [],
           } as never
         }
@@ -2277,7 +2380,7 @@ describe('Skill source updates', () => {
             skills: { sources, skills: [] },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: [] },
+            config: { agents: [] },
             errors: [],
           } as never
         }
@@ -2349,7 +2452,7 @@ describe('Skill source updates', () => {
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: [] },
+            config: { agents: [] },
             errors: [],
           } as never
         }
@@ -2390,7 +2493,7 @@ describe('Skill source updates', () => {
             },
             mcp: [],
             vars: { default: {}, active: {} },
-            config: { targets: [] },
+            config: { agents: [] },
             errors: [],
           } as never
         }
@@ -2443,7 +2546,7 @@ describe('Skill source updates', () => {
     expect(within(dialog).getByRole('tab', { name: 'Bundles' }).getAttribute('aria-selected')).toBe(
       'true',
     )
-    expect(within(dialog).queryByText('Projection targets')).toBeNull()
+    expect(within(dialog).queryByText('Projection agents')).toBeNull()
     expect(api.getCachedSourceTree).toHaveBeenCalledWith({
       repo: '/tmp/skills-layout',
       url: 'https://github.com/obra/superpowers.git',
@@ -3178,10 +3281,10 @@ describe('Sync view', () => {
       conflicts: [
         {
           path: 'config.yaml',
-          base: 'profile: local\ntargets:\n  - claude-code\nprojection:\n  strategy: link\n',
-          ours: 'profile: local\ntargets:\n  - claude-code\n  - codex\n  - opencode\nprojection:\n  strategy: link\n',
+          base: 'profile: local\nagents:\n  - claude-code\nprojection:\n  strategy: link\n',
+          ours: 'profile: local\nagents:\n  - claude-code\n  - codex\n  - opencode\nprojection:\n  strategy: link\n',
           theirs:
-            'profile: local\ntargets: []\nprojection:\n  strategy: link\nproxy:\n  http: http://127.0.0.1:7890\n  https: http://127.0.0.1:7890\n',
+            'profile: local\nagents: []\nprojection:\n  strategy: link\nproxy:\n  http: http://127.0.0.1:7890\n  https: http://127.0.0.1:7890\n',
           result: 'unused Git marker result',
           binary: false,
         },
@@ -3238,11 +3341,11 @@ describe('Sync view', () => {
     fireEvent.change(resultPane, {
       target: { value: `# manually edited\n${resultPane.value.replace('profile: local\n', '')}` },
     })
-    expect(resultPane.value).toMatch(/^# manually edited\ntargets:/)
+    expect(resultPane.value).toMatch(/^# manually edited\nagents:/)
 
     fireEvent.click(localApply)
     expect(resultPane.value).toMatch(
-      /^# manually edited\ntargets:\n  - claude-code\n  - codex\n  - opencode\nprojection:/,
+      /^# manually edited\nagents:\n  - claude-code\n  - codex\n  - opencode\nprojection:/,
     )
     expect(resultPane.value).toContain('opencode')
     expect(screen.getByText('1 个待处理冲突')).toBeDefined()
@@ -3279,7 +3382,7 @@ describe('Sync view', () => {
         expect.objectContaining({
           sessionId: 'session-2',
           path: 'config.yaml',
-          result: expect.stringMatching(/targets:[\s\S]*opencode[\s\S]*proxy:/),
+          result: expect.stringMatching(/agents:[\s\S]*opencode[\s\S]*proxy:/),
         }),
       ),
     )

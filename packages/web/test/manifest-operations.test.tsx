@@ -10,7 +10,7 @@ vi.mock('../src/lib/api', () => ({
       skills: { sources: [], skills: [] },
       mcp: [],
       vars: { default: {}, active: {} },
-      config: { targets: ['codex'] },
+      config: { agents: ['codex'] },
       errors: [],
     })),
     putConfig: vi.fn(async () => ({ ok: true })),
@@ -39,10 +39,10 @@ vi.mock('../src/lib/api', () => ({
     finalizeSourceUpdate: vi.fn(async () => ({ ok: true, pinned_commit: 'bbb' })),
     importLocalSkills: vi.fn(async () => ({ ok: true })),
     writeLocalSkills: vi.fn(async () => ({ ok: true })),
-    updateSkillTargets: vi.fn(async () => ({ ok: true })),
-    updateSourceSkillTargets: vi.fn(async () => ({ ok: true })),
-    updateLocalSkillTargets: vi.fn(async () => ({ ok: true })),
-    updateMcpTargets: vi.fn(async () => ({ ok: true })),
+    updateSkillAgents: vi.fn(async () => ({ ok: true })),
+    updateSourceSkillAgents: vi.fn(async () => ({ ok: true })),
+    updateLocalSkillAgents: vi.fn(async () => ({ ok: true })),
+    updateMcpAgents: vi.fn(async () => ({ ok: true })),
   },
 }))
 
@@ -83,7 +83,7 @@ describe('useManifestOperations', () => {
     render(
       <Harness
         onError={onError}
-        action={(ops) => ops.saveConfig({ level: 'repo', field: 'targets', value: ['codex'] })}
+        action={(ops) => ops.saveConfig({ level: 'repo', field: 'agents', value: ['codex'] })}
       />,
     )
 
@@ -93,7 +93,7 @@ describe('useManifestOperations', () => {
       expect(api.putConfig).toHaveBeenCalledWith({
         repo: '/tmp/r',
         level: 'repo',
-        field: 'targets',
+        field: 'agents',
         value: ['codex'],
       }),
     )
@@ -380,7 +380,7 @@ describe('useManifestOperations', () => {
               {
                 name: 'alpha',
                 entry: 'alpha/SKILL.md',
-                targets: ['codex'],
+                agents: ['codex'],
                 description: 'runtime description',
               },
             ],
@@ -397,7 +397,7 @@ describe('useManifestOperations', () => {
         {
           url: 'https://example.test/skills.git',
           ref: 'main',
-          members: [{ name: 'alpha', entry: 'alpha/SKILL.md', targets: ['codex'] }],
+          members: [{ name: 'alpha', entry: 'alpha/SKILL.md', agents: ['codex'] }],
         },
       ]),
     )
@@ -572,20 +572,20 @@ describe('useManifestOperations', () => {
     }
   })
 
-  it('returns failure and refreshes when skill bulk target update fails after an earlier update', async () => {
+  it('returns failure and refreshes when skill bulk agent update fails after an earlier update', async () => {
     const onError = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    let result: Awaited<ReturnType<Operations['setAllSkillTargets']>> | undefined
-    vi.mocked(api.updateSkillTargets)
+    let result: Awaited<ReturnType<Operations['setAllSkillAgents']>> | undefined
+    vi.mocked(api.updateSkillAgents)
       .mockResolvedValueOnce({ ok: true } as never)
-      .mockResolvedValueOnce({ ok: false, message: 'second target failed' } as never)
+      .mockResolvedValueOnce({ ok: false, message: 'second agent failed' } as never)
 
     try {
       render(
         <Harness
           onError={onError}
           action={async (ops) => {
-            result = await ops.setAllSkillTargets(
+            result = await ops.setAllSkillAgents(
               {
                 skills: {
                   sources: [
@@ -599,7 +599,7 @@ describe('useManifestOperations', () => {
                 },
                 mcp: [],
                 vars: { default: {}, active: {} },
-                config: { targets: ['codex'] },
+                config: { agents: ['codex'] },
                 errors: [],
               } as never,
               'codex',
@@ -610,14 +610,14 @@ describe('useManifestOperations', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
-      await waitFor(() => expect(api.updateSkillTargets).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(api.updateSkillAgents).toHaveBeenCalledTimes(2))
       await waitFor(() => expect(result?.ok).toBe(false))
-      expect(result?.message).toBe('second target failed')
-      expect(onError).toHaveBeenCalledWith('second target failed')
+      expect(result?.message).toBe('second agent failed')
+      expect(onError).toHaveBeenCalledWith('second agent failed')
       expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
       expect(consoleError).toHaveBeenCalledWith(
         expect.objectContaining({
-          key: 'skills:all-targets:codex',
+          key: 'skills:all-agents:codex',
           result: expect.objectContaining({ ok: false }),
         }),
         expect.any(String),
@@ -627,27 +627,27 @@ describe('useManifestOperations', () => {
     }
   })
 
-  it('projects skills after bulk skill target update succeeds', async () => {
-    let result: Awaited<ReturnType<Operations['setAllSkillTargets']>> | undefined
+  it('projects skills after bulk skill agent update succeeds', async () => {
+    let result: Awaited<ReturnType<Operations['setAllSkillAgents']>> | undefined
 
     render(
       <Harness
         action={async (ops) => {
-          result = await ops.setAllSkillTargets(
+          result = await ops.setAllSkillAgents(
             {
               skills: {
                 sources: [
                   {
                     url: 'https://example.test/skills.git',
                     ref: 'main',
-                    members: [{ name: 'alpha', targets: [] }],
+                    members: [{ name: 'alpha', agents: [] }],
                   },
                 ],
-                skills: [{ id: 'local-alpha', targets: [] }],
+                skills: [{ id: 'local-alpha', agents: [] }],
               },
               mcp: [],
               vars: { default: {}, active: {} },
-              config: { targets: ['codex'] },
+              config: { agents: ['codex'] },
               errors: [],
             } as never,
             'codex',
@@ -658,26 +658,26 @@ describe('useManifestOperations', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
-    await waitFor(() => expect(api.updateSkillTargets).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(api.updateLocalSkillTargets).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(api.updateSkillAgents).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(api.updateLocalSkillAgents).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(result?.ok).toBe(true))
     expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/r', scope: 'skills' })
   })
 
-  it('projects skills after source bulk target update succeeds', async () => {
-    let result: Awaited<ReturnType<Operations['setSourceSkillTargets']>> | undefined
+  it('projects skills after source bulk agent update succeeds', async () => {
+    let result: Awaited<ReturnType<Operations['setSourceSkillAgents']>> | undefined
 
     render(
       <Harness
         action={async (ops) => {
-          result = await ops.setSourceSkillTargets(
+          result = await ops.setSourceSkillAgents(
             {
               url: 'https://example.test/skills.git',
               ref: 'main',
               members: [
-                { name: 'alpha', entry: 'alpha/SKILL.md', targets: [] },
-                { name: 'beta', entry: 'beta/SKILL.md', targets: [] },
-                { name: 'gamma', entry: 'gamma/SKILL.md', targets: ['claude-code'] },
+                { name: 'alpha', entry: 'alpha/SKILL.md', agents: [] },
+                { name: 'beta', entry: 'beta/SKILL.md', agents: [] },
+                { name: 'gamma', entry: 'gamma/SKILL.md', agents: ['claude-code'] },
               ],
             },
             'codex',
@@ -688,39 +688,39 @@ describe('useManifestOperations', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
-    await waitFor(() => expect(api.updateSourceSkillTargets).toHaveBeenCalledTimes(1))
-    expect(api.updateSourceSkillTargets).toHaveBeenCalledWith({
+    await waitFor(() => expect(api.updateSourceSkillAgents).toHaveBeenCalledTimes(1))
+    expect(api.updateSourceSkillAgents).toHaveBeenCalledWith({
       repo: '/tmp/r',
       sourceUrl: 'https://example.test/skills.git',
       updates: [
-        { memberEntry: 'alpha/SKILL.md', targets: ['codex'] },
-        { memberEntry: 'beta/SKILL.md', targets: ['codex'] },
-        { memberEntry: 'gamma/SKILL.md', targets: ['claude-code', 'codex'] },
+        { memberEntry: 'alpha/SKILL.md', agents: ['codex'] },
+        { memberEntry: 'beta/SKILL.md', agents: ['codex'] },
+        { memberEntry: 'gamma/SKILL.md', agents: ['claude-code', 'codex'] },
       ],
     })
-    expect(api.updateSkillTargets).not.toHaveBeenCalled()
-    expect(api.updateLocalSkillTargets).not.toHaveBeenCalled()
+    expect(api.updateSkillAgents).not.toHaveBeenCalled()
+    expect(api.updateLocalSkillAgents).not.toHaveBeenCalled()
     await waitFor(() => expect(result?.ok).toBe(true))
     expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/r', scope: 'skills' })
   })
 
-  it('returns failure and refreshes when MCP bulk target update fails after an earlier update', async () => {
+  it('returns failure and refreshes when MCP bulk agent update fails after an earlier update', async () => {
     const onError = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    let result: Awaited<ReturnType<Operations['setAllMcpTargets']>> | undefined
-    vi.mocked(api.updateMcpTargets)
+    let result: Awaited<ReturnType<Operations['setAllMcpAgents']>> | undefined
+    vi.mocked(api.updateMcpAgents)
       .mockResolvedValueOnce({ ok: true } as never)
-      .mockResolvedValueOnce({ ok: false, message: 'second MCP target failed' } as never)
+      .mockResolvedValueOnce({ ok: false, message: 'second MCP agent failed' } as never)
 
     try {
       render(
         <Harness
           onError={onError}
           action={async (ops) => {
-            result = await ops.setAllMcpTargets(
+            result = await ops.setAllMcpAgents(
               [
-                { id: 'alpha', type: 'stdio', command: 'alpha', targets: [] },
-                { id: 'beta', type: 'stdio', command: 'beta', targets: [] },
+                { id: 'alpha', type: 'stdio', command: 'alpha', agents: [] },
+                { id: 'beta', type: 'stdio', command: 'beta', agents: [] },
               ] as never,
               'codex',
             )
@@ -730,14 +730,14 @@ describe('useManifestOperations', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
-      await waitFor(() => expect(api.updateMcpTargets).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalledTimes(2))
       await waitFor(() => expect(result?.ok).toBe(false))
-      expect(result?.message).toBe('second MCP target failed')
-      expect(onError).toHaveBeenCalledWith('second MCP target failed')
+      expect(result?.message).toBe('second MCP agent failed')
+      expect(onError).toHaveBeenCalledWith('second MCP agent failed')
       expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
       expect(consoleError).toHaveBeenCalledWith(
         expect.objectContaining({
-          key: 'mcp:all-targets:codex',
+          key: 'mcp:all-agents:codex',
           result: expect.objectContaining({ ok: false }),
         }),
         expect.any(String),
@@ -832,7 +832,7 @@ describe('useManifestOperations', () => {
                 {
                   name: 'alpha',
                   entry: 'skills/alpha/SKILL.md',
-                  targets: ['codex'],
+                  agents: ['codex'],
                   description: 'runtime member description',
                 },
               ],
@@ -863,7 +863,7 @@ describe('useManifestOperations', () => {
             {
               name: 'alpha',
               entry: 'skills/alpha/SKILL.md',
-              targets: ['codex'],
+              agents: ['codex'],
             },
           ],
           resources: {
