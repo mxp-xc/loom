@@ -35,6 +35,28 @@ function ruleBodyContaining(css: string, selector: string): string {
 }
 
 describe('skill group header CSS', () => {
+  it('keeps group spacing on the default cursor while the header stays interactive', async () => {
+    const css = await readCss(skillSourceCssPath)
+    const sortableGroup = ruleBodyContaining(
+      css,
+      ".sortable-group[role='button'][aria-roledescription='可排序项']:not([aria-disabled='true'])",
+    )
+    const groupHead = ruleBody(css, '.group-head')
+
+    expect(sortableGroup).toMatch(/cursor\s*:\s*default\b/)
+    expect(groupHead).toMatch(/cursor\s*:\s*pointer\b/)
+  })
+
+  it('keeps the pointer cursor across the page while a group drag is active', async () => {
+    const css = await readCss(skillSourceCssPath)
+    const draggingCursor = ruleBodyContaining(
+      css,
+      ":global(body[data-skill-group-dragging='true'] *)",
+    )
+
+    expect(draggingCursor).toMatch(/cursor\s*:\s*pointer\s*!important/)
+  })
+
   it('does not animate an expanding header border from the text color', async () => {
     const css = await readCss(skillSourceCssPath)
     const groupHead = ruleBody(css, '.group-head')

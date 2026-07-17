@@ -2062,6 +2062,104 @@ describe('Skill source updates', () => {
     expect(onReorderGroups).not.toHaveBeenCalled()
   })
 
+  it('does not start group sorting from spacing outside the group header', () => {
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/group-sort-gap"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  url: 'https://example.test/source',
+                  ref: 'main',
+                  members: [],
+                },
+              ],
+              skills: [{ id: 'local-skill', targets: [] }],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: [] },
+            errors: [],
+          } as never
+        }
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set()}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    const sourceGroup = screen.getByLabelText('调整 source:https://example.test/source 顺序')
+    act(() => {
+      fireEvent.mouseDown(sourceGroup, { clientX: 100, clientY: 100 })
+      fireEvent.mouseMove(document, { clientX: 112, clientY: 100 })
+    })
+
+    expect(sourceGroup.getAttribute('data-dragging')).toBeNull()
+    act(() => fireEvent.mouseUp(document))
+  })
+
+  it('keeps the complete source header visible in the group drag overlay', async () => {
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/group-sort-overlay"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  name: 'mxp-xc',
+                  url: 'https://github.com/mxp-xc/agents',
+                  ref: 'main',
+                  type: 'branch',
+                  members: [],
+                },
+              ],
+              skills: [{ id: 'local-skill', targets: [] }],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { targets: [] },
+            errors: [],
+          } as never
+        }
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set()}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    const sourceGroup = screen.getByLabelText('调整 source:https://github.com/mxp-xc/agents 顺序')
+    const sourceHeader = screen.getByTestId('skill-group-head-mxp-xc')
+    sourceGroup.getBoundingClientRect = () =>
+      DOMRect.fromRect({ x: 0, y: 100, width: 700, height: 52 })
+    sourceHeader.getBoundingClientRect = () =>
+      DOMRect.fromRect({ x: 0, y: 100, width: 700, height: 52 })
+
+    act(() => {
+      fireEvent.mouseDown(sourceHeader, { clientX: 100, clientY: 120 })
+      fireEvent.mouseMove(document, { clientX: 112, clientY: 120 })
+    })
+
+    await waitFor(() => expect(sourceGroup.getAttribute('data-dragging')).toBe('true'))
+    expect(document.body.dataset.skillGroupDragging).toBe('true')
+    const overlay = document.querySelector('[class*="group-overlay"]')
+    expect(overlay?.textContent).toContain('mxp-xc')
+    expect(overlay?.textContent).toContain('branch')
+    expect(overlay?.textContent).toContain('https://github.com/mxp-xc/agents')
+    expect(overlay?.textContent).toContain('@ main')
+    await act(async () => {
+      fireEvent.mouseUp(document)
+      await new Promise((resolve) => window.setTimeout(resolve, 200))
+    })
+    expect(document.body.dataset.skillGroupDragging).toBeUndefined()
+  })
+
   it('renders source members in the same sorted order used by scan', () => {
     render(
       <SkillSourceListHarness

@@ -93,16 +93,20 @@ interface SkillSortState {
   suppressClick: MutableRefObject<boolean>
 }
 
+type SkillGroupPreview =
+  | { kind: 'source'; label: string; sourceType: 'branch' | 'tag'; url: string; ref: string }
+  | { kind: 'local'; label: string; path: string }
+
 const SkillSortContext = createContext<SkillSortState | null>(null)
 
 function SortableSkillGroups({
   ids,
-  labels,
+  previews,
   onReorder,
   children,
 }: {
   ids: string[]
-  labels: Map<string, string>
+  previews: Map<string, SkillGroupPreview>
   onReorder: (ids: string[]) => Promise<void> | void
   children: ReactNode
 }) {
@@ -117,7 +121,8 @@ function SortableSkillGroups({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
   const disabled = saving || ids.length < 2
-  const itemLabel = (id: string | number) => labels.get(String(id)) ?? String(id)
+  const itemLabel = (id: string | number) => previews.get(String(id))?.label ?? String(id)
+  const activePreview = activeId ? previews.get(activeId) : undefined
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return
@@ -127,6 +132,14 @@ function SortableSkillGroups({
     media.addEventListener('change', update)
     return () => media.removeEventListener('change', update)
   }, [])
+  useEffect(() => {
+    if (!activeId) return
+
+    document.body.dataset.skillGroupDragging = 'true'
+    return () => {
+      delete document.body.dataset.skillGroupDragging
+    }
+  }, [activeId])
   const orderedChildren = Children.toArray(children).sort((left, right) => {
     const leftId = isValidElement<{ id?: string }>(left) ? left.props.id : undefined
     const rightId = isValidElement<{ id?: string }>(right) ? right.props.id : undefined
@@ -185,14 +198,44 @@ function SortableSkillGroups({
           reducedMotion ? null : { duration: 180, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
         }
       >
-        {activeId ? (
+        {activePreview ? (
           <div
             className={cn(styles.group, styles['group-overlay'])}
             style={{ width: overlayWidth ?? undefined }}
             aria-hidden="true"
+            data-testid="skill-group-drag-overlay"
           >
-            <div className={styles['group-head']}>
-              <span className={styles.gname}>{labels.get(activeId) ?? activeId}</span>
+            <div className={styles['group-head']} data-expanded="false">
+              <span className={styles.gname}>
+                <ChevronDown size={14} style={chevronStyle(true)} />
+                {activePreview.label}
+                {activePreview.kind === 'local' && (
+                  <span className={styles['local-tag']}>local</span>
+                )}
+              </span>
+              {activePreview.kind === 'source' ? (
+                <>
+                  <span
+                    className={cn(
+                      styles['source-type-badge'],
+                      activePreview.sourceType === 'tag' ? styles.tag : styles.branch,
+                    )}
+                  >
+                    {activePreview.sourceType}
+                  </span>
+                  <span className={styles.gurl} title={activePreview.url}>
+                    {activePreview.url}
+                  </span>
+                  <span className={styles.gref}>@ {activePreview.ref}</span>
+                </>
+              ) : (
+                <span
+                  className={cn(styles['skill-source-path'], styles['local-skills-root-path'])}
+                  title={activePreview.path}
+                >
+                  {activePreview.path}
+                </span>
+              )}
             </div>
           </div>
         ) : null}
@@ -218,9 +261,10 @@ function SortableSkillGroup({ id, children }: { id: string; children: ReactNode 
       name,
       (event: SyntheticEvent<HTMLElement>) => {
         const target = event.target as Element | null
-        if (target !== event.currentTarget) {
-          if (!target?.closest('[data-sort-activator="true"]')) return
-          if (target.closest(GROUP_INTERACTIVE_SELECTOR)) return
+        if (target?.closest(GROUP_INTERACTIVE_SELECTOR)) return
+        if (event.type !== 'keydown') {
+          const activator = target?.closest('[data-sort-activator="true"]')
+          if (!activator || !event.currentTarget.contains(activator)) return
         }
         listener(event as never)
       },
@@ -418,19 +462,27 @@ export default function SkillSourceList({
       : deleteTarget?.kind === 'local'
         ? operations.pending.skills.deleteLocal(deleteTarget.id)
         : false
-  const groupLabels = new Map(
-    manifest.skills.sources.map((source) => [
+  const groupPreviews = new Map<string, SkillGroupPreview>(
+    manifest.skills.sources.map((source): [string, SkillGroupPreview] => [
       `source:${source.url}`,
-      sourceIdentity(source).repoId,
+      {
+        kind: 'source',
+        label: sourceIdentity(source).repoId,
+        sourceType: source.type === 'tag' ? 'tag' : 'branch',
+        url: source.url,
+        ref: source.ref,
+      },
     ]),
   )
-  if (localCount > 0) groupLabels.set('local', 'local skills')
+  if (localCount > 0) {
+    groupPreviews.set('local', { kind: 'local', label: 'local skills', path: 'assets/skills' })
+  }
 
   return (
     <>
       <SortableSkillGroups
         ids={groupOrder ?? normalizeSkillGroupOrder(manifest.skills)}
-        labels={groupLabels}
+        previews={groupPreviews}
         onReorder={onReorderGroups ?? (() => {})}
       >
         {/* Remote sources */}

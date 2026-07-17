@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
 async function readCss(relativePath: string): Promise<string> {
@@ -155,13 +155,31 @@ describe('web CSS architecture', () => {
     }
   })
 
-  it('uses pointer cursors for interactive controls and grab cursors for sortable activators', async () => {
-    const baseCss = await readCss('../src/styles/global/base.css')
+  it('uses pointer cursors for interactive controls and sortable activators', async () => {
+    const [baseCss, skillSourceListCss] = await Promise.all([
+      readCss('../src/styles/global/base.css'),
+      readCss('../src/views/skills/SkillSourceList.module.css'),
+    ])
 
     expect(baseCss).toMatch(/button:not\(:disabled\)[^{]*\{[^}]*cursor:\s*pointer;/s)
     expect(baseCss).toMatch(
-      /\[role='button'\]\[aria-roledescription='可排序项'\][^{]*\{[^}]*cursor:\s*grab;/s,
+      /\[role='button'\]\[aria-roledescription='可排序项'\][^{]*\{[^}]*cursor:\s*pointer;/s,
     )
+    expect(skillSourceListCss).toMatch(/\.skill\s*\{[^}]*cursor:\s*pointer;/s)
+  })
+
+  it('does not use open-hand or closed-hand cursors', async () => {
+    const sourceRoot = new URL('../src/', import.meta.url)
+    const cssPaths = (await readdir(sourceRoot, { recursive: true }))
+      .filter((path) => path.endsWith('.css'))
+      .map((path) => path.replaceAll('\\', '/'))
+    const cssFiles = await Promise.all(
+      cssPaths.map(async (path) => ({ path, css: await readCss(`../src/${path}`) })),
+    )
+
+    for (const { path, css } of cssFiles) {
+      expect(css, path).not.toMatch(/cursor:\s*grabb?(?:ing)?\s*;/)
+    }
   })
 
   it('keeps composite search focus on the rounded container only', async () => {
@@ -202,7 +220,7 @@ describe('web CSS architecture', () => {
     expect(mcpCss).toMatch(/\.editorModeSwitch\s*\{[^}]*border:\s*1px solid var\(--border\);/s)
     expect(mcpCss).toMatch(/\.recordModeSwitch\s*\{[^}]*border:\s*1px solid var\(--border\);/s)
     expect(mcpCss).toMatch(/\.fieldInput\s*\{[^}]*display:\s*flex;/s)
-    expect(mcpCss).toMatch(/\.argumentHandle\s*\{[^}]*cursor:\s*grab;/s)
+    expect(mcpCss).toMatch(/\.argumentHandle\s*\{[^}]*cursor:\s*pointer;/s)
     expect(mcpCss).toMatch(/\.toolsList button > svg\s*\{[^}]*grid-row:\s*span 2;/s)
     expect(mcpCss).toMatch(
       /\.toolsList button span,\s*\.toolsList button small\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,

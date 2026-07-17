@@ -20,6 +20,14 @@
   transition-duration: 180ms;
   transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+.sortable-group[role='button'][aria-roledescription='可排序项']:not([aria-disabled='true']),
+.sortable-group[role='button'][aria-roledescription='可排序项']:not([aria-disabled='true']):active {
+  cursor: default;
+}
+:global(body[data-skill-group-dragging='true']),
+:global(body[data-skill-group-dragging='true'] *) {
+  cursor: pointer !important;
+}
 .sortable-group[data-dragging='true'] {
   opacity: 0.22;
 }
@@ -33,6 +41,7 @@
   overflow: hidden;
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
   opacity: 0.96;
+  pointer-events: none;
 }
 .local-skills-group {
   order: -1;
@@ -168,6 +177,7 @@
   gap: 12px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
 }
 .skill:last-child {
   border-bottom: none;

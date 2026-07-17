@@ -56,11 +56,11 @@ button:not(:disabled),
 }
 
 [role='button'][aria-roledescription='可排序项']:not([aria-disabled='true']) {
-  cursor: grab;
+  cursor: pointer;
 }
 
 [role='button'][aria-roledescription='可排序项']:not([aria-disabled='true']):active {
-  cursor: grabbing;
+  cursor: pointer;
 }
 
 .loom-button:focus-visible {

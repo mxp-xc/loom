@@ -297,7 +297,7 @@
 }
 
 .serverRow[data-overlay='true'] {
-  cursor: grabbing;
+  cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--border));
   background: var(--card);
   box-shadow: 0 18px 42px rgb(0 0 0 / 22%);
@@ -368,7 +368,7 @@
   height: 40px;
   place-items: center;
   color: color-mix(in srgb, var(--muted) 78%, transparent);
-  cursor: grab;
+  cursor: pointer;
   touch-action: none;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -384,7 +384,7 @@
 }
 
 .dragHandle:active:not([aria-disabled='true']) {
-  cursor: grabbing;
+  cursor: pointer;
 }
 
 .dragHandle[aria-disabled='true'] {
@@ -1164,12 +1164,12 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  cursor: grab;
+  cursor: pointer;
   touch-action: none;
 }
 
 .argumentHandle:active {
-  cursor: grabbing;
+  cursor: pointer;
 }
 
 .argumentRow[data-dragging='true'] {
