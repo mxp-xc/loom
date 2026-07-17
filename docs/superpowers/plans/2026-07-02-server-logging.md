@@ -14,21 +14,22 @@
 
 ## File Structure
 
-| 文件 | 职责 | 操作 |
-|---|---|---|
-| `packages/server/src/lib/logger.ts` | 核心 logger 模块:格式化、双写、按天轮转、清理旧文件、child logger | Create |
-| `packages/server/src/lib/logger.test.ts` | logger 单元测试 | Create |
-| `packages/server/src/index.ts` | 服务入口:注册全局异常处理 | Modify |
-| `packages/server/src/api/server.ts` | Hono app:移除 hono/logger,加自定义请求日志中间件 | Modify |
-| `packages/server/src/api/routes.ts` | 路由:各 handler 关键流程 INFO、catch 块 ERROR | Modify |
-| `packages/server/src/api/deps.ts` | 依赖工厂:logger 桥接 | Modify |
-| `.gitignore` | 忽略 logs 目录 | Modify |
+| 文件                                     | 职责                                                              | 操作   |
+| ---------------------------------------- | ----------------------------------------------------------------- | ------ |
+| `packages/server/src/lib/logger.ts`      | 核心 logger 模块:格式化、双写、按天轮转、清理旧文件、child logger | Create |
+| `packages/server/src/lib/logger.test.ts` | logger 单元测试                                                   | Create |
+| `packages/server/src/index.ts`           | 服务入口:注册全局异常处理                                         | Modify |
+| `packages/server/src/api/server.ts`      | Hono app:移除 hono/logger,加自定义请求日志中间件                  | Modify |
+| `packages/server/src/api/routes.ts`      | 路由:各 handler 关键流程 INFO、catch 块 ERROR                     | Modify |
+| `packages/server/src/api/deps.ts`        | 依赖工厂:logger 桥接                                              | Modify |
+| `.gitignore`                             | 忽略 logs 目录                                                    | Modify |
 
 ---
 
 ### Task 1: 创建 logger 核心模块
 
 **Files:**
+
 - Create: `packages/server/src/lib/logger.ts`
 - Test: `packages/server/src/lib/logger.test.ts`
 
@@ -62,7 +63,9 @@ describe('logger', () => {
       const file = files.find((f) => f.endsWith('.log'))!
       const content = await readFile(join(dir, file), 'utf8')
       // 2026-07-02 10:00:00 INFO  loom - hello world foo=bar count=3
-      expect(content).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} INFO  loom - hello world foo=bar count=3\n$/)
+      expect(content).toMatch(
+        /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} INFO  loom - hello world foo=bar count=3\n$/,
+      )
     })
 
     it('left-pads level to 5 chars', async () => {
@@ -413,6 +416,7 @@ git commit -m "feat: add logger module with daily rotation and 7-day retention"
 ### Task 2: 注册全局未捕获异常处理
 
 **Files:**
+
 - Modify: `packages/server/src/index.ts`
 
 - [ ] **Step 1: Rewrite index.ts with global exception handlers**
@@ -456,6 +460,7 @@ git commit -m "feat: register global uncaughtException and unhandledRejection ha
 ### Task 3: 替换 Hono 请求日志中间件
 
 **Files:**
+
 - Modify: `packages/server/src/api/server.ts`
 
 - [ ] **Step 1: Replace hono/logger with custom request logging middleware**
@@ -515,13 +520,17 @@ Note: The `hono/logger` import is removed entirely. The startup `console.log` is
 - [ ] **Step 2: Verify the server boots and request logging works**
 
 Run: `pnpm --filter @loom/server dev`, then in another terminal:
+
 ```bash
 curl http://localhost:3000/api/health
 ```
+
 Expected: `{"ok":true}` response. In `logs/loom-YYYY-MM-DD.log` you should see a line like:
+
 ```
 2026-07-02 ... INFO  loom.api - request method=GET path=/api/health status=200 duration=2ms
 ```
+
 Stop the server with Ctrl+C.
 
 - [ ] **Step 3: Commit**
@@ -536,6 +545,7 @@ git commit -m "feat: replace hono/logger with custom request logging middleware"
 ### Task 4: 路由层接入业务日志
 
 **Files:**
+
 - Modify: `packages/server/src/api/routes.ts`
 
 This task adds INFO logging to key route handlers and replaces all `console.error`/`console.warn` in catch blocks with `logger.error`.
@@ -557,27 +567,25 @@ const remoteLogger = logger.child('remote')
 Find the `app.post('/sync/pull'` handler. Replace its entire body (the try/catch block) with:
 
 ```typescript
-  app.post('/sync/pull', async (c) => {
-    try {
-      const { repoPath } = await c.req.json()
-      syncLogger.info('pull started', { repoPath })
-      const { git, fs } = createNodePlatform()
-      const res = await syncPull(repoPath, git, fs, {
-        error: (o, m) => syncLogger.error(m, o),
-        warn: (o, m) => syncLogger.warn(m, o),
-      })
-      syncLogger.info('pull completed', { repoPath, clean: res.clean })
-      return c.json({ ok: true, ...res })
-    } catch (e) {
-      const msg = String(e?.message ?? e)
-      syncLogger.error('pull failed', { err: e, repoPath: c.req.path })
-      const noRemote =
-        /no remote|could not find remote|not a git repository|does not appear to be a git/i.test(
-          msg,
-        )
-      return c.json({ ok: false, error: noRemote ? 'no_remote' : 'other', message: msg })
-    }
-  })
+app.post('/sync/pull', async (c) => {
+  try {
+    const { repoPath } = await c.req.json()
+    syncLogger.info('pull started', { repoPath })
+    const { git, fs } = createNodePlatform()
+    const res = await syncPull(repoPath, git, fs, {
+      error: (o, m) => syncLogger.error(m, o),
+      warn: (o, m) => syncLogger.warn(m, o),
+    })
+    syncLogger.info('pull completed', { repoPath, clean: res.clean })
+    return c.json({ ok: true, ...res })
+  } catch (e) {
+    const msg = String(e?.message ?? e)
+    syncLogger.error('pull failed', { err: e, repoPath: c.req.path })
+    const noRemote =
+      /no remote|could not find remote|not a git repository|does not appear to be a git/i.test(msg)
+    return c.json({ ok: false, error: noRemote ? 'no_remote' : 'other', message: msg })
+  }
+})
 ```
 
 - [ ] **Step 3: Add logging to sync/apply handler**
@@ -585,23 +593,23 @@ Find the `app.post('/sync/pull'` handler. Replace its entire body (the try/catch
 Replace the entire `app.post('/sync/apply'` handler body with:
 
 ```typescript
-  app.post('/sync/apply', async (c) => {
-    try {
-      const { repoPath, resolutions } = await c.req.json()
-      syncLogger.info('apply resolutions', { repoPath, count: Object.keys(resolutions ?? {}).length })
-      const { git, fs } = createNodePlatform()
-      await applyResolutions(repoPath, git, fs, resolutions, {
-        error: (o, m) => syncLogger.error(m, o),
-        warn: (o, m) => syncLogger.warn(m, o),
-      })
-      syncLogger.info('apply completed', { repoPath })
-      return c.json({ ok: true })
-    } catch (e) {
-      syncLogger.error('apply failed', { err: e })
-      const msg = String(e?.message ?? e)
-      return c.json({ ok: false, error: 'apply_failed', message: msg })
-    }
-  })
+app.post('/sync/apply', async (c) => {
+  try {
+    const { repoPath, resolutions } = await c.req.json()
+    syncLogger.info('apply resolutions', { repoPath, count: Object.keys(resolutions ?? {}).length })
+    const { git, fs } = createNodePlatform()
+    await applyResolutions(repoPath, git, fs, resolutions, {
+      error: (o, m) => syncLogger.error(m, o),
+      warn: (o, m) => syncLogger.warn(m, o),
+    })
+    syncLogger.info('apply completed', { repoPath })
+    return c.json({ ok: true })
+  } catch (e) {
+    syncLogger.error('apply failed', { err: e })
+    const msg = String(e?.message ?? e)
+    return c.json({ ok: false, error: 'apply_failed', message: msg })
+  }
+})
 ```
 
 - [ ] **Step 4: Add logging to sync/push handler**
@@ -609,30 +617,28 @@ Replace the entire `app.post('/sync/apply'` handler body with:
 Replace the entire `app.post('/sync/push'` handler body with:
 
 ```typescript
-  app.post('/sync/push', async (c) => {
-    try {
-      const { repoPath } = await c.req.json()
-      syncLogger.info('push started', { repoPath })
-      const { git } = createNodePlatform()
-      // Auto-commit uncommitted yaml changes before pushing
-      const status = await git.status(repoPath)
-      if (status.dirty) {
-        await git.add(repoPath, ['.'])
-        await git.commit(repoPath, 'loom: sync changes')
-      }
-      const res = await syncPush(repoPath, git)
-      syncLogger.info('push completed', { repoPath, ok: res.ok })
-      return c.json(res)
-    } catch (e) {
-      syncLogger.error('push failed', { err: e })
-      const msg = String(e?.message ?? e)
-      const noRemote =
-        /no remote|could not find remote|not a git repository|does not appear to be a git/i.test(
-          msg,
-        )
-      return c.json({ ok: false, error: noRemote ? 'no_remote' : 'other', message: msg })
+app.post('/sync/push', async (c) => {
+  try {
+    const { repoPath } = await c.req.json()
+    syncLogger.info('push started', { repoPath })
+    const { git } = createNodePlatform()
+    // Auto-commit uncommitted yaml changes before pushing
+    const status = await git.status(repoPath)
+    if (status.dirty) {
+      await git.add(repoPath, ['.'])
+      await git.commit(repoPath, 'loom: sync changes')
     }
-  })
+    const res = await syncPush(repoPath, git)
+    syncLogger.info('push completed', { repoPath, ok: res.ok })
+    return c.json(res)
+  } catch (e) {
+    syncLogger.error('push failed', { err: e })
+    const msg = String(e?.message ?? e)
+    const noRemote =
+      /no remote|could not find remote|not a git repository|does not appear to be a git/i.test(msg)
+    return c.json({ ok: false, error: noRemote ? 'no_remote' : 'other', message: msg })
+  }
+})
 ```
 
 - [ ] **Step 5: Add logging to project handler**
@@ -640,48 +646,52 @@ Replace the entire `app.post('/sync/push'` handler body with:
 Find the `app.post('/project'` handler. Replace the entire handler with:
 
 ```typescript
-  app.post('/project', async (c) => {
-    const body = await c.req.json()
-    const repoPath = body.repoPath
-    apiLogger.info('projection started', { repoPath })
-    const { proc } = createNodePlatform()
-    // Detect installed agents
-    const allAgents: AgentId[] =
-      body.installedAgents ?? (['claude-code', 'codex', 'opencode'] as AgentId[])
-    const installed = new Set<AgentId>()
-    for (const a of allAgents) {
-      try {
-        if (await proc.isInstalled(a)) installed.add(a)
-      } catch {
-        /* proc not available, assume installed */ installed.add(a)
-      }
+app.post('/project', async (c) => {
+  const body = await c.req.json()
+  const repoPath = body.repoPath
+  apiLogger.info('projection started', { repoPath })
+  const { proc } = createNodePlatform()
+  // Detect installed agents
+  const allAgents: AgentId[] =
+    body.installedAgents ?? (['claude-code', 'codex', 'opencode'] as AgentId[])
+  const installed = new Set<AgentId>()
+  for (const a of allAgents) {
+    try {
+      if (await proc.isInstalled(a)) installed.add(a)
+    } catch {
+      /* proc not available, assume installed */ installed.add(a)
     }
-    // Build manifest from repo files if not provided
-    let mf = body.manifest
-    if (!mf) {
-      const { fs } = createNodePlatform()
-      const files = await readRepoFiles(fs, repoPath)
-      const repoManifest = loadRepoManifest(files)
-      const home = process.env.HOME || process.env.USERPROFILE || ''
-      const localConfig = await readLocalConfig(fs, home)
-      mf = buildManifest(repoManifest, localConfig as any)
-    }
-    // Plan projection (use provided plan or build from manifest)
-    const plan = body.plan ?? planProjection(mf, mf.config, installed)
-    const deps = createDeps(repoPath, installed)
-    const varsCtx = body.varsCtx ?? {
-      env: {},
-      activeProfile: mf.vars.active,
-      defaultProfile: mf.vars.default,
-    }
-    const res = await executeProjection(plan, mf, varsCtx, deps)
-    if (res.ok) {
-      apiLogger.info('projection completed', { repoPath })
-    } else {
-      apiLogger.error('projection failed', { repoPath, step: res.failure.failedStep, err: res.failure.originalError })
-    }
-    return c.json(res)
-  })
+  }
+  // Build manifest from repo files if not provided
+  let mf = body.manifest
+  if (!mf) {
+    const { fs } = createNodePlatform()
+    const files = await readRepoFiles(fs, repoPath)
+    const repoManifest = loadRepoManifest(files)
+    const home = process.env.HOME || process.env.USERPROFILE || ''
+    const localConfig = await readLocalConfig(fs, home)
+    mf = buildManifest(repoManifest, localConfig as any)
+  }
+  // Plan projection (use provided plan or build from manifest)
+  const plan = body.plan ?? planProjection(mf, mf.config, installed)
+  const deps = createDeps(repoPath, installed)
+  const varsCtx = body.varsCtx ?? {
+    env: {},
+    activeProfile: mf.vars.active,
+    defaultProfile: mf.vars.default,
+  }
+  const res = await executeProjection(plan, mf, varsCtx, deps)
+  if (res.ok) {
+    apiLogger.info('projection completed', { repoPath })
+  } else {
+    apiLogger.error('projection failed', {
+      repoPath,
+      step: res.failure.failedStep,
+      err: res.failure.originalError,
+    })
+  }
+  return c.json(res)
+})
 ```
 
 - [ ] **Step 6: Add logging to install handler**
@@ -689,19 +699,19 @@ Find the `app.post('/project'` handler. Replace the entire handler with:
 Replace the `app.post('/install'` handler with:
 
 ```typescript
-  app.post('/install', async (c) => {
-    const { url, ref, repoPath, sourceId } = await c.req.json()
-    remoteLogger.info('install skill', { url, ref, repoPath, sourceId })
-    const { git, fs } = createNodePlatform()
-    try {
-      const res = await installSkill(git, fs, url, ref, repoPath, sourceId)
-      remoteLogger.info('install completed', { url, sourceId, commit: res.pinned_commit })
-      return c.json(res)
-    } catch (e) {
-      remoteLogger.error('install failed', { err: e, url, sourceId })
-      return c.json({ ok: false, error: 'install_failed', message: String(e?.message ?? e) })
-    }
-  })
+app.post('/install', async (c) => {
+  const { url, ref, repoPath, sourceId } = await c.req.json()
+  remoteLogger.info('install skill', { url, ref, repoPath, sourceId })
+  const { git, fs } = createNodePlatform()
+  try {
+    const res = await installSkill(git, fs, url, ref, repoPath, sourceId)
+    remoteLogger.info('install completed', { url, sourceId, commit: res.pinned_commit })
+    return c.json(res)
+  } catch (e) {
+    remoteLogger.error('install failed', { err: e, url, sourceId })
+    return c.json({ ok: false, error: 'install_failed', message: String(e?.message ?? e) })
+  }
+})
 ```
 
 - [ ] **Step 7: Add logging to update handlers**
@@ -709,55 +719,65 @@ Replace the `app.post('/install'` handler with:
 Replace the `app.post('/update'` and `app.post('/update/perform'` handlers with:
 
 ```typescript
-  app.post('/update', async (c) => {
-    const { sources } = await c.req.json()
-    remoteLogger.info('check updates', { count: sources?.length ?? 0 })
-    const { git } = createNodePlatform()
-    const updates = await checkUpdates(sources, git)
-    return c.json({ updates })
-  })
+app.post('/update', async (c) => {
+  const { sources } = await c.req.json()
+  remoteLogger.info('check updates', { count: sources?.length ?? 0 })
+  const { git } = createNodePlatform()
+  const updates = await checkUpdates(sources, git)
+  return c.json({ updates })
+})
 
-  app.post('/update/perform', async (c) => {
-    const body = await c.req.json()
-    remoteLogger.info('perform update', { source: body.source?.url, newRef: body.newRef, repoPath: body.repoPath })
-    const { git, fs } = createNodePlatform()
-    try {
-      const res = await performUpdate(
-        git,
-        fs,
-        body.source,
-        body.newRef,
-        body.repoPath,
-        body.sourceId,
-        body.oldMembers,
-      )
-      remoteLogger.info('update completed', { source: body.source?.url, commit: res.pinned_commit })
-      return c.json(res)
-    } catch (e) {
-      remoteLogger.error('update failed', { err: e, source: body.source?.url })
-      return c.json({ ok: false, error: 'update_failed', message: String(e?.message ?? e) })
-    }
+app.post('/update/perform', async (c) => {
+  const body = await c.req.json()
+  remoteLogger.info('perform update', {
+    source: body.source?.url,
+    newRef: body.newRef,
+    repoPath: body.repoPath,
   })
+  const { git, fs } = createNodePlatform()
+  try {
+    const res = await performUpdate(
+      git,
+      fs,
+      body.source,
+      body.newRef,
+      body.repoPath,
+      body.sourceId,
+      body.oldMembers,
+    )
+    remoteLogger.info('update completed', { source: body.source?.url, commit: res.pinned_commit })
+    return c.json(res)
+  } catch (e) {
+    remoteLogger.error('update failed', { err: e, source: body.source?.url })
+    return c.json({ ok: false, error: 'update_failed', message: String(e?.message ?? e) })
+  }
+})
 ```
 
 - [ ] **Step 8: Replace remaining console calls**
 
 In the `app.post('/sources'` handler, replace:
+
 ```typescript
-      console.error('auto-install failed for source', url, installErr)
+console.error('auto-install failed for source', url, installErr)
 ```
+
 with:
+
 ```typescript
-      remoteLogger.error('auto-install failed for source', { err: installErr, url })
+remoteLogger.error('auto-install failed for source', { err: installErr, url })
 ```
 
 In the `app.put('/skill/content'` handler, replace:
+
 ```typescript
-      logger.error({ err: e }, 'Failed to save skill content')
+logger.error({ err: e }, 'Failed to save skill content')
 ```
+
 with:
+
 ```typescript
-      apiLogger.error('failed to save skill content', { err: e })
+apiLogger.error('failed to save skill content', { err: e })
 ```
 
 - [ ] **Step 9: Verify no console calls remain in routes.ts**
@@ -768,10 +788,12 @@ Expected: no output (zero matches)
 - [ ] **Step 10: Verify the server boots and routes work**
 
 Run: `pnpm --filter @loom/server dev`, then:
+
 ```bash
 curl http://localhost:3000/api/health
 curl -X POST http://localhost:3000/api/sync/pull -H "Content-Type: application/json" -d '{"repoPath":"."}'
 ```
+
 Expected: Both return JSON. The log file contains `request`, `pull started`, and either `pull completed` or `pull failed` lines. Stop the server.
 
 - [ ] **Step 11: Commit**
@@ -786,6 +808,7 @@ git commit -m "feat: add business logging to all route handlers"
 ### Task 5: 桥接 ProjectionDeps logger
 
 **Files:**
+
 - Modify: `packages/server/src/api/deps.ts`
 
 - [ ] **Step 1: Bridge the deps logger to the new logger module**
@@ -828,11 +851,13 @@ git commit -m "feat: bridge ProjectionDeps logger to persistent logger"
 ### Task 6: 添加 logs/ 到 .gitignore
 
 **Files:**
+
 - Modify: `.gitignore`
 
 - [ ] **Step 1: Add logs/ to .gitignore**
 
 In `.gitignore`, find the existing `# logs` section:
+
 ```
 # logs
 *.log
@@ -874,6 +899,7 @@ Expected: All tests pass (existing tests + new logger tests).
 - [ ] **Step 2: Boot the server end-to-end**
 
 Run: `pnpm dev`, then test multiple endpoints:
+
 ```bash
 curl http://localhost:3000/api/health
 curl -X POST http://localhost:3000/api/init
@@ -881,6 +907,7 @@ curl -X POST http://localhost:3000/api/sync/pull -H "Content-Type: application/j
 ```
 
 Check the log file `logs/loom-YYYY-MM-DD.log` contains:
+
 - `server started` line on boot
 - `request` lines for each HTTP call
 - `pull started` / `pull completed` (or `pull failed`) lines
@@ -891,12 +918,19 @@ Stop the server with Ctrl+C.
 - [ ] **Step 3: Verify uncaughtException logging**
 
 Temporarily add to `packages/server/src/index.ts` before `startApiServer()`:
+
 ```typescript
-setTimeout(() => { throw new Error('test uncaught') }, 1000)
+setTimeout(() => {
+  throw new Error('test uncaught')
+}, 1000)
 ```
+
 Run `pnpm --filter @loom/server dev`, wait 2 seconds. Expected: server logs `uncaught exception` with full stack to the log file, then exits. Remove the test line.
 
 - [ ] **Step 4: Final commit (if any cleanup)**
 
 If any cleanup was needed, commit it. Otherwise, the implementation is complete.
+
+```
+
 ```

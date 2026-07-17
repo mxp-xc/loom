@@ -40,9 +40,11 @@
 ## Task 0: 扩展 IGit(show / revParseHead / lsTree)
 
 **Files:**
+
 - Modify: `src/platform/interfaces.ts`(Plan 1)、`src/platform/node/git.ts`(Plan 1)、`tests/platform/node/git.test.ts`(Plan 1,补用例)
 
 **Interfaces:**
+
 - Consumes: Plan 1 IGit/NodeGit
 - Produces: IGit 加 `show(repoPath, ref, path): Promise<string>`(`git show <ref>:<path>`)、`revParseHead(repoPath): Promise<string>`(`git rev-parse HEAD`)、`lsTree(repoPath, ref, dir): Promise<string[]>`(`git ls-tree --name-only`)。被 Task 1/5/6 消费
 
@@ -51,23 +53,27 @@
 ```typescript
 describe('NodeGit show/revParseHead/lsTree', () => {
   it('show reads file content at ref', async () => {
-    const dest = await mkdtemp(join(tmpdir(), 'show-')); created.push(dest)
+    const dest = await mkdtemp(join(tmpdir(), 'show-'))
+    created.push(dest)
     await new NodeGit().clone(bare, dest, false)
     expect(await new NodeGit().show(dest, 'HEAD', 'a.txt')).toContain('x')
   })
   it('revParseHead returns HEAD hash', async () => {
-    const dest = await mkdtemp(join(tmpdir(), 'rev-')); created.push(dest)
+    const dest = await mkdtemp(join(tmpdir(), 'rev-'))
+    created.push(dest)
     await new NodeGit().clone(bare, dest, false)
     expect(await new NodeGit().revParseHead(dest)).toMatch(/^[0-9a-f]{7,40}$/)
   })
   it('lsTree lists files under dir', async () => {
-    const dest = await mkdtemp(join(tmpdir(), 'lstree-')); created.push(dest)
+    const dest = await mkdtemp(join(tmpdir(), 'lstree-'))
+    created.push(dest)
     await new NodeGit().clone(bare, dest, false)
     const files = await new NodeGit().lsTree(dest, 'HEAD', '.')
     expect(files).toContain('a.txt')
   })
   it('lsTree 不存在目录返回 [](不抛错)', async () => {
-    const dest = await mkdtemp(join(tmpdir(), 'lstree-none-')); created.push(dest)
+    const dest = await mkdtemp(join(tmpdir(), 'lstree-none-'))
+    created.push(dest)
     await new NodeGit().clone(bare, dest, false)
     expect(await new NodeGit().lsTree(dest, 'HEAD', 'nonexistent/')).toEqual([])
   })
@@ -82,6 +88,7 @@ Expected: FAIL — show/revParseHead/lsTree is not a function
 - [ ] **Step 3: 写实现**
 
 `src/platform/interfaces.ts` IGit 加:
+
 ```typescript
   show(repoPath: string, ref: string, path: string): Promise<string>
   revParseHead(repoPath: string): Promise<string>
@@ -89,6 +96,7 @@ Expected: FAIL — show/revParseHead/lsTree is not a function
 ```
 
 `src/platform/node/git.ts` NodeGit 加:
+
 ```typescript
   async show(repoPath: string, ref: string, path: string): Promise<string> {
     return (await this.git(repoPath).raw(['show', `${ref}:${path}`])).trimEnd()
@@ -123,10 +131,12 @@ git commit -m "feat(platform): IGit show/revParseHead/lsTree (Plan 3 sync 依赖
 ## Task 1: git 同步编排(syncPull + syncPush)
 
 **Files:**
+
 - Create: `src/sync/pull.ts`, `src/sync/push.ts`
 - Test: `tests/sync/pull.test.ts`, `tests/sync/push.test.ts`
 
 **Interfaces:**
+
 - Consumes: `IGit`(Plan 1,需加 show)、`IFileSystem`(Plan 1)、`threeWayMerge`/`MergeResult`/`Kind`/`Conflict`(Plan 1)
 - Produces: `syncPull(repoPath, git, fs): Promise<PullResult>`(fetch+merge-base+三份 git 对象+threeWayMerge,无冲突写+git add,有冲突归集)、`syncPush(repoPath, git): Promise<{ok:boolean; nonFastForward?:boolean}>`(push non-ff 收敛正则)。被 API(Plan 4)消费
 
@@ -144,23 +154,35 @@ import { NodeFileSystem } from '../../src/platform/node/fs'
 import { syncPull } from '../../src/sync/pull'
 
 const created: string[] = []
-afterAll(async () => { for (const p of created.splice(0)) await rm(p, { recursive: true, force: true }).catch(() => {}) })
+afterAll(async () => {
+  for (const p of created.splice(0)) await rm(p, { recursive: true, force: true }).catch(() => {})
+})
 
 // base 推到 bare,w2 clone 自 bare(共享祖先)造 theirs,本地造 ours——保证 merge-base 有共同祖先
 async function setupRepo(contentBase: string, ours: string, theirs: string): Promise<string> {
   const repo = await mkdtemp(join(tmpdir(), 'syncrepo-'))
-  const g = simpleGit(repo); await g.raw(['init', '-b', 'main'])
-  await g.addConfig('user.email', 't@t.t'); await g.addConfig('user.name', 't')
+  const g = simpleGit(repo)
+  await g.raw(['init', '-b', 'main'])
+  await g.addConfig('user.email', 't@t.t')
+  await g.addConfig('user.name', 't')
   await writeFile(join(repo, 'skills.yaml'), contentBase)
-  await g.add('.'); await g.commit('base')
+  await g.add('.')
+  await g.commit('base')
   const bare = await mkdtemp(join(tmpdir(), 'syncbare-'))
   await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
-  await g.addRemote('origin', bare); await g.push('origin', 'HEAD:main')
-  await writeFile(join(repo, 'skills.yaml'), ours); await g.add('.'); await g.commit('ours')
+  await g.addRemote('origin', bare)
+  await g.push('origin', 'HEAD:main')
+  await writeFile(join(repo, 'skills.yaml'), ours)
+  await g.add('.')
+  await g.commit('ours')
   const w2 = await mkdtemp(join(tmpdir(), 'syncw2-'))
-  const gw2 = simpleGit(w2); await gw2.clone(bare, '.') // 共享 base
-  await gw2.addConfig('user.email', 't@t.t'); await gw2.addConfig('user.name', 't')
-  await writeFile(join(w2, 'skills.yaml'), theirs); await gw2.add('.'); await gw2.commit('theirs')
+  const gw2 = simpleGit(w2)
+  await gw2.clone(bare, '.') // 共享 base
+  await gw2.addConfig('user.email', 't@t.t')
+  await gw2.addConfig('user.name', 't')
+  await writeFile(join(w2, 'skills.yaml'), theirs)
+  await gw2.add('.')
+  await gw2.commit('theirs')
   await gw2.push('origin', 'HEAD:main')
   await g.fetch('origin')
   created.push(repo, bare, w2)
@@ -168,23 +190,36 @@ async function setupRepo(contentBase: string, ours: string, theirs: string): Pro
 }
 
 // 多文件版 setup:支持 vars/assets 等额外文件的三方历史(base/ours/theirs 各自可选)
-async function setupRepoMulti(files: { path: string; base?: string; ours?: string; theirs?: string }[]): Promise<string> {
+async function setupRepoMulti(
+  files: { path: string; base?: string; ours?: string; theirs?: string }[],
+): Promise<string> {
   const repo = await mkdtemp(join(tmpdir(), 'syncrepo-'))
-  const g = simpleGit(repo); await g.raw(['init', '-b', 'main'])
-  await g.addConfig('user.email', 't@t.t'); await g.addConfig('user.name', 't')
-  const writeAt = async (root: string, p: string, c: string) => { await mkdir(join(root, dirname(p)), { recursive: true }).catch(() => {}); await writeFile(join(root, p), c) }
+  const g = simpleGit(repo)
+  await g.raw(['init', '-b', 'main'])
+  await g.addConfig('user.email', 't@t.t')
+  await g.addConfig('user.name', 't')
+  const writeAt = async (root: string, p: string, c: string) => {
+    await mkdir(join(root, dirname(p)), { recursive: true }).catch(() => {})
+    await writeFile(join(root, p), c)
+  }
   for (const f of files) if (f.base !== undefined) await writeAt(repo, f.path, f.base)
-  await g.add('.'); await g.commit('base')
+  await g.add('.')
+  await g.commit('base')
   const bare = await mkdtemp(join(tmpdir(), 'syncbare-'))
   await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
-  await g.addRemote('origin', bare); await g.push('origin', 'HEAD:main')
+  await g.addRemote('origin', bare)
+  await g.push('origin', 'HEAD:main')
   for (const f of files) if (f.ours !== undefined) await writeAt(repo, f.path, f.ours)
-  await g.add('.'); await g.commit('ours')
+  await g.add('.')
+  await g.commit('ours')
   const w2 = await mkdtemp(join(tmpdir(), 'syncw2-'))
-  const gw2 = simpleGit(w2); await gw2.clone(bare, '.')
-  await gw2.addConfig('user.email', 't@t.t'); await gw2.addConfig('user.name', 't')
+  const gw2 = simpleGit(w2)
+  await gw2.clone(bare, '.')
+  await gw2.addConfig('user.email', 't@t.t')
+  await gw2.addConfig('user.name', 't')
   for (const f of files) if (f.theirs !== undefined) await writeAt(w2, f.path, f.theirs)
-  await gw2.add('.'); await gw2.commit('theirs')
+  await gw2.add('.')
+  await gw2.commit('theirs')
   await gw2.push('origin', 'HEAD:main')
   await g.fetch('origin')
   created.push(repo, bare, w2)
@@ -192,8 +227,10 @@ async function setupRepoMulti(files: { path: string; base?: string; ours?: strin
 }
 
 const A = 'sources:\n  - url: github:x/a\n    ref: v1\nskills: []\n'
-const B = 'sources:\n  - url: github:x/a\n    ref: v1\n  - url: github:x/b\n    ref: v1\nskills: []\n'
-const C = 'sources:\n  - url: github:x/a\n    ref: v1\n  - url: github:x/c\n    ref: v1\nskills: []\n'
+const B =
+  'sources:\n  - url: github:x/a\n    ref: v1\n  - url: github:x/b\n    ref: v1\nskills: []\n'
+const C =
+  'sources:\n  - url: github:x/a\n    ref: v1\n  - url: github:x/c\n    ref: v1\nskills: []\n'
 
 describe('syncPull', () => {
   it('no conflict: auto-merges both sides (B + C)', async () => {
@@ -201,13 +238,22 @@ describe('syncPull', () => {
     const res = await syncPull(repo, new NodeGit(), new NodeFileSystem())
     expect(res.clean).toBe(true)
     const merged = await readFile(join(repo, 'skills.yaml'), 'utf8')
-    expect(merged).toContain('github:x/b'); expect(merged).toContain('github:x/c')
+    expect(merged).toContain('github:x/b')
+    expect(merged).toContain('github:x/c')
   })
   it('conflict: both change same ref -> conflicts, no <<<<<<< in working tree', async () => {
-    const repo = await setupRepo(A, 'sources:\n  - url: github:x/a\n    ref: v2\nskills: []\n', 'sources:\n  - url: github:x/a\n    ref: v3\nskills: []\n')
+    const repo = await setupRepo(
+      A,
+      'sources:\n  - url: github:x/a\n    ref: v2\nskills: []\n',
+      'sources:\n  - url: github:x/a\n    ref: v3\nskills: []\n',
+    )
     const res = await syncPull(repo, new NodeGit(), new NodeFileSystem())
     expect(res.clean).toBe(false)
-    expect(res.files.some(f => f.result.conflicts.some(c => c.path.includes('github:x/a') && c.field === 'ref'))).toBe(true)
+    expect(
+      res.files.some((f) =>
+        f.result.conflicts.some((c) => c.path.includes('github:x/a') && c.field === 'ref'),
+      ),
+    ).toBe(true)
     expect(await readFile(join(repo, 'skills.yaml'), 'utf8')).not.toContain('<<<<<<<')
   })
   it('vars 三方并集: HEAD 无 vars, theirs 新增 vars/local.yaml -> clean 落盘(父目录自建)', async () => {
@@ -226,7 +272,7 @@ describe('syncPull', () => {
     ])
     const res = await syncPull(repo, new NodeGit(), new NodeFileSystem())
     expect(res.clean).toBe(false)
-    expect(res.textConflicts.some(t => t.file.includes('SKILL.md'))).toBe(true)
+    expect(res.textConflicts.some((t) => t.file.includes('SKILL.md'))).toBe(true)
   })
 })
 ```
@@ -249,21 +295,34 @@ describe('syncPush', () => {
     await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
     // 远程先有一个 commit
     const w = await mkdtemp(join(tmpdir(), 'pushw-'))
-    const gw = simpleGit(w); await gw.raw(['init', '-b', 'main'])
-    await gw.addConfig('user.email', 't@t.t'); await gw.addConfig('user.name', 't')
-    await writeFile(join(w, 'a.txt'), 'x'); await gw.add('.'); await gw.commit('init')
-    await gw.addRemote('origin', bare); await gw.push('origin', 'HEAD:main')
+    const gw = simpleGit(w)
+    await gw.raw(['init', '-b', 'main'])
+    await gw.addConfig('user.email', 't@t.t')
+    await gw.addConfig('user.name', 't')
+    await writeFile(join(w, 'a.txt'), 'x')
+    await gw.add('.')
+    await gw.commit('init')
+    await gw.addRemote('origin', bare)
+    await gw.push('origin', 'HEAD:main')
   })
-  afterEach(async () => { for (const p of created.splice(0)) await rm(p, { recursive: true, force: true }).catch(() => {}) })
+  afterEach(async () => {
+    for (const p of created.splice(0)) await rm(p, { recursive: true, force: true }).catch(() => {})
+  })
 
   it('non-fast-forward when local behind', async () => {
     // dest clone 自 bare(共享 init commit),bare 侧再追加 commit 使 dest 落后,push 旧 HEAD 才是真 non-ff
-    const dest = await mkdtemp(join(tmpdir(), 'pushdest-')); created.push(dest)
+    const dest = await mkdtemp(join(tmpdir(), 'pushdest-'))
+    created.push(dest)
     await simpleGit().clone(bare, dest)
-    const w2 = await mkdtemp(join(tmpdir(), 'pushw2-')); created.push(w2)
-    const gw2 = simpleGit(w2); await gw2.clone(bare, '.')
-    await gw2.addConfig('user.email', 't@t.t'); await gw2.addConfig('user.name', 't')
-    await writeFile(join(w2, 'b.txt'), 'y'); await gw2.add('.'); await gw2.commit('remote-update')
+    const w2 = await mkdtemp(join(tmpdir(), 'pushw2-'))
+    created.push(w2)
+    const gw2 = simpleGit(w2)
+    await gw2.clone(bare, '.')
+    await gw2.addConfig('user.email', 't@t.t')
+    await gw2.addConfig('user.name', 't')
+    await writeFile(join(w2, 'b.txt'), 'y')
+    await gw2.add('.')
+    await gw2.commit('remote-update')
     await gw2.push('origin', 'HEAD:main')
     // dest 仍指向旧 init commit(未 fetch),push 旧 HEAD -> ! [rejected] (fetch first) -> non-ff
     const res = await syncPush(dest, new NodeGit())
@@ -293,12 +352,25 @@ const STRUCT_FILES: { path: string; kind: Kind }[] = [
   { path: 'config.yaml', kind: 'config' },
 ]
 
-export interface PullFileResult { path: string; result: MergeResult }
-export interface PullResult { files: PullFileResult[]; varsFiles: PullFileResult[]; textConflicts: TextFileConflict[]; clean: boolean }
+export interface PullFileResult {
+  path: string
+  result: MergeResult
+}
+export interface PullResult {
+  files: PullFileResult[]
+  varsFiles: PullFileResult[]
+  textConflicts: TextFileConflict[]
+  clean: boolean
+}
 
 type Logger = { warn?: (o: unknown, m: string) => void; error: (o: unknown, m: string) => void }
 
-export async function syncPull(repoPath: string, git: IGit, fs: IFileSystem, logger?: Logger): Promise<PullResult> {
+export async function syncPull(
+  repoPath: string,
+  git: IGit,
+  fs: IFileSystem,
+  logger?: Logger,
+): Promise<PullResult> {
   await git.fetch(repoPath)
   const base = await git.mergeBase(repoPath, 'FETCH_HEAD', 'HEAD')
   const files: PullFileResult[] = []
@@ -319,7 +391,8 @@ export async function syncPull(repoPath: string, git: IGit, fs: IFileSystem, log
   }
   const textConflicts = await detectTextConflicts(git, repoPath, base, logger)
   const allResults = [...files, ...varsFiles]
-  const clean = allResults.every(f => f.result.conflicts.length === 0) && textConflicts.length === 0
+  const clean =
+    allResults.every((f) => f.result.conflicts.length === 0) && textConflicts.length === 0
   if (clean) {
     for (const f of allResults) {
       const dest = join(repoPath, f.path)
@@ -327,35 +400,66 @@ export async function syncPull(repoPath: string, git: IGit, fs: IFileSystem, log
       if (!(await fs.exists(dir))) await fs.mkdir(dir, true) // vars/<profile>.yaml 父目录可能不存在(HEAD 无 vars 而 theirs 新增),避免 ENOENT
       await fs.writeFile(dest, f.result.merged)
     }
-    await git.add(repoPath, allResults.map(f => f.path))
+    await git.add(
+      repoPath,
+      allResults.map((f) => f.path),
+    )
     await git.commit(repoPath, 'merge: pull from origin') // commit 使 HEAD 含 merge 结果,syncPush 推 HEAD 才能上传(spec 行 257/259)
     // 重新投影由 caller(API/Plan 4)编排,与 install/performUpdate 一致
   }
   return { files, varsFiles, textConflicts, clean }
 }
 
-async function safeShow(git: IGit, repoPath: string, ref: string, path: string, logger?: Logger): Promise<string> {
-  try { return await git.show(repoPath, ref, path) }
-  catch (e) { logger?.warn?.({ err: e, ref, path }, 'git show miss (file absent at ref)'); return '' }
+async function safeShow(
+  git: IGit,
+  repoPath: string,
+  ref: string,
+  path: string,
+  logger?: Logger,
+): Promise<string> {
+  try {
+    return await git.show(repoPath, ref, path)
+  } catch (e) {
+    logger?.warn?.({ err: e, ref, path }, 'git show miss (file absent at ref)')
+    return ''
+  }
 }
 
-async function listVarsFilesUnion(git: IGit, repoPath: string, base: string, logger?: { warn?: (o: unknown, m: string) => void }): Promise<string[]> {
+async function listVarsFilesUnion(
+  git: IGit,
+  repoPath: string,
+  base: string,
+  logger?: { warn?: (o: unknown, m: string) => void },
+): Promise<string[]> {
   // 三方并集:base/HEAD/FETCH_HEAD 各 ls-tree vars/(git show <dir> 不可靠,用 ls-tree)
   const all = new Set<string>()
   for (const ref of [base, 'HEAD', 'FETCH_HEAD']) {
-    try { for (const f of await git.lsTree(repoPath, ref, 'vars')) all.add(f.startsWith('vars/') ? f : `vars/${f}`) }
-    catch (e) { logger?.warn?.({ err: e, ref }, 'ls-tree vars miss') }
+    try {
+      for (const f of await git.lsTree(repoPath, ref, 'vars'))
+        all.add(f.startsWith('vars/') ? f : `vars/${f}`)
+    } catch (e) {
+      logger?.warn?.({ err: e, ref }, 'ls-tree vars miss')
+    }
   }
   return [...all]
 }
 
 // assets/ 文本文件两方同改检测(spec 行 258/270:文件级冲突先由 git 检测,文本交外部解决)
-async function detectTextConflicts(git: IGit, repoPath: string, base: string, logger?: { warn?: (o: unknown, m: string) => void }): Promise<TextFileConflict[]> {
+async function detectTextConflicts(
+  git: IGit,
+  repoPath: string,
+  base: string,
+  logger?: { warn?: (o: unknown, m: string) => void },
+): Promise<TextFileConflict[]> {
   const out: TextFileConflict[] = []
   const allAssets = new Set<string>()
   for (const ref of [base, 'HEAD', 'FETCH_HEAD']) {
-    try { for (const f of await git.lsTree(repoPath, ref, 'assets')) allAssets.add(f.startsWith('assets/') ? f : `assets/${f}`) }
-    catch (e) { logger?.warn?.({ err: e, ref }, 'ls-tree assets miss') }
+    try {
+      for (const f of await git.lsTree(repoPath, ref, 'assets'))
+        allAssets.add(f.startsWith('assets/') ? f : `assets/${f}`)
+    } catch (e) {
+      logger?.warn?.({ err: e, ref }, 'ls-tree assets miss')
+    }
   }
   for (const p of allAssets) {
     const b = await safeShow(git, repoPath, base, p, logger)
@@ -371,7 +475,10 @@ async function detectTextConflicts(git: IGit, repoPath: string, base: string, lo
 // src/sync/push.ts
 import type { IGit } from '../platform/interfaces.js'
 
-export async function syncPush(repoPath: string, git: IGit): Promise<{ ok: boolean; nonFastForward?: boolean }> {
+export async function syncPush(
+  repoPath: string,
+  git: IGit,
+): Promise<{ ok: boolean; nonFastForward?: boolean }> {
   return git.push(repoPath) // Plan 1 NodeGit.push 已返回 {ok, nonFastForward};收敛正则在 NodeGit.push 内
 }
 ```
@@ -399,10 +506,12 @@ git commit -m "feat(sync): pull (fetch+merge-base+3-way from git objects) + push
 ## Task 2: 冲突视图模型
 
 **Files:**
+
 - Create: `src/sync/conflicts.ts`
 - Test: `tests/sync/conflicts.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Conflict`、`Kind`(Plan 1 merge.ts)
 - Produces: `ConflictGroup`(file + kind + conflicts 带 resolution)、`TextFileConflict`、`groupConflicts(files, kindOf): ConflictGroup[]`(供 Plan 4 UI 三栏渲染)
 
@@ -416,7 +525,22 @@ import { groupConflicts } from '../../src/sync/conflicts'
 describe('groupConflicts', () => {
   it('groups files with conflicts, attaches resolution slot', () => {
     const files = [
-      { path: 'skills.yaml', result: { merged: '', conflicts: [{ file: 'skills.yaml', path: 'github:x/a', field: 'ref', base: 'v1', ours: 'v2', theirs: 'v3' }] } },
+      {
+        path: 'skills.yaml',
+        result: {
+          merged: '',
+          conflicts: [
+            {
+              file: 'skills.yaml',
+              path: 'github:x/a',
+              field: 'ref',
+              base: 'v1',
+              ours: 'v2',
+              theirs: 'v3',
+            },
+          ],
+        },
+      },
       { path: 'mcp.yaml', result: { merged: '', conflicts: [] } },
     ]
     const groups = groupConflicts(files, () => 'skills')
@@ -443,17 +567,31 @@ Expected: FAIL — module not found
 import type { Conflict, Kind } from '../core/merge.js'
 
 export type Resolution = 'ours' | 'theirs' | 'manual' | 'base'
-export interface ConflictItem extends Conflict { resolution?: Resolution; manualValue?: unknown }
-export interface ConflictGroup { file: string; kind: Kind; conflicts: ConflictItem[] }
-export interface TextFileConflict { file: string; resolvedExternally: boolean }
+export interface ConflictItem extends Conflict {
+  resolution?: Resolution
+  manualValue?: unknown
+}
+export interface ConflictGroup {
+  file: string
+  kind: Kind
+  conflicts: ConflictItem[]
+}
+export interface TextFileConflict {
+  file: string
+  resolvedExternally: boolean
+}
 
 export function groupConflicts(
   files: { path: string; result: { conflicts: Conflict[] } }[],
   kindOf: (path: string) => Kind,
 ): ConflictGroup[] {
   return files
-    .filter(f => f.result.conflicts.length > 0)
-    .map(f => ({ file: f.path, kind: kindOf(f.path), conflicts: f.result.conflicts.map(c => ({ ...c })) }))
+    .filter((f) => f.result.conflicts.length > 0)
+    .map((f) => ({
+      file: f.path,
+      kind: kindOf(f.path),
+      conflicts: f.result.conflicts.map((c) => ({ ...c })),
+    }))
 }
 ```
 
@@ -474,10 +612,12 @@ git commit -m "feat(sync): conflict view model (ConflictGroup + resolution slot)
 ## Task 3: SKILL.md frontmatter 解析
 
 **Files:**
+
 - Create: `src/remote/frontmatter.ts`
 - Test: `tests/remote/frontmatter.test.ts`
 
 **Interfaces:**
+
 - Consumes: gray-matter
 - Produces: `parseSkillMeta(content, dirName, path): SkillMeta | null`(gray-matter 解析 frontmatter,name 校验 = 父目录名 + `^[a-z0-9]+(-[a-z0-9]+)*$`,不合规返回 null)。被 Task 4 发现消费
 
@@ -485,7 +625,7 @@ git commit -m "feat(sync): conflict view model (ConflictGroup + resolution slot)
 
 > 先安装依赖:`pnpm add gray-matter`(frontmatter 解析,内部用 js-yaml)。
 
-```typescript
+````typescript
 // tests/remote/frontmatter.test.ts
 import { describe, it, expect } from 'vitest'
 import { parseSkillMeta } from '../../src/remote/frontmatter'
@@ -508,12 +648,13 @@ describe('parseSkillMeta', () => {
     expect(parseSkillMeta('# just body', 'brainstorming', '/p')).toBeNull()
   })
   it('does not mis-split fenced code block with --- inside body', () => {
-    const md = '---\nname: brainstorming\ndescription: x\n---\n```yaml\n---\nfake: frontmatter\n---\n```\n'
+    const md =
+      '---\nname: brainstorming\ndescription: x\n---\n```yaml\n---\nfake: frontmatter\n---\n```\n'
     const m = parseSkillMeta(md, 'brainstorming', '/p')
     expect(m?.name).toBe('brainstorming') // gray-matter 不误切代码块内的 ---
   })
 })
-```
+````
 
 - [ ] **Step 2: 运行确认失败**
 
@@ -526,7 +667,11 @@ Expected: FAIL — module not found
 // src/remote/frontmatter.ts
 import matter from 'gray-matter'
 
-export interface SkillMeta { name: string; description: string; path: string }
+export interface SkillMeta {
+  name: string
+  description: string
+  path: string
+}
 
 const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -556,10 +701,12 @@ git commit -m "feat(remote): SKILL.md frontmatter parse + name validation (gray-
 ## Task 4: 远程 skill 发现
 
 **Files:**
+
 - Create: `src/remote/resolve-url.ts`(github:/gitee: URL 归一化,remote 层共用)、`src/remote/discover.ts`
 - Test: `tests/remote/discover.test.ts`
 
 **Interfaces:**
+
 - Consumes: `IGit`(Plan 1 clone)、`IFileSystem`、tinyglobby(Plan 2)、`parseSkillMeta`(Task 3)
 - Produces: `resolveGitUrl(url): string`(github:owner/repo → https://github.com/owner/repo.git;gitee:owner/repo → https://gitee.com/owner/repo.git;裸 URL 透传)、`discoverSkills(git, fs, url, installed?): Promise<(SkillMeta & {installed:boolean})[]>`(浅 clone 临时目录 + scan + frontmatter + 标已安装 + 清理临时)。被 Task 5/6 + API(Plan 4)消费
 
@@ -577,8 +724,12 @@ import { NodeFileSystem } from '../../src/platform/node/fs'
 import type { IGit } from '../../src/platform/interfaces'
 
 let srcTmp: string
-beforeAll(async () => { srcTmp = await mkdtemp(join(tmpdir(), 'discsrc-')) })
-afterAll(async () => { await rm(srcTmp, { recursive: true, force: true }).catch(() => {}) })
+beforeAll(async () => {
+  srcTmp = await mkdtemp(join(tmpdir(), 'discsrc-'))
+})
+afterAll(async () => {
+  await rm(srcTmp, { recursive: true, force: true }).catch(() => {})
+})
 
 describe('resolveGitUrl', () => {
   it('github:owner/repo -> https URL', () => {
@@ -596,12 +747,27 @@ describe('resolveGitUrl', () => {
 describe('discoverSkills', () => {
   it('shallow clone + scan + parse frontmatter, filter invalid name, mark installed', async () => {
     await mkdir(join(srcTmp, 'skills', 'brainstorming'), { recursive: true })
-    await writeFile(join(srcTmp, 'skills', 'brainstorming', 'SKILL.md'), '---\nname: brainstorming\ndescription: A skill\n---\nbody\n')
+    await writeFile(
+      join(srcTmp, 'skills', 'brainstorming', 'SKILL.md'),
+      '---\nname: brainstorming\ndescription: A skill\n---\nbody\n',
+    )
     await mkdir(join(srcTmp, 'skills', 'bad-name'), { recursive: true })
-    await writeFile(join(srcTmp, 'skills', 'bad-name', 'SKILL.md'), '---\nname: BadName\ndescription: x\n---\n') // 不合规
-    const mockGit = { clone: async (_u: string, dest: string) => { await cp(srcTmp, dest, { recursive: true }) } } as unknown as IGit
-    const members = await discoverSkills(mockGit, new NodeFileSystem(), 'github:obra/superpowers', new Set(['superpowers-brainstorming']))
-    expect(members.map(m => m.name)).toEqual(['brainstorming']) // bad-name 被过滤
+    await writeFile(
+      join(srcTmp, 'skills', 'bad-name', 'SKILL.md'),
+      '---\nname: BadName\ndescription: x\n---\n',
+    ) // 不合规
+    const mockGit = {
+      clone: async (_u: string, dest: string) => {
+        await cp(srcTmp, dest, { recursive: true })
+      },
+    } as unknown as IGit
+    const members = await discoverSkills(
+      mockGit,
+      new NodeFileSystem(),
+      'github:obra/superpowers',
+      new Set(['superpowers-brainstorming']),
+    )
+    expect(members.map((m) => m.name)).toEqual(['brainstorming']) // bad-name 被过滤
     expect(members[0].description).toBe('A skill')
     expect(members[0].installed).toBe(true)
   })
@@ -638,7 +804,10 @@ import { resolveGitUrl } from './resolve-url.js'
 const DEFAULT_IGNORE = ['**/.git/**', '**/node_modules/**', '**/.cache/**']
 
 export async function discoverSkills(
-  git: IGit, fs: IFileSystem, url: string, installed: Set<string> = new Set(),
+  git: IGit,
+  fs: IFileSystem,
+  url: string,
+  installed: Set<string> = new Set(),
 ): Promise<(SkillMeta & { installed: boolean })[]> {
   const tmp = await mkdtemp(join(tmpdir(), 'discover-'))
   try {
@@ -647,7 +816,8 @@ export async function discoverSkills(
     const repoId = deriveRepoId(url)
     const out: (SkillMeta & { installed: boolean })[] = []
     for (const m of matches) {
-      const dir = dirname(m), dirName = basename(dir)
+      const dir = dirname(m),
+        dirName = basename(dir)
       const meta = parseSkillMeta(await fs.readFile(join(tmp, m)), dirName, join(tmp, dir))
       if (meta) out.push({ ...meta, installed: installed.has(`${repoId}-${dirName}`) })
     }
@@ -659,7 +829,10 @@ export async function discoverSkills(
 
 function deriveRepoId(url: string): string {
   const parts = url.split(':')
-  return parts[parts.length - 1].split('/').pop()!.replace(/\.git$/, '')
+  return parts[parts.length - 1]
+    .split('/')
+    .pop()!
+    .replace(/\.git$/, '')
 }
 ```
 
@@ -680,10 +853,12 @@ git commit -m "feat(remote): skill discovery (shallow clone + scan + frontmatter
 ## Task 5: 远程 skill 安装
 
 **Files:**
+
 - Create: `src/remote/install.ts`
 - Test: `tests/remote/install.test.ts`
 
 **Interfaces:**
+
 - Consumes: `IGit`(Plan 1,需加 `revParseHead(repoPath): Promise<string>` 取 HEAD hash)、`IFileSystem`
 - Produces: `installSkill(git, fs, url, ref, repoPath, sourceId): Promise<{pinned_commit:string; cacheDir:string}>`(clone 到 remote-cache/<sourceId> + checkout ref + 取 pinned_commit + 验证;失败清理半成品并抛错)。caller(API)负责写 skills.yaml + 投影
 
@@ -706,17 +881,33 @@ describe('installSkill', () => {
     bare = await mkdtemp(join(tmpdir(), 'instbare-'))
     await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
     const w = await mkdtemp(join(tmpdir(), 'instw-'))
-    const g = simpleGit(w); await g.raw(['init', '-b', 'main'])
-    await g.addConfig('user.email', 't@t.t'); await g.addConfig('user.name', 't')
+    const g = simpleGit(w)
+    await g.raw(['init', '-b', 'main'])
+    await g.addConfig('user.email', 't@t.t')
+    await g.addConfig('user.name', 't')
     await mkdir(join(w, 'skills', 'brainstorming'), { recursive: true })
-    await writeFile(join(w, 'skills', 'brainstorming', 'SKILL.md'), '---\nname: brainstorming\n---\n')
-    await g.add('.'); await g.commit('init'); await g.addTag('v1.0.0')
-    await g.addRemote('origin', bare); await g.push('origin', 'HEAD:main'); await g.pushTags('origin')
+    await writeFile(
+      join(w, 'skills', 'brainstorming', 'SKILL.md'),
+      '---\nname: brainstorming\n---\n',
+    )
+    await g.add('.')
+    await g.commit('init')
+    await g.addTag('v1.0.0')
+    await g.addRemote('origin', bare)
+    await g.push('origin', 'HEAD:main')
+    await g.pushTags('origin')
   })
 
   it('clones + checks out ref + returns pinned_commit (HEAD hash)', async () => {
     const repoPath = await mkdtemp(join(tmpdir(), 'instrepo-'))
-    const res = await installSkill(new NodeGit(), new NodeFileSystem(), bare, 'v1.0.0', repoPath, 'superpowers')
+    const res = await installSkill(
+      new NodeGit(),
+      new NodeFileSystem(),
+      bare,
+      'v1.0.0',
+      repoPath,
+      'superpowers',
+    )
     expect(res.pinned_commit).toMatch(/^[0-9a-f]{7,40}$/)
     expect(res.cacheDir).toBe(join(repoPath, 'remote-cache', 'superpowers'))
     await rm(repoPath, { recursive: true, force: true })
@@ -724,7 +915,9 @@ describe('installSkill', () => {
   it('failure (bad ref) cleans up remote-cache half-product', async () => {
     const repoPath = await mkdtemp(join(tmpdir(), 'instrepo2-'))
     const fs = new NodeFileSystem()
-    await expect(installSkill(new NodeGit(), fs, bare, 'nonexistent-ref', repoPath, 'superpowers')).rejects.toThrow()
+    await expect(
+      installSkill(new NodeGit(), fs, bare, 'nonexistent-ref', repoPath, 'superpowers'),
+    ).rejects.toThrow()
     expect(await fs.exists(join(repoPath, 'remote-cache', 'superpowers'))).toBe(false) // 半成品清理
     await rm(repoPath, { recursive: true, force: true })
   })
@@ -747,7 +940,12 @@ import { resolveGitUrl } from './resolve-url.js'
 
 // clone 到 remote-cache/<sourceId> + checkout ref + 取 pinned_commit;失败清理半成品(spec 行 285)
 export async function installSkill(
-  git: IGit, fs: IFileSystem, url: string, ref: string, repoPath: string, sourceId: string,
+  git: IGit,
+  fs: IFileSystem,
+  url: string,
+  ref: string,
+  repoPath: string,
+  sourceId: string,
 ): Promise<{ pinned_commit: string; cacheDir: string }> {
   const cacheDir = join(repoPath, 'remote-cache', sourceId)
   if (await fs.exists(cacheDir)) await rm(cacheDir, { recursive: true, force: true }) // 重新安装先清
@@ -782,10 +980,12 @@ git commit -m "feat(remote): skill install (clone + checkout ref + pinned_commit
 ## Task 6: 更新检测 + 更新流程
 
 **Files:**
+
 - Create: `src/remote/update.ts`
 - Test: `tests/remote/update.test.ts`
 
 **Interfaces:**
+
 - Consumes: `IGit`(lsRemote/fetch/checkout/revParseHead)、`IFileSystem`、`SkillSource`(Plan 1)、`compareVersion`/`RemoteRef`/`VersionStatus`(Plan 1)、`scanSourceMembers`/`ScannedMember`(Plan 2)
 - Produces: `checkUpdates(sources, git): Promise<(VersionStatus & {source:SkillSource})[]>`(lsRemote + compareVersion)、`performUpdate(git, fs, source, newRef, repoPath, sourceId, oldMembers): Promise<{pinned_commit:string; orphans:ScannedMember[]}>`(fetch+checkout+pinned_commit+orphan 检测)。被 API(Plan 4)消费
 
@@ -815,7 +1015,10 @@ describe('checkUpdates', () => {
   })
   it('no update when pinned_commit matches latest tag commit', async () => {
     const mockGit = { lsRemote: async () => ({ tags: { 'v5.1.4': 'aaa' }, head: 'aaa' }) } as any
-    const r = await checkUpdates([{ url: 'github:x/y', ref: 'v5.1.4', pinned_commit: 'aaa' }], mockGit)
+    const r = await checkUpdates(
+      [{ url: 'github:x/y', ref: 'v5.1.4', pinned_commit: 'aaa' }],
+      mockGit,
+    )
     expect(r[0].hasUpdate).toBe(false)
   })
 })
@@ -826,30 +1029,55 @@ describe('performUpdate', () => {
     bare = await mkdtemp(join(tmpdir(), 'updbare-'))
     await simpleGit().raw(['init', '--bare', '-b', 'main', bare])
     const w = await mkdtemp(join(tmpdir(), 'updw-'))
-    const g = simpleGit(w); await g.raw(['init', '-b', 'main'])
-    await g.addConfig('user.email', 't@t.t'); await g.addConfig('user.name', 't')
+    const g = simpleGit(w)
+    await g.raw(['init', '-b', 'main'])
+    await g.addConfig('user.email', 't@t.t')
+    await g.addConfig('user.name', 't')
     await mkdir(join(w, 'skills', 'brainstorming'), { recursive: true })
-    await writeFile(join(w, 'skills', 'brainstorming', 'SKILL.md'), '---\nname: brainstorming\n---\nv1\n')
-    await g.add('.'); await g.commit('v1'); await g.addTag('v1.0.0')
+    await writeFile(
+      join(w, 'skills', 'brainstorming', 'SKILL.md'),
+      '---\nname: brainstorming\n---\nv1\n',
+    )
+    await g.add('.')
+    await g.commit('v1')
+    await g.addTag('v1.0.0')
     // v2:删 brainstorming,加 tdd(orphan 场景)
     await rm(join(w, 'skills', 'brainstorming', 'SKILL.md'))
     await mkdir(join(w, 'skills', 'tdd'), { recursive: true })
     await writeFile(join(w, 'skills', 'tdd', 'SKILL.md'), '---\nname: tdd\n---\nv2\n')
-    await g.add('.'); await g.commit('v2'); await g.addTag('v2.0.0')
-    await g.addRemote('origin', bare); await g.push('origin', 'HEAD:main'); await g.pushTags('origin')
+    await g.add('.')
+    await g.commit('v2')
+    await g.addTag('v2.0.0')
+    await g.addRemote('origin', bare)
+    await g.push('origin', 'HEAD:main')
+    await g.pushTags('origin')
   })
 
   it('fetch + checkout new ref + detect orphan members', async () => {
     const repoPath = await mkdtemp(join(tmpdir(), 'updrepo-'))
-    const git = new NodeGit(), fs = new NodeFileSystem()
+    const git = new NodeGit(),
+      fs = new NodeFileSystem()
     // 先装 v1.0.0(非浅,对齐 installSkill 契约;本地 clone 忽略 --depth,用 false 显式非浅)
     await git.clone(bare, join(repoPath, 'remote-cache', 'superpowers'), false)
     await git.checkout(join(repoPath, 'remote-cache', 'superpowers'), 'v1.0.0')
-    const oldMembers: ScannedMember[] = [{ name: 'brainstorming', path: join(repoPath, 'remote-cache', 'superpowers', 'skills', 'brainstorming') }]
+    const oldMembers: ScannedMember[] = [
+      {
+        name: 'brainstorming',
+        path: join(repoPath, 'remote-cache', 'superpowers', 'skills', 'brainstorming'),
+      },
+    ]
     // 更新到 v2.0.0
-    const res = await performUpdate(git, fs, { url: bare, ref: 'v1.0.0', pinned_commit: 'old' }, 'v2.0.0', repoPath, 'superpowers', oldMembers)
+    const res = await performUpdate(
+      git,
+      fs,
+      { url: bare, ref: 'v1.0.0', pinned_commit: 'old' },
+      'v2.0.0',
+      repoPath,
+      'superpowers',
+      oldMembers,
+    )
     expect(res.pinned_commit).toMatch(/^[0-9a-f]{7,40}$/)
-    expect(res.orphans.map(o => o.name)).toEqual(['brainstorming']) // brainstorming 在 v2 不存在 -> orphan
+    expect(res.orphans.map((o) => o.name)).toEqual(['brainstorming']) // brainstorming 在 v2 不存在 -> orphan
     await rm(repoPath, { recursive: true, force: true })
   })
 })
@@ -872,29 +1100,43 @@ import { scanSourceMembers, type ScannedMember } from '../projection/scan.js'
 import { resolveGitUrl } from './resolve-url.js'
 
 export async function checkUpdates(
-  sources: SkillSource[], git: IGit,
+  sources: SkillSource[],
+  git: IGit,
 ): Promise<(VersionStatus & { source: SkillSource })[]> {
   const out: (VersionStatus & { source: SkillSource })[] = []
   for (const s of sources) {
     const remote: RemoteRef = await git.lsRemote(resolveGitUrl(s.url))
-    out.push({ ...compareVersion({ ref: s.ref, pinned_commit: s.pinned_commit ?? '' }, remote), source: s })
+    out.push({
+      ...compareVersion({ ref: s.ref, pinned_commit: s.pinned_commit ?? '' }, remote),
+      source: s,
+    })
   }
   return out
 }
 
-export interface UpdateResult { pinned_commit: string; orphans: ScannedMember[]; newMembers: ScannedMember[] }
+export interface UpdateResult {
+  pinned_commit: string
+  orphans: ScannedMember[]
+  newMembers: ScannedMember[]
+}
 
 // fetch + checkout newRef + 取 pinned_commit + 检测 orphan(旧 member 不在新 scan 结果中,spec 行 299)
 export async function performUpdate(
-  git: IGit, fs: IFileSystem, _source: SkillSource, newRef: string, repoPath: string, sourceId: string, oldMembers: ScannedMember[],
+  git: IGit,
+  fs: IFileSystem,
+  _source: SkillSource,
+  newRef: string,
+  repoPath: string,
+  sourceId: string,
+  oldMembers: ScannedMember[],
 ): Promise<UpdateResult> {
   const cacheDir = join(repoPath, 'remote-cache', sourceId)
   await git.fetch(cacheDir)
   await git.checkout(cacheDir, newRef)
   const pinned_commit = await git.revParseHead(cacheDir)
   const newMembers = await scanSourceMembers(fs, cacheDir, { url: _source.url, ref: newRef })
-  const newNames = new Set(newMembers.map(m => m.name))
-  const orphans = oldMembers.filter(m => !newNames.has(m.name)) // orphan:旧 member 不在新 ref
+  const newNames = new Set(newMembers.map((m) => m.name))
+  const orphans = oldMembers.filter((m) => !newNames.has(m.name)) // orphan:旧 member 不在新 ref
   return { pinned_commit, orphans, newMembers }
 }
 ```
@@ -918,6 +1160,7 @@ git commit -m "feat(remote): update check (lsRemote+compareVersion) + update flo
 ## Self-Review
 
 **1. Spec coverage** (Plan 3 覆盖范围):
+
 - 同步拉取(一步 fetch + 程序内三向 merge,不落冲突标记,repo 始终干净,spec 行 257)→ Task 1 ✓(从 git 对象读三份 base/ours/theirs)
 - 同步上传(push,non-ff 提示重新拉取,不 force 不循环,spec 行 259)→ Task 1 ✓
 - 结构化 merge 范围(config/skills/mcp/vars 三方并集,spec 行 264)→ Task 1 ✓(listVarsFilesUnion ls-tree 三方并集 + 复用 Plan 1 threeWayMerge)
@@ -935,6 +1178,6 @@ git commit -m "feat(remote): update check (lsRemote+compareVersion) + update flo
 **4. 三方包调研结论**: gray-matter(frontmatter)引入;simple-git(同步/clone/checkout/fetch/lsRemote + Task 0 raw show/rev-parse/ls-tree)、threeWayMerge/compareVersion(Plan 1)、tinyglobby/scanSourceMembers(Plan 2)复用;冲突模型/orphan 检测/文本冲突检测自写。base/ours/theirs 从 git 对象读(IGit.show)避免工作区脏态污染。non-ff 正则收敛(Task 1 同步修订 Plan 1 NodeGit.push,去 `rejected`)。
 
 **5. 第 2 轮 review 修复**: syncPull 无冲突测试非法 YAML 改完整合法(blocker,`skills: []` 后跟块序列致 js-yaml 抛错)、syncPull 写 vars 父目录 mkdir + clean 后 commit(blocker,ENOENT + spec 257/259)、syncPush 空仓 non-ff 改 clone+bare 追加 commit(blocker,空仓报 `src refspec does not match` 非 non-ff)、lsTree 加 -r 递归(detectTextConflicts 嵌套 assets high)、resolveGitUrl 归一化 github:/gitee:(high,产线 simple-git 不认 `github:` scheme 必崩)、补 detectTextConflicts/listVarsFilesUnion 测试(vars 并集+assets 冲突 high)、NodeGit.push 正则去 rejected 显式 Step 3b(medium)、performUpdate 浅 clone 改非浅(medium)、lsTree 不存在目录返回 [](medium)、pull/push.test 加 afterAll 清理(low)。
-   第 1 轮修复: Task 0 IGit 扩展、setupRepo w2 clone 共享祖先、install 测试 mkdir、listVarsFilesUnion ls-tree 三方并集、textConflicts 检测、install 非浅 clone、syncPull logger、performUpdate newMembers、gray-matter 安装、discover beforeAll。
+第 1 轮修复: Task 0 IGit 扩展、setupRepo w2 clone 共享祖先、install 测试 mkdir、listVarsFilesUnion ls-tree 三方并集、textConflicts 检测、install 非浅 clone、syncPull logger、performUpdate newMembers、gray-matter 安装、discover beforeAll。
 
 **未覆盖(留给后续 plan)**: API+WebUI(Plan 4,含冲突三栏 UI + 文件冲突三入口 + 安装/更新编排写 skills.yaml + 投影 + orphan 覆盖项保留 UI)、orphan 覆盖项保留的契约(caller 清理投影软链时不删 skills.yaml 覆盖项,等用户决定)。

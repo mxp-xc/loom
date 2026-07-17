@@ -127,16 +127,16 @@ loom/
 
 测试归属映射：
 
-| 现有路径 | 目标路径 |
-|---|---|
-| `tests/core/*` | `packages/core/test/*` |
-| `tests/adapters/*` | `packages/server/test/adapters/*` |
-| `tests/api/*` | `packages/server/test/api/*` |
-| `tests/platform/*` | `packages/server/test/platform/*` |
+| 现有路径             | 目标路径                            |
+| -------------------- | ----------------------------------- |
+| `tests/core/*`       | `packages/core/test/*`              |
+| `tests/adapters/*`   | `packages/server/test/adapters/*`   |
+| `tests/api/*`        | `packages/server/test/api/*`        |
+| `tests/platform/*`   | `packages/server/test/platform/*`   |
 | `tests/projection/*` | `packages/server/test/projection/*` |
-| `tests/remote/*` | `packages/server/test/remote/*` |
-| `tests/sync/*` | `packages/server/test/sync/*` |
-| `tests/webui/*` | `packages/web/test/*` |
+| `tests/remote/*`     | `packages/server/test/remote/*`     |
+| `tests/sync/*`       | `packages/server/test/sync/*`       |
+| `tests/webui/*`      | `packages/web/test/*`               |
 
 用包内 `test/` 目录（Astro/Nuxt 风格）而非紧挨源码的 `*.test.ts`（Hono 风格），因为 server 包测试文件较多且涉及 mock/fixtures，独立 `test/` 目录更整洁。
 
@@ -275,17 +275,17 @@ export default defineConfig({
 
 import 路径改写（机械替换）：
 
-| 旧路径 | 新路径 |
-|---|---|
-| `../core/types.js` | `@loom/core` |
-| `../core/manifest.js` | `@loom/core` |
-| `../core/projection.js` | `@loom/core` |
-| `../core/merge.js` | `@loom/core` |
-| `../core/vars.js` | `@loom/core` |
-| `../core/version.js` | `@loom/core` |
-| `../platform/interfaces.js` | `./ports/fs.js` / `./ports/git.js` / `./ports/process.js` |
-| `../adapters/types.js`（接口） | `./ports/adapter.js` |
-| `../adapters/types.js`（函数） | `./adapters/types.js` |
+| 旧路径                         | 新路径                                                    |
+| ------------------------------ | --------------------------------------------------------- |
+| `../core/types.js`             | `@loom/core`                                              |
+| `../core/manifest.js`          | `@loom/core`                                              |
+| `../core/projection.js`        | `@loom/core`                                              |
+| `../core/merge.js`             | `@loom/core`                                              |
+| `../core/vars.js`              | `@loom/core`                                              |
+| `../core/version.js`           | `@loom/core`                                              |
+| `../platform/interfaces.js`    | `./ports/fs.js` / `./ports/git.js` / `./ports/process.js` |
+| `../adapters/types.js`（接口） | `./ports/adapter.js`                                      |
+| `../adapters/types.js`（函数） | `./adapters/types.js`                                     |
 
 server 包内部其余相对路径不变（`./adapters/claude-code.js` 等）。
 

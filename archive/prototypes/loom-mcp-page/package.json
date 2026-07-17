@@ -1,8 +1,0 @@
-{
-  "name": "loom-mcp-page-prototype",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "bun --cwd ../../../packages/web --bun vite --config ../../temp/prototypes/mcp-page/vite.config.ts --host 127.0.0.1"
-  }
-}

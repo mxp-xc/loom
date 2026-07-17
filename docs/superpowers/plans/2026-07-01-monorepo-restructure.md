@@ -26,55 +26,56 @@ git checkout -b refactor/monorepo-restructure
 
 ### 新建文件
 
-| 文件 | 职责 |
-|---|---|
-| `tsconfig.base.json` | 共享 TS 编译选项，所有包 extends |
-| `packages/core/package.json` | @loom/core 包定义 |
-| `packages/core/tsconfig.json` | core 编译配置 |
-| `packages/core/vitest.config.ts` | core 测试配置 |
-| `packages/core/src/index.ts` | core 公共 API re-export |
-| `packages/server/package.json` | @loom/server 包定义 |
-| `packages/server/tsconfig.json` | server 编译配置 |
-| `packages/server/vitest.config.ts` | server 测试配置 |
-| `packages/server/src/ports/fs.ts` | IFileSystem 接口 |
-| `packages/server/src/ports/git.ts` | IGit 接口 |
-| `packages/server/src/ports/process.ts` | IProcess 接口 |
-| `packages/server/src/ports/adapter.ts` | IAgentAdapter 等接口 |
-| `packages/web/package.json` | @loom/web 包定义 |
-| `packages/web/tsconfig.json` | web 编译配置 |
-| `packages/web/vitest.config.ts` | web 测试配置 |
+| 文件                                   | 职责                             |
+| -------------------------------------- | -------------------------------- |
+| `tsconfig.base.json`                   | 共享 TS 编译选项，所有包 extends |
+| `packages/core/package.json`           | @loom/core 包定义                |
+| `packages/core/tsconfig.json`          | core 编译配置                    |
+| `packages/core/vitest.config.ts`       | core 测试配置                    |
+| `packages/core/src/index.ts`           | core 公共 API re-export          |
+| `packages/server/package.json`         | @loom/server 包定义              |
+| `packages/server/tsconfig.json`        | server 编译配置                  |
+| `packages/server/vitest.config.ts`     | server 测试配置                  |
+| `packages/server/src/ports/fs.ts`      | IFileSystem 接口                 |
+| `packages/server/src/ports/git.ts`     | IGit 接口                        |
+| `packages/server/src/ports/process.ts` | IProcess 接口                    |
+| `packages/server/src/ports/adapter.ts` | IAgentAdapter 等接口             |
+| `packages/web/package.json`            | @loom/web 包定义                 |
+| `packages/web/tsconfig.json`           | web 编译配置                     |
+| `packages/web/vitest.config.ts`        | web 测试配置                     |
 
 ### 移动文件
 
-| 来源 | 目标 |
-|---|---|
-| `src/core/*` | `packages/core/src/*` |
-| `src/adapters/*` | `packages/server/src/adapters/*` |
-| `src/api/*` | `packages/server/src/api/*` |
-| `src/platform/*` | `packages/server/src/platform/*` |
-| `src/projection/*` | `packages/server/src/projection/*` |
-| `src/remote/*` | `packages/server/src/remote/*` |
-| `src/sync/*` | `packages/server/src/sync/*` |
-| `src/index.ts` | `packages/server/src/index.ts` |
-| `webui/*` | `packages/web/*` |
-| `tests/core/*` | `packages/core/test/*` |
-| `tests/{adapters,api,platform,projection,remote,sync}/*` | `packages/server/test/*` |
-| `tests/webui/*` | `packages/web/test/*` |
+| 来源                                                     | 目标                               |
+| -------------------------------------------------------- | ---------------------------------- |
+| `src/core/*`                                             | `packages/core/src/*`              |
+| `src/adapters/*`                                         | `packages/server/src/adapters/*`   |
+| `src/api/*`                                              | `packages/server/src/api/*`        |
+| `src/platform/*`                                         | `packages/server/src/platform/*`   |
+| `src/projection/*`                                       | `packages/server/src/projection/*` |
+| `src/remote/*`                                           | `packages/server/src/remote/*`     |
+| `src/sync/*`                                             | `packages/server/src/sync/*`       |
+| `src/index.ts`                                           | `packages/server/src/index.ts`     |
+| `webui/*`                                                | `packages/web/*`                   |
+| `tests/core/*`                                           | `packages/core/test/*`             |
+| `tests/{adapters,api,platform,projection,remote,sync}/*` | `packages/server/test/*`           |
+| `tests/webui/*`                                          | `packages/web/test/*`              |
 
 ### 删除文件
 
-| 文件 | 原因 |
-|---|---|
-| `src/` (整个目录) | 全部迁出 |
-| `webui/` (整个目录, 含 node_modules) | 全部迁出 |
-| `tests/` (整个目录) | 全部迁出 |
-| `tsconfig.json` (根级) | 被 tsconfig.base.json 取代 |
+| 文件                                 | 原因                       |
+| ------------------------------------ | -------------------------- |
+| `src/` (整个目录)                    | 全部迁出                   |
+| `webui/` (整个目录, 含 node_modules) | 全部迁出                   |
+| `tests/` (整个目录)                  | 全部迁出                   |
+| `tsconfig.json` (根级)               | 被 tsconfig.base.json 取代 |
 
 ---
 
 ## Task 1: 创建 workspace 骨架
 
 **Files:**
+
 - Create: `tsconfig.base.json`
 - Modify: `pnpm-workspace.yaml`
 - Modify: `package.json`
@@ -184,6 +185,7 @@ git commit -m "chore: set up workspace skeleton for three-package structure"
 ## Task 2: 迁移 core 包
 
 **Files:**
+
 - Move: `src/core/*` -> `packages/core/src/*`
 - Move: `tests/core/*` -> `packages/core/test/*`
 - Create: `packages/core/package.json`, `tsconfig.json`, `vitest.config.ts`, `src/index.ts`
@@ -259,6 +261,7 @@ export default defineProject({
 - [ ] **Step 7: 修改 core 测试的 import 路径**
 
 将 `../../src/core/<module>` 改为 `../src/<module>`：
+
 - manifest.test.ts: `../../src/core/manifest` -> `../src/manifest`, `../../src/core/types` -> `../src/types`
 - merge.test.ts: `../../src/core/merge` -> `../src/merge`
 - projection.test.ts: `../../src/core/projection` -> `../src/projection`, `../../src/core/types` -> `../src/types`
@@ -289,6 +292,7 @@ git commit -m "refactor: migrate core package to @loom/core"
 注意：本 Task 合并了源码移动和 import 改写，确保 commit 时代码可编译。移动后如果不改写 import，`../core/*.js` 路径会断（core 已在 packages/core/），所以必须在同一个 commit 内完成。
 
 **Files:**
+
 - Move: `src/{adapters,api,platform,projection,remote,sync}/*` + `src/index.ts` -> `packages/server/src/*`
 - Create: `packages/server/src/ports/{fs,git,process,adapter}.ts`
 - Delete: `packages/server/src/platform/interfaces.ts`
@@ -348,11 +352,31 @@ export interface IProcess {
 import type { AgentId } from '@loom/core'
 import type { IFileSystem } from './fs.js'
 
-export interface McpFragment { id: string; type: 'stdio'|'sse'|'http'; command?: string; args?: string[]; env?: Record<string,string>; url?: string; headers?: Record<string,string>; targets?: AgentId[] }
-export type UndoAction = { kind: 'unlink'; path: string } | { kind: 'restoreMcp'; path: string; backup: string | null }
-export interface ProjectionJournal { undos: UndoAction[] }
-export interface ProjectionFailure { failedStep: string; originalError: unknown; rollbackReport: { undone: number; rollbackFailures: { path: string; err: unknown }[] } }
-export interface IAgentAdapter { readonly agent: AgentId; readMcp(fs: IFileSystem): Promise<Record<string, McpFragment>>; writeMcp(fs: IFileSystem, merged: Record<string, McpFragment>): Promise<void> }
+export interface McpFragment {
+  id: string
+  type: 'stdio' | 'sse' | 'http'
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  url?: string
+  headers?: Record<string, string>
+  targets?: AgentId[]
+}
+export type UndoAction =
+  { kind: 'unlink'; path: string } | { kind: 'restoreMcp'; path: string; backup: string | null }
+export interface ProjectionJournal {
+  undos: UndoAction[]
+}
+export interface ProjectionFailure {
+  failedStep: string
+  originalError: unknown
+  rollbackReport: { undone: number; rollbackFailures: { path: string; err: unknown }[] }
+}
+export interface IAgentAdapter {
+  readonly agent: AgentId
+  readMcp(fs: IFileSystem): Promise<Record<string, McpFragment>>
+  writeMcp(fs: IFileSystem, merged: Record<string, McpFragment>): Promise<void>
+}
 ```
 
 - [ ] **Step 6: 修改 packages/server/src/adapters/types.ts**
@@ -381,6 +405,7 @@ git rm packages/server/src/platform/interfaces.ts
 ### Part B: 改写所有 server src 的 import 路径
 
 改写规则：
+
 - `../core/*.js` -> `@loom/core`
 - `../platform/interfaces.js` -> `../ports/fs.js` / `../ports/git.js` / `../ports/process.js` (按实际接口)
 - `../adapters/types.js` (接口) -> `../ports/adapter.js`
@@ -507,12 +532,14 @@ git commit -m "refactor: migrate server package with ports split and import rewr
 ## Task 4: 迁移 server 包 — 测试文件 + vi.mock 改写
 
 **Files:**
+
 - Move: `tests/{adapters,api,platform,projection,remote,sync}/*` -> `packages/server/test/*`
 - Modify: 所有移动后的测试文件 import 路径 + vi.mock 路径
 
 关键：server 测试的相对路径 `../../src/` 和 `../../../src/` **不需要改变**——迁移前后 test 与 src 的相对深度一致（tests/xxx/ -> packages/server/test/xxx/，src/ -> packages/server/src/）。
 
 只有语义性改写需要：
+
 - `../../src/core/*` -> `@loom/core`
 - `../../src/platform/interfaces` -> `../../src/ports/git` 或 `../../src/ports/fs` (注意：还是 ../../src/ 前缀)
 - `../../src/adapters/types` -> `../../src/ports/adapter` (接口)
@@ -531,6 +558,7 @@ git mv tests/sync packages/server/test/sync
 - [ ] **Step 2: 改写 test/ 下的 import 和 vi.mock 路径**
 
 通用规则（`../../src/` 前缀不变，只改语义路径）：
+
 - `../../src/core/*` -> `@loom/core`
 - `../../src/platform/interfaces` -> `../../src/ports/git` 或 `../../src/ports/fs`
 - `../../src/adapters/types` -> `../../src/ports/adapter` (接口)
@@ -542,6 +570,7 @@ git mv tests/sync packages/server/test/sync
 vi.mock 的路径也必须按同样规则改写。以下是需要改写 mock 路径的文件：
 
 `packages/server/test/api/routes.test.ts` 有 5 个 vi.mock：
+
 - `vi.mock('../../src/projection/executor.js', ...)` -> 不变
 - `vi.mock('../../src/sync/pull.js', ...)` -> 不变
 - `vi.mock('../../src/sync/push.js', ...)` -> 不变
@@ -558,9 +587,11 @@ vi.mock 的路径也必须按同样规则改写。以下是需要改写 mock 路
 - `vi.mock('../../src/platform/node/index.js', ...)` -> 不变
 
 `packages/server/test/api/server.test.ts` 有 1 个 vi.mock：
+
 - `vi.mock('../../src/api/routes.js', ...)` -> 不变
 
 逐文件改写清单：
+
 - test/adapters/: claude-code, codex, opencode, paths — 仅 `../../src/` 路径不变，无 core/interfaces 引用
 - test/api/: routes (vi.mock core/manifest -> @loom/core + 补全), server (LOOM_WEBUI_DIST -> LOOM_WEB_DIST, 2 处)
 - test/platform/node/: fs, git, init — 无语义改写
@@ -589,6 +620,7 @@ git commit -m "refactor: migrate server tests with import and vi.mock path updat
 ## Task 5: 迁移 web 包
 
 **Files:**
+
 - Move: `webui/*` -> `packages/web/*`
 - Move: `tests/webui/*` -> `packages/web/test/*`
 - Create: `packages/web/package.json`, `tsconfig.json`, `vitest.config.ts`
@@ -625,7 +657,12 @@ name 改 @loom/web，加 @loom/core 依赖和 test 脚本：
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview", "test": "vitest run" },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
   "dependencies": {
     "@loom/core": "workspace:*",
     "@radix-ui/react-slot": "^1.1.1",
@@ -709,6 +746,7 @@ vite.config.ts 中 @ alias 指向 ./src/，移动后路径自洽不用改。内�
 `../../webui/src/*` -> `../src/*`（旧结构 test 和 source 不在同一子树，新结构变为同包内 test/ vs src/）
 
 vi.mock 路径同样改写：
+
 - app.test.tsx: `vi.mock('../../webui/src/lib/api', ...)` -> `vi.mock('../src/lib/api', ...)`
 - settings.test.tsx: 同上
 - views.test.tsx: 同上
@@ -734,6 +772,7 @@ git commit -m "refactor: migrate web package to @loom/web"
 ## Task 6: 清理与最终验证
 
 **Files:**
+
 - Delete: `src/`, `webui/` (含 node_modules), `tests/`
 - Verify: 全量测试、dev 启动、build
 
@@ -768,6 +807,7 @@ pnpm dev:web
 ```
 
 预期：
+
 - API server 在 http://localhost:3000 启动
 - Vite dev server 在 http://localhost:5173 启动
 - 浏览器访问 http://localhost:5173 能加载 UI
@@ -801,6 +841,7 @@ git commit -m "chore: clean up old directories and finalize monorepo structure"
 ## 回滚策略
 
 每个 Task 是独立 commit，可精确回滚：
+
 ```bash
 git log --oneline -10
 git reset --hard <commit-hash>

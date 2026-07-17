@@ -27,6 +27,7 @@ Loom server 层目前没有持久化日志。现有日志全部是散落的 `con
 ```
 
 要素：
+
 - 时间戳：`YYYY-MM-DD HH:mm:ss`，本地时区
 - 级别：`DEBUG / INFO / WARN / ERROR`，固定 5 字符宽度左对齐
 - 组件名：通过 child logger 标注，如 `loom.api`、`loom.sync`、`loom.projection`
@@ -36,10 +37,10 @@ Loom server 层目前没有持久化日志。现有日志全部是散落的 `con
 
 ## 配置
 
-| 环境变量 | 默认值 | 说明 |
-|---|---|---|
-| `LOOM_LOG_DIR` | `<项目根>/logs` | 日志文件目录 |
-| `LOOM_LOG_LEVEL` | `INFO` | 最低输出级别 |
+| 环境变量         | 默认值          | 说明         |
+| ---------------- | --------------- | ------------ |
+| `LOOM_LOG_DIR`   | `<项目根>/logs` | 日志文件目录 |
+| `LOOM_LOG_LEVEL` | `INFO`          | 最低输出级别 |
 
 ## 轮转与清理
 
@@ -67,6 +68,7 @@ type LogContext = Record<string, unknown>
 ```
 
 内部实现要点：
+
 - `createLogger(opts)` 工厂函数，返回 Logger 实例
 - 写入方式：`fs.appendFile`（异步，每条日志一次写入；Loom 是低并发的本地工具，无需批量缓冲）
 - 双写：同时写入文件和控制台（stderr），格式一致
@@ -85,7 +87,12 @@ app.use('*', async (c, next) => {
   const start = Date.now()
   await next()
   const duration = Date.now() - start
-  requestLogger.info('request', { method: c.req.method, path: c.req.path, status: c.res.status, duration: `${duration}ms` })
+  requestLogger.info('request', {
+    method: c.req.method,
+    path: c.req.path,
+    status: c.res.status,
+    duration: `${duration}ms`,
+  })
 })
 ```
 
@@ -94,6 +101,7 @@ app.use('*', async (c, next) => {
 **2. 业务流程日志（`api/routes.ts`）**
 
 各路由 handler 在关键操作前后记录 INFO：
+
 - `sync/pull`：开始拉取、拉取完成/失败
 - `sync/push`：开始推送、推送完成/失败
 - `sync/apply`：应用冲突解决方案
@@ -143,17 +151,17 @@ process.on('unhandledRejection', (reason) => {
 
 ## 文件变更清单
 
-| 文件 | 变更 |
-|---|---|
-| `packages/server/src/lib/logger.ts` | 新增：核心 logger 模块 |
-| `packages/server/src/lib/logger.test.ts` | 新增：测试 |
-| `packages/server/src/index.ts` | 修改：注册全局异常处理 |
-| `packages/server/src/api/server.ts` | 修改：移除 hono/logger，替换为自定义请求日志中间件 |
-| `packages/server/src/api/routes.ts` | 修改：各 handler 加业务日志，catch 块替换 console |
-| `packages/server/src/api/deps.ts` | 修改：logger 桥接到新 logger |
-| `packages/server/src/projection/executor.ts` | 无需改动（接口不变） |
-| `packages/server/src/sync/pull.ts` | 无需改动（接口不变） |
-| `.gitignore` | 修改：添加 `logs/` |
+| 文件                                         | 变更                                               |
+| -------------------------------------------- | -------------------------------------------------- |
+| `packages/server/src/lib/logger.ts`          | 新增：核心 logger 模块                             |
+| `packages/server/src/lib/logger.test.ts`     | 新增：测试                                         |
+| `packages/server/src/index.ts`               | 修改：注册全局异常处理                             |
+| `packages/server/src/api/server.ts`          | 修改：移除 hono/logger，替换为自定义请求日志中间件 |
+| `packages/server/src/api/routes.ts`          | 修改：各 handler 加业务日志，catch 块替换 console  |
+| `packages/server/src/api/deps.ts`            | 修改：logger 桥接到新 logger                       |
+| `packages/server/src/projection/executor.ts` | 无需改动（接口不变）                               |
+| `packages/server/src/sync/pull.ts`           | 无需改动（接口不变）                               |
+| `.gitignore`                                 | 修改：添加 `logs/`                                 |
 
 ## 不做的事
 
