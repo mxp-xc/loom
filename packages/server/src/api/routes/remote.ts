@@ -43,6 +43,12 @@ const FinalizeUpdateBody = z.object({
     )
     .default([]),
 })
+const CancelUpdateBody = z
+  .object({
+    repo: NonEmptyString,
+    sessionId: z.string().uuid(),
+  })
+  .strict()
 const ScanSourceBody = z
   .object({
     name: NonEmptyString.optional(),
@@ -144,6 +150,55 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
           error: 'update_prepare_failed',
           message: String((e as Error).message),
         })
+      }
+    },
+  )
+
+  app.post(
+    '/update/cancel',
+    jsonValidator(CancelUpdateBody, { error: 'invalid_update_session' }),
+    async (c) => {
+      const { repo, sessionId } = c.req.valid('json')
+      let repoPath: string
+      try {
+        repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      } catch (err) {
+        remoteLogger.error('source update cancel repo resolution failed', { err, repo, sessionId })
+        return c.json(
+          { ok: false, error: 'invalid_repo', message: String((err as Error).message) },
+          400,
+        )
+      }
+
+      const session = await updateSessions.get(sessionId, repoPath)
+      if (!session) {
+        const err = new Error('更新会话不存在或已过期')
+        remoteLogger.warn('source update cancel session unavailable', {
+          err,
+          repo: repoPath,
+          sessionId,
+        })
+        return c.json({ ok: false, error: 'invalid_update_session', message: err.message }, 404)
+      }
+
+      try {
+        await updateSessions.discard(sessionId)
+        return c.json({ ok: true })
+      } catch (err) {
+        remoteLogger.error('source update cancel failed', {
+          err,
+          repo: repoPath,
+          sessionId,
+          source: session.source.url,
+        })
+        return c.json(
+          {
+            ok: false,
+            error: 'update_cancel_failed',
+            message: String((err as Error).message),
+          },
+          500,
+        )
       }
     },
   )

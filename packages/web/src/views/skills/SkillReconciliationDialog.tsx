@@ -98,40 +98,44 @@ export default function SkillReconciliationDialog({
             </div>
           </section>
         )}
-        {removedNames.length > 0 && (
-          <section className={styles.section}>
-            <div className={styles.heading}>
-              <strong>远端已删除</strong>
-              <span>{removedNames.length}</span>
-            </div>
-            <p className={styles.hint}>已默认保留为 local skill；取消勾选的项目将被删除。</p>
-            <div className={styles.tools}>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setSelected(new Set(removedNames))}
-              >
-                全选
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => setSelected(new Set())}>
-                取消全选
-              </Button>
-            </div>
-            <div className={styles.list}>
-              {removedNames.map((name) => (
-                <label key={name} className={styles.row}>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(name)}
-                    onChange={() => toggle(name)}
-                    aria-label={`保留 ${name}`}
-                  />
-                  <span>{name}</span>
-                </label>
-              ))}
-            </div>
-          </section>
-        )}
+        <section className={styles.section}>
+          <div className={styles.heading}>
+            <h3>删除</h3>
+            <span>{removedNames.length}</span>
+          </div>
+          {removedNames.length === 0 ? (
+            <p className={styles.hint}>无变化</p>
+          ) : (
+            <>
+              <p className={styles.hint}>已默认保留为 local skill；取消勾选的项目将被删除。</p>
+              <div className={styles.tools}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setSelected(new Set(removedNames))}
+                >
+                  全选
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => setSelected(new Set())}>
+                  取消全选
+                </Button>
+              </div>
+              <div className={styles.list}>
+                {removedNames.map((name) => (
+                  <label key={name} className={styles.row}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(name)}
+                      onChange={() => toggle(name)}
+                      aria-label={`保留 ${name}`}
+                    />
+                    <span>{name}</span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
       </div>
       {error && (
         <p className={styles.error} role="alert">
@@ -157,14 +161,13 @@ export default function SkillReconciliationDialog({
 }
 
 function ChangeSection({ title, names }: { title: string; names: string[] }) {
-  if (names.length === 0) return null
   return (
     <section className={styles.section}>
       <div className={styles.heading}>
-        <strong>{title}</strong>
+        <h3>{title}</h3>
         <span>{names.length}</span>
       </div>
-      <div className={styles.names}>{names.join(', ')}</div>
+      <div className={styles.names}>{names.length > 0 ? names.join(', ') : '无变化'}</div>
     </section>
   )
 }

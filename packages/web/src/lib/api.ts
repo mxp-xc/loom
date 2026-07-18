@@ -328,6 +328,8 @@ export const api = {
       preserved: string[]
       deleted: string[]
     }>,
+  cancelSourceUpdate: (body: { repo: string; sessionId: string }) =>
+    post('/update/cancel', body).then(json) as Promise<{ ok: boolean }>,
   getConfig: (repo: string) => fetch(`${base}/config?repo=${encodeURIComponent(repo)}`).then(json),
   getManifest: (repo: string) =>
     fetch(`${base}/manifest?repo=${encodeURIComponent(repo)}`).then(json),

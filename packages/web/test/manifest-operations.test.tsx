@@ -37,6 +37,7 @@ vi.mock('../src/lib/api', () => ({
       resourceBoundaryChanges: [],
     })),
     finalizeSourceUpdate: vi.fn(async () => ({ ok: true, pinned_commit: 'bbb' })),
+    cancelSourceUpdate: vi.fn(async () => ({ ok: true })),
     importLocalSkills: vi.fn(async () => ({ ok: true })),
     writeLocalSkills: vi.fn(async () => ({ ok: true })),
     updateSkillAgents: vi.fn(async () => ({ ok: true })),
@@ -873,5 +874,20 @@ describe('useManifestOperations', () => {
         },
       }),
     )
+  })
+
+  it('cancels a prepared source update without refreshing the manifest', async () => {
+    const getManifestCallsBefore = vi.mocked(api.getManifest).mock.calls.length
+    render(<Harness action={(ops) => ops.cancelSourceUpdate('update-1')} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() =>
+      expect(api.cancelSourceUpdate).toHaveBeenCalledWith({
+        repo: '/tmp/r',
+        sessionId: 'update-1',
+      }),
+    )
+    expect(api.getManifest).toHaveBeenCalledTimes(getManifestCallsBefore)
   })
 })

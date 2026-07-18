@@ -68,6 +68,7 @@ vi.mock('../src/lib/api', () => ({
       resourceBoundaryChanges: [],
     })),
     finalizeSourceUpdate: vi.fn(async () => ({ ok: true, pinned_commit: 'bbb' })),
+    cancelSourceUpdate: vi.fn(async () => ({ ok: true })),
     syncPull: vi.fn(async () => ({ clean: true, files: [], textConflicts: [] })),
     getSyncSession: vi.fn(async () => ({ ok: true, active: false })),
     syncPush: vi.fn(async () => ({ ok: true })),
@@ -2508,6 +2509,18 @@ describe('Skill source updates', () => {
       expect(api.prepareSourceUpdate).toHaveBeenCalledWith(
         expect.objectContaining({ newRef: 'v6.1.1' }),
       ),
+    )
+
+    expect(await screen.findByRole('dialog', { name: '确认 skills 更新' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    await waitFor(() =>
+      expect(api.cancelSourceUpdate).toHaveBeenCalledWith({
+        repo: '/tmp/tag-update',
+        sessionId: 'update-1',
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '确认 skills 更新' })).toBeNull(),
     )
   })
 

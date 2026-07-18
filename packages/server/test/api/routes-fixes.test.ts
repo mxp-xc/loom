@@ -610,6 +610,35 @@ describe('source updates', () => {
     expect(res.status).toBe(404)
   })
 
+  it('cancels a prepared update and removes its staged session', async () => {
+    const repo = '/tmp/source-cancel'
+    const prepared = await app.request('/api/update/prepare', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo,
+        source: {
+          url: 'https://github.com/mattpocock/skills',
+          ref: 'main',
+          members: [],
+        },
+        newRef: 'main',
+      }),
+    })
+    const { sessionId } = (await prepared.json()) as { sessionId: string }
+
+    const cancelled = await app.request('/api/update/cancel', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo, sessionId }),
+    })
+
+    expect(cancelled.status).toBe(200)
+    expect(await cancelled.json()).toEqual({ ok: true })
+    expect(memFs.removeDir).toHaveBeenCalledWith('/tmp/source-update/temp/source-updates')
+    expect(memFiles[`${repo}/temp/source-updates/${sessionId}.json`]).toBeUndefined()
+  })
+
   it('requires explicit confirmation when an update creates a resource bundle boundary', async () => {
     memFiles['/tmp/source-boundary/skills.yaml'] = [
       'sources:',

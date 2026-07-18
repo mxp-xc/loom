@@ -4,6 +4,27 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import SkillReconciliationDialog from '../src/views/skills/SkillReconciliationDialog'
 
 describe('SkillReconciliationDialog', () => {
+  it('always shows added, updated, and removed summaries', () => {
+    render(
+      <SkillReconciliationDialog
+        state={{
+          sessionId: 'session-empty',
+          pinned_commit: 'abc',
+          changes: { added: [], updated: [], removed: [] },
+          resourceBoundaryChanges: [],
+        }}
+        busy={false}
+        onClose={vi.fn()}
+        onConfirm={vi.fn(async () => {})}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: '新增' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '更新' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '删除' })).toBeTruthy()
+    expect(screen.getAllByText('无变化')).toHaveLength(3)
+  })
+
   it('defaults removals to preserve and supports clear, select all, and do not preserve', () => {
     const onConfirm = vi.fn(async () => {})
     render(

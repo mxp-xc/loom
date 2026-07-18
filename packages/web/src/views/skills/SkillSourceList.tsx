@@ -426,6 +426,22 @@ export default function SkillSourceList({
     }
   }
 
+  const cancelReconciliation = async () => {
+    if (!reconciliation) return
+    setReconciliationBusy(true)
+    setReconciliationError(null)
+    try {
+      const result = await operations.cancelSourceUpdate(reconciliation.sessionId)
+      if (!result.ok) {
+        setReconciliationError(result.message ?? '取消 source 更新失败')
+        return
+      }
+      setReconciliation(null)
+    } finally {
+      setReconciliationBusy(false)
+    }
+  }
+
   const requestDeleteSource = (url: string, label: string) => {
     setDeleteTarget({ kind: 'source', url, label })
   }
@@ -994,7 +1010,7 @@ export default function SkillSourceList({
         state={reconciliation}
         busy={reconciliationBusy}
         error={reconciliationError}
-        onClose={() => {}}
+        onClose={() => void cancelReconciliation()}
         onConfirm={finalizeReconciliation}
       />
     </>

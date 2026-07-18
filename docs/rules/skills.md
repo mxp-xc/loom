@@ -198,6 +198,7 @@ Rule:
 Implications:
 
 - 更新结果分别展示新增、更新和远端已删除的 members。
+- 更新确认始终展示新增、更新和删除摘要；没有对应变化时明确显示 0 项。
 - 缺失项支持逐项选择、全选、取消全选和不保留。
 - 打开 Skills 页面和编辑现有 source 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。
 - Source cache 是否可用是当前机器的运行时状态，不是 manifest 配置有效性；单个 source 不可用时，其他 source、local skills 和非 Skills 功能保持可用。
@@ -214,6 +215,7 @@ Safety:
 
 - 现有 local skill 目录或 manifest entry 不得被覆盖。
 - 用户确认前不得丢弃需要保留的旧 member 内容。
+- 用户取消更新时丢弃隔离 candidate 和对应更新会话，不改变 live cache。
 - Manifest 保存和 projection 完成前不能报告整体更新成功。
 
 Examples:

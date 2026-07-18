@@ -116,6 +116,7 @@ const pendingKey = {
   saveSource: (url: string) => 'source:save:' + url,
   checkSourceUpdate: (url: string) => 'source:check:' + url,
   performSourceUpdate: (url: string) => 'source:update:' + url,
+  cancelSourceUpdate: (sessionId: string) => 'source:update-cancel:' + sessionId,
   deleteSource: (url: string) => 'source:delete:' + url,
   deleteLocalSkill: (id: string) => 'skills:delete-local:' + id,
   sourceSkillAgent: (sourceUrl: string, memberEntry: string) =>
@@ -634,6 +635,16 @@ export function useManifestOperations(
     [repoPath, run],
   )
 
+  const cancelSourceUpdate = useCallback(
+    (sessionId: string) =>
+      run(
+        pendingKey.cancelSourceUpdate(sessionId),
+        () => api.cancelSourceUpdate({ repo: repoPath, sessionId }),
+        { reload: false, failureMessage: '取消 source 更新失败' },
+      ),
+    [repoPath, run],
+  )
+
   const deleteSource = useCallback(
     (url: string) =>
       run(
@@ -924,6 +935,7 @@ export function useManifestOperations(
       checkSourceUpdate,
       performSourceUpdate,
       finalizeSourceUpdate,
+      cancelSourceUpdate,
       deleteSource,
       deleteLocalSkill,
       toggleSourceSkillAgent,
@@ -953,6 +965,7 @@ export function useManifestOperations(
       checkSourceUpdate,
       performSourceUpdate,
       finalizeSourceUpdate,
+      cancelSourceUpdate,
       deleteSource,
       deleteLocalSkill,
       toggleSourceSkillAgent,
