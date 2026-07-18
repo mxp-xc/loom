@@ -435,6 +435,7 @@ describe('Vars view', () => {
 
     expect(await screen.findByRole('dialog', { name: '编辑配置' })).toBeDefined()
     const editor = screen.getByRole('textbox', { name: /配置值/ })
+    expect(editor.closest('label')).toBeNull()
     fireEvent.change(editor, { target: { value: 'Local Codex v2' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
@@ -751,7 +752,8 @@ describe('Vars view', () => {
     const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
     fireEvent.click(within(dialog).getByRole('button', { name: '解析预览' }))
 
-    expect(within(dialog).getByText('/agent/RTK.md')).toBeDefined()
+    const resolvedValue = within(dialog).getByText('/agent/RTK.md')
+    expect(resolvedValue.closest('.md-preview')?.tagName).toBe('ARTICLE')
     expect(within(dialog).queryByText('${LOOM_CONFIG_DIR}/RTK.md')).toBeNull()
   })
 

@@ -191,7 +191,7 @@
 
 .vars-profile-meta,
 .vars-section-head p,
-.vars-editor-card p {
+.vars-editor-card > p {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
@@ -667,15 +667,15 @@
   gap: 6px;
 }
 
-.vars-field span {
+.vars-field > span {
   color: var(--bright);
   font-size: 12px;
   font-weight: 600;
 }
 
-.vars-field input,
-.vars-field select,
-.vars-field textarea {
+.vars-field > input,
+.vars-field > select,
+.vars-field > textarea {
   width: 100%;
   min-height: 38px;
   padding: 9px 11px;
@@ -689,9 +689,9 @@
     monospace;
 }
 
-.vars-field input:focus,
-.vars-field select:focus,
-.vars-field textarea:focus {
+.vars-field > input:focus,
+.vars-field > select:focus,
+.vars-field > textarea:focus {
   border-color: var(--primary);
   box-shadow: none;
 }
@@ -708,7 +708,7 @@
   align-content: start;
 }
 
-.vars-editor-field textarea {
+.vars-editor-field > textarea {
   height: 100%;
   min-height: 240px;
   max-height: none;
@@ -837,14 +837,14 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
+  color: var(--bright);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .vars-preview-raw {
   margin: 0;
-  color: var(--bright);
-  font:
-    12px/1.7 'JetBrains Mono',
-    monospace;
   white-space: pre-wrap;
 }
 

@@ -155,6 +155,23 @@ describe('web CSS architecture', () => {
     }
   })
 
+  it('keeps Vars field styles out of nested Monaco content', async () => {
+    const varsCss = await readCss('../src/views/vars/Vars.module.css')
+
+    expect(varsCss).toContain('.vars-editor-card > p')
+    expect(varsCss).toContain('.vars-field > span')
+    expect(varsCss).toContain('.vars-field > textarea')
+    expect(varsCss).toContain('.vars-editor-field > textarea')
+    expect(varsCss).toMatch(
+      /\.vars-preview\s*{[^}]*color: var\(--bright\);[^}]*font-family: 'JetBrains Mono', monospace;[^}]*font-size: 13px;[^}]*line-height: 1\.7;/s,
+    )
+    expect(varsCss).not.toMatch(/\.vars-preview-raw\s*{[^}]*(?:color|font(?:-family)?):/s)
+    expect(varsCss).not.toMatch(/\.vars-field span\b/)
+    expect(varsCss).not.toMatch(/\.vars-field textarea\b/)
+    expect(varsCss).not.toMatch(/\.vars-editor-card p\b/)
+    expect(varsCss).not.toMatch(/\.vars-editor-field textarea\b/)
+  })
+
   it('uses pointer cursors for interactive controls and sortable activators', async () => {
     const [baseCss, skillSourceListCss] = await Promise.all([
       readCss('../src/styles/global/base.css'),

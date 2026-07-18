@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../lib/api.js'
 import { agentName, agentShort, type AgentId } from '../../lib/agents.js'
 import { AgentChip } from '@/components/ui/AgentChip'
+import { MarkdownDocument } from '@/components/MarkdownPreview'
 import { cn } from '@/lib/utils.js'
 import type {
   StringFormat,
@@ -162,19 +163,6 @@ function BaseKeyPicker({
           </button>
         ))}
       </div>
-    </div>
-  )
-}
-
-function MarkdownPreview({ value }: { value: string }) {
-  const lines = value.split('\n')
-  return (
-    <div className={cn('md-preview', styles['vars-preview'])}>
-      {lines.map((line, index) => {
-        if (line.startsWith('# ')) return <h3 key={index}>{line.slice(2)}</h3>
-        if (line.startsWith('- ')) return <p key={index}>• {line.slice(2)}</p>
-        return <p key={index}>{line || '\u00a0'}</p>
-      })}
     </div>
   )
 }
@@ -489,7 +477,7 @@ export default function VarsConfigModal({
                 ))}
               </div>
               {previewMode === 'edit' ? (
-                <label className={cn(styles['vars-field'], styles['vars-editor-field'])}>
+                <div className={cn(styles['vars-field'], styles['vars-editor-field'])}>
                   <span>
                     配置值 · {profile.name} · {slotLabel(slot)}
                   </span>
@@ -513,13 +501,16 @@ export default function VarsConfigModal({
                       onChange={setDraft}
                     />
                   )}
-                </label>
+                </div>
               ) : previewMode === 'raw' ? (
                 <pre className={cn(styles['vars-preview'], styles['vars-preview-raw'])}>
                   {rawPreviewValue}
                 </pre>
               ) : format === 'markdown' ? (
-                <MarkdownPreview value={resolvedValue || draft} />
+                <MarkdownDocument
+                  className={styles['vars-preview']}
+                  content={resolvedValue || draft}
+                />
               ) : (
                 <pre className={cn(styles['vars-preview'], styles['vars-preview-raw'])}>
                   {resolvedPreviewValue}
