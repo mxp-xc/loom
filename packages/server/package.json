@@ -9,7 +9,7 @@
     }
   },
   "scripts": {
-    "dev": "bun src/index.ts",
+    "dev": "bun --watch --no-clear-screen src/index.ts",
     "start": "bun src/index.ts",
     "test": "bun vitest run"
   },
