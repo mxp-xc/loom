@@ -150,3 +150,31 @@ Tests:
 
 - packages/server/test/projection/executor.test.ts
 - packages/server/test/projection/mcp-merge.test.ts
+
+## R-CROSS-005 外部路径操作只能作用于仓库内目标
+
+Status: active
+Applies to: server API, web UI
+
+Rule:
+Loom 可以解析当前仓库内已存在文件或目录的真实绝对路径，用于复制路径或请求受支持的本机应用打开目标。请求使用仓库相对路径；server 统一执行安全解析，打开操作额外使用受限应用标识。
+
+Implications:
+
+- 目标可以是文件或目录，不绑定特定扩展名或业务资源类型。
+- 复制路径返回运行平台的原生绝对路径。
+- 首版支持 macOS 和 Windows；不支持的平台返回明确诊断。
+- 系统文件管理器对文件执行定位选择，对目录直接打开。
+- 上次选择的应用保存在设备级 Loom 配置中，跨仓库、文件和浏览器复用。
+
+Safety:
+
+- 不接受绝对路径、路径穿越或符号链接后落到仓库外的目标。
+- 不通过 shell 拼接用户提供的路径或应用名称。
+- 应用标识必须来自 server 定义的白名单。
+
+Tests:
+
+- packages/server/test/api/open-path.test.ts
+- packages/server/test/platform/node/external-opener.test.ts
+- packages/web/test/open-with.test.tsx

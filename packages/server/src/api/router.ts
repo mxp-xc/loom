@@ -17,6 +17,9 @@ import { SyncSessionManager } from '../sync/session-manager.js'
 import { logger } from '../lib/logger.js'
 import { createVarsRoutes } from './routes/vars.js'
 import type { McpDebugSessionManagerLike } from './routes/mcp-debug.js'
+import type { IExternalOpener } from '../ports/external-opener.js'
+import { NodeExternalOpener } from '../platform/node/external-opener.js'
+import { createOpenPathRoutes } from './routes/open-path.js'
 import { projectRepository } from '../projection/workflow.js'
 
 export interface RouteDeps {
@@ -29,6 +32,7 @@ export interface RouteDeps {
 type RegisterRouteDeps = RouteDeps & {
   sync?: SyncSessionManager
   mcpDebug?: McpDebugSessionManagerLike
+  externalOpener?: IExternalOpener
 }
 
 export type SyncRouteDeps = RouteDeps & { sync: SyncSessionManager }
@@ -38,9 +42,9 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
   const baseDeps: RegisterRouteDeps =
     routeDeps ??
     (() => {
-      const { fs, git, proc } = createNodePlatform()
+      const { fs, git, proc, externalOpener } = createNodePlatform()
       const home = process.env.HOME || process.env.USERPROFILE || ''
-      return { fs, git, proc, home }
+      return { fs, git, proc, externalOpener, home }
     })()
   const sync =
     baseDeps.sync ??
@@ -90,5 +94,13 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
   app.route('/', createMcpDebugRoutes(deps))
   app.route('/', createMemoryRoutes(deps))
   app.route('/', createVarsRoutes(deps))
+  app.route(
+    '/',
+    createOpenPathRoutes({
+      fs: deps.fs,
+      home: deps.home,
+      externalOpener: deps.externalOpener ?? new NodeExternalOpener(),
+    }),
+  )
   return app
 }

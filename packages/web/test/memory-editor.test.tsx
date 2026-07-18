@@ -108,6 +108,10 @@ vi.mock('../src/lib/api', async () => {
   return {
     ...actual,
     api: {
+      getOpenPathPreference: vi.fn(() => new Promise(() => {})),
+      setOpenPathPreference: vi.fn(),
+      resolvePath: vi.fn(),
+      openPath: vi.fn(),
       previewMemory: vi.fn(),
       vars: {
         getMatrix: vi.fn(async () => ({
@@ -156,6 +160,7 @@ describe('MemoryEditor', () => {
     expect(screen.getByRole('tab', { name: '所见' })).toBeDefined()
     expect(screen.getByRole('tab', { name: '源码' })).toBeDefined()
     expect(screen.queryByRole('tab', { name: '解析预览' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '复制路径' })).toBeNull()
     expect(api.vars.getMatrix).not.toHaveBeenCalled()
     expect(api.previewMemory).not.toHaveBeenCalled()
   })
@@ -217,6 +222,61 @@ describe('MemoryEditor', () => {
     expect(screen.getByRole('button', { name: '保存' })).toBeDefined()
     expect(consoleError).toHaveBeenCalledWith({ err: error }, 'Failed to save Memory content')
     consoleError.mockRestore()
+  })
+
+  it('saves the current source with Ctrl+S and prevents the browser save dialog', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(
+      <MemoryEditor
+        repo="/repo"
+        name="default"
+        content="# Original"
+        agents={['codex']}
+        onSave={onSave}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Memory 内容' }), {
+      target: { value: '# Saved by shortcut' },
+    })
+    const saveEvent = new KeyboardEvent('keydown', {
+      key: 's',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    act(() => {
+      window.dispatchEvent(saveEvent)
+    })
+
+    expect(saveEvent.defaultPrevented).toBe(true)
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith('# Saved by shortcut'))
+  })
+
+  it('closes the Memory actions menu with Escape and restores trigger focus', async () => {
+    render(
+      <MemoryEditor
+        repo="/repo"
+        name="default"
+        content="# Default"
+        agents={['codex']}
+        onSave={async () => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'codex'))
+
+    const trigger = screen.getByRole('button', { name: '管理 Memory' })
+    fireEvent.click(trigger)
+    expect(screen.getByRole('menu')).toBeTruthy()
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Escape' })
+    })
+
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
   })
 
   it('registers Monaco variable completion with disposable provider', async () => {
@@ -359,12 +419,11 @@ describe('MemoryEditor', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Memory 内容' }), {
       target: { value: '# Unsaved raw Markdown' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '管理 Memory' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '复制 Memory 原始内容' }))
+    fireEvent.click(screen.getByRole('button', { name: '复制 Memory 原始内容' }))
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('# Unsaved raw Markdown'))
     expect(toastMocks.showToast).toHaveBeenCalledWith('已复制')
-    expect(screen.getByRole('menuitem', { name: '已复制 Memory 原始内容' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '已复制 Memory 原始内容' })).toBeTruthy()
   })
 
   it('logs and reports clipboard failures', async () => {
@@ -385,8 +444,7 @@ describe('MemoryEditor', () => {
         />,
       )
 
-      fireEvent.click(screen.getByRole('button', { name: '管理 Memory' }))
-      fireEvent.click(screen.getByRole('menuitem', { name: '复制 Memory 原始内容' }))
+      fireEvent.click(screen.getByRole('button', { name: '复制 Memory 原始内容' }))
 
       await waitFor(() =>
         expect(errorSpy).toHaveBeenCalledWith({ err: cause }, 'Failed to copy memory content'),

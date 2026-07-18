@@ -78,6 +78,10 @@ vi.mock('../src/lib/api', () => ({
     setSyncRemote: vi.fn(async () => ({ ok: true })),
     getConfig: vi.fn(async () => ({ effective: {}, repo: {}, local: {} })),
     putConfig: vi.fn(async () => ({ ok: true })),
+    getOpenPathPreference: vi.fn(() => new Promise(() => {})),
+    setOpenPathPreference: vi.fn(async () => ({ ok: true })),
+    resolvePath: vi.fn(async () => ({ ok: true, path: '/repo/path' })),
+    openPath: vi.fn(async () => ({ ok: true })),
     scanLocalSkills: vi.fn(async () => ({ ok: true, skills: [] })),
     importLocalSkills: vi.fn(async () => ({ ok: true, count: 1 })),
     writeLocalSkills: vi.fn(async () => ({ ok: true, count: 1 })),
@@ -789,6 +793,32 @@ describe('Memory view', () => {
     expect(within(menu).getByRole('button', { name: '删除 v1' })).toBeDefined()
     expect(within(menu).getByRole('button', { name: '删除 review-rules' })).toBeDefined()
     expect(within(menu).getByRole('button', { name: 'v1 已投影到 Codex' })).toBeDefined()
+  })
+
+  it('closes the Memory selector with Escape and restores trigger focus', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: ['codex'] },
+      errors: [],
+    } as never)
+    vi.mocked(api.getMemory).mockResolvedValueOnce({
+      memories: [{ name: 'v1', agents: ['codex'] }],
+      assignments: { codex: 'v1' },
+      active: null,
+      activeContent: '',
+    } as never)
+    vi.mocked(api.getMemoryContent).mockResolvedValueOnce({ content: '# v1' })
+    render(<Memory repoPath="/tmp/memory-menu-escape" />)
+
+    const trigger = await screen.findByRole('button', { name: /Memory.*v1/ })
+    fireEvent.click(trigger)
+    expect(screen.getByRole('menu', { name: 'Memory 列表' })).toBeDefined()
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(screen.queryByRole('menu', { name: 'Memory 列表' })).toBeNull()
+    expect(document.activeElement).toBe(trigger)
   })
 
   it('hides preserved assignments for agents outside the configured scope', async () => {

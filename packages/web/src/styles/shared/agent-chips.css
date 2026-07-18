@@ -129,17 +129,9 @@
     inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent);
 }
 
-.agent-chip[data-tooltip] {
-  position: relative;
-}
-
-.agent-chip[data-tooltip]::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  top: auto;
-  bottom: calc(100% + 7px);
-  left: var(--agent-tooltip-left, 50%);
-  z-index: 1000;
+.agent-chip-floating-tooltip {
+  position: fixed;
+  z-index: 1200;
   max-width: 220px;
   padding: 4px 7px;
   overflow: hidden;
@@ -150,24 +142,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   pointer-events: none;
-  visibility: hidden;
-  opacity: 0;
   background: var(--popover);
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) - 2px);
   box-shadow: var(--shadow-popover);
-  transform: translate(var(--agent-tooltip-translate-x, -50%), 3px);
-  transition:
-    opacity 0.12s var(--ease),
-    transform 0.12s var(--ease),
-    visibility 0.12s var(--ease);
+  transform: translate(-50%, -100%);
 }
 
-.agent-chip[data-tooltip]:hover::after,
-.agent-chip[data-tooltip]:focus-visible::after {
-  visibility: visible;
-  opacity: 1;
-  transform: translate(var(--agent-tooltip-translate-x, -50%), 0);
+.agent-chip-floating-tooltip[data-placement='bottom'] {
+  transform: translate(-50%, 0);
 }
 
 @media (max-width: 760px) {
@@ -179,17 +162,5 @@
   .global-agents-bar > .agent-chips {
     grid-column: 1 / -1;
     justify-content: flex-start;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-chip[data-tooltip]::after {
-    transition: none;
-    transform: translate(var(--agent-tooltip-translate-x, -50%), 0);
-  }
-
-  .agent-chip[data-tooltip]:hover::after,
-  .agent-chip[data-tooltip]:focus-visible::after {
-    transform: translate(var(--agent-tooltip-translate-x, -50%), 0);
   }
 }

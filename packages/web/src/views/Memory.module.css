@@ -167,10 +167,6 @@
   border-left: 1px solid var(--border);
 }
 
-.memoryRowAgents :global(.agent-chip)::after {
-  display: none;
-}
-
 .occupiedAgent {
   opacity: 0.72;
 }
@@ -296,10 +292,6 @@
   }
 
   .currentAgents > span {
-    display: none;
-  }
-
-  .currentAgents :global(.agent-chip)::after {
     display: none;
   }
 }

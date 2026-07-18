@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -19,6 +19,7 @@ import type { AgentId } from '@/lib/agents'
 import { MarkdownDocument } from '@/components/MarkdownPreview'
 import { IconButton } from '@/components/ui/IconButton'
 import { AgentChip } from '@/components/ui/AgentChip'
+import { OpenWith } from '@/components/ui/OpenWith'
 import { useToast } from '@/hooks/useToast'
 import { cn } from '@/lib/utils'
 import type { VarsDiagnostic } from '@/lib/vars'
@@ -88,6 +89,7 @@ export default function MemoryEditor({
   const [actionsOpen, setActionsOpen] = useState(false)
   const copiedTimerRef = useRef<number | null>(null)
   const actionsRef = useRef<HTMLDivElement>(null)
+  const actionsTriggerRef = useRef<HTMLButtonElement>(null)
   const [varKeyState, setVarKeyState] = useState<{ cacheKey: string; keys: string[] }>({
     cacheKey: '',
     keys: [],
@@ -122,6 +124,19 @@ export default function MemoryEditor({
     document.addEventListener('pointerdown', closeActions)
     return () => document.removeEventListener('pointerdown', closeActions)
   }, [])
+
+  useEffect(() => {
+    if (!actionsOpen) return
+    const closeActions = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setActionsOpen(false)
+      actionsTriggerRef.current?.focus()
+    }
+    window.addEventListener('keydown', closeActions)
+    return () => window.removeEventListener('keydown', closeActions)
+  }, [actionsOpen])
 
   useEffect(() => {
     if (agent !== null && agents.includes(agent)) return
@@ -192,7 +207,7 @@ export default function MemoryEditor({
     setDirty(true)
   }
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     setSaving(true)
     try {
       await onSave(edit)
@@ -202,7 +217,17 @@ export default function MemoryEditor({
     } finally {
       setSaving(false)
     }
-  }
+  }, [edit, onSave])
+
+  useEffect(() => {
+    const saveWithKeyboard = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
+      event.preventDefault()
+      if (dirty && !saving) void handleSave()
+    }
+    window.addEventListener('keydown', saveWithKeyboard)
+    return () => window.removeEventListener('keydown', saveWithKeyboard)
+  }, [dirty, handleSave, saving])
 
   const copyRawMarkdown = async () => {
     try {
@@ -259,6 +284,7 @@ export default function MemoryEditor({
       {label}
     </button>
   )
+  const memoryPath = `memories/${name}.md`
 
   return (
     <div className={styles['mem-editor']}>
@@ -285,8 +311,33 @@ export default function MemoryEditor({
               </div>
             </div>
           )}
+          <OpenWith
+            repo={repo}
+            path={memoryPath}
+            onError={(error) =>
+              showErrorToast(error, {
+                title: '无法打开 Memory',
+                message: '请确认所选应用已安装后重试',
+              })
+            }
+            onPathCopied={() => showToast('已复制路径')}
+            onPathCopyError={(error) =>
+              showErrorToast(error, {
+                title: '路径复制失败',
+                message: '请检查目标路径和剪贴板权限后重试',
+              })
+            }
+          />
+          <IconButton
+            label={copied ? '已复制 Memory 原始内容' : '复制 Memory 原始内容'}
+            tooltip={copied ? '已复制' : '复制源码'}
+            onClick={() => void copyRawMarkdown()}
+          >
+            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          </IconButton>
           <div className={styles['mem-action-control']} ref={actionsRef}>
             <IconButton
+              ref={actionsTriggerRef}
               label="管理 Memory"
               tooltip="管理"
               onClick={() => setActionsOpen((open) => !open)}
@@ -295,15 +346,6 @@ export default function MemoryEditor({
             </IconButton>
             {actionsOpen && (
               <div className={styles['mem-action-menu']} role="menu">
-                <button
-                  type="button"
-                  role="menuitem"
-                  aria-label={copied ? '已复制 Memory 原始内容' : '复制 Memory 原始内容'}
-                  onClick={() => void copyRawMarkdown()}
-                >
-                  {copied ? <Check /> : <Copy />}
-                  {copied ? '已复制' : '复制源码'}
-                </button>
                 {onRename && (
                   <button
                     type="button"

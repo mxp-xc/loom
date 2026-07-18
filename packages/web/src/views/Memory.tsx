@@ -43,6 +43,7 @@ export default function Memory({ repoPath }: Props) {
   const [editorDirty, setEditorDirty] = useState(false)
   const [pendingSelection, setPendingSelection] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
   const contentRequestRef = useRef(0)
   const { showToast, showErrorToast } = useToast()
   const { manifest } = useManifest(repoPath)
@@ -93,6 +94,19 @@ export default function Memory({ repoPath }: Props) {
     document.addEventListener('pointerdown', closeMenu)
     return () => document.removeEventListener('pointerdown', closeMenu)
   }, [])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const closeMenu = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setMenuOpen(false)
+      menuTriggerRef.current?.focus()
+    }
+    window.addEventListener('keydown', closeMenu)
+    return () => window.removeEventListener('keydown', closeMenu)
+  }, [menuOpen])
 
   const visibleMemories = useMemo(
     () =>
@@ -237,6 +251,7 @@ export default function Memory({ repoPath }: Props) {
     <>
       <div className={styles.memoryControl} ref={menuRef}>
         <button
+          ref={menuTriggerRef}
           className={styles.memoryTrigger}
           type="button"
           aria-haspopup="menu"

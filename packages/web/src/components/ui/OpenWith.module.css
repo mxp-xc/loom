@@ -1,0 +1,114 @@
+.root {
+  display: inline-flex;
+  height: 32px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--card) 92%, var(--bg));
+  overflow: hidden;
+}
+
+.primary,
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.primary {
+  width: 34px;
+}
+
+.trigger {
+  width: 27px;
+}
+
+.trigger svg {
+  width: 13px;
+  height: 13px;
+}
+
+.primary:hover:not(:disabled),
+.trigger:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--accent);
+}
+
+.primary:focus-visible,
+.trigger:focus-visible,
+.menu button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid color-mix(in srgb, var(--ring) 55%, transparent);
+  outline-offset: -2px;
+}
+
+.primary:disabled,
+.trigger:disabled,
+.menu button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.appIcon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.appIcon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+.appIcon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.menu {
+  position: fixed;
+  z-index: 1000;
+  width: 196px;
+  padding: 6px;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-popover);
+}
+
+.menu button {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 4px 8px;
+  color: var(--text);
+  border-radius: 5px;
+  font-size: 13px;
+  text-align: left;
+}
+
+.menu button:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.spinner {
+  animation: open-with-spin 0.8s linear infinite;
+}
+
+@keyframes open-with-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

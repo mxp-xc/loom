@@ -21,6 +21,8 @@ import type {
 
 const base = '/api'
 
+export type ExternalApplication = 'vscode' | 'zed' | 'system'
+
 export interface McpImportDiagnostic {
   code: string
   message: string
@@ -282,6 +284,16 @@ export const api = {
     fetch(`${base}/status`).then(json) as Promise<{ active_repo: string; repoPath: string }>,
   project: (body: { repo: string; scope?: 'skills' | 'mcp' | 'memory' | 'all' }) =>
     post('/project', body).then(json),
+  getOpenPathPreference: () =>
+    fetch(`${base}/open-path/preference`).then(json) as Promise<{
+      application: ExternalApplication
+    }>,
+  setOpenPathPreference: (application: ExternalApplication) =>
+    put('/open-path/preference', { application }).then(json) as Promise<{ ok: true }>,
+  resolvePath: (body: { repo: string; path: string }) =>
+    post('/open-path/resolve', body).then(json) as Promise<{ ok: true; path: string }>,
+  openPath: (body: { repo: string; path: string; application: ExternalApplication }) =>
+    post('/open-path', body).then(json) as Promise<{ ok: true }>,
   syncPull: (repo: string, options?: RequestOptions) =>
     post('/sync/pull', { repo }, options).then(json) as Promise<SyncPullResponse>,
   getSyncSession: (repo: string) =>
