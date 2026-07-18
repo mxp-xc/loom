@@ -364,7 +364,7 @@ async function replaceSourceNamespace(
       if (entryFiles.length === 0) {
         throw new Error(`Tracked source content unavailable: ${entry.sourcePath || '.'}`)
       }
-      for (const sourcePath of entryFiles) {
+      const materializedFiles = entryFiles.map((sourcePath) => {
         const relativePath =
           entry.kind === 'resource-file'
             ? ''
@@ -386,6 +386,21 @@ async function replaceSourceNamespace(
           throw new Error(`Projection destination collision: ${targetPath}`)
         }
         materializedDestinations.add(destination)
+        return { sourcePath, targetPath }
+      })
+      if (
+        strategy === 'link' &&
+        entry.kind !== 'resource-file' &&
+        entry.sourcePath &&
+        entry.targetPath &&
+        (await containsOnlyTrackedFiles(fs, sourceRoot, entry.sourcePath, entryFiles))
+      ) {
+        const target = join(staging, entry.targetPath)
+        await fs.mkdir(dirname(target), true)
+        await fs.createLink(join(sourceRoot, entry.sourcePath), target)
+        continue
+      }
+      for (const { sourcePath, targetPath } of materializedFiles) {
         const source = join(sourceRoot, sourcePath)
         const target = join(staging, targetPath)
         if (strategy === 'copy') await fs.copyFile(source, target)
@@ -479,6 +494,40 @@ function trackedFilesForEntry(
   if (!entry.sourcePath) return [...sourceFiles]
   const prefix = `${entry.sourcePath}/`
   return sourceFiles.filter((sourcePath) => sourcePath.startsWith(prefix))
+}
+
+async function containsOnlyTrackedFiles(
+  fs: IFileSystem,
+  sourceRoot: string,
+  directory: string,
+  trackedFiles: readonly string[],
+): Promise<boolean> {
+  const expectedFiles = new Set(trackedFiles)
+  const expectedDirectories = new Set([directory])
+  for (const file of trackedFiles) {
+    const parts = file.split('/')
+    parts.pop()
+    while (parts.length > 0) {
+      expectedDirectories.add(parts.join('/'))
+      parts.pop()
+    }
+  }
+  const seenFiles = new Set<string>()
+  const visit = async (relativeDirectory: string): Promise<boolean> => {
+    for (const name of await fs.readDir(join(sourceRoot, relativeDirectory))) {
+      const relativePath = `${relativeDirectory}/${name}`
+      const absolutePath = join(sourceRoot, relativePath)
+      if (await fs.isLink(absolutePath)) return false
+      if (await fs.isDirectory(absolutePath)) {
+        if (!expectedDirectories.has(relativePath) || !(await visit(relativePath))) return false
+      } else {
+        if (!expectedFiles.has(relativePath)) return false
+        seenFiles.add(relativePath)
+      }
+    }
+    return true
+  }
+  return (await visit(directory)) && seenFiles.size === expectedFiles.size
 }
 
 async function writeSourceMarker(

@@ -136,36 +136,43 @@ describe('source namespace projection', () => {
     )
   })
 
-  it('materializes a root bundle without copying Git metadata into the namespace', async () => {
-    await mkdir(join(cacheRoot, '.git'), { recursive: true })
-    await mkdir(join(cacheRoot, 'references'), { recursive: true })
-    await writeFile(join(cacheRoot, '.git', 'config'), 'private cache metadata')
-    await writeFile(join(cacheRoot, 'SKILL.md'), 'root bundle')
-    await writeFile(join(cacheRoot, 'references', 'guide.md'), 'guide')
+  it.each(['copy', 'link'] as const)(
+    'materializes a root bundle without exposing Git metadata for %s strategy',
+    async (strategy) => {
+      await mkdir(join(cacheRoot, '.git'), { recursive: true })
+      await mkdir(join(cacheRoot, 'references'), { recursive: true })
+      await writeFile(join(cacheRoot, '.git', 'config'), 'private cache metadata')
+      await writeFile(join(cacheRoot, 'SKILL.md'), 'root bundle')
+      await writeFile(join(cacheRoot, 'references', 'guide.md'), 'guide')
 
-    const result = await executeProjection(
-      projectionPlan(
-        [
-          sourcePlan({
-            entries: [{ kind: 'bundle', sourcePath: '', targetPath: '' }],
-          }),
-        ],
-        'copy',
-      ),
-      manifest,
-      { env: {}, activeProfile: {}, defaultProfile: {} },
-      deps(() => cacheRoot),
-      'skills',
-    )
+      const result = await executeProjection(
+        projectionPlan(
+          [
+            sourcePlan({
+              entries: [{ kind: 'bundle', sourcePath: '', targetPath: '' }],
+            }),
+          ],
+          strategy,
+        ),
+        manifest,
+        { env: {}, activeProfile: {}, defaultProfile: {} },
+        deps(() => cacheRoot),
+        'skills',
+      )
 
-    const namespace = join(home, '.claude', 'skills', 'workflow-source')
-    expect(result).toEqual({ ok: true })
-    expect(await readFile(join(namespace, 'SKILL.md'), 'utf8')).toBe('root bundle')
-    expect(await readFile(join(namespace, 'references', 'guide.md'), 'utf8')).toBe('guide')
-    await expect(readFile(join(namespace, '.git', 'config'), 'utf8')).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-  })
+      const namespace = join(home, '.claude', 'skills', 'workflow-source')
+      expect(result).toEqual({ ok: true })
+      expect(await readFile(join(namespace, 'SKILL.md'), 'utf8')).toBe('root bundle')
+      expect(await readFile(join(namespace, 'references', 'guide.md'), 'utf8')).toBe('guide')
+      expect(await new NodeFileSystem().isLink(namespace)).toBe(false)
+      expect(await new NodeFileSystem().isLink(join(namespace, 'SKILL.md'))).toBe(
+        strategy === 'link',
+      )
+      await expect(readFile(join(namespace, '.git', 'config'), 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+    },
+  )
 
   it('preserves selected root structure under the source namespace', async () => {
     await mkdir(join(cacheRoot, 'skill-dir1', 'shared'), { recursive: true })
@@ -264,12 +271,19 @@ describe('source namespace projection', () => {
       expect(await fs.exists(join(namespace, 'shared', 'tracked.md'))).toBe(true)
       expect(await fs.exists(join(namespace, 'skill', 'references', 'untracked.md'))).toBe(false)
       expect(await fs.exists(join(namespace, 'shared', 'untracked.md'))).toBe(false)
+      if (strategy === 'link') {
+        expect(await fs.isLink(join(namespace, 'skill'))).toBe(false)
+        expect(await fs.isLink(join(namespace, 'shared'))).toBe(false)
+      }
     },
   )
 
-  it('links tracked files from directory and file roots when link strategy is selected', async () => {
-    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+  it('links complete bundle and resource directories when link strategy is selected', async () => {
+    await mkdir(join(cacheRoot, 'skill', 'references'), { recursive: true })
+    await mkdir(join(cacheRoot, 'shared'), { recursive: true })
     await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
+    await writeFile(join(cacheRoot, 'skill', 'references', 'guide.md'), 'guide')
+    await writeFile(join(cacheRoot, 'shared', 'workflow.md'), 'shared workflow')
     await writeFile(join(cacheRoot, 'workflow.md'), 'workflow')
     const fs = new NodeFileSystem()
     const result = await executeProjection(
@@ -277,7 +291,12 @@ describe('source namespace projection', () => {
         [
           sourcePlan({
             entries: [
-              { kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' },
+              {
+                kind: 'bundle',
+                sourcePath: 'skill',
+                targetPath: 'engineering/skill',
+              },
+              { kind: 'resource-directory', sourcePath: 'shared', targetPath: 'shared' },
               { kind: 'resource-file', sourcePath: 'workflow.md', targetPath: 'workflow.md' },
             ],
           }),
@@ -292,8 +311,16 @@ describe('source namespace projection', () => {
 
     expect(result.ok).toBe(true)
     const namespace = join(home, '.claude', 'skills', 'workflow-source')
-    expect(await fs.isLink(join(namespace, 'skill'))).toBe(false)
-    expect(await readFile(join(namespace, 'skill', 'SKILL.md'), 'utf8')).toBe('skill')
+    expect(await fs.isLink(join(namespace, 'engineering', 'skill'))).toBe(true)
+    expect(await fs.isLink(join(namespace, 'shared'))).toBe(true)
+    expect(await fs.isLink(join(namespace, 'workflow.md'))).toBe(true)
+    expect(await readFile(join(namespace, 'engineering', 'skill', 'SKILL.md'), 'utf8')).toBe(
+      'skill',
+    )
+    expect(
+      await readFile(join(namespace, 'engineering', 'skill', 'references', 'guide.md'), 'utf8'),
+    ).toBe('guide')
+    expect(await readFile(join(namespace, 'shared', 'workflow.md'), 'utf8')).toBe('shared workflow')
     expect(await readFile(join(namespace, 'workflow.md'), 'utf8')).toBe('workflow')
   })
 
