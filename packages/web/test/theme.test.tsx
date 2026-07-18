@@ -32,14 +32,18 @@ afterEach(() => {
 })
 
 describe('ThemeProvider', () => {
-  it('defaults to light and sets data-theme=light', () => {
+  it('defaults to auto without persisting a user preference', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 19, 12))
+
     render(
       <ThemeProvider>
         <Probe />
       </ThemeProvider>,
     )
-    expect(screen.getByTestId('theme').textContent).toBe('light')
+    expect(screen.getByTestId('theme').textContent).toBe('auto')
     expect(document.documentElement.getAttribute('data-theme')).toBe('light')
+    expect(localStorage.getItem('loom-theme')).toBeNull()
   })
 
   it('reads persisted theme from localStorage', () => {
@@ -100,14 +104,16 @@ describe('ThemeProvider', () => {
   })
 
   it('ignores an invalid persisted theme', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 19, 20))
     localStorage.setItem('loom-theme', 'invalid')
     render(
       <ThemeProvider>
         <Probe />
       </ThemeProvider>,
     )
-    expect(screen.getByTestId('theme').textContent).toBe('light')
-    expect(document.documentElement.getAttribute('data-theme')).toBe('light')
+    expect(screen.getByTestId('theme').textContent).toBe('auto')
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
   })
 
   it('setTheme persists to localStorage and applies', () => {

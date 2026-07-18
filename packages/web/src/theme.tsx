@@ -45,7 +45,7 @@ function resolveApplied(theme: Theme): 'dark' | 'light' {
 
 export function ThemeProvider({
   children,
-  defaultTheme = 'light',
+  defaultTheme = 'auto',
   storageKey = 'loom-theme',
 }: {
   children: ReactNode
