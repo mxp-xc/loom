@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { AlertCircle, RefreshCw } from 'lucide-react'
+import { AlertCircle, AlertTriangle, RefreshCw } from 'lucide-react'
 import type { AppErrorFeedback, ErrorFeedbackAction } from '@/lib/app-error'
 import Modal from './Modal'
 import { Button } from './ui/button'
@@ -67,6 +67,24 @@ export function ErrorState({
         <ErrorDetails code={code} detail={detail} />
       </div>
       {action && <ErrorActionButton action={action} />}
+    </section>
+  )
+}
+
+export function WarningState({
+  title,
+  message,
+  detail,
+  code,
+}: Pick<AppErrorFeedback, 'title' | 'message' | 'detail' | 'code'>) {
+  return (
+    <section className="app-error-state" data-tone="warning" role="status" aria-label={title}>
+      <AlertTriangle size={24} aria-hidden="true" />
+      <div className="app-error-state-copy">
+        <strong>{title}</strong>
+        <p>{message}</p>
+        <ErrorDetails code={code} detail={detail} />
+      </div>
     </section>
   )
 }

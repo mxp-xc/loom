@@ -49,6 +49,12 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
       onApplied: async (repoPath) => {
         const result = await projectRepository(baseDeps, repoPath, {})
         if (!result.ok) throw result.failure.originalError
+        if (result.warnings?.length) {
+          syncLogger.warn('sync projection completed with unavailable sources', {
+            repoPath,
+            warnings: result.warnings,
+          })
+        }
       },
       logger: {
         error: (message, context) => syncLogger.error(message, context),

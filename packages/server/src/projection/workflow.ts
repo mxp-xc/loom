@@ -22,7 +22,12 @@ import type { IProcess } from '../ports/process.js'
 import { logger } from '../lib/logger.js'
 import { cacheDirFor } from '../remote/cache.js'
 import { readLocalConfig, readRepoFiles } from '../api/repo-config.js'
-import { executeProjection, type ProjectionResult, type ProjectionScope } from './executor.js'
+import {
+  executeProjection,
+  type ProjectionResult,
+  type ProjectionScope,
+  type ProjectionWarning,
+} from './executor.js'
 import { resolveAgentAwareVars } from '../vars/agent-aware.js'
 import { createProjectionDeps } from './deps.js'
 import { mergeLocalSkills } from './scan.js'
@@ -75,7 +80,10 @@ export async function projectRepository(
     installed,
     deps.home,
   )
-  return executeProjection(plan, manifest, varsCtx, projectionDeps, scope)
+  const result = await executeProjection(plan, manifest, varsCtx, projectionDeps, scope)
+  if (!result.ok || (scope !== 'skills' && scope !== 'all')) return result
+  const warnings = unavailableSourceWarnings(manifest.skills.sources ?? [])
+  return warnings.length > 0 ? { ...result, warnings } : result
 }
 
 export async function loadProjectionManifest(
@@ -97,7 +105,7 @@ export async function loadDisplayManifest(
 ): Promise<Manifest> {
   const manifest = await loadBaseManifest(deps, repoPath)
   await Promise.all([
-    annotateSourceMemberMetadata(deps.fs, repoPath, manifest.skills.sources ?? []),
+    annotateSourceMemberMetadata(deps, repoPath, manifest.skills.sources ?? []),
     annotateLocalSkillAvailability(deps.fs, repoPath, manifest.skills.skills),
   ])
   return manifest
@@ -116,7 +124,7 @@ async function loadBaseManifest(deps: ProjectionWorkflowDeps, repoPath: string):
 }
 
 async function annotateSourceMemberMetadata(
-  fs: Pick<IFileSystem, 'exists' | 'readFile'>,
+  deps: Pick<ProjectionWorkflowDeps, 'fs' | 'git'>,
   repoPath: string,
   sources: SkillSource[],
 ): Promise<void> {
@@ -124,15 +132,44 @@ async function annotateSourceMemberMetadata(
     sources.map(async (source) => {
       const cacheId = deriveRepoId(source.url)
       const cacheDir = cacheDirFor(repoPath, cacheId)
-      const cacheAvailable = await fs.exists(cacheDir)
+      const cacheAvailable = await deps.fs.exists(cacheDir)
+      if (!cacheAvailable) {
+        source.availability = {
+          available: false,
+          reason: 'cache-unavailable',
+          message: `Source cache unavailable: ${source.url}`,
+        }
+      } else {
+        try {
+          const ref = source.pinned_commit ?? 'HEAD'
+          await Promise.all([
+            deps.git.revParse(cacheDir, `${ref}^{commit}`),
+            deps.git.revParse(cacheDir, `${ref}^{tree}`),
+          ])
+          source.availability = { available: true }
+        } catch (err) {
+          workflowLogger.error('source cache validation failed for display', {
+            err,
+            source: source.url,
+            cacheId,
+          })
+          source.availability = {
+            available: false,
+            reason: 'cache-invalid',
+            message: err instanceof Error ? err.message : String(err),
+          }
+        }
+      }
       source.members = await Promise.all(
         (source.members ?? []).map(async (member) => {
           const enriched = { ...member, path: member.entry }
-          if (!cacheAvailable || !isSafeSkillEntry(member.entry)) return enriched
+          if (source.availability.available === false || !isSafeSkillEntry(member.entry)) {
+            return enriched
+          }
           const skillFile = join(cacheDir, member.entry)
-          if (!(await fs.exists(skillFile))) return enriched
+          if (!(await deps.fs.exists(skillFile))) return enriched
           try {
-            const content = await fs.readFile(skillFile)
+            const content = await deps.fs.readFile(skillFile)
             const metadata = parseSkillMeta(content, member.name, dirname(skillFile))
             return metadata?.description
               ? { ...enriched, description: metadata.description }
@@ -225,7 +262,12 @@ async function ensureSourceTrees(
         repoId,
         cacheId,
       })
-      throw err
+      source.availability = {
+        available: false,
+        reason: 'cache-unavailable',
+        message: err.message,
+      }
+      continue
     }
     try {
       const tree = await scanSourceTree(deps.git, cacheDir, source.pinned_commit ?? 'HEAD', source)
@@ -241,6 +283,7 @@ async function ensureSourceTrees(
         await deps.git.checkout(cacheDir, tree.commit)
       }
       source.sourceTree = tree
+      source.availability = { available: true }
       const metadataByEntry = new Map<string, { path: string; description?: string }>(
         flattenSourceTree(tree.nodes)
           .filter((node) => node.kind === 'bundle')
@@ -252,9 +295,29 @@ async function ensureSourceTrees(
       })
     } catch (err) {
       workflowLogger.error('source tree scan failed', { err, url: source.url, repoId, cacheId })
-      throw err
+      source.availability = {
+        available: false,
+        reason: 'cache-invalid',
+        message: err instanceof Error ? err.message : String(err),
+      }
     }
   }
+}
+
+function unavailableSourceWarnings(sources: SkillSource[]): ProjectionWarning[] {
+  return sources.flatMap((source) =>
+    source.availability?.available === false
+      ? [
+          {
+            code: 'source-unavailable' as const,
+            sourceName: sourceIdentity(source).repoId,
+            sourceUrl: source.url,
+            message:
+              source.availability.message ?? `Source unavailable on this machine: ${source.url}`,
+          },
+        ]
+      : [],
+  )
 }
 
 function flattenSourceTree(nodes: SourceTreeNode[]): SourceTreeNode[] {

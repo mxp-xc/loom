@@ -50,7 +50,15 @@ export interface ProjectionDeps {
   setManagedMcpIds?: (agent: AgentId, ids: string[]) => Promise<void>
 }
 
-export type ProjectionResult = { ok: true } | { ok: false; failure: ProjectionFailure }
+export interface ProjectionWarning {
+  code: 'source-unavailable'
+  sourceName: string
+  sourceUrl: string
+  message: string
+}
+
+export type ProjectionResult =
+  { ok: true; warnings?: ProjectionWarning[] } | { ok: false; failure: ProjectionFailure }
 
 export type ProjectionScope = 'skills' | 'mcp' | 'memory' | 'all'
 const COPY_MARKER = '.loom-projection.json'
@@ -273,7 +281,17 @@ async function projectSourceNamespaces(
   if ((plan.sourcePlans?.length ?? 0) > 0 && !deps.resolveSourceFiles) {
     throw new Error('Source projection tracked file resolver is unavailable')
   }
-  const desired = new Set<string>()
+  const desired = new Set(
+    (plan.preservedSourceNamespaces ?? []).map(({ sourceName, agent }) =>
+      join(agentSkillsDir(agent, deps.pathContext), sourceName),
+    ),
+  )
+  const preservedSourceKeysByAgent = new Map<AgentId, Set<string>>()
+  for (const preserved of plan.preservedSourceNamespaces ?? []) {
+    const sourceKeys = preservedSourceKeysByAgent.get(preserved.agent) ?? new Set<string>()
+    sourceKeys.add(sha256(preserved.sourceUrl))
+    preservedSourceKeysByAgent.set(preserved.agent, sourceKeys)
+  }
   const sourceFilesByTree = new Map<string, Promise<string[]>>()
   for (const sourcePlan of plan.sourcePlans ?? []) {
     const sourceRoot = deps.resolveSourceRoot?.(sourcePlan)
@@ -311,6 +329,7 @@ async function projectSourceNamespaces(
       journal,
       deps.logger,
       deps.pathContext,
+      preservedSourceKeysByAgent,
     )
   }
 }
@@ -514,6 +533,7 @@ async function cleanOrphanedSourceNamespaces(
   journal: ProjectionJournal,
   logger?: ProjectionDeps['logger'],
   pathContext?: AgentPathContext,
+  preservedSourceKeysByAgent: Map<AgentId, Set<string>> = new Map(),
 ): Promise<void> {
   for (const agent of installedAgents) {
     if (!supportsAgentCapability(agent, 'skills')) continue
@@ -529,6 +549,15 @@ async function cleanOrphanedSourceNamespaces(
       const namespace = join(skillsDir, entry)
       if (desired.has(namespace) || !(await isManagedSourceNamespace(fs, namespace, { ownerRepo })))
         continue
+      const preservedSourceKeys = preservedSourceKeysByAgent.get(agent)
+      let preservesUnavailableSource = false
+      for (const sourceKey of preservedSourceKeys ?? []) {
+        if (await isManagedSourceNamespace(fs, namespace, { ownerRepo, sourceKey })) {
+          preservesUnavailableSource = true
+          break
+        }
+      }
+      if (preservesUnavailableSource) continue
       try {
         const backupPath = sourceTransactionPath(
           namespace,

@@ -94,6 +94,12 @@ export interface SkillSource {
   resources?: SourceResources
   /** Runtime-only tree read from pinned_commit. Never serialized to skills.yaml. */
   sourceTree?: SourceTree
+  /** Runtime-only availability of this source's cache on the current machine. */
+  availability?: {
+    available: boolean
+    reason?: 'cache-unavailable' | 'cache-invalid'
+    message?: string
+  }
 }
 
 export interface LocalSkill {

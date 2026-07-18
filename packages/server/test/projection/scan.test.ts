@@ -94,32 +94,98 @@ describe('loadProjectionManifest', () => {
     expect(git.clone).not.toHaveBeenCalled()
   })
 
-  it('reports a missing source cache without installing it', async () => {
+  it('marks a missing source cache unavailable without blocking other sources', async () => {
     await writeFile(
       join(root, 'skills.yaml'),
       [
         'sources:',
-        '  - url: https://example.test/skills.git',
+        '  - name: private-skills',
+        '    url: git@example.test:team/private-skills.git',
         '    ref: main',
         '    members:',
         '      - name: selected',
         '        entry: skills/selected/SKILL.md',
+        '        agents: [codex]',
+        '  - name: public-skills',
+        '    url: https://example.test/public-skills.git',
+        '    ref: main',
+        '    pinned_commit: commit-1',
+        '    members:',
+        '      - name: available',
+        '        entry: skills/available/SKILL.md',
+        '        agents: [codex]',
         'skills: []',
         '',
       ].join('\n'),
     )
-    const git = sourceTreeGit([treeEntry('skills/selected/SKILL.md', 'selected-skill')])
-    await expect(loadProjectionManifest(deps(git), root)).rejects.toThrow(
-      'Source cache unavailable: https://example.test/skills.git',
-    )
+    await mkdir(join(root, 'remote-cache', 'public-skills'), { recursive: true })
+    const git = sourceTreeGit([treeEntry('skills/available/SKILL.md', 'available-skill')])
+
+    const manifest = await loadProjectionManifest(deps(git), root)
+
+    expect(manifest.skills.sources[0].availability).toMatchObject({
+      available: false,
+      reason: 'cache-unavailable',
+    })
+    expect(manifest.skills.sources[1].sourceTree?.commit).toBe('commit-1')
 
     expect(git.clone).not.toHaveBeenCalled()
-    expect(git.checkout).not.toHaveBeenCalled()
-    expect(git.readTree).not.toHaveBeenCalled()
+    expect(git.readTree).toHaveBeenCalledTimes(1)
   })
 })
 
 describe('projectRepository', () => {
+  it('projects available local skills while preserving an unavailable remote source', async () => {
+    await writeFile(join(root, 'config.yaml'), 'agents: [codex]\n')
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: private-skills',
+        '    url: git@example.test:team/private-skills.git',
+        '    ref: main',
+        '    members:',
+        '      - name: selected',
+        '        entry: skills/selected/SKILL.md',
+        '        agents: [codex]',
+        'skills:',
+        '  - id: local-skill',
+        '    agents: [codex]',
+        '',
+      ].join('\n'),
+    )
+    const localSkill = join(root, 'assets', 'skills', 'local-skill')
+    await mkdir(localSkill, { recursive: true })
+    await writeFile(join(localSkill, 'SKILL.md'), '# Local skill\n')
+    const git = sourceTreeGit([])
+    const projectDeps = deps(git)
+    projectDeps.proc.isCommandInstalled = async (command) => command === 'codex'
+    const projectionManifest = await loadProjectionManifest(projectDeps, root, 'skills')
+    expect(projectionManifest.config.agents).toEqual(['codex'])
+    expect(projectionManifest.skills.skills).toContainEqual(
+      expect.objectContaining({ id: 'local-skill', agents: ['codex'] }),
+    )
+
+    const result = await projectRepository(projectDeps, root, {
+      scope: 'skills',
+      installedAgents: ['codex'],
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      warnings: [
+        expect.objectContaining({
+          code: 'source-unavailable',
+          sourceName: 'private-skills',
+        }),
+      ],
+    })
+    await expect(
+      projectDeps.fs.readFile(join(root, '.codex', 'skills', 'local-skill', 'SKILL.md')),
+    ).resolves.toBe('# Local skill\n')
+    expect(git.clone).not.toHaveBeenCalled()
+  })
+
   it.each(['mcp', 'memory'] as const)(
     'does not read or install skill source trees for %s-only projection',
     async (scope) => {
@@ -151,7 +217,7 @@ describe('projectRepository', () => {
 })
 
 describe('loadDisplayManifest', () => {
-  it('enriches configured members from the existing checkout without scanning the Git tree', async () => {
+  it('validates the pinned local tree without scanning it and enriches configured members', async () => {
     await writeFile(
       join(root, 'skills.yaml'),
       [
@@ -185,8 +251,45 @@ describe('loadDisplayManifest', () => {
     ])
     expect(git.clone).not.toHaveBeenCalled()
     expect(git.checkout).not.toHaveBeenCalled()
+    expect(git.revParse).toHaveBeenCalledTimes(2)
     expect(git.readTree).not.toHaveBeenCalled()
     expect(git.show).not.toHaveBeenCalled()
+  })
+
+  it('marks an existing but unreadable source cache invalid', async () => {
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: private-skills',
+        '    url: git@example.test:team/private-skills.git',
+        '    ref: main',
+        '    pinned_commit: commit-1',
+        '    members:',
+        '      - name: selected',
+        '        entry: skills/selected/SKILL.md',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    await mkdir(join(root, 'remote-cache', 'private-skills'), { recursive: true })
+    const git = sourceTreeGit([])
+    git.revParse = vi.fn(async () => {
+      throw new Error('not a readable Git cache')
+    })
+
+    const manifest = await loadDisplayManifest(deps(git), root)
+
+    expect(manifest.skills.sources[0]).toMatchObject({
+      availability: {
+        available: false,
+        reason: 'cache-invalid',
+        message: 'not a readable Git cache',
+      },
+      members: [{ name: 'selected', path: 'skills/selected/SKILL.md' }],
+    })
+    expect(git.clone).not.toHaveBeenCalled()
+    expect(git.checkout).not.toHaveBeenCalled()
   })
 })
 

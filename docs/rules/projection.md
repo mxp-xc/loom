@@ -173,6 +173,7 @@ Safety:
 - Namespace staging、替换和跨 agent 执行必须可回滚；全部成功前不能删除 backups 或报告成功。
 - Executor 只物化 SourceTree commit 中的 tracked files；cache checkout 中的未跟踪文件不得进入 namespace。
 - Projection 前必须将 Loom 管理的 source cache checkout 对齐到 plan 的 SourceTree commit；cache 漂移时只能使用本地已有 Git 对象恢复，不得隐式 fetch。
+- 当前机器缺少或无法读取某个 source cache 时，projection 跳过该 source、保留其已有 managed namespace，并继续 reconcile 其他 source 与 local skills；结果必须暴露 source-specific warning。
 - Link projection 必须区分 file/directory link；稀疏目录不得用覆盖 excludes 的整目录 link。Copy 必须保持二进制内容。
 - Source 改名后的 orphan cleanup 只能删除 marker 能证明属于同一 repo/source 的旧 namespace。
 

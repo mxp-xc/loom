@@ -1,5 +1,5 @@
 import type { Manifest, AgentId, Config, Memory, SkillSource, SourceTreeNode } from './types.js'
-import { applicableAgents } from './agents.js'
+import { applicableAgents, supportsAgentCapability } from './agents.js'
 import { normalizeSourceResources, projectionBase, resourceSelectionState } from './source-tree.js'
 
 export interface LinkPlan {
@@ -37,9 +37,15 @@ export interface SourceProjectionPlan {
   projectionBase: string
   entries: SourceProjectionEntry[]
 }
+export interface PreservedSourceNamespace {
+  sourceName: string
+  sourceUrl: string
+  agent: AgentId
+}
 export interface ProjectionPlan {
   links: LinkPlan[]
   sourcePlans: SourceProjectionPlan[]
+  preservedSourceNamespaces?: PreservedSourceNamespace[]
   mcpEntries: McpPlanEntry[]
   memoryPlan: MemoryPlan
   skippedAgents: AgentId[]
@@ -112,7 +118,13 @@ export function planProjection(
   const sourcePlans = manifest.skills.sources.flatMap((source) =>
     planSourceProjection(source, (agents) => activeAgents(agents, 'skills')),
   )
-  assertSkillDestinationCollisions(links, sourcePlans)
+  const installedSkillAgents = [...installedAgents].filter((agent) =>
+    supportsAgentCapability(agent, 'skills'),
+  )
+  const preservedSourceNamespaces = manifest.skills.sources.flatMap((source) =>
+    planUnavailableSourceNamespaces(source, installedSkillAgents),
+  )
+  assertSkillDestinationCollisions(links, [...sourcePlans, ...preservedSourceNamespaces])
 
   const mcpEntries: McpPlanEntry[] = manifest.mcp.map((m) => ({
     id: m.id,
@@ -151,6 +163,7 @@ export function planProjection(
   return {
     links,
     sourcePlans,
+    preservedSourceNamespaces,
     mcpEntries,
     memoryPlan,
     skippedAgents: [...new Set(skippedAgents)],
@@ -160,9 +173,12 @@ export function planProjection(
 
 function assertSkillDestinationCollisions(
   links: LinkPlan[],
-  sourcePlans: SourceProjectionPlan[],
+  sourcePlans: Array<Pick<SourceProjectionPlan, 'sourceName' | 'agent'>>,
 ): void {
-  const namespacesByAgent = new Map<AgentId, SourceProjectionPlan[]>()
+  const namespacesByAgent = new Map<
+    AgentId,
+    Array<Pick<SourceProjectionPlan, 'sourceName' | 'agent'>>
+  >()
   for (const sourcePlan of sourcePlans) {
     const plans = namespacesByAgent.get(sourcePlan.agent) ?? []
     plans.push(sourcePlan)
@@ -202,6 +218,7 @@ function planSourceProjection(
   const sourceTree = source.sourceTree
   const members = source.members ?? []
   if (members.length === 0) return []
+  if (source.availability?.available === false) return []
   if (!sourceTree) throw new Error(`SourceTree unavailable for ${source.url}`)
   if (sourceTree.diagnostics.length > 0) {
     throw new Error(sourceTree.diagnostics.map((diagnostic) => diagnostic.message).join('; '))
@@ -257,6 +274,15 @@ function planSourceProjection(
       entries,
     }
   })
+}
+
+function planUnavailableSourceNamespaces(
+  source: SkillSource,
+  installedSkillAgents: AgentId[],
+): PreservedSourceNamespace[] {
+  if (source.availability?.available !== false) return []
+  const sourceName = sourceIdentity(source).repoId
+  return installedSkillAgents.map((agent) => ({ sourceName, sourceUrl: source.url, agent }))
 }
 
 export function planSourceProjectionForAgents(

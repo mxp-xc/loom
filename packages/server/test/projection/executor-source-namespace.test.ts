@@ -491,4 +491,35 @@ describe('source namespace projection', () => {
     expect(await fs.exists(managed)).toBe(false)
     expect(await fs.exists(join(userOwned, 'notes.md'))).toBe(true)
   })
+
+  it('preserves a managed namespace whose source is unavailable on this machine', async () => {
+    const namespace = join(home, '.claude', 'skills', 'previous-source-name')
+    await mkdir(namespace, { recursive: true })
+    await writeFile(
+      join(namespace, '.loom-projection.json'),
+      JSON.stringify({ ...sourceMarker(), sourceName: 'previous-source-name' }),
+    )
+    await writeFile(join(namespace, 'existing.md'), 'keep me')
+    const plan = {
+      ...projectionPlan([], 'copy'),
+      preservedSourceNamespaces: [
+        {
+          sourceName: 'workflow-source',
+          sourceUrl: 'https://example.com/workflow-source.git',
+          agent: 'claude-code' as const,
+        },
+      ],
+    }
+
+    const result = await executeProjection(
+      plan,
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result).toEqual({ ok: true })
+    expect(await readFile(join(namespace, 'existing.md'), 'utf8')).toBe('keep me')
+  })
 })

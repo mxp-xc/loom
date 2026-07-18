@@ -5,7 +5,7 @@ import { useManifest } from '@/hooks/useManifest'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
-import { ErrorState } from '@/components/ErrorFeedback'
+import { ErrorState, WarningState } from '@/components/ErrorFeedback'
 import {
   applicableAgents,
   normalizeOrder,
@@ -59,6 +59,8 @@ export default function Skills({ repoPath }: { repoPath: string }) {
     ? normalizeOrder(groupOrder, normalizeSkillGroupOrder(manifest.skills))
     : []
   const visibleAgents = applicableAgents(manifest?.config?.agents, 'skills')
+  const unavailableSources =
+    manifest?.skills.sources.filter((source) => source.availability?.available === false) ?? []
 
   const reorderGroups = async (ids: string[]) => {
     const previous = normalizedGroupOrder
@@ -144,6 +146,15 @@ export default function Skills({ repoPath }: { repoPath: string }) {
           title="部分 Skills 配置无法读取"
           message="请修正配置后重新加载"
           detail={manifest.errors.join('\n')}
+        />
+      )}
+      {unavailableSources.length > 0 && (
+        <WarningState
+          title="部分 Source 在当前机器不可用"
+          message={`${unavailableSources.map((source) => source.name ?? source.url).join('、')} 暂不参与投影；其他 Skills 仍可正常使用，现有投影已保留。`}
+          detail={unavailableSources
+            .map((source) => source.availability?.message ?? source.url)
+            .join('\n')}
         />
       )}
       {error && <ErrorState {...error} />}

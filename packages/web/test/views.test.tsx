@@ -987,6 +987,42 @@ describe('Memory view', () => {
 })
 
 describe('Skills view', () => {
+  it('shows machine-local source unavailability as a non-blocking warning', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: {
+        sources: [
+          {
+            name: 'plm-harness',
+            url: 'git@gitcode.com:HarnessPlatform/Marketplace.git',
+            ref: 'main',
+            members: [],
+            availability: {
+              available: false,
+              reason: 'cache-unavailable',
+              message: 'Source cache unavailable: git@gitcode.com:HarnessPlatform/Marketplace.git',
+            },
+          },
+        ],
+        skills: [],
+      },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: ['codex'] },
+      errors: [],
+    } as never)
+
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-source-unavailable" />
+      </TestRouter>,
+    )
+
+    const warning = await screen.findByRole('status', { name: '部分 Source 在当前机器不可用' })
+    expect(warning.textContent).toContain('plm-harness')
+    expect(warning.textContent).toContain('现有投影已保留')
+    expect(screen.queryByText('部分 Skills 配置无法读取')).toBeNull()
+  })
+
   it('renders unambiguous page actions without the legacy footer guidance', async () => {
     render(
       <TestRouter>

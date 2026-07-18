@@ -57,6 +57,12 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
     const res = await projectRepository(deps, repoPath, { ...body, scope })
     if (res.ok) {
       apiLogger.info('projection completed', { repoPath })
+      if (res.warnings?.length) {
+        apiLogger.warn('projection completed with unavailable sources', {
+          repoPath,
+          warnings: res.warnings,
+        })
+      }
     } else {
       apiLogger.error('projection failed', {
         repoPath,

@@ -200,6 +200,7 @@ Implications:
 - 更新结果分别展示新增、更新和远端已删除的 members。
 - 缺失项支持逐项选择、全选、取消全选和不保留。
 - 打开 Skills 页面和编辑现有 source 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。
+- Source cache 是否可用是当前机器的运行时状态，不是 manifest 配置有效性；单个 source 不可用时，其他 source、local skills 和非 Skills 功能保持可用。
 - Remote refs 只在用户首次打开 ref 选择或切换 branch/tag 时按需读取；同一编辑会话内复用结果。
 - 远端 SourceTree 只在用户选择其他 ref 或主动刷新时读取。
 - 初始编辑和未主动扫描的同 ref/type 保存必须基于当前 pinned commit，不得隐式拉取远端或替换 live cache。

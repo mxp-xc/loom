@@ -143,6 +143,7 @@ Implications:
 - 远端新增或删除的 skills、MCP、memory 投影会同步应用到本地 agent-native 文件。
 - 存在未解决冲突时不得提前应用投影；最后一个冲突解决并应用后再执行。
 - Projection 失败必须作为同步失败暴露，不能静默返回同步完成。
+- 当前机器不可用的 remote skill source 按 Projection 规则降级为 warning；同步继续应用其他可投影内容，并保留该 source 的已有 managed namespace。
 
 Safety:
 

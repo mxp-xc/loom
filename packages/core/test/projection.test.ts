@@ -261,6 +261,56 @@ describe('planProjection', () => {
       { kind: 'bundle', sourcePath: 'skills/writing', targetPath: 'writing' },
     ])
   })
+  it('preserves unavailable source namespaces for every installed skills agent', () => {
+    const unavailableSource = {
+      ...manifest.skills.sources[0],
+      members: [
+        {
+          name: 'writing',
+          entry: 'skills/writing/SKILL.md',
+          agents: ['codex' as const],
+        },
+      ],
+      sourceTree: undefined,
+      availability: {
+        available: false,
+        reason: 'cache-unavailable' as const,
+      },
+    }
+    const withoutOverlap: Manifest = {
+      ...manifest,
+      skills: { sources: [unavailableSource], skills: [] },
+    }
+
+    expect(
+      planProjection(withoutOverlap, withoutOverlap.config, new Set(['codex', 'claude-code'])),
+    ).toMatchObject({
+      sourcePlans: [],
+      preservedSourceNamespaces: [
+        {
+          sourceName: 'superpowers',
+          sourceUrl: 'github:obra/superpowers',
+          agent: 'codex',
+        },
+        {
+          sourceName: 'superpowers',
+          sourceUrl: 'github:obra/superpowers',
+          agent: 'claude-code',
+        },
+      ],
+    })
+
+    const withOverlap: Manifest = {
+      ...withoutOverlap,
+      skills: {
+        ...withoutOverlap.skills,
+        skills: [{ id: 'superpowers/custom', agents: ['codex'] }],
+      },
+    }
+    expect(() => planProjection(withOverlap, withOverlap.config, new Set(['codex']))).toThrow(
+      'Local skill destination "superpowers/custom" overlaps source namespace "superpowers" for codex',
+    )
+  })
   it.each(['superpowers', 'superpowers/custom'])(
     'rejects local skill destination %s overlapping a source namespace on the same agent',
     (localSkillId) => {
