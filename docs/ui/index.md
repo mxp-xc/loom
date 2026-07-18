@@ -12,4 +12,4 @@
 
 ## 设计语言
 
-Loom 默认使用浅色中性表面和 emerald 主色，同时支持深色与跟随系统主题。界面以 sans-serif 为主，等宽字体用于代码、路径、配置键和数据值；交互控件优先复用 `packages/web/src/components/ui`，页面样式消费全局 token，不在页面内复制另一套主题值。
+Loom 默认使用浅色中性表面和 emerald 主色，同时支持深色、按本地时间自动切换与跟随系统主题。界面以 sans-serif 为主，等宽字体用于代码、路径、配置键和数据值；交互控件优先复用 `packages/web/src/components/ui`，页面样式消费全局 token，不在页面内复制另一套主题值。

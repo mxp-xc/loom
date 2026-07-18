@@ -6,15 +6,21 @@
     <title>Loom</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <script>
-      // no-flash: apply persisted/system theme before React mounts
+      // no-flash: apply the resolved theme before React mounts
       ;(function () {
         var t = localStorage.getItem('loom-theme') || 'light'
+        if (!['light', 'dark', 'auto', 'system'].includes(t)) t = 'light'
+        var hour = new Date().getHours()
         var d =
           t === 'system'
             ? matchMedia('(prefers-color-scheme: dark)').matches
               ? 'dark'
               : 'light'
-            : t
+            : t === 'auto'
+              ? hour >= 6 && hour < 18
+                ? 'light'
+                : 'dark'
+              : t
         document.documentElement.setAttribute('data-theme', d)
       })()
     </script>

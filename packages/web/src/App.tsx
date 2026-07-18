@@ -21,10 +21,11 @@ import Vars from './views/vars/Vars'
 import VarsProfileDemo from './views/vars/VarsProfileDemo'
 import { useManifest } from './hooks/useManifest'
 import { useViewError } from './hooks/useViewError'
-import { useTheme } from './theme'
+import { useTheme, type Theme } from './theme'
 import { Button } from '@/components/ui/button'
 import {
   Braces,
+  Clock3,
   Command,
   GripVertical,
   Monitor,
@@ -122,10 +123,11 @@ function SidebarNavLink({
 
 function ThemeSwitcher({ collapsed }: { collapsed: boolean }) {
   const { theme, setTheme } = useTheme()
-  const modes: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system']
-  const labels: Record<'light' | 'dark' | 'system', string> = {
+  const modes: Theme[] = ['light', 'dark', 'auto', 'system']
+  const labels: Record<Theme, string> = {
     light: '浅色主题',
     dark: '深色主题',
+    auto: '自动主题（06:00–18:00 浅色）',
     system: '跟随系统主题',
   }
   return (
@@ -166,6 +168,8 @@ function ThemeSwitcher({ collapsed }: { collapsed: boolean }) {
               <Sun className="h-3 w-3" />
             ) : m === 'dark' ? (
               <Moon className="h-3 w-3" />
+            ) : m === 'auto' ? (
+              <Clock3 className="h-3 w-3" />
             ) : (
               <Monitor className="h-3 w-3" />
             )}

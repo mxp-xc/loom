@@ -134,6 +134,17 @@ describe('App', () => {
     expect(localStorage.getItem('loom-sidebar-collapsed')).toBe('true')
   })
 
+  it('selects and persists the automatic theme', async () => {
+    renderApp()
+
+    await screen.findByRole('link', { name: 'Skills' })
+    const autoTheme = screen.getByRole('button', { name: '自动主题（06:00–18:00 浅色）' })
+    fireEvent.click(autoTheme)
+
+    expect(autoTheme.getAttribute('aria-pressed')).toBe('true')
+    expect(localStorage.getItem('loom-theme')).toBe('auto')
+  })
+
   it('resizes the sidebar by dragging the separator', async () => {
     renderApp()
 
