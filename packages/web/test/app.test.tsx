@@ -85,6 +85,39 @@ describe('App', () => {
     expect(screen.getByRole('link', { name: 'Settings' })).toBeDefined()
   })
 
+  it('persists the last clicked sidebar page', async () => {
+    renderApp('/skills')
+
+    fireEvent.click(await screen.findByRole('link', { name: 'Settings' }))
+
+    expect(await screen.findByText('Settings page')).toBeDefined()
+    expect(localStorage.getItem('loom-sidebar-last-path')).toBe('/settings')
+  })
+
+  it('restores the last clicked sidebar page from the home route', async () => {
+    localStorage.setItem('loom-sidebar-last-path', '/memory')
+
+    renderApp('/')
+
+    expect(await screen.findByText('Memory page')).toBeDefined()
+  })
+
+  it('falls back to Skills when the stored sidebar path is invalid', async () => {
+    localStorage.setItem('loom-sidebar-last-path', '/vars-lab')
+
+    renderApp('/')
+
+    expect(await screen.findByText('Skills page')).toBeDefined()
+  })
+
+  it('keeps an explicit URL ahead of the stored sidebar page', async () => {
+    localStorage.setItem('loom-sidebar-last-path', '/memory')
+
+    renderApp('/mcp')
+
+    expect(await screen.findByText('MCP page')).toBeDefined()
+  })
+
   it('initializes once during StrictMode effect replay', async () => {
     const callsBefore = vi.mocked(api.init).mock.calls.length
     render(

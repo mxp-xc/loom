@@ -41,6 +41,9 @@ import {
 
 const SIDEBAR_WIDTH_KEY = 'loom-sidebar-width'
 const SIDEBAR_COLLAPSED_KEY = 'loom-sidebar-collapsed'
+const LAST_SIDEBAR_PATH_KEY = 'loom-sidebar-last-path'
+const DEFAULT_SIDEBAR_PATH = '/skills'
+const SIDEBAR_PATHS = new Set(['/skills', '/mcp', '/memory', '/vars', '/sync', '/settings'])
 const MIN_SIDEBAR_WIDTH = 176
 const DEFAULT_SIDEBAR_WIDTH = MIN_SIDEBAR_WIDTH
 const MAX_SIDEBAR_WIDTH = 360
@@ -73,6 +76,25 @@ function readStoredSidebarWidth() {
 function readStoredSidebarCollapsed() {
   if (typeof localStorage === 'undefined') return false
   return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'
+}
+
+function readLastSidebarPath() {
+  if (typeof localStorage === 'undefined') return DEFAULT_SIDEBAR_PATH
+  try {
+    const stored = localStorage.getItem(LAST_SIDEBAR_PATH_KEY)
+    return stored && SIDEBAR_PATHS.has(stored) ? stored : DEFAULT_SIDEBAR_PATH
+  } catch (err) {
+    console.error({ err }, 'Failed to read last sidebar path')
+    return DEFAULT_SIDEBAR_PATH
+  }
+}
+
+function storeLastSidebarPath(path: string) {
+  try {
+    localStorage.setItem(LAST_SIDEBAR_PATH_KEY, path)
+  } catch (err) {
+    console.error({ err }, 'Failed to store last sidebar path')
+  }
 }
 
 function useNarrowSidebarViewport() {
@@ -110,6 +132,7 @@ function SidebarNavLink({
       className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
       aria-label={label}
       title={label}
+      onClick={() => storeLastSidebarPath(to)}
     >
       <span className="ic" aria-hidden="true">
         {icon}
@@ -369,7 +392,7 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
         </aside>
         <main className="main">
           <Routes>
-            <Route index element={<Navigate to="/skills" replace />} />
+            <Route index element={<Navigate to={readLastSidebarPath()} replace />} />
             <Route path="skills" element={routePage('workbench', <Skills repoPath={repoPath} />)} />
             <Route path="mcp" element={routePage('workbench', <Mcp repoPath={repoPath} />)} />
             <Route
