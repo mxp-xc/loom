@@ -16,18 +16,6 @@
   background: var(--bg);
 }
 
-:global([data-theme='dark']) .page {
-  --bg: #171719;
-  --card: #1d1d20;
-  --popover: #1d1d20;
-  --border: rgb(255 255 255 / 10%);
-  --text: #c7c7cf;
-  --bright: #e4e4e7;
-  --muted: #8b8b94;
-  --m2: #8b8b94;
-  --accent: #252529;
-}
-
 .pageHeading {
   display: flex;
   align-items: flex-end;
