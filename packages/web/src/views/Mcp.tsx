@@ -19,6 +19,8 @@ import {
   ArrowLeft,
   Braces,
   Check,
+  ChevronDown,
+  ChevronRight,
   CircleAlert,
   Cloud,
   Command,
@@ -128,6 +130,16 @@ interface RecordRow {
 
 type JsonSchemaLike = Record<string, unknown>
 
+interface ToolInputParameter {
+  path: string
+  type: string
+  required: boolean
+  description: string
+  details: string[]
+}
+
+const MCP_TOOL_PARAMETERS_EXPANDED_KEY = 'loom:mcp-debug:parameters-expanded'
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -144,6 +156,77 @@ function stableStringify(value: unknown): string {
       .join(',') +
     '}'
   )
+}
+
+function schemaTypeLabel(schema: JsonSchemaLike): string {
+  const schemaType = schema.type
+  if (Array.isArray(schemaType)) {
+    const types = schemaType.filter((item): item is string => typeof item === 'string')
+    if (types.length > 0) return types.join(' | ')
+  }
+  if (typeof schemaType === 'string') return schemaType
+  if (isPlainRecord(schema.properties)) return 'object'
+  if (schema.items) return 'array'
+  return 'unknown'
+}
+
+function schemaDetailValue(value: unknown): string {
+  if (typeof value === 'string') return value
+  const serialized = stableStringify(value)
+  return serialized === undefined ? String(value) : serialized
+}
+
+function toolInputParameters(schema: unknown): ToolInputParameter[] {
+  const parameters: ToolInputParameter[] = []
+
+  const visit = (value: unknown, parentPath: string, depth: number) => {
+    if (!isPlainRecord(value) || depth > 4) return
+    const properties = isPlainRecord(value.properties) ? value.properties : null
+    if (!properties) return
+    const required = new Set(
+      Array.isArray(value.required)
+        ? value.required.filter((item): item is string => typeof item === 'string')
+        : [],
+    )
+
+    for (const [name, propertyValue] of Object.entries(properties)) {
+      const path = parentPath ? `${parentPath}.${name}` : name
+      const property = isPlainRecord(propertyValue) ? propertyValue : {}
+      const details: string[] = []
+      if ('default' in property) details.push(`default: ${schemaDetailValue(property.default)}`)
+      if (Array.isArray(property.enum) && property.enum.length > 0) {
+        details.push(`enum: ${property.enum.map(schemaDetailValue).join(' | ')}`)
+      }
+      if ('const' in property) details.push(`const: ${schemaDetailValue(property.const)}`)
+
+      parameters.push({
+        path,
+        type: schemaTypeLabel(property),
+        required: required.has(name),
+        description:
+          typeof property.description === 'string' && property.description.trim()
+            ? property.description
+            : '未提供 description',
+        details,
+      })
+
+      visit(property, path, depth + 1)
+      if (property.items) visit(property.items, `${path}[]`, depth + 1)
+    }
+  }
+
+  visit(schema, '', 0)
+  return parameters
+}
+
+function initialToolParametersExpanded(): boolean {
+  if (typeof window === 'undefined') return true
+  try {
+    return window.localStorage.getItem(MCP_TOOL_PARAMETERS_EXPANDED_KEY) !== 'false'
+  } catch (err) {
+    console.error({ err }, 'Failed to read MCP tool parameters disclosure state')
+    return true
+  }
 }
 
 function connectionOnlyServer(server: McpServer): McpServer {
@@ -920,6 +1003,7 @@ function McpDebugPanel({
   > | null>(null)
   const [selectedTool, setSelectedTool] = useState<string | null>(null)
   const [toolQuery, setToolQuery] = useState('')
+  const [parametersExpanded, setParametersExpanded] = useState(initialToolParametersExpanded)
   const [args, setArgs] = useState('{}')
   const [result, setResult] = useState<string | null>(null)
   const [resultCopied, setResultCopied] = useState(false)
@@ -950,6 +1034,13 @@ function McpDebugPanel({
     })
   }, [normalizedToolQuery, tools])
   const activeTool = tools.find((tool) => tool.name === selectedTool) ?? tools[0] ?? null
+  const activeToolParameters = useMemo(
+    () => toolInputParameters(activeTool?.inputSchema),
+    [activeTool?.inputSchema],
+  )
+  const requiredParameterCount = activeToolParameters.filter(
+    (parameter) => parameter.required,
+  ).length
 
   useEffect(() => {
     sessionIdRef.current = session?.sessionId ?? null
@@ -1141,6 +1232,21 @@ function McpDebugPanel({
     }
   }
 
+  const toggleParameters = () => {
+    setParametersExpanded((previous) => {
+      const next = !previous
+      try {
+        window.localStorage.setItem(MCP_TOOL_PARAMETERS_EXPANDED_KEY, String(next))
+      } catch (err) {
+        console.error(
+          { err, expanded: next },
+          'Failed to save MCP tool parameters disclosure state',
+        )
+      }
+      return next
+    })
+  }
+
   const canCall = !disabledReason && connection === 'connected' && Boolean(activeTool) && !calling
   const connectLabel = needsSave ? '保存并连接 MCP server' : 'Connect debug session'
   const contextDescription =
@@ -1257,6 +1363,45 @@ function McpDebugPanel({
               重置参数
             </Button>
           </header>
+          <section className={styles.toolParameters} aria-label="Tool 参数说明">
+            <button
+              type="button"
+              className={styles.toolParametersToggle}
+              aria-expanded={parametersExpanded}
+              onClick={toggleParameters}
+              disabled={!activeTool}
+            >
+              {parametersExpanded ? (
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              <strong>参数说明</strong>
+              <span>
+                {activeTool
+                  ? `${requiredParameterCount} 必填 · ${activeToolParameters.length} 个`
+                  : '选择 Tool 后显示'}
+              </span>
+            </button>
+            {parametersExpanded && activeTool && (
+              <div className={styles.toolParametersList} role="list">
+                {activeToolParameters.map((parameter) => (
+                  <div className={styles.toolParameter} role="listitem" key={parameter.path}>
+                    <div className={styles.toolParameterKey}>
+                      <code>{parameter.path}</code>
+                      <span>{parameter.type}</span>
+                      {parameter.required && <b>必填</b>}
+                    </div>
+                    <p>{parameter.description}</p>
+                    {parameter.details.length > 0 && <small>{parameter.details.join(' · ')}</small>}
+                  </div>
+                ))}
+                {activeToolParameters.length === 0 && (
+                  <div className={styles.toolParametersEmpty}>这个 Tool 没有入参</div>
+                )}
+              </div>
+            )}
+          </section>
           <div className={styles.toolArguments}>
             <MonacoTextEditor
               ariaLabel="Tool arguments JSON"

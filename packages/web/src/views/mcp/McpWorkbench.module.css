@@ -1565,7 +1565,7 @@
 }
 
 .toolCallColumn {
-  grid-template-rows: auto minmax(120px, 0.48fr) auto minmax(120px, 0.52fr);
+  grid-template-rows: auto auto minmax(120px, 0.48fr) auto minmax(120px, 0.52fr);
 }
 
 .toolCallColumn > header {
@@ -1665,6 +1665,130 @@
   line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.toolParameters {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.toolParametersToggle {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  color: var(--bright);
+  text-align: left;
+  border: 0;
+  background: color-mix(in srgb, var(--accent) 36%, var(--card));
+}
+
+.toolParametersToggle:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.toolParametersToggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.toolParametersToggle:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.toolParametersToggle strong {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.toolParametersToggle span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.toolParametersList {
+  display: grid;
+  min-height: min(66px, 12vh);
+  max-height: min(180px, 24vh);
+  overflow: auto;
+}
+
+.toolParameter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.toolParameterKey {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolParameterKey code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bright);
+  font:
+    650 10px 'JetBrains Mono',
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolParameterKey span,
+.toolParameterKey b {
+  flex-shrink: 0;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font:
+    600 9px 'JetBrains Mono',
+    monospace;
+}
+
+.toolParameterKey span {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 10%, var(--card));
+}
+
+.toolParameterKey b {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 9%, var(--card));
+}
+
+.toolParameter p {
+  margin: 0;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.toolParameter small {
+  color: var(--muted);
+  font:
+    9px 'JetBrains Mono',
+    monospace;
+  line-height: 1.4;
+}
+
+.toolParametersEmpty {
+  display: grid;
+  min-height: 66px;
+  place-items: center;
+  padding: 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
 }
 
 .toolsList {
@@ -2407,7 +2531,7 @@
   }
 
   .toolCallColumn {
-    grid-template-rows: auto 192px auto auto;
+    grid-template-rows: auto auto 192px auto auto;
   }
 
   .toolResultPanel {

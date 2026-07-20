@@ -86,8 +86,26 @@ vi.mock('../src/lib/api', () => ({
             type: 'object',
             required: ['pattern'],
             properties: {
-              pattern: { type: 'string', default: 'mcp' },
-              caseSensitive: { type: 'boolean' },
+              pattern: {
+                type: 'string',
+                default: 'mcp',
+                description: 'Match this text against each captured request URL.',
+              },
+              caseSensitive: {
+                type: 'boolean',
+                description: 'Use case-sensitive text matching.',
+              },
+              options: {
+                type: 'object',
+                description: 'Optional result controls.',
+                properties: {
+                  limit: {
+                    type: 'integer',
+                    default: 100,
+                    description: 'Maximum number of matching records to return.',
+                  },
+                },
+              },
             },
           },
         },
@@ -180,6 +198,7 @@ vi.mock('../src/lib/api', () => ({
 beforeEach(() => {
   vi.clearAllMocks()
   monacoEditorMock.reset()
+  window.localStorage.clear()
   window.history.replaceState({}, '', '/mcp')
 })
 
@@ -762,6 +781,19 @@ describe('MCP workbench view', () => {
     expect(within(panel).getByTitle('capture_live_filter')).toBeDefined()
     expect(within(panel).getByTitle('Filter current Reqable live capture records')).toBeDefined()
     expect(within(panel).getByRole('button', { name: '重置参数' })).toBeDefined()
+    const parametersToggle = within(panel).getByRole('button', { name: /参数说明.*1 必填 · 4 个/ })
+    expect(parametersToggle.getAttribute('aria-expanded')).toBe('true')
+    expect(
+      within(panel).getByText('Match this text against each captured request URL.'),
+    ).toBeDefined()
+    expect(within(panel).getByText('options.limit')).toBeDefined()
+    expect(within(panel).getByText('default: 100')).toBeDefined()
+    fireEvent.click(parametersToggle)
+    expect(parametersToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(
+      within(panel).queryByText('Match this text against each captured request URL.'),
+    ).toBeNull()
+    expect(window.localStorage.getItem('loom:mcp-debug:parameters-expanded')).toBe('false')
     fireEvent.change(args, { target: { value: '{ "pattern": "reqable" }' } })
     fireEvent.click(within(panel).getByRole('button', { name: 'Call tool' }))
 
