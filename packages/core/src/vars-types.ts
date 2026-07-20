@@ -1,13 +1,23 @@
 export type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 
+export const STRING_FORMATS = [
+  'plain',
+  'markdown',
+  'json',
+  'yaml',
+  'toml',
+  'shell',
+  'path',
+] as const
+
+export type StringFormat = (typeof STRING_FORMATS)[number]
+
 export type VarEntry =
   | { type: 'string' | 'secret'; value: string; format?: StringFormat }
   | { type: 'number'; value: number }
   | { type: 'boolean'; value: boolean }
   | { type: 'json'; value: JsonValue }
-
-export type StringFormat = 'plain' | 'markdown' | 'json' | 'yaml' | 'toml' | 'shell' | 'path'
 
 export type VarDefinition = VarEntry
 

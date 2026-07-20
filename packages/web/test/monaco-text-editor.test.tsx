@@ -116,7 +116,7 @@ describe('MonacoTextEditor', () => {
   it('shows a visible error and logs the full object when Monaco render fails', async () => {
     const err = new Error('render failed')
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    function BrokenEditor() {
+    function BrokenEditor(): JSX.Element {
       throw err
     }
 

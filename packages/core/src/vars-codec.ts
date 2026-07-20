@@ -2,6 +2,7 @@ import yaml from 'js-yaml'
 import { z } from 'zod'
 import {
   RESERVED_BUILTIN_PREFIX,
+  STRING_FORMATS,
   VAR_KEY,
   type JsonValue,
   type VarDefinition,
@@ -33,14 +34,16 @@ export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 )
 
 export const VarEntrySchema: z.ZodType<VarEntry> = z.discriminatedUnion('type', [
-  z.object({
-    type: z.enum(['string', 'secret']),
-    format: z.enum(['plain', 'markdown', 'json', 'yaml', 'toml', 'shell', 'path']).optional(),
-    value: z.string(),
-  }),
-  z.object({ type: z.literal('number'), value: z.number().finite() }),
-  z.object({ type: z.literal('boolean'), value: z.boolean() }),
-  z.object({ type: z.literal('json'), value: JsonValueSchema }),
+  z
+    .object({
+      type: z.enum(['string', 'secret']),
+      format: z.enum(STRING_FORMATS).optional(),
+      value: z.string(),
+    })
+    .strict(),
+  z.object({ type: z.literal('number'), value: z.number().finite() }).strict(),
+  z.object({ type: z.literal('boolean'), value: z.boolean() }).strict(),
+  z.object({ type: z.literal('json'), value: JsonValueSchema }).strict(),
 ])
 
 export const VarDefinitionSchema: z.ZodType<VarDefinition> = VarEntrySchema
@@ -50,11 +53,13 @@ export const VarOverrideSchema: z.ZodType<VarOverride> = z
   .strict()
 
 export const VarsEnvironmentSchema: z.ZodType<VarsEnvironment> = z.discriminatedUnion('format', [
-  z.object({
-    format: z.literal('legacy'),
-    entries: z.record(z.object({ type: z.literal('string'), value: z.string() })),
-  }),
-  z.object({ format: z.literal('typed'), entries: z.record(VarEntrySchema) }),
+  z
+    .object({
+      format: z.literal('legacy'),
+      entries: z.record(z.object({ type: z.literal('string'), value: z.string() }).strict()),
+    })
+    .strict(),
+  z.object({ format: z.literal('typed'), entries: z.record(VarEntrySchema) }).strict(),
 ])
 
 const VarsDocumentSchema = z.record(z.unknown())

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SourceTreeNode } from '@loom/core'
 import SourceTreeSelection, {
@@ -127,13 +127,22 @@ describe('SourceTreeSelection', () => {
     )
 
     onOpenBundle.mockClear()
-    fireEvent.click(screen.getByRole('tab', { name: 'Tree' }))
-    const bundleName = await screen.findByText('incident-triage')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: 'Tree' }))
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    })
+    const bundleName = screen.getByText('incident-triage')
     expect(screen.queryByRole('link', { name: 'incident-triage' })).toBeNull()
-    fireEvent.click(bundleName.parentElement!)
+    await act(async () => {
+      fireEvent.click(bundleName.parentElement!)
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    })
     expect(onOpenBundle).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Select folder/incident-triage' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select folder/incident-triage' }))
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    })
     expect(onChange).toHaveBeenCalled()
   })
 

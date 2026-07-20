@@ -18,8 +18,8 @@ describe('parseVarsEnvironment', () => {
   it('parses all five explicit typed entries', () => {
     expect(
       parseVarsEnvironment(`
-TEXT: { type: string, value: hello }
-TOKEN: { type: secret, value: hidden }
+TEXT: { type: string, format: path, value: hello }
+TOKEN: { type: secret, format: markdown, value: hidden }
 COUNT: { type: number, value: 3.5 }
 ENABLED: { type: boolean, value: true }
 CONFIG:
@@ -29,8 +29,8 @@ CONFIG:
     ).toEqual({
       format: 'typed',
       entries: {
-        TEXT: { type: 'string', value: 'hello' },
-        TOKEN: { type: 'secret', value: 'hidden' },
+        TEXT: { type: 'string', format: 'path', value: 'hello' },
+        TOKEN: { type: 'secret', format: 'markdown', value: 'hidden' },
         COUNT: { type: 'number', value: 3.5 },
         ENABLED: { type: 'boolean', value: true },
         CONFIG: { type: 'json', value: { nested: [null, false, 2, 'ok'] } },
@@ -83,7 +83,12 @@ CONFIG:
     expect(environment.entries['__proto__']).toEqual({ type: 'string', value: 'root' })
     const config = environment.entries.CONFIG
     expect(config.type).toBe('json')
-    if (config.type === 'json' && typeof config.value === 'object' && config.value !== null) {
+    if (
+      config.type === 'json' &&
+      typeof config.value === 'object' &&
+      config.value !== null &&
+      !Array.isArray(config.value)
+    ) {
       expect(Object.hasOwn(config.value, '__proto__')).toBe(true)
       expect(config.value['__proto__']).toEqual({ polluted: true })
     }
@@ -96,7 +101,8 @@ CONFIG:
     if (
       roundTrippedConfig.type === 'json' &&
       typeof roundTrippedConfig.value === 'object' &&
-      roundTrippedConfig.value !== null
+      roundTrippedConfig.value !== null &&
+      !Array.isArray(roundTrippedConfig.value)
     ) {
       expect(Object.hasOwn(roundTrippedConfig.value, '__proto__')).toBe(true)
       expect(roundTrippedConfig.value['__proto__']).toEqual({ polluted: true })
@@ -112,6 +118,25 @@ CONFIG:
       'typed_value_invalid',
     )
     expectCode(() => parseVarsEnvironment('VALUE: { nested: true }'), 'legacy_value_invalid')
+  })
+
+  it('rejects unknown fields instead of preserving or stripping them', () => {
+    expectCode(
+      () => parseVarsEnvironment('VALUE: { type: string, value: ok, future: true }'),
+      'typed_value_invalid',
+    )
+    expectCode(
+      () => parseVarsBaseDefinitions('VALUE: { type: string, value: ok, future: true }'),
+      'typed_value_invalid',
+    )
+    expectCode(
+      () =>
+        serializeVarsEnvironment({
+          format: 'typed',
+          entries: { VALUE: { type: 'string', value: 'ok', future: true } },
+        } as never),
+      'vars_environment_invalid',
+    )
   })
 
   it('keeps parser causes without exposing YAML source in the wrapper message or stack', () => {
@@ -132,8 +157,8 @@ CONFIG:
 describe('serializeVarsEnvironment', () => {
   it('round-trips a typed environment', () => {
     const environment = parseVarsEnvironment(`
-TEXT: { type: string, value: hello }
-TOKEN: { type: secret, value: hidden }
+TEXT: { type: string, format: path, value: hello }
+TOKEN: { type: secret, format: markdown, value: hidden }
 COUNT: { type: number, value: 3.5 }
 ENABLED: { type: boolean, value: true }
 CONFIG: { type: json, value: { nested: [null, false, 2, ok] } }

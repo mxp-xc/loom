@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -92,10 +92,43 @@ function sourceMarker(sourceUrl = 'https://example.com/workflow-source.git') {
     ownerRepo: 'owner-repo',
     sourceKey: createHash('sha256').update(sourceUrl).digest('hex'),
     sourceName: 'workflow-source',
+    namespace: 'workflow-source',
   }
 }
 
 describe('source namespace projection', () => {
+  it('does not follow a replacement link at the staging marker path', async () => {
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
+    const external = join(home, 'external.txt')
+    await writeFile(external, 'keep')
+    class MarkerCollisionFileSystem extends NodeFileSystem {
+      override async writeFileExclusive(path: string, content: string) {
+        if (path.endsWith('/.loom-projection.json')) await symlink(external, path)
+        return super.writeFileExclusive(path, content)
+      }
+    }
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          {
+            ...sourcePlan(),
+            entries: [{ kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' }],
+          },
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      { ...deps(() => cacheRoot), fs: new MarkerCollisionFileSystem() },
+      'skills',
+    )
+
+    expect(result.ok).toBe(false)
+    await expect(readFile(external, 'utf8')).resolves.toBe('keep')
+  })
+
   it('builds source transactions outside the agent skills discovery root', async () => {
     await mkdir(join(cacheRoot, 'skill'), { recursive: true })
     await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
@@ -356,6 +389,85 @@ describe('source namespace projection', () => {
     },
   )
 
+  it('preserves and rejects a source namespace marker missing its actual namespace', async () => {
+    const namespace = join(home, '.claude', 'skills', 'workflow-source')
+    await mkdir(namespace, { recursive: true })
+    await writeFile(join(namespace, 'keep.md'), 'keep')
+    const { namespace: _namespace, ...incompleteMarker } = sourceMarker()
+    await writeFile(join(namespace, '.loom-projection.json'), JSON.stringify(incompleteMarker))
+    await mkdir(join(cacheRoot, 'skill'))
+    await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            entries: [{ kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' }],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result.ok).toBe(false)
+    expect(await readFile(join(namespace, 'keep.md'), 'utf8')).toBe('keep')
+  })
+
+  it.each(['CON', 'folder/nul.txt', 'trailing.', 'trailing '])(
+    'rejects a non-portable materialized target path %s',
+    async (targetPath) => {
+      await writeFile(join(cacheRoot, 'workflow.md'), 'workflow')
+
+      const result = await executeProjection(
+        projectionPlan(
+          [
+            sourcePlan({
+              entries: [{ kind: 'resource-file', sourcePath: 'workflow.md', targetPath }],
+            }),
+          ],
+          'copy',
+        ),
+        manifest,
+        { env: {}, activeProfile: {}, defaultProfile: {} },
+        deps(() => cacheRoot),
+        'skills',
+      )
+
+      expect(result.ok).toBe(false)
+    },
+  )
+
+  it('rejects case-folded tracked source collisions before reading either path', async () => {
+    const projectionDeps = deps(() => cacheRoot)
+    projectionDeps.resolveSourceFiles = async () => ['Skill/SKILL.md', 'skill/SKILL.md']
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            entries: [{ kind: 'bundle', sourcePath: '', targetPath: '' }],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      projectionDeps,
+      'skills',
+    )
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.failure.originalError).toEqual(
+        expect.objectContaining({ message: expect.stringContaining('path collision') }),
+      )
+    }
+  })
+
   it('does not overwrite an unmarked user-owned namespace', async () => {
     const namespace = join(home, '.claude', 'skills', 'workflow-source')
     await mkdir(namespace, { recursive: true })
@@ -380,6 +492,83 @@ describe('source namespace projection', () => {
 
     expect(result.ok).toBe(false)
     expect(await readFile(join(namespace, 'notes.md'), 'utf8')).toBe('mine')
+  })
+
+  it('does not overwrite a namespace whose marker sourceName mismatches its directory', async () => {
+    const namespace = join(home, '.claude', 'skills', 'workflow-source')
+    await mkdir(namespace, { recursive: true })
+    await writeFile(join(namespace, 'notes.md'), 'keep me')
+    await writeFile(
+      join(namespace, '.loom-projection.json'),
+      JSON.stringify({ ...sourceMarker(), sourceName: 'different-source' }),
+    )
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'next')
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            entries: [{ kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' }],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result.ok).toBe(false)
+    expect(await readFile(join(namespace, 'notes.md'), 'utf8')).toBe('keep me')
+    await expect(readFile(join(namespace, 'skill', 'SKILL.md'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('rejects a tracked file replacement after preflight and preserves the old namespace', async () => {
+    const namespace = join(home, '.claude', 'skills', 'workflow-source')
+    const trackedFile = join(cacheRoot, 'skill', 'SKILL.md')
+    await mkdir(namespace, { recursive: true })
+    await writeFile(join(namespace, 'old.md'), 'old')
+    await writeFile(join(namespace, '.loom-projection.json'), JSON.stringify(sourceMarker()))
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await writeFile(trackedFile, 'original')
+
+    class SwappingSourceFileSystem extends NodeFileSystem {
+      private swapped = false
+
+      override async mkdir(path: string, recursive?: boolean): Promise<void> {
+        await super.mkdir(path, recursive)
+        if (!this.swapped && path.includes('.loom-staging-')) {
+          this.swapped = true
+          await rename(trackedFile, `${trackedFile}.original`)
+          await writeFile(trackedFile, 'replacement')
+        }
+      }
+    }
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            entries: [{ kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' }],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      { ...deps(() => cacheRoot), fs: new SwappingSourceFileSystem() },
+      'skills',
+    )
+
+    expect(result.ok).toBe(false)
+    expect(await readFile(join(namespace, 'old.md'), 'utf8')).toBe('old')
+    await expect(readFile(join(namespace, 'skill', 'SKILL.md'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('fails before changing an existing namespace when the tracked resolver is unavailable', async () => {
@@ -445,6 +634,43 @@ describe('source namespace projection', () => {
     expect(await new NodeFileSystem().exists(join(namespace, 'next'))).toBe(false)
   })
 
+  it('reports backup cleanup failure without rolling back the applied namespace', async () => {
+    const namespace = join(home, '.claude', 'skills', 'workflow-source')
+    await mkdir(namespace, { recursive: true })
+    await writeFile(join(namespace, 'old.md'), 'old')
+    await writeFile(join(namespace, '.loom-projection.json'), JSON.stringify(sourceMarker()))
+    await mkdir(join(cacheRoot, 'next'))
+    await writeFile(join(cacheRoot, 'next', 'SKILL.md'), 'next')
+
+    class CleanupFaultFileSystem extends NodeFileSystem {
+      override async removeEntryIfIdentity(path: string, expectedIdentity: string): Promise<void> {
+        if (path.includes('.loom-backup-')) throw new Error('simulated backup cleanup failure')
+        await super.removeEntryIfIdentity(path, expectedIdentity)
+      }
+    }
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            entries: [{ kind: 'bundle', sourcePath: 'next', targetPath: 'next' }],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      { ...deps(() => cacheRoot), fs: new CleanupFaultFileSystem() },
+      'skills',
+    )
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.failure.failedStep).toBe('cleanup')
+    expect(await readFile(join(namespace, 'next', 'SKILL.md'), 'utf8')).toBe('next')
+    const transactions = await readdir(join(home, '.claude', '.loom-projection-transactions'))
+    expect(transactions.some((entry) => entry.includes('.loom-backup-'))).toBe(true)
+  })
+
   it('retries namespace restoration through the outer journal when the immediate restore fails', async () => {
     const namespace = join(home, '.claude', 'skills', 'workflow-source')
     await mkdir(namespace, { recursive: true })
@@ -457,7 +683,7 @@ describe('source namespace projection', () => {
       private stagingMoveFailed = false
       private immediateRestoreFailed = false
 
-      override async move(src: string, dest: string): Promise<void> {
+      override async moveNoReplace(src: string, dest: string, expectedIdentity?: string) {
         if (src.includes('.loom-staging-')) {
           this.stagingMoveFailed = true
           throw new Error('simulated staging move failure')
@@ -470,7 +696,7 @@ describe('source namespace projection', () => {
           this.immediateRestoreFailed = true
           throw new Error('simulated immediate restore failure')
         }
-        await super.move(src, dest)
+        return super.moveNoReplace(src, dest, expectedIdentity)
       }
     }
 
@@ -501,7 +727,11 @@ describe('source namespace projection', () => {
     await mkdir(userOwned, { recursive: true })
     await writeFile(
       join(managed, '.loom-projection.json'),
-      JSON.stringify({ ...sourceMarker('https://example.com/old.git'), sourceName: 'old-source' }),
+      JSON.stringify({
+        ...sourceMarker('https://example.com/old.git'),
+        sourceName: 'old-source',
+        namespace: 'old-source',
+      }),
     )
     await writeFile(join(userOwned, 'notes.md'), 'mine')
 

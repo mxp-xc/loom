@@ -5,44 +5,54 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createSkillsYamlRoutes } from '../../src/api/routes/skills-yaml'
 import { annotateLocalSkillAvailability } from '../../src/projection/workflow'
+import { NodeFileSystem } from '../../src/platform/node/fs'
 
 describe('local skill availability', () => {
   it('marks refs by checking their SKILL.md file', async () => {
-    const fs = {
-      exists: vi.fn(async (path: string) => path === '/repo/valid/SKILL.md'),
-      readFile: vi.fn(async () => '---\ndescription: Valid local skill\n---\nbody'),
+    const repo = await mkdtemp(join(tmpdir(), 'local-skill-status-'))
+    try {
+      await mkdir(join(repo, 'valid'), { recursive: true })
+      await writeFile(
+        join(repo, 'valid', 'SKILL.md'),
+        '---\ndescription: Valid local skill\n---\nbody',
+      )
+      const skills = [
+        { id: 'valid', path: './valid' },
+        { id: 'missing', path: './missing' },
+        { id: 'builtin' },
+      ]
+
+      await annotateLocalSkillAvailability(new NodeFileSystem(), repo, skills)
+
+      expect(skills).toEqual([
+        {
+          id: 'valid',
+          path: './valid',
+          available: true,
+          skillFilePath: 'valid/SKILL.md',
+          description: 'Valid local skill',
+        },
+        { id: 'missing', path: './missing', available: false },
+        { id: 'builtin' },
+      ])
+    } finally {
+      await rm(repo, { recursive: true, force: true })
     }
-    const skills = [
-      { id: 'valid', path: './valid' },
-      { id: 'missing', path: './missing' },
-      { id: 'builtin' },
-    ]
-
-    await annotateLocalSkillAvailability(fs as never, '/repo', skills)
-
-    expect(skills).toEqual([
-      {
-        id: 'valid',
-        path: './valid',
-        available: true,
-        skillFilePath: 'valid/SKILL.md',
-        description: 'Valid local skill',
-      },
-      { id: 'missing', path: './missing', available: false },
-      { id: 'builtin' },
-    ])
   })
 
   it('accepts desc frontmatter as a local skill description alias', async () => {
-    const fs = {
-      exists: vi.fn(async (path: string) => path === '/repo/alias/SKILL.md'),
-      readFile: vi.fn(async () => '---\ndesc: Alias local skill\n---\nbody'),
+    const repo = await mkdtemp(join(tmpdir(), 'local-skill-alias-'))
+    try {
+      await mkdir(join(repo, 'alias'), { recursive: true })
+      await writeFile(join(repo, 'alias', 'SKILL.md'), '---\ndesc: Alias local skill\n---\nbody')
+      const skills = [{ id: 'alias', path: './alias' }]
+
+      await annotateLocalSkillAvailability(new NodeFileSystem(), repo, skills)
+
+      expect(skills[0]).toMatchObject({ description: 'Alias local skill' })
+    } finally {
+      await rm(repo, { recursive: true, force: true })
     }
-    const skills = [{ id: 'alias', path: './alias' }]
-
-    await annotateLocalSkillAvailability(fs as never, '/repo', skills)
-
-    expect(skills[0]).toMatchObject({ description: 'Alias local skill' })
   })
 })
 
@@ -65,79 +75,39 @@ describe('local skill scan path', () => {
     expect(response.status).toBe(200)
     expect(fs.exists).toHaveBeenCalledWith('/home/tester/.agents/skills')
   })
-
-  it('keeps previous scan behavior by including skills under .cache directories', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'local-skill-scan-'))
-    try {
-      await mkdir(join(dir, '.cache', 'cached-skill'), { recursive: true })
-      await writeFile(join(dir, '.cache', 'cached-skill', 'SKILL.md'), 'x')
-      await mkdir(join(dir, 'node_modules', 'ignored'), { recursive: true })
-      await writeFile(join(dir, 'node_modules', 'ignored', 'SKILL.md'), 'x')
-      const fs = {
-        exists: vi.fn(async (path: string) => path === dir),
-      }
-      const app = new Hono().route(
-        '/api',
-        createSkillsYamlRoutes({ fs, git: {}, proc: {}, home: '/home/tester' } as never),
-      )
-
-      const response = await app.request('/api/skills/local/scan', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ dir }),
-      })
-
-      expect(response.status).toBe(200)
-      expect(await response.json()).toEqual({
-        ok: true,
-        skills: [{ name: 'cached-skill', path: join(dir, '.cache', 'cached-skill') }],
-      })
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
 })
 
 describe('source skill agent routes', () => {
   it('updates multiple source member agents with one request and one yaml write', async () => {
-    const files = new Map<string, string>()
-    const fs = {
-      readDir: vi.fn(async () => ['demo']),
-      exists: vi.fn(async () => true),
-      readFile: vi.fn(async (path: string) => {
-        if (!path.endsWith('skills.yaml')) {
-          throw Object.assign(new Error('missing'), { code: 'ENOENT' })
-        }
-        return [
-          'sources:',
-          '  - url: https://example.test/skills.git',
-          '    ref: main',
-          '    members:',
-          '      - name: alpha',
-          '        entry: skills/alpha/SKILL.md',
-          '        agents:',
-          '          - claude-code',
-          '      - name: beta',
-          '        entry: skills/beta/SKILL.md',
-          '        agents: []',
-          'skills: []',
-          '',
-        ].join('\n')
-      }),
-      writeFile: vi.fn(async (path: string, content: string) => {
-        files.set(path, content)
-      }),
-      replaceFile: vi.fn(async (temporary: string, target: string) => {
-        files.set(target, files.get(temporary) ?? '')
-        files.delete(temporary)
-      }),
-      removeFile: vi.fn(async (path: string) => {
-        files.delete(path)
-      }),
-    }
+    const home = await mkdtemp(join(tmpdir(), 'source-agents-route-'))
+    const repo = join(home, '.loom', 'repos', 'demo')
+    await mkdir(repo, { recursive: true })
+    await writeFile(
+      join(repo, 'skills.yaml'),
+      [
+        'sources:',
+        '  - url: https://example.test/skills.git',
+        '    ref: main',
+        '    members:',
+        '      - name: alpha',
+        '        entry: skills/alpha/SKILL.md',
+        '        agents:',
+        '          - claude-code',
+        '      - name: beta',
+        '        entry: skills/beta/SKILL.md',
+        '        agents: []',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
     const app = new Hono().route(
       '/api',
-      createSkillsYamlRoutes({ fs, git: {}, proc: {}, home: '/home/tester' } as never),
+      createSkillsYamlRoutes({
+        fs: new NodeFileSystem(),
+        git: {},
+        proc: {},
+        home,
+      } as never),
     )
 
     const response = await app.request('/api/skills/source-agents', {
@@ -153,12 +123,16 @@ describe('source skill agent routes', () => {
       }),
     })
 
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ ok: true })
-    expect(fs.writeFile).toHaveBeenCalledTimes(1)
-    expect([...files.values()][0]).toContain('name: alpha')
-    expect([...files.values()][0]).toContain('- codex')
-    expect([...files.values()][0]).toContain('name: beta')
-    expect([...files.values()][0]).toContain('- opencode')
+    try {
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ ok: true })
+      const content = await new NodeFileSystem().readFile(join(repo, 'skills.yaml'))
+      expect(content).toContain('name: alpha')
+      expect(content).toContain('- codex')
+      expect(content).toContain('name: beta')
+      expect(content).toContain('- opencode')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
   })
 })

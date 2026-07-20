@@ -1,4 +1,5 @@
 import type { SkillsManifest, McpServer, AgentId, LocalSkill, SkillSource } from './types.js'
+import { assertLocalSkillId } from './skill-id.js'
 
 export type MutationResult<T> = { changed: boolean; data: T }
 
@@ -8,6 +9,10 @@ export function addLocalSkill(
   skills: SkillsManifest,
   skill: LocalSkill,
 ): MutationResult<SkillsManifest> {
+  assertLocalSkillId(skill.id)
+  if (skills.skills.some((existing) => existing.id === skill.id)) {
+    return { changed: false, data: skills }
+  }
   return { changed: true, data: { ...skills, skills: [...skills.skills, skill] } }
 }
 
@@ -15,6 +20,7 @@ export function removeLocalSkill(
   skills: SkillsManifest,
   id: string,
 ): MutationResult<SkillsManifest> {
+  assertLocalSkillId(id)
   const filtered = skills.skills.filter((s) => s.id !== id)
   if (filtered.length === skills.skills.length) return { changed: false, data: skills }
   return { changed: true, data: { ...skills, skills: filtered } }
@@ -125,10 +131,9 @@ export function setLocalSkillAgents(
   id: string,
   agents: AgentId[],
 ): MutationResult<SkillsManifest> {
+  assertLocalSkillId(id)
   const idx = skills.skills.findIndex((s) => s.id === id)
-  if (idx === -1) {
-    return { changed: true, data: { ...skills, skills: [...skills.skills, { id, agents }] } }
-  }
+  if (idx === -1) return { changed: false, data: skills }
   const list = skills.skills.slice()
   list[idx] = { ...skills.skills[idx], agents }
   return { changed: true, data: { ...skills, skills: list } }
@@ -190,37 +195,50 @@ export function setMcpAgents(
 
 // -- Config mutation (open-ended Record, not Config interface) --
 
+const unsafeConfigPathSegments = new Set(['__proto__', 'prototype', 'constructor'])
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
 export function setConfigField(
   config: Record<string, unknown>,
   field: string,
   value: unknown,
 ): { changed: boolean; data: Record<string, unknown> } {
   const parts = field.split('.')
+  if (parts.some((part) => !part || unsafeConfigPathSegments.has(part))) {
+    throw new Error(`Invalid config field path: ${field}`)
+  }
+
   if (parts.length === 1) {
-    // Top-level field — original behavior
     if (value === null) {
-      if (!(field in config)) return { changed: false, data: config }
+      if (!Object.hasOwn(config, field)) return { changed: false, data: config }
       const rest = { ...config }
       delete rest[field]
       return { changed: true, data: rest }
     }
-    if (Object.is(config[field], value)) return { changed: false, data: config }
+    if (Object.hasOwn(config, field) && Object.is(config[field], value)) {
+      return { changed: false, data: config }
+    }
     return { changed: true, data: { ...config, [field]: value } }
   }
 
-  // Dot-path: traverse into nested objects
   const [head, ...tail] = parts
-  const child = config[head]
+  const hasChild = Object.hasOwn(config, head)
+  const child = hasChild ? config[head] : undefined
   if (value === null) {
-    if (child === undefined || typeof child !== 'object' || child === null) {
-      return { changed: false, data: config }
-    }
+    if (!hasChild) return { changed: false, data: config }
+    if (!isPlainRecord(child)) throw new Error(`Config field ${head} is not an object`)
     const result = setConfigField(child as Record<string, unknown>, tail.join('.'), null)
     if (!result.changed) return { changed: false, data: config }
     return { changed: true, data: { ...config, [head]: result.data } }
   }
-  const base = typeof child === 'object' && child !== null ? (child as Record<string, unknown>) : {}
+  if (hasChild && !isPlainRecord(child)) throw new Error(`Config field ${head} is not an object`)
+  const base: Record<string, unknown> = hasChild ? (child as Record<string, unknown>) : {}
   const result = setConfigField(base, tail.join('.'), value)
-  if (!result.changed && head in config) return { changed: false, data: config }
+  if (!result.changed && hasChild) return { changed: false, data: config }
   return { changed: true, data: { ...config, [head]: result.data } }
 }

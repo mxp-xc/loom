@@ -6,6 +6,8 @@ import type {
   VarsLayerRef,
   VarsResolvedEntry,
 } from './vars-types.js'
+import { replaceVariableTokens } from './vars-template.js'
+import { cloneJsonValue } from './vars-value.js'
 
 export interface BuiltinVarsRuntime {
   agent: AgentId
@@ -76,9 +78,7 @@ function diagnostic(
 }
 
 function cloneDefinition(entry: VarDefinition): VarDefinition {
-  return entry.type === 'json'
-    ? { type: 'json', value: structuredClone(entry.value) }
-    : { ...entry }
+  return entry.type === 'json' ? { type: 'json', value: cloneJsonValue(entry.value) } : { ...entry }
 }
 
 function definitionWithOverride(
@@ -94,7 +94,7 @@ function definitionWithOverride(
       : null
   if (definition.type === 'boolean')
     return typeof override.value === 'boolean' ? { type: 'boolean', value: override.value } : null
-  return { type: 'json', value: structuredClone(override.value) }
+  return { type: 'json', value: cloneJsonValue(override.value) }
 }
 
 export function createBuiltinVars(runtime: BuiltinVarsRuntime): Record<string, VarDefinition> {
@@ -203,8 +203,6 @@ export function resolveLayeredVars(input: LayeredVarsInput): LayeredVarsResoluti
   const dependencies = createRecord<string[]>()
   const stack: string[] = []
   const visiting = new Set<string>()
-  const ESC = String.fromCharCode(0) + 'DOLLAR_BRACE' + String.fromCharCode(0)
-
   const resolveEntry = (key: string): VarDefinition => {
     if (Object.hasOwn(values, key)) return values[key]
     const entry = merged[key]
@@ -228,18 +226,20 @@ export function resolveLayeredVars(input: LayeredVarsInput): LayeredVarsResoluti
     stack.push(key)
     dependencies[key] = []
     try {
-      const protectedValue = entry.value.replaceAll('\\${', ESC)
-      const resolvedValue = protectedValue.replace(/\$\{([^}]+)\}/g, (full, raw: string) => {
-        const [referencedKey, ...defaultParts] = raw.split(':')
-        if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(referencedKey)) return full
+      const resolvedValue = replaceVariableTokens(entry.value, (token) => {
+        const referencedKey = token.key
         if (!dependencies[key].includes(referencedKey)) dependencies[key].push(referencedKey)
-        if (defaultParts.length > 0)
+        if (token.defaultValue !== undefined)
           throw new ResolutionFailure(
-            diagnostic('UNSUPPORTED_DEFAULT', '变量默认值语法暂不支持: ' + raw, {
-              key,
-              referencedKey,
-              path: [...stack, referencedKey],
-            }),
+            diagnostic(
+              'UNSUPPORTED_DEFAULT',
+              '变量默认值语法暂不支持: ' + referencedKey + ':' + token.defaultValue,
+              {
+                key,
+                referencedKey,
+                path: [...stack, referencedKey],
+              },
+            ),
           )
         if (!Object.hasOwn(merged, referencedKey))
           throw new ResolutionFailure(
@@ -264,7 +264,7 @@ export function resolveLayeredVars(input: LayeredVarsInput): LayeredVarsResoluti
           )
         return String(referenced.value)
       })
-      values[key] = { ...entry, value: resolvedValue.replaceAll(ESC, '${') }
+      values[key] = { ...entry, value: resolvedValue }
       return values[key]
     } finally {
       stack.pop()
@@ -300,40 +300,39 @@ export function resolveLayeredVars(input: LayeredVarsInput): LayeredVarsResoluti
 
 export function renderTextWithResolvedVars(
   text: string,
-  resolution: Extract<LayeredVarsResolution, { ok: true }>,
+  resolution: Pick<Extract<LayeredVarsResolution, { ok: true }>, 'values'>,
 ): RenderTextResult {
-  const ESC = String.fromCharCode(0) + 'DOLLAR_BRACE' + String.fromCharCode(0)
   const diagnostics: VarsDiagnostic[] = []
-  const rendered = text
-    .replaceAll('\\${', ESC)
-    .replace(/\$\{([^}]+)\}/g, (full, raw: string) => {
-      const [key, ...defaultParts] = raw.split(':')
-      if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key)) return full
-      if (defaultParts.length > 0) {
-        diagnostics.push(
-          diagnostic('UNSUPPORTED_DEFAULT', '变量默认值语法暂不支持: ' + raw, { key, path: [key] }),
-        )
-        return full
-      }
-      const entry = resolution.values[key]
-      if (!entry) {
-        diagnostics.push(
-          diagnostic('MISSING_REFERENCE', '模板引用了不存在的变量 ' + key, { key, path: [key] }),
-        )
-        return full
-      }
-      if (entry.type === 'json') {
-        diagnostics.push(
-          diagnostic('JSON_TEXT_INTERPOLATION', 'JSON 变量不能直接插入文本: ' + key, {
-            key,
-            path: [key],
-          }),
-        )
-        return full
-      }
-      return String(entry.value)
-    })
-    .replaceAll(ESC, '${')
+  const rendered = replaceVariableTokens(text, (token) => {
+    const key = token.key
+    if (token.defaultValue !== undefined) {
+      diagnostics.push(
+        diagnostic(
+          'UNSUPPORTED_DEFAULT',
+          '变量默认值语法暂不支持: ' + key + ':' + token.defaultValue,
+          { key, path: [key] },
+        ),
+      )
+      return text.slice(token.start, token.end)
+    }
+    const entry = resolution.values[key]
+    if (!entry) {
+      diagnostics.push(
+        diagnostic('MISSING_REFERENCE', '模板引用了不存在的变量 ' + key, { key, path: [key] }),
+      )
+      return text.slice(token.start, token.end)
+    }
+    if (entry.type === 'json') {
+      diagnostics.push(
+        diagnostic('JSON_TEXT_INTERPOLATION', 'JSON 变量不能直接插入文本: ' + key, {
+          key,
+          path: [key],
+        }),
+      )
+      return text.slice(token.start, token.end)
+    }
+    return String(entry.value)
+  })
   return diagnostics.some((item) => item.severity === 'error')
     ? { ok: false, diagnostics }
     : { ok: true, text: rendered, diagnostics: [] }

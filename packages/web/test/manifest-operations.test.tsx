@@ -435,7 +435,7 @@ describe('useManifestOperations', () => {
     )
   })
 
-  it('saves a source name change and projects skills', async () => {
+  it('atomically reconciles a source name change and refreshes the manifest', async () => {
     let result: Awaited<ReturnType<Operations['saveSource']>> | undefined
 
     render(
@@ -452,7 +452,7 @@ describe('useManifestOperations', () => {
             name: 'new-name',
             ref: 'main',
             type: 'branch',
-            expected_commit: 'abc123456789',
+            expectedCommit: 'abc123456789',
             members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
             resources: { include: [], exclude: [] },
           })
@@ -469,6 +469,7 @@ describe('useManifestOperations', () => {
         name: 'new-name',
         ref: 'main',
         type: 'branch',
+        expected_commit: 'abc123456789',
         members: [{ name: 'alpha', entry: 'alpha/SKILL.md' }],
         resources: { include: [], exclude: [] },
       }),
@@ -516,13 +517,13 @@ describe('useManifestOperations', () => {
     }
   })
 
-  it('returns failure and refreshes when source meta saves before member save fails', async () => {
+  it('returns failure without refreshing when atomic source reconciliation fails', async () => {
     const onError = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     let result: Awaited<ReturnType<Operations['saveSource']>> | undefined
     vi.mocked(api.reconcileSource).mockResolvedValueOnce({
       ok: false,
-      message: 'members write failed',
+      message: 'source reconciliation failed',
     } as never)
 
     try {
@@ -549,8 +550,8 @@ describe('useManifestOperations', () => {
 
       await waitFor(() => expect(api.reconcileSource).toHaveBeenCalled())
       await waitFor(() => expect(result?.ok).toBe(false))
-      expect(result?.message).toBe('members write failed')
-      expect(onError).toHaveBeenCalledWith('members write failed')
+      expect(result?.message).toBe('source reconciliation failed')
+      expect(onError).toHaveBeenCalledWith('source reconciliation failed')
       expect(api.reconcileSource).toHaveBeenCalledWith({
         repo: '/tmp/r',
         url: 'https://example.test/skills.git',

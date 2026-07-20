@@ -1,34 +1,95 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ToastHost from '../src/components/ToastHost'
 import { dismissToast } from '../src/hooks/useToast'
 import Sync from '../src/views/Sync'
+import type {
+  SyncConflictSaveResponse,
+  SyncPullResponse,
+  SyncPushResponse,
+  SyncSessionResponse,
+} from '../src/lib/api'
+import { deferred } from './deferred'
+
+interface RequestOptions {
+  signal?: AbortSignal
+}
 
 const api = vi.hoisted(() => ({
-  getSyncRemote: vi.fn(async () => ({ remoteUrl: 'https://example.com/repo.git' })),
-  getSyncSession: vi.fn(async () => ({ ok: true, active: false })),
-  syncPull: vi.fn(async () => ({ ok: true, clean: true, conflicts: [] })),
-  syncPush: vi.fn(async () => ({ ok: true })),
-  syncForcePush: vi.fn(async () => ({ ok: true })),
-  syncForcePull: vi.fn(async () => ({ ok: true, clean: true, conflicts: [] })),
-  saveSyncConflict: vi.fn(),
-  abortSyncMerge: vi.fn(),
-  setSyncRemote: vi.fn(async () => ({ ok: true })),
+  getSyncRemote: vi.fn<(repo: string) => Promise<{ remoteUrl: string | null }>>(async () => ({
+    remoteUrl: 'https://example.com/repo.git',
+  })),
+  getSyncSession: vi.fn<(repo: string) => Promise<SyncSessionResponse>>(async () => ({
+    ok: true,
+    active: false,
+  })),
+  syncPull: vi.fn<(repo: string, options?: RequestOptions) => Promise<SyncPullResponse>>(
+    async () => ({
+      ok: true,
+      clean: true,
+      conflicts: [],
+    }),
+  ),
+  syncPush: vi.fn<(repo: string, options?: RequestOptions) => Promise<SyncPushResponse>>(
+    async () => ({
+      ok: true,
+    }),
+  ),
+  syncForcePush: vi.fn<(repo: string) => Promise<SyncPushResponse>>(async () => ({ ok: true })),
+  syncForcePull: vi.fn<(repo: string) => Promise<SyncPullResponse>>(async () => ({
+    ok: true,
+    clean: true,
+    conflicts: [],
+  })),
+  saveSyncConflict: vi.fn<
+    (body: { sessionId: string; path: string; result: string }) => Promise<SyncConflictSaveResponse>
+  >(async () => ({ ok: true, clean: true, remaining: [] })),
+  abortSyncMerge: vi.fn<
+    (sessionId: string) => Promise<{ ok: boolean; error?: string; message?: string }>
+  >(async () => ({ ok: true })),
+  setSyncRemote: vi.fn<(body: { repo: string; remoteUrl: string }) => Promise<{ ok: boolean }>>(
+    async () => ({ ok: true }),
+  ),
 }))
 
 vi.mock('../src/lib/api', () => ({ api }))
 vi.mock('../src/views/sync/ConflictEditor', () => ({
-  default: () => <div>冲突编辑器</div>,
+  default: ({ onAbort }: { onAbort: () => void }) => (
+    <div>
+      冲突编辑器<button onClick={onAbort}>放弃合并</button>
+    </div>
+  ),
 }))
 
-function renderSync() {
-  render(
+const conflictSession: SyncSessionResponse = {
+  ok: true,
+  active: true,
+  clean: false,
+  sessionId: 'session-1',
+  conflicts: [
+    {
+      path: 'skills.yaml',
+      base: 'base',
+      ours: 'local',
+      theirs: 'remote',
+      result: '<<<<<<< HEAD\n',
+      binary: false,
+    },
+  ],
+}
+
+function syncView(repoPath: string) {
+  return (
     <>
       <ToastHost />
-      <Sync repoPath="/repo" />
-    </>,
+      <Sync repoPath={repoPath} />
+    </>
   )
+}
+
+function renderSync(repoPath = '/repo') {
+  return render(syncView(repoPath))
 }
 
 describe('Sync force operations', () => {
@@ -36,7 +97,10 @@ describe('Sync force operations', () => {
     vi.clearAllMocks()
     dismissToast()
     api.getSyncRemote.mockResolvedValue({ remoteUrl: 'https://example.com/repo.git' })
-    api.getSyncSession.mockResolvedValue({ ok: true, active: false })
+    api.getSyncSession.mockResolvedValue({
+      ok: true,
+      active: false,
+    })
     api.syncForcePush.mockResolvedValue({ ok: true })
     api.syncForcePull.mockResolvedValue({ ok: true, clean: true, conflicts: [] })
   })
@@ -64,6 +128,7 @@ describe('Sync force operations', () => {
 
   it('keeps the remote region mounted while the remote URL is loading', async () => {
     api.getSyncRemote.mockImplementation(() => new Promise(() => {}))
+    api.getSyncSession.mockImplementation(() => new Promise(() => {}))
 
     renderSync()
 
@@ -94,22 +159,7 @@ describe('Sync force operations', () => {
   })
 
   it('disables force operations while conflicts are active', async () => {
-    api.getSyncSession.mockResolvedValue({
-      ok: true,
-      active: true,
-      clean: false,
-      sessionId: 'session-1',
-      conflicts: [
-        {
-          path: 'skills.yaml',
-          base: 'base',
-          ours: 'local',
-          theirs: 'remote',
-          result: '<<<<<<< HEAD\n',
-          binary: false,
-        },
-      ],
-    })
+    api.getSyncSession.mockResolvedValue(conflictSession)
 
     renderSync()
     await screen.findByText(/Git 检测到 1 个冲突文件/)
@@ -118,6 +168,42 @@ describe('Sync force operations', () => {
     expect(screen.getByRole('button', { name: '强制推送' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: '更换 remote' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByText('请先解决或放弃本次合并，再更换 remote。')).toBeDefined()
+  })
+
+  it('explains that multiple conflict files are resolved one at a time', async () => {
+    api.getSyncSession.mockResolvedValue({
+      ...conflictSession,
+      conflicts: [
+        conflictSession.conflicts[0],
+        { ...conflictSession.conflicts[0], path: 'agents.yaml' },
+      ],
+    })
+
+    renderSync()
+
+    expect(
+      await screen.findByText('Git 检测到 2 个冲突文件，当前显示第 1/2 个，保存后继续下一个'),
+    ).toBeDefined()
+  })
+
+  it('keeps the conflict visible when abort resolves with a failure response', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    api.getSyncSession.mockResolvedValue(conflictSession)
+    api.abortSyncMerge.mockResolvedValue({
+      ok: false,
+      error: 'cleanup_pending',
+      message: '同步结果仍在清理',
+    })
+
+    renderSync()
+    await screen.findByText('冲突编辑器')
+    fireEvent.click(screen.getByRole('button', { name: '放弃合并' }))
+
+    expect(await screen.findByText('同步操作失败')).toBeDefined()
+    expect(screen.getByText('冲突编辑器')).toBeDefined()
+    expect(screen.queryByText('已放弃本次合并')).toBeNull()
+    expect(consoleError).toHaveBeenCalledWith({ err: expect.any(Error) }, 'Sync merge abort failed')
+    consoleError.mockRestore()
   })
 
   it('switches an existing remote without pulling or pushing', async () => {
@@ -167,7 +253,9 @@ describe('Sync force operations', () => {
   })
 
   it('shows upload failure details in the feedback dialog', async () => {
-    api.syncPush.mockResolvedValue({ ok: false, error: '网络连接失败，请稍后重试' })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const result = { ok: false, error: '网络连接失败，请稍后重试' } as const
+    api.syncPush.mockResolvedValue(result)
 
     renderSync()
     await screen.findByText('https://example.com/repo.git')
@@ -177,15 +265,19 @@ describe('Sync force operations', () => {
     expect(await screen.findByRole('dialog', { name: '上传本地变更' })).toBeDefined()
     expect(screen.getAllByText('上传失败').length).toBeGreaterThan(0)
     expect(screen.getAllByText('网络连接失败，请稍后重试').length).toBeGreaterThan(0)
+    expect(consoleError).toHaveBeenCalledWith({ result }, 'Sync push failed')
+    consoleError.mockRestore()
   })
 
   it('explains non-fast-forward upload failures without showing raw git output', async () => {
-    api.syncPush.mockResolvedValue({
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const result = {
       ok: false,
       nonFastForward: true,
       message:
         'To https://github.com/mxp-xc/my-loom.git\n ! [rejected] HEAD -> main (fetch first)\nhint: Updates were rejected because the remote contains work that you do not have locally.',
-    })
+    } as const
+    api.syncPush.mockResolvedValue(result)
 
     renderSync()
     await screen.findByText('https://example.com/repo.git')
@@ -200,6 +292,8 @@ describe('Sync force operations', () => {
       ).length,
     ).toBeGreaterThan(0)
     expect(screen.queryByText(/fetch first/)).toBeNull()
+    expect(consoleError).toHaveBeenCalledWith({ result }, 'Sync push failed')
+    consoleError.mockRestore()
   })
 
   it('can stop waiting for a running upload from the feedback dialog', async () => {
@@ -225,5 +319,59 @@ describe('Sync force operations', () => {
 
     await waitFor(() => expect(options?.signal?.aborted).toBe(true))
     expect(await screen.findByText('已停止等待')).toBeDefined()
+  })
+
+  it('ignores an old remote response after switching repositories', async () => {
+    const repoA = deferred<{ remoteUrl: string | null }>()
+    const repoB = deferred<{ remoteUrl: string | null }>()
+    api.getSyncRemote.mockImplementation((repoPath) =>
+      repoPath === '/repo-a' ? repoA.promise : repoB.promise,
+    )
+    const view = renderSync('/repo-a')
+
+    view.rerender(syncView('/repo-b'))
+    repoB.resolve({ remoteUrl: 'https://example.com/repo-b.git' })
+    expect(await screen.findByText('https://example.com/repo-b.git')).toBeDefined()
+
+    repoA.resolve({ remoteUrl: 'https://example.com/repo-a.git' })
+    await waitFor(() => expect(screen.queryByText('https://example.com/repo-a.git')).toBeNull())
+    expect(screen.getByText('https://example.com/repo-b.git')).toBeDefined()
+  })
+
+  it('clears conflicts when the next repository has no active session', async () => {
+    api.getSyncRemote.mockImplementation(async (repoPath) => ({
+      remoteUrl: `https://example.com${repoPath}.git`,
+    }))
+    api.getSyncSession.mockImplementation(async (repoPath) =>
+      repoPath === '/repo-a' ? conflictSession : { ok: true, active: false },
+    )
+    const view = renderSync('/repo-a')
+    await screen.findByText('冲突编辑器')
+
+    view.rerender(syncView('/repo-b'))
+
+    expect(await screen.findByText('https://example.com/repo-b.git')).toBeDefined()
+    await waitFor(() => expect(screen.queryByText('冲突编辑器')).toBeNull())
+    expect(screen.queryByText(/Git 检测到 1 个冲突文件/)).toBeNull()
+  })
+
+  it('ignores a pending operation result after switching repositories', async () => {
+    const upload = deferred<SyncPushResponse>()
+    api.getSyncRemote.mockImplementation(async (repoPath) => ({
+      remoteUrl: `https://example.com${repoPath}.git`,
+    }))
+    api.syncPush.mockReturnValue(upload.promise)
+    const view = renderSync('/repo-a')
+    await screen.findByText('https://example.com/repo-a.git')
+
+    fireEvent.click(screen.getByRole('button', { name: '上传' }))
+    expect(await screen.findByRole('dialog', { name: '上传本地变更' })).toBeDefined()
+    view.rerender(syncView('/repo-b'))
+    expect(await screen.findByText('https://example.com/repo-b.git')).toBeDefined()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '上传本地变更' })).toBeNull())
+
+    upload.resolve({ ok: true })
+    await waitFor(() => expect(screen.queryByText('上传成功，远端已同步')).toBeNull())
+    expect(screen.getByText('https://example.com/repo-b.git')).toBeDefined()
   })
 })

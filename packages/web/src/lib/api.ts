@@ -12,6 +12,7 @@ import type {
 } from './vars'
 import type {
   AgentId,
+  Manifest,
   McpServer,
   SourceResources,
   SourceTree,
@@ -134,14 +135,12 @@ async function json<T>(res: Response): Promise<T> {
         diagnostics?: VarsDiagnostic[]
       }
       const nested = typeof payload.error === 'object' ? payload.error : undefined
-      const message =
-        nested?.message ??
-        payload.message ??
-        (typeof payload.error === 'string' ? payload.error : undefined)
+      const flatCode = typeof payload.error === 'string' ? payload.error : undefined
+      const message = nested?.message ?? payload.message ?? flatCode
       throw new ApiError(
         message ?? `${res.status} ${res.statusText}`,
         res.status,
-        nested?.code,
+        nested?.code ?? flatCode,
         nested?.diagnostics ?? payload.diagnostics,
         { details: nested },
       )
@@ -297,15 +296,21 @@ export const api = {
   syncPull: (repo: string, options?: RequestOptions) =>
     post('/sync/pull', { repo }, options).then(json) as Promise<SyncPullResponse>,
   getSyncSession: (repo: string) =>
-    fetch(`${base}/sync/session?repo=${encodeURIComponent(repo)}`).then(json) as Promise<
-      SyncPullResponse & { active: boolean }
-    >,
+    fetch(`${base}/sync/session?repo=${encodeURIComponent(repo)}`).then(
+      json,
+    ) as Promise<SyncSessionResponse>,
   saveSyncConflict: (body: { sessionId: string; path: string; result: string }) =>
     post('/sync/conflicts/save', body).then(json) as Promise<SyncConflictSaveResponse>,
-  abortSyncMerge: (sessionId: string) => post('/sync/conflicts/abort', { sessionId }).then(json),
+  abortSyncMerge: (sessionId: string) =>
+    post('/sync/conflicts/abort', { sessionId }).then(json) as Promise<{
+      ok: boolean
+      error?: string
+      message?: string
+    }>,
   syncPush: (repo: string, options?: RequestOptions) =>
-    post('/sync/push', { repo }, options).then(json),
-  syncForcePush: (repo: string) => post('/sync/force-push', { repo }).then(json),
+    post('/sync/push', { repo }, options).then(json) as Promise<SyncPushResponse>,
+  syncForcePush: (repo: string) =>
+    post('/sync/force-push', { repo }).then(json) as Promise<SyncPushResponse>,
   syncForcePull: (repo: string) =>
     post('/sync/force-pull', { repo }).then(json) as Promise<SyncPullResponse>,
   update: (repo: string, sources: unknown[]) => post('/update', { repo, sources }).then(json),
@@ -344,31 +349,27 @@ export const api = {
     post('/update/cancel', body).then(json) as Promise<{ ok: boolean }>,
   getConfig: (repo: string) => fetch(`${base}/config?repo=${encodeURIComponent(repo)}`).then(json),
   getManifest: (repo: string) =>
-    fetch(`${base}/manifest?repo=${encodeURIComponent(repo)}`).then(json),
-  getSkillContent: (repo: string, skillId: string, sourceUrl?: string, localPath?: string) => {
-    const params = new URLSearchParams({ repo, skillId })
-    if (sourceUrl) params.set('sourceUrl', sourceUrl)
-    if (localPath) params.set('localPath', localPath)
+    fetch(`${base}/manifest?repo=${encodeURIComponent(repo)}`).then(json) as Promise<Manifest>,
+  getSkillContent: (
+    repo: string,
+    identity:
+      | { kind: 'local'; skillId: string }
+      | { kind: 'source'; sourceUrl: string; memberEntry: string },
+  ) => {
+    const params = new URLSearchParams({ repo, ...identity })
     return fetch(`${base}/skill/content?${params}`).then(json) as Promise<{
       ok: boolean
       content?: string
-      path?: string
       error?: string
       message?: string
     }>
   },
-  saveSkillContent: (body: {
-    repo: string
-    skillId: string
-    sourceUrl?: string
-    localPath?: string
-    content: string
-  }) =>
+  saveSkillContent: (body: { repo: string; skillId: string; content: string }) =>
     fetch(`${base}/skill/content`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
-    }).then(json) as Promise<{ ok: boolean; path?: string; error?: string; message?: string }>,
+    }).then(json) as Promise<{ ok: boolean; error?: string; message?: string }>,
   putConfig: (body: { repo: string; level: 'repo' | 'local'; field: string; value: unknown }) =>
     fetch(`${base}/config`, {
       method: 'PUT',
@@ -589,22 +590,20 @@ export interface GitConflictFile {
   theirs: string | null
   result: string | null
   binary: boolean
+  modes?: string[]
+  unsupportedReason?: 'non-regular-mode' | 'binary-content' | 'invalid-utf8' | 'too-large'
 }
 
-export interface SyncPullResponse {
-  ok: boolean
-  clean: boolean
-  sessionId?: string
-  conflicts: GitConflictFile[]
-  error?: string
-  message?: string
-}
+export type SyncPullResponse =
+  | { ok: true; clean: true; conflicts: [] }
+  | { ok: true; clean: false; sessionId: string; conflicts: GitConflictFile[] }
 
-export interface SyncConflictSaveResponse {
-  ok: boolean
-  clean: boolean
-  remaining: GitConflictFile[]
-  sessionId?: string
-  error?: string
-  message?: string
-}
+export type SyncSessionResponse =
+  { ok: true; active: false } | ({ active: true } & Extract<SyncPullResponse, { clean: false }>)
+
+export type SyncConflictSaveResponse =
+  | { ok: true; clean: true; remaining: [] }
+  | { ok: true; clean: false; sessionId: string; remaining: GitConflictFile[] }
+
+export type SyncPushResponse =
+  { ok: true } | { ok: false; nonFastForward?: boolean; error?: string; message?: string }

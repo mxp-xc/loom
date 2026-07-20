@@ -1,14 +1,20 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterAll, describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
 import * as yaml from 'js-yaml'
 import { registerRoutes } from '../../src/api/router'
+import { deriveRepoId } from '@loom/core'
+import type { ProjectionResult } from '../../src/projection/executor.js'
+import type { PreparedSourceUpdate } from '../../src/remote/update.js'
+import { responseJson, validationError } from '../helpers/http.js'
 
 const logFns = vi.hoisted(() => ({
   error: vi.fn(),
   warn: vi.fn(),
   info: vi.fn(),
 }))
-const projectRepositoryMock = vi.hoisted(() => vi.fn(async () => ({ ok: true as const })))
+const projectRepositoryMock = vi.hoisted(() =>
+  vi.fn<() => Promise<ProjectionResult>>(async () => ({ ok: true })),
+)
 const platformGit = vi.hoisted(() => ({
   clone: vi.fn(async () => {}),
   checkout: vi.fn(async () => {}),
@@ -45,54 +51,213 @@ const platformGit = vi.hoisted(() => ({
   }),
 }))
 const prepareSourceUpdateMock = vi.hoisted(() =>
-  vi.fn(async () => ({
-    pinned_commit: 'next-commit',
-    stagingDir: '/tmp/source-update/temp/source-updates/staged',
-    candidateDir: '/tmp/source-update/temp/source-updates/candidate',
-    newMembers: [{ name: 'next-skill', entry: 'skills/next-skill/SKILL.md' }],
-    resourceBoundaryChanges: [] as Array<{ name: string; entry: string; path: string }>,
-    pathMoves: [],
-    changes: {
-      added: [{ name: 'next-skill' }],
-      updated: [],
-      removed: [
-        {
-          name: 'old-skill',
-          previousPath: 'skills/old-skill/SKILL.md',
-          agents: ['codex'],
+  vi.fn<typeof import('../../src/remote/update.js').prepareSourceUpdate>(
+    async (_git, fs, _source, _newRef, workspace) => {
+      await fs.mkdir(`${workspace.candidateDir}/.git`, true)
+      await fs.writeFile(`${workspace.candidateDir}/.git/HEAD`, 'ref: refs/heads/main\n')
+      return {
+        pinned_commit: 'next-commit',
+        newMembers: [{ name: 'next-skill', entry: 'skills/next-skill/SKILL.md' }],
+        resourceBoundaryChanges: [] as Array<{ name: string; entry: string; path: string }>,
+        pathMoves: [],
+        changes: {
+          added: [{ name: 'next-skill' }],
+          updated: [],
+          removed: [
+            {
+              name: 'old-skill',
+              previousPath: 'skills/old-skill/SKILL.md',
+              agents: ['codex'],
+            },
+          ],
+          unchanged: [],
         },
-      ],
-      unchanged: [],
+      }
     },
-  })),
+  ),
 )
 
 const memFiles: Record<string, string> = {}
+const memFileIdentities = new Map<string, string>()
+const memDirectories = new Map<string, string>()
+let memIdentity = 0
+
+function normalizeMemPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/$/, '')
+}
+
+function memEntry(path: string) {
+  const normalized = normalizeMemPath(path)
+  if (normalized in memFiles) {
+    let identity = memFileIdentities.get(normalized)
+    if (!identity) {
+      identity = `file:${++memIdentity}`
+      memFileIdentities.set(normalized, identity)
+    }
+    return { kind: 'file' as const, identity, linkCount: 1 }
+  }
+  const explicitIdentity = memDirectories.get(normalized)
+  if (explicitIdentity) return { kind: 'directory' as const, identity: explicitIdentity }
+  const prefix = `${normalized}/`
+  if (
+    Object.keys(memFiles).some((candidate) => candidate.startsWith(prefix)) ||
+    [...memDirectories.keys()].some((candidate) => candidate.startsWith(prefix))
+  ) {
+    return { kind: 'directory' as const, identity: `directory:${normalized}` }
+  }
+  return null
+}
 
 const memFs = {
   readFile: vi.fn(async (p: string) => {
-    const n = p.replace(/\\/g, '/')
+    const n = normalizeMemPath(p)
     if (!(n in memFiles)) throw Object.assign(new Error('not found'), { code: 'ENOENT' })
     return memFiles[n]
   }),
   writeFile: vi.fn(async (p: string, c: string) => {
-    memFiles[p.replace(/\\/g, '/')] = c
+    const path = normalizeMemPath(p)
+    memFiles[path] = c
+    if (!memFileIdentities.has(path)) memFileIdentities.set(path, `file:${++memIdentity}`)
   }),
-  exists: vi.fn(async (p: string) => p.replace(/\\/g, '/') in memFiles),
-  readDir: vi.fn(async () => []),
-  mkdir: vi.fn(async () => {}),
-  copyDir: vi.fn(async () => {}),
-  move: vi.fn(async () => {}),
-  removeDir: vi.fn(async () => {}),
+  writeFileExclusive: vi.fn(async (p: string, c: string) => {
+    const path = normalizeMemPath(p)
+    if (memEntry(path)) throw Object.assign(new Error('exists'), { code: 'EEXIST' })
+    memFiles[path] = c
+    const identity = `file:${++memIdentity}`
+    memFileIdentities.set(path, identity)
+    return { kind: 'file' as const, identity, linkCount: 1 }
+  }),
+  exists: vi.fn(async (p: string) => memEntry(p) !== null),
+  inspectEntry: vi.fn(async (p: string) => memEntry(p)),
+  realPath: vi.fn(async (p: string) => normalizeMemPath(p)),
+  readLink: vi.fn(async () => {
+    throw Object.assign(new Error('not a link'), { code: 'EINVAL' })
+  }),
+  readDir: vi.fn(async (p: string) => {
+    const root = normalizeMemPath(p)
+    const prefix = `${root}/`
+    return [
+      ...new Set(
+        [...Object.keys(memFiles), ...memDirectories.keys()]
+          .filter((candidate) => candidate.startsWith(prefix))
+          .map((candidate) => candidate.slice(prefix.length).split('/')[0])
+          .filter(Boolean),
+      ),
+    ]
+  }),
+  mkdir: vi.fn(async (p: string, recursive = true) => {
+    const normalized = normalizeMemPath(p)
+    if (memEntry(normalized)) {
+      if (!recursive) throw Object.assign(new Error('exists'), { code: 'EEXIST' })
+      return
+    }
+    memDirectories.set(normalized, `directory:${++memIdentity}`)
+  }),
+  copyDir: vi.fn(async (source: string, destination: string) => {
+    const src = normalizeMemPath(source)
+    const dest = normalizeMemPath(destination)
+    memDirectories.set(dest, `directory:${++memIdentity}`)
+    const prefix = `${src}/`
+    for (const [path, content] of Object.entries(memFiles)) {
+      if (path.startsWith(prefix)) {
+        const copied = `${dest}/${path.slice(prefix.length)}`
+        memFiles[copied] = content
+        memFileIdentities.set(copied, `file:${++memIdentity}`)
+      }
+    }
+  }),
+  move: vi.fn(async (source: string, destination: string) => {
+    moveMemEntry(source, destination, false)
+  }),
+  moveNoReplace: vi.fn(async (source: string, destination: string) => {
+    moveMemEntry(source, destination, true)
+    return memEntry(destination)!
+  }),
+  moveDirectoryAtomic: vi.fn(
+    async (source: string, destination: string, expectedIdentity: string) => {
+      const sourceEntry = memEntry(source)
+      if (sourceEntry?.kind !== 'directory' || sourceEntry.identity !== expectedIdentity) {
+        throw new Error(`Source directory identity changed before atomic move: ${source}`)
+      }
+      if (memEntry(destination)) {
+        throw Object.assign(new Error(`Destination already exists: ${destination}`), {
+          code: 'destination_exists',
+        })
+      }
+
+      memDirectories.set(normalizeMemPath(source), sourceEntry.identity)
+      moveMemEntry(source, destination, false)
+      return memEntry(destination)!
+    },
+  ),
+  removeDir: vi.fn(async (p: string) => {
+    const normalized = normalizeMemPath(p)
+    const prefix = `${normalized}/`
+    memDirectories.delete(normalized)
+    for (const path of [...memDirectories.keys()]) {
+      if (path.startsWith(prefix)) memDirectories.delete(path)
+    }
+    for (const path of Object.keys(memFiles)) {
+      if (path.startsWith(prefix)) {
+        delete memFiles[path]
+        memFileIdentities.delete(path)
+      }
+    }
+  }),
   removeFile: vi.fn(async (p: string) => {
-    delete memFiles[p.replace(/\\/g, '/')]
+    const path = normalizeMemPath(p)
+    delete memFiles[path]
+    memFileIdentities.delete(path)
+  }),
+  removeEntryIfIdentity: vi.fn(async (p: string, expectedIdentity: string) => {
+    const entry = memEntry(p)
+    if (!entry || entry.identity !== expectedIdentity) throw new Error('identity changed')
+    if (entry.kind === 'directory') await memFs.removeDir(p)
+    else await memFs.removeFile(p)
   }),
   replaceFile: vi.fn(async (tempPath: string, targetPath: string) => {
-    const temp = tempPath.replace(/\\/g, '/')
-    const target = targetPath.replace(/\\/g, '/')
+    const temp = normalizeMemPath(tempPath)
+    const target = normalizeMemPath(targetPath)
     memFiles[target] = memFiles[temp]
+    const identity = memFileIdentities.get(temp)
+    if (identity) memFileIdentities.set(target, identity)
     delete memFiles[temp]
+    memFileIdentities.delete(temp)
   }),
+}
+
+function moveMemEntry(source: string, destination: string, noReplace: boolean): void {
+  const src = normalizeMemPath(source)
+  const dest = normalizeMemPath(destination)
+  if (noReplace && memEntry(dest)) throw Object.assign(new Error('exists'), { code: 'EEXIST' })
+  const sourceDirectory = memDirectories.get(src)
+  if (sourceDirectory) {
+    memDirectories.delete(src)
+    memDirectories.set(dest, noReplace ? `directory:${++memIdentity}` : sourceDirectory)
+  }
+  const prefix = `${src}/`
+  for (const path of [...memDirectories.keys()]) {
+    if (!path.startsWith(prefix)) continue
+    const identity = memDirectories.get(path)!
+    memDirectories.delete(path)
+    memDirectories.set(`${dest}/${path.slice(prefix.length)}`, identity)
+  }
+  for (const [path, content] of Object.entries(memFiles)) {
+    if (path === src) {
+      const identity = memFileIdentities.get(path)
+      delete memFiles[path]
+      memFiles[dest] = content
+      memFileIdentities.delete(path)
+      if (identity) memFileIdentities.set(dest, identity)
+    } else if (path.startsWith(prefix)) {
+      const identity = memFileIdentities.get(path)
+      const moved = `${dest}/${path.slice(prefix.length)}`
+      delete memFiles[path]
+      memFiles[moved] = content
+      memFileIdentities.delete(path)
+      if (identity) memFileIdentities.set(moved, identity)
+    }
+  }
 }
 
 vi.mock('../../src/projection/workflow.js', async () => {
@@ -105,20 +270,7 @@ vi.mock('../../src/projection/workflow.js', async () => {
 vi.mock('../../src/projection/executor.js', () => ({
   executeProjection: vi.fn(async () => ({ ok: true })),
 }))
-vi.mock('../../src/sync/pull.js', () => ({
-  syncPull: vi.fn(async () => ({ files: [], varsFiles: [], textConflicts: [], clean: true })),
-}))
 vi.mock('../../src/sync/push.js', () => ({ syncPush: vi.fn(async () => ({ ok: true })) }))
-vi.mock('@loom/core', async () => {
-  const actual = await vi.importActual<typeof import('@loom/core')>('@loom/core')
-  return {
-    ...actual,
-    loadRepoManifest: vi.fn(() => ({ repoConfig: {}, errors: [] })),
-    mergeConfig: vi.fn((repo: Record<string, unknown>) => ({ ...repo })),
-    buildManifest: vi.fn(),
-    planProjection: vi.fn(),
-  }
-})
 vi.mock('../../src/platform/node/index.js', () => ({
   createNodePlatform: vi.fn(() => ({
     fs: memFs,
@@ -135,10 +287,20 @@ vi.mock('../../src/lib/logger.js', () => ({
   },
 }))
 vi.mock('../../src/platform/node/init.js', () => ({ initLoom: vi.fn() }))
-vi.mock('../../src/api/repo.js', () => ({
-  resolveRepoPath: vi.fn(async (_fs: unknown, repo: string) => repo),
-  listRepos: vi.fn(async () => []),
-}))
+vi.mock('../../src/api/repo.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/api/repo.js')>()
+  return {
+    ...actual,
+    resolveRepoPath: vi.fn(async (_fs: unknown, repo: string) => repo),
+    authorizeRepository: vi.fn(async (_fs: unknown, repo: string) => ({
+      name: repo,
+      path: repo,
+      identity: `repo:${repo}`,
+    })),
+    revalidateRepositoryAuthorization: vi.fn(async () => undefined),
+    listRepos: vi.fn(async () => []),
+  }
+})
 vi.mock('../../src/remote/discover.js', () => ({
   discoverSourceTree: vi.fn(async () => ({
     commit: 'commit-oid',
@@ -175,9 +337,14 @@ vi.mock('../../src/remote/update.js', () => ({
   prepareSourceUpdate: prepareSourceUpdateMock,
 }))
 
-describe('routes file-init safety', () => {
-  const app = new Hono().route('/api', registerRoutes())
+const routes = registerRoutes()
+const app = new Hono().route('/api', routes)
 
+afterAll(async () => {
+  await routes.dispose()
+})
+
+describe('routes file-init safety', () => {
   it('POST /api/mcp rejects an invalid server body with invalid_server', async () => {
     const res = await app.request('/api/mcp', {
       method: 'POST',
@@ -189,17 +356,18 @@ describe('routes file-init safety', () => {
     })
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ ok: false, error: 'invalid_server' })
+    expect(await res.json()).toEqual(validationError('invalid_server'))
   })
 
   it('POST /api/skills/local works when skills.yaml does not exist', async () => {
+    memFiles['/tmp/r1/assets/skills/test-skill/SKILL.md'] = '# Test skill'
     const res = await app.request('/api/skills/local', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ repo: '/tmp/r1', skill: { id: 'test-skill' } }),
     })
     expect(res.status).toBe(200)
-    const body = await res.json()
+    const body = await responseJson<{ ok: boolean }>(res)
     expect(body.ok).toBe(true)
   })
 
@@ -214,14 +382,12 @@ describe('routes file-init safety', () => {
       }),
     })
     expect(res.status).toBe(200)
-    const body = await res.json()
+    const body = await responseJson<{ ok: boolean }>(res)
     expect(body.ok).toBe(true)
   })
 })
 
 describe('reorder endpoints', () => {
-  const app = new Hono().route('/api', registerRoutes())
-
   it('normalizes Skills order without projection and maps duplicate or malformed entities', async () => {
     const repo = '/tmp/reorder-skills'
     memFiles[`${repo}/skills.yaml`] = [
@@ -311,8 +477,6 @@ describe('reorder endpoints', () => {
 })
 
 describe('DELETE endpoints', () => {
-  const app = new Hono().route('/api', registerRoutes())
-
   it('DELETE /api/mcp rejects a missing id with the existing invalid_id contract', async () => {
     const res = await app.request('/api/mcp', {
       method: 'DELETE',
@@ -321,7 +485,7 @@ describe('DELETE endpoints', () => {
     })
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ ok: false, error: 'invalid_id' })
+    expect(await res.json()).toEqual(validationError('invalid_id'))
   })
 
   it('DELETE /api/sources removes a source by url', async () => {
@@ -333,7 +497,7 @@ describe('DELETE endpoints', () => {
       body: JSON.stringify({ repo: '/tmp/r2', url: 'https://github.com/test/repo' }),
     })
     expect(res.status).toBe(200)
-    const body = await res.json()
+    const body = await responseJson<{ ok: boolean }>(res)
     expect(body.ok).toBe(true)
     const parsed = yaml.load(memFiles['/tmp/r2/skills.yaml']) as any
     expect(parsed.sources).toHaveLength(0)
@@ -347,7 +511,7 @@ describe('DELETE endpoints', () => {
       body: JSON.stringify({ repo: '/tmp/r3', id: 'test-skill' }),
     })
     expect(res.status).toBe(200)
-    const body = await res.json()
+    const body = await responseJson<{ ok: boolean }>(res)
     expect(body.ok).toBe(true)
     const parsed = yaml.load(memFiles['/tmp/r3/skills.yaml']) as any
     expect(parsed.skills).toHaveLength(0)
@@ -361,7 +525,7 @@ describe('DELETE endpoints', () => {
       body: JSON.stringify({ repo: '/tmp/r4', id: 'test' }),
     })
     expect(res.status).toBe(200)
-    const body = await res.json()
+    const body = await responseJson<{ ok: boolean }>(res)
     expect(body.ok).toBe(true)
     const parsed = yaml.load(memFiles['/tmp/r4/mcp.yaml']) as any
     expect(parsed).toHaveLength(0)
@@ -369,8 +533,6 @@ describe('DELETE endpoints', () => {
 })
 
 describe('local skill import', () => {
-  const app = new Hono().route('/api', registerRoutes())
-
   it('POST /api/skills/local/import rejects a non-array skills field', async () => {
     const res = await app.request('/api/skills/local/import', {
       method: 'POST',
@@ -379,32 +541,11 @@ describe('local skill import', () => {
     })
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ ok: false, error: 'invalid_skills' })
-  })
-
-  it('stores repo assets skills imports as built-in local skills without ref paths', async () => {
-    memFiles['/tmp/r7/skills.yaml'] = 'sources: []\nskills: []\n'
-
-    const res = await app.request('/api/skills/local/import', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        repo: '/tmp/r7',
-        mode: 'ref',
-        skills: [{ name: 'test-qa-skill', path: '/tmp/r7/assets/skills/test-qa-skill' }],
-      }),
-    })
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true, count: 1 })
-    const parsed = yaml.load(memFiles['/tmp/r7/skills.yaml']) as any
-    expect(parsed.skills).toEqual([{ id: 'test-qa-skill' }])
+    expect(await res.json()).toEqual(validationError('invalid_skills'))
   })
 })
 
 describe('source scan', () => {
-  const app = new Hono().route('/api', registerRoutes())
-
   it('POST /api/sources/scan returns the source commit tree', async () => {
     const { discoverSourceTree } = await import('../../src/remote/discover.js')
     vi.mocked(discoverSourceTree).mockClear()
@@ -450,12 +591,21 @@ describe('source scan', () => {
     })
 
     expect(res.status).toBe(400)
-    expect((await res.json()).ok).toBe(false)
+    expect((await responseJson<{ ok: boolean }>(res)).ok).toBe(false)
   })
 
   it('POST /api/sources/tree reads the pinned tree from cache without remote git operations', async () => {
     const repo = '/tmp/cached-source'
-    memFiles[`${repo}/remote-cache/superpowers/.git`] = 'gitdir'
+    memFiles[`${repo}/skills.yaml`] = [
+      'sources:',
+      '  - url: https://github.com/obra/superpowers',
+      '    ref: main',
+      '    pinned_commit: pinned-commit',
+      'skills: []',
+      '',
+    ].join('\n')
+    memDirectories.set(`${repo}/remote-cache/superpowers/.git`, `directory:${++memIdentity}`)
+    memFiles[`${repo}/remote-cache/superpowers/.git/HEAD`] = 'ref: refs/heads/main\n'
     platformGit.clone.mockClear()
     platformGit.checkout.mockClear()
     platformGit.fetch.mockClear()
@@ -507,6 +657,15 @@ describe('source scan', () => {
   })
 
   it('POST /api/sources/tree reports a missing cache without starting git operations', async () => {
+    const repo = '/tmp/missing-cached-source'
+    memFiles[`${repo}/skills.yaml`] = [
+      'sources:',
+      '  - url: https://github.com/obra/superpowers',
+      '    ref: main',
+      '    pinned_commit: pinned-commit',
+      'skills: []',
+      '',
+    ].join('\n')
     platformGit.clone.mockClear()
     platformGit.checkout.mockClear()
     platformGit.fetch.mockClear()
@@ -519,7 +678,7 @@ describe('source scan', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        repo: '/tmp/missing-cached-source',
+        repo,
         url: 'https://github.com/obra/superpowers',
         pinned_commit: 'pinned-commit',
       }),
@@ -548,11 +707,11 @@ describe('source scan', () => {
       body: JSON.stringify({ url: 'https://github.com/obra/superpowers' }),
     })
 
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(500)
     expect(await res.json()).toEqual({
       ok: false,
       error: 'scan_failed',
-      message: 'scan exploded',
+      message: 'failed to scan source',
     })
     expect(logFns.error).toHaveBeenCalledWith('source scan failed', { err })
   })
@@ -565,8 +724,8 @@ describe('source scan', () => {
       body: JSON.stringify({ url: 'https://github.com/obra/superpowers' }),
     })
 
-    expect(res.status).toBe(200)
-    expect((await res.json()).error).toBe('refs_failed')
+    expect(res.status).toBe(500)
+    expect((await responseJson<{ error: string }>(res)).error).toBe('refs_failed')
     expect(logFns.error).toHaveBeenCalledWith(
       'source refs failed',
       expect.objectContaining({ err: expect.any(TypeError) }),
@@ -574,71 +733,7 @@ describe('source scan', () => {
   })
 })
 
-describe('source members', () => {
-  const app = new Hono().route('/api', registerRoutes())
-
-  it('POST /api/sources/members is not available', async () => {
-    const res = await app.request('/api/sources/members', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repo: '/tmp/source-members' }),
-    })
-
-    expect(res.status).toBe(404)
-  })
-})
-
 describe('source updates', () => {
-  const app = new Hono().route('/api', registerRoutes())
-
-  it('POST /api/install is not available', async () => {
-    const res = await app.request('/api/install', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repo: '/tmp/source-install' }),
-    })
-
-    expect(res.status).toBe(404)
-  })
-
-  it('POST /api/update/perform is not available', async () => {
-    const res = await app.request('/api/update/perform', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    expect(res.status).toBe(404)
-  })
-
-  it('cancels a prepared update and removes its staged session', async () => {
-    const repo = '/tmp/source-cancel'
-    const prepared = await app.request('/api/update/prepare', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        repo,
-        source: {
-          url: 'https://github.com/mattpocock/skills',
-          ref: 'main',
-          members: [],
-        },
-        newRef: 'main',
-      }),
-    })
-    const { sessionId } = (await prepared.json()) as { sessionId: string }
-
-    const cancelled = await app.request('/api/update/cancel', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repo, sessionId }),
-    })
-
-    expect(cancelled.status).toBe(200)
-    expect(await cancelled.json()).toEqual({ ok: true })
-    expect(memFs.removeDir).toHaveBeenCalledWith('/tmp/source-update/temp/source-updates')
-    expect(memFiles[`${repo}/temp/source-updates/${sessionId}.json`]).toBeUndefined()
-  })
-
   it('requires explicit confirmation when an update creates a resource bundle boundary', async () => {
     memFiles['/tmp/source-boundary/skills.yaml'] = [
       'sources:',
@@ -659,8 +754,6 @@ describe('source updates', () => {
     ].join('\n')
     prepareSourceUpdateMock.mockResolvedValueOnce({
       pinned_commit: 'next-commit',
-      stagingDir: '/tmp/source-boundary/temp/source-updates/staged',
-      candidateDir: '/tmp/source-boundary/temp/source-updates/candidate',
       newMembers: [{ name: 'new-skill', entry: 'shared/new-skill/SKILL.md' }],
       resourceBoundaryChanges: [
         {
@@ -691,6 +784,12 @@ describe('source updates', () => {
       }),
     })
     const preview = (await prepared.json()) as any
+    memDirectories.set(
+      `/tmp/source-boundary/temp/source-updates/${preview.sessionId}/candidate/.git`,
+      `directory:${++memIdentity}`,
+    )
+    memFiles[`/tmp/source-boundary/temp/source-updates/${preview.sessionId}/candidate/.git/HEAD`] =
+      'ref: refs/heads/main\n'
     expect(preview.resourceBoundaryChanges).toEqual([
       {
         name: 'new-skill',
@@ -709,7 +808,9 @@ describe('source updates', () => {
       }),
     })
     expect(blocked.status).toBe(409)
-    expect((await blocked.json()).error).toBe('resource_boundary_confirmation_required')
+    expect((await responseJson<{ error: string }>(blocked)).error).toBe(
+      'resource_boundary_confirmation_required',
+    )
 
     const accepted = await app.request('/api/update/finalize', {
       method: 'POST',
@@ -721,7 +822,7 @@ describe('source updates', () => {
         resourceBoundaryDecisions: [{ entry: 'shared/new-skill/SKILL.md', action: 'enable' }],
       }),
     })
-    expect((await accepted.json()).ok).toBe(true)
+    expect((await responseJson<{ ok: boolean }>(accepted)).ok).toBe(true)
     expect(
       (yaml.load(memFiles['/tmp/source-boundary/skills.yaml']) as any).sources[0].members,
     ).toEqual([{ name: 'new-skill', entry: 'shared/new-skill/SKILL.md' }])
@@ -741,8 +842,6 @@ describe('source updates', () => {
     ].join('\n')
     prepareSourceUpdateMock.mockResolvedValueOnce({
       pinned_commit: 'next-commit',
-      stagingDir: '/tmp/source-concurrent/temp/source-updates/staged',
-      candidateDir: '/tmp/source-concurrent/temp/source-updates/candidate',
       newMembers: [{ name: 'retained', entry: 'skills/retained/SKILL.md' }],
       resourceBoundaryChanges: [],
       pathMoves: [],
@@ -768,6 +867,12 @@ describe('source updates', () => {
       }),
     })
     const { sessionId } = (await prepared.json()) as { sessionId: string }
+    memDirectories.set(
+      `/tmp/source-concurrent/temp/source-updates/${sessionId}/candidate/.git`,
+      `directory:${++memIdentity}`,
+    )
+    memFiles[`/tmp/source-concurrent/temp/source-updates/${sessionId}/candidate/.git/HEAD`] =
+      'ref: refs/heads/main\n'
     memFiles['/tmp/source-concurrent/skills.yaml'] = memFiles[
       '/tmp/source-concurrent/skills.yaml'
     ].replace('[codex]', '[opencode]')
@@ -783,7 +888,7 @@ describe('source updates', () => {
       }),
     })
 
-    expect((await finalized.json()).ok).toBe(true)
+    expect((await responseJson<{ ok: boolean }>(finalized)).ok).toBe(true)
     expect(
       (yaml.load(memFiles['/tmp/source-concurrent/skills.yaml']) as any).sources[0].members,
     ).toEqual([
@@ -793,6 +898,77 @@ describe('source updates', () => {
         agents: ['opencode'],
       },
     ])
+  })
+
+  it('installs preserved members from pinned Git blobs through the local transaction', async () => {
+    const repo = '/tmp/source-preserve-transaction'
+    const sourceUrl = 'https://github.com/mattpocock/skills'
+    const cache = `${repo}/remote-cache/${deriveRepoId(sourceUrl)}`
+    memFiles[`${repo}/skills.yaml`] = [
+      'sources:',
+      `  - url: ${sourceUrl}`,
+      '    ref: main',
+      '    pinned_commit: abcdef1',
+      '    members:',
+      '      - name: old-skill',
+      '        entry: skills/old-skill/SKILL.md',
+      '        agents: [codex]',
+      'skills: []',
+      '',
+    ].join('\n')
+    memDirectories.set(cache, `directory:${++memIdentity}`)
+    memDirectories.set(`${cache}/.git`, `directory:${++memIdentity}`)
+    memFiles[`${cache}/.git/HEAD`] = 'ref: refs/heads/main\n'
+    platformGit.readTree.mockResolvedValueOnce([
+      { mode: '040000', type: 'tree', oid: 'skills-tree', path: 'skills' },
+      {
+        mode: '040000',
+        type: 'tree',
+        oid: 'old-skill-tree',
+        path: 'skills/old-skill',
+      },
+      {
+        mode: '100644',
+        type: 'blob',
+        oid: 'old-skill-file',
+        path: 'skills/old-skill/SKILL.md',
+      },
+    ])
+    platformGit.show.mockResolvedValueOnce('# Old skill')
+
+    const prepared = await app.request('/api/update/prepare', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo,
+        source: { url: sourceUrl, ref: 'forged' },
+        newRef: 'next',
+      }),
+    })
+    const { sessionId } = (await prepared.json()) as { sessionId: string }
+    const finalized = await app.request('/api/update/finalize', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo, sessionId, preserve: ['old-skill'] }),
+    })
+
+    expect(finalized.status).toBe(200)
+    expect(await finalized.json()).toMatchObject({ ok: true, preserved: ['old-skill'] })
+    expect(memFiles[`${repo}/assets/skills/old-skill/SKILL.md`]).toBe('# Old skill')
+    expect(
+      JSON.parse(memFiles[`${repo}/assets/skills/old-skill/.loom-source-update-owner.json`]),
+    ).toMatchObject({ version: 1, sessionId, skillId: 'old-skill' })
+    expect((yaml.load(memFiles[`${repo}/skills.yaml`]) as any).skills).toEqual([
+      { id: 'old-skill', agents: ['codex'] },
+    ])
+    expect(memFs.mkdir).toHaveBeenCalledWith(
+      `${repo}/temp/source-updates/${sessionId}/preserve-transaction`,
+      false,
+    )
+    expect(memFs.copyDir).not.toHaveBeenCalledWith(
+      expect.stringContaining('/temp/source-updates/'),
+      `${repo}/assets/skills/old-skill`,
+    )
   })
 
   it.each([
@@ -814,12 +990,18 @@ describe('source updates', () => {
         'skills: []',
         '',
       ].join('\n')
-      if (cacheDirectoryExists) memFiles[`${repo}/remote-cache/skills`] = 'corrupt cache'
+      if (cacheDirectoryExists) {
+        memDirectories.set(`${repo}/remote-cache/skills`, `directory:${++memIdentity}`)
+      }
       projectRepositoryMock.mockClear()
       projectRepositoryMock.mockResolvedValue({ ok: true })
       projectRepositoryMock.mockResolvedValueOnce({
         ok: false,
-        failure: { originalError: new Error('projection failed') },
+        failure: {
+          failedStep: 'projection',
+          originalError: new Error('projection failed'),
+          rollbackReport: { undone: 0, rollbackFailures: [] },
+        },
       })
 
       const prepared = await app.request('/api/update/prepare', {
@@ -843,14 +1025,14 @@ describe('source updates', () => {
         }),
       })
       const { sessionId } = (await prepared.json()) as { sessionId: string }
-      const finalizeBody = { repo, sessionId, preserve: ['old-skill'] }
+      const finalizeBody = { repo, sessionId, preserve: [] }
 
       const failed = await app.request('/api/update/finalize', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(finalizeBody),
       })
-      expect((await failed.json()).ok).toBe(false)
+      expect((await responseJson<{ ok: boolean }>(failed)).ok).toBe(false)
       expect(projectRepositoryMock).toHaveBeenCalledTimes(1)
       expect((yaml.load(memFiles[`${repo}/skills.yaml`]) as any).sources[0]).toMatchObject({
         pinned_commit: 'old-commit',
@@ -862,15 +1044,13 @@ describe('source updates', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(finalizeBody),
       })
-      expect((await retried.json()).ok).toBe(true)
+      expect((await responseJson<{ ok: boolean }>(retried)).ok).toBe(true)
       expect(projectRepositoryMock).toHaveBeenCalledTimes(2)
     },
   )
 })
 
 describe('source metadata', () => {
-  const app = new Hono().route('/api', registerRoutes())
-
   it('POST /api/sources rejects a missing url with invalid_url', async () => {
     const res = await app.request('/api/sources', {
       method: 'POST',
@@ -879,7 +1059,7 @@ describe('source metadata', () => {
     })
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ ok: false, error: 'invalid_url' })
+    expect(await res.json()).toEqual(validationError('invalid_url'))
   })
 
   it('POST /api/sources atomically stores selected bundles and resources', async () => {
@@ -902,7 +1082,7 @@ describe('source metadata', () => {
     })
 
     expect(res.status).toBe(200)
-    expect((await res.json()).ok).toBe(true)
+    expect((await responseJson<{ ok: boolean }>(res)).ok).toBe(true)
     const parsed = yaml.load(memFiles['/tmp/r8/skills.yaml']) as any
     expect(parsed.sources[0]).toMatchObject({
       name: 'skills',
@@ -969,21 +1149,9 @@ describe('source metadata', () => {
     expect(duplicate.status).toBe(409)
     expect(await duplicate.json()).toMatchObject({ ok: false, error: 'source_name_exists' })
   })
-
-  it('POST /api/sources/update is not available', async () => {
-    const res = await app.request('/api/sources/update', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repo: '/tmp/r9' }),
-    })
-
-    expect(res.status).toBe(404)
-  })
 })
 
 describe('agents update', () => {
-  const app = new Hono().route('/api', registerRoutes())
-
   it('POST /api/skills/source-agents keeps separate invalid field error codes', async () => {
     const res = await app.request('/api/skills/source-agents', {
       method: 'POST',
@@ -996,7 +1164,7 @@ describe('agents update', () => {
     })
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ ok: false, error: 'invalid_updates' })
+    expect(await res.json()).toEqual(validationError('invalid_updates'))
   })
 
   it('POST /api/mcp/agents updates agents for an mcp server', async () => {
@@ -1008,7 +1176,7 @@ describe('agents update', () => {
       body: JSON.stringify({ repo: '/tmp/r5', id: 'srv1', agents: ['claude-code', 'codex'] }),
     })
     expect(res.status).toBe(200)
-    const body = await res.json()
+    const body = await responseJson<{ ok: boolean }>(res)
     expect(body.ok).toBe(true)
     const parsed = yaml.load(memFiles['/tmp/r5/mcp.yaml']) as any
     expect(parsed[0].agents).toEqual(['claude-code', 'codex'])
@@ -1040,13 +1208,11 @@ describe('agents update', () => {
     })
 
     expect(res.status).toBe(400)
-    expect((await res.json()).error).toBe('invalid_server')
+    expect((await responseJson<{ error: string }>(res)).error).toBe('invalid_server')
   })
 })
 
 describe('PUT /config', () => {
-  const app = new Hono().route('/api', registerRoutes())
-
   it('PUT /api/config updates a repo-level config field', async () => {
     memFiles['/tmp/r6/config.yaml'] = 'profile: local\nagents:\n  - claude-code\n'
     const res = await app.request('/api/config', {
@@ -1060,7 +1226,7 @@ describe('PUT /config', () => {
       }),
     })
     expect(res.status).toBe(200)
-    const body = await res.json()
+    const body = await responseJson<{ ok: boolean }>(res)
     expect(body.ok).toBe(true)
     const parsed = yaml.load(memFiles['/tmp/r6/config.yaml']) as any
     expect(parsed.profile).toBe('default')

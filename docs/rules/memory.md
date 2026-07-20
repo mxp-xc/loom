@@ -62,7 +62,7 @@ Examples:
 Tests:
 
 - packages/server/test/api/memory.test.ts
-- packages/web/test/views.test.tsx
+- packages/web/test/memory-view.test.tsx
 
 ## R-MEMORY-003 Memory projection 按 Agent 选择内容并渲染
 
@@ -97,7 +97,7 @@ Tests:
 - packages/core/test/projection-memory.test.ts
 - packages/server/test/projection/executor-memory.test.ts
 - packages/server/test/projection/undo-memory.test.ts
-- packages/web/test/views.test.tsx
+- packages/web/test/memory-view.test.tsx
 
 ## R-MEMORY-004 Memory preview 使用结构化 vars 诊断
 
@@ -155,4 +155,3 @@ Tests:
 
 - packages/core/test/memory-manifest.test.ts
 - packages/server/test/api/memory.test.ts
-- packages/web/test/views.test.tsx

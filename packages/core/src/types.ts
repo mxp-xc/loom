@@ -159,6 +159,7 @@ export interface ProxyConfig {
 }
 
 export interface Config {
+  [key: string]: unknown
   profile?: string
   agents?: AgentId[]
   projection?: ProjectionConfig
@@ -184,10 +185,20 @@ export interface Manifest {
   errors: string[]
 }
 
+export type ManifestConfigFile = 'skills.yaml' | 'mcp.yaml' | 'config.yaml'
+
+export interface ManifestLoadDiagnostic {
+  code: 'manifest_container_invalid' | 'manifest_field_invalid' | 'manifest_item_invalid'
+  file: ManifestConfigFile
+  path?: string
+  message: string
+}
+
 export interface RepoManifest {
   skills: SkillsManifest
   mcp: McpServer[]
   varsFiles: Record<string, VarsEnvironment>
   repoConfig: Config
   memoriesFiles: Record<string, string>
+  loadDiagnostics?: ManifestLoadDiagnostic[]
 }

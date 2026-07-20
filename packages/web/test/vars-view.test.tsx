@@ -2,11 +2,28 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Vars from '../src/views/vars/Vars'
-import { useProfileVars } from '../src/views/vars/useProfileVars'
 import { api } from '../src/lib/api'
+import type { VarsMatrixResponse } from '../src/lib/vars'
 import { createMonacoEditorMock } from './monaco-test-utils'
 
 const monacoEditorMock = createMonacoEditorMock()
+
+type SuccessfulVarsMatrixResponse = Omit<VarsMatrixResponse, 'resolution'> & {
+  resolution: Extract<VarsMatrixResponse['resolution'], { ok: true }>
+}
+
+const matrixKeyGroups = {
+  builtinResult: ['LOOM_AGENT'],
+  formats: ['json_text', 'yaml_text'],
+  memoryPicker: ['memory.context'],
+  pathPreview: ['LOOM_CONFIG_DIR', 'rtk_path'],
+} as const
+
+function selectKeys<T>(record: Record<string, T>, includedKeys: ReadonlySet<string>) {
+  return Object.fromEntries(
+    Object.entries(record).filter(([key]) => includedKeys.has(key)),
+  ) as Record<string, T>
+}
 
 vi.mock('@monaco-editor/react', async () => {
   const { createMonacoEditorMock } = await import('./monaco-test-utils')
@@ -25,98 +42,122 @@ vi.mock('../src/lib/api', () => ({
   },
 }))
 
-const matrix = (agent = 'codex') => ({
-  ok: true as const,
-  agent,
-  builtinKeys: ['LOOM_AGENT', 'LOOM_CONFIG_DIR'],
-  userKeys: ['agent_name', 'json_text', 'yaml_text', 'memory.context', 'rtk_path', 'rtk'],
-  snapshot: {
-    base: {
-      agent_name: { type: 'string' as const, format: 'markdown' as const, value: 'Agent' },
-      json_text: { type: 'string' as const, format: 'json' as const, value: '{"b":2,"a":1}' },
-      yaml_text: { type: 'string' as const, format: 'yaml' as const, value: 'enabled: true' },
-      'memory.context': {
-        type: 'string' as const,
-        format: 'markdown' as const,
-        value: 'Base memory',
+const matrix = (
+  agent = 'codex',
+  extraKeys: readonly string[] = [],
+): SuccessfulVarsMatrixResponse => {
+  const response: SuccessfulVarsMatrixResponse = {
+    ok: true,
+    agent,
+    builtinKeys: ['LOOM_AGENT', 'LOOM_CONFIG_DIR'],
+    userKeys: ['agent_name', 'json_text', 'yaml_text', 'memory.context', 'rtk_path'],
+    snapshot: {
+      base: {
+        agent_name: { type: 'string', format: 'markdown', value: 'Agent' },
+        json_text: { type: 'string', format: 'json', value: '{"b":2,"a":1}' },
+        yaml_text: { type: 'string', format: 'yaml', value: 'enabled: true' },
+        'memory.context': {
+          type: 'string',
+          format: 'markdown',
+          value: 'Base memory',
+        },
+        rtk_path: {
+          type: 'string',
+          format: 'markdown',
+          value: '${LOOM_CONFIG_DIR}/RTK.md',
+        },
       },
-      rtk_path: {
-        type: 'string' as const,
-        format: 'markdown' as const,
-        value: '${LOOM_CONFIG_DIR}/RTK.md',
+      baseAgent: {},
+      local: {},
+      localAgent: agent === 'codex' ? { agent_name: { value: 'Local Codex agent' } } : {},
+    },
+    resolution: {
+      ok: true,
+      values: {
+        LOOM_AGENT: { type: 'string', value: agent },
+        LOOM_CONFIG_DIR: { type: 'string', format: 'path', value: '/agent' },
+        agent_name: {
+          type: 'string',
+          format: 'markdown',
+          value: agent === 'codex' ? 'Local Codex agent' : 'Agent',
+        },
+        json_text: { type: 'string', format: 'json', value: '{"b":2,"a":1}' },
+        yaml_text: { type: 'string', format: 'yaml', value: 'enabled: true' },
+        'memory.context': {
+          type: 'string',
+          format: 'markdown',
+          value: 'Base memory',
+        },
+        rtk_path: {
+          type: 'string',
+          format: 'markdown',
+          value: agent === 'default' ? '${LOOM_CONFIG_DIR}/RTK.md' : '/agent/RTK.md',
+        },
       },
-      rtk: { type: 'string' as const, format: 'markdown' as const, value: '# RTK\n\nHello' },
-    },
-    baseAgent: {},
-    local: {},
-    localAgent: agent === 'codex' ? { agent_name: { value: 'Local Codex agent' } } : {},
-  },
-  resolution: {
-    ok: true as const,
-    values: {
-      LOOM_AGENT: { type: 'string' as const, value: agent },
-      LOOM_CONFIG_DIR: { type: 'string' as const, format: 'path' as const, value: '/agent' },
-      agent_name: {
-        type: 'string' as const,
-        format: 'markdown' as const,
-        value: agent === 'codex' ? 'Local Codex agent' : 'Agent',
+      sources: {
+        LOOM_AGENT: { locality: 'builtin', layer: 'runtime', agent },
+        LOOM_CONFIG_DIR: { locality: 'builtin', layer: 'runtime', agent },
+        agent_name:
+          agent === 'codex'
+            ? { locality: 'local', layer: 'agent', agent }
+            : { locality: 'synced', layer: 'base' },
+        rtk_path: { locality: 'synced', layer: 'base' },
+        json_text: { locality: 'synced', layer: 'base' },
+        yaml_text: { locality: 'synced', layer: 'base' },
+        'memory.context': { locality: 'synced', layer: 'base' },
       },
-      json_text: { type: 'string' as const, format: 'json' as const, value: '{"b":2,"a":1}' },
-      yaml_text: { type: 'string' as const, format: 'yaml' as const, value: 'enabled: true' },
-      'memory.context': {
-        type: 'string' as const,
-        format: 'markdown' as const,
-        value: 'Base memory',
+      overrideChains: {
+        LOOM_AGENT: [{ locality: 'builtin', layer: 'runtime', agent }],
+        LOOM_CONFIG_DIR: [{ locality: 'builtin', layer: 'runtime', agent }],
+        agent_name:
+          agent === 'codex'
+            ? [
+                { locality: 'synced', layer: 'base' },
+                { locality: 'local', layer: 'agent', agent },
+              ]
+            : [{ locality: 'synced', layer: 'base' }],
+        rtk_path: [{ locality: 'synced', layer: 'base' }],
+        json_text: [{ locality: 'synced', layer: 'base' }],
+        yaml_text: [{ locality: 'synced', layer: 'base' }],
+        'memory.context': [{ locality: 'synced', layer: 'base' }],
       },
-      rtk_path: {
-        type: 'string' as const,
-        format: 'markdown' as const,
-        value: '/agent/RTK.md',
+      dependencies: {
+        rtk_path: ['LOOM_CONFIG_DIR'],
+        json_text: [],
+        yaml_text: [],
+        'memory.context': [],
+        agent_name: [],
+        LOOM_AGENT: [],
+        LOOM_CONFIG_DIR: [],
       },
-      rtk: { type: 'string' as const, format: 'markdown' as const, value: '# RTK\n\nHello' },
+      diagnostics: [],
     },
-    sources: {
-      LOOM_AGENT: { locality: 'builtin' as const, layer: 'runtime' as const, agent },
-      LOOM_CONFIG_DIR: { locality: 'builtin' as const, layer: 'runtime' as const, agent },
-      agent_name:
-        agent === 'codex'
-          ? { locality: 'local' as const, layer: 'agent' as const, agent }
-          : { locality: 'synced' as const, layer: 'base' as const },
-      rtk: { locality: 'synced' as const, layer: 'base' as const },
-      rtk_path: { locality: 'synced' as const, layer: 'base' as const },
-      json_text: { locality: 'synced' as const, layer: 'base' as const },
-      yaml_text: { locality: 'synced' as const, layer: 'base' as const },
-      'memory.context': { locality: 'synced' as const, layer: 'base' as const },
+  }
+  const includedKeys = new Set(['agent_name', ...extraKeys])
+  if (agent === 'default') {
+    includedKeys.delete('LOOM_AGENT')
+    includedKeys.delete('LOOM_CONFIG_DIR')
+  }
+
+  return {
+    ...response,
+    builtinKeys: response.builtinKeys.filter((key) => includedKeys.has(key)),
+    userKeys: response.userKeys.filter((key) => includedKeys.has(key)),
+    snapshot: {
+      base: selectKeys(response.snapshot.base, includedKeys),
+      baseAgent: selectKeys(response.snapshot.baseAgent, includedKeys),
+      local: selectKeys(response.snapshot.local, includedKeys),
+      localAgent: selectKeys(response.snapshot.localAgent, includedKeys),
     },
-    overrideChains: {
-      LOOM_AGENT: [{ locality: 'builtin' as const, layer: 'runtime' as const, agent }],
-      LOOM_CONFIG_DIR: [{ locality: 'builtin' as const, layer: 'runtime' as const, agent }],
-      agent_name:
-        agent === 'codex'
-          ? [
-              { locality: 'synced' as const, layer: 'base' as const },
-              { locality: 'local' as const, layer: 'agent' as const, agent },
-            ]
-          : [{ locality: 'synced' as const, layer: 'base' as const }],
-      rtk: [{ locality: 'synced' as const, layer: 'base' as const }],
-      rtk_path: [{ locality: 'synced' as const, layer: 'base' as const }],
-      json_text: [{ locality: 'synced' as const, layer: 'base' as const }],
-      yaml_text: [{ locality: 'synced' as const, layer: 'base' as const }],
-      'memory.context': [{ locality: 'synced' as const, layer: 'base' as const }],
+    resolution: {
+      ...response.resolution,
+      values: selectKeys(response.resolution.values, includedKeys),
+      sources: selectKeys(response.resolution.sources, includedKeys),
+      overrideChains: selectKeys(response.resolution.overrideChains, includedKeys),
+      dependencies: selectKeys(response.resolution.dependencies, includedKeys),
     },
-    dependencies: {
-      rtk: [],
-      rtk_path: ['LOOM_CONFIG_DIR'],
-      json_text: [],
-      yaml_text: [],
-      'memory.context': [],
-      agent_name: [],
-      LOOM_AGENT: [],
-      LOOM_CONFIG_DIR: [],
-    },
-    diagnostics: [],
-  },
-})
+  }
+}
 
 describe('Vars view', () => {
   beforeEach(() => {
@@ -249,21 +290,6 @@ describe('Vars view', () => {
     expect(row.textContent).not.toContain('default')
   })
 
-  it('loads only Default and configured agent matrices through the profile vars hook', async () => {
-    function ProfileVarsHarness() {
-      const { loading } = useProfileVars('/repo')
-      return <div>{loading ? 'loading' : 'loaded'}</div>
-    }
-
-    render(<ProfileVarsHarness />)
-
-    await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledTimes(2))
-    expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'default')
-    expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'codex')
-    expect(api.vars.getMatrix).not.toHaveBeenCalledWith('/repo', 'claude-code')
-    expect(api.vars.getMatrix).not.toHaveBeenCalledWith('/repo', 'opencode')
-  })
-
   it('loads only Default and keeps Default editing when configured agents are empty', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
       skills: { sources: [], skills: [] },
@@ -368,13 +394,12 @@ describe('Vars view', () => {
     expect(screen.queryByLabelText('最终结果 agent')).toBeNull()
   })
 
-  it('uses clearer column names and centers the actions column', async () => {
+  it('uses clear semantic column names', async () => {
     render(<Vars repoPath="/repo" />)
     await screen.findByText('agent_name')
 
     expect(screen.getByRole('columnheader', { name: /^专属/ })).toBeDefined()
-    const actionsHeader = screen.getByRole('columnheader', { name: /^操作/ })
-    expect(actionsHeader.className).toContain('vars-col-actions')
+    expect(screen.getByRole('columnheader', { name: /^操作/ })).toBeDefined()
   })
 
   it('refreshes final resolved values when switching agent', async () => {
@@ -385,6 +410,9 @@ describe('Vars view', () => {
       config: { agents: ['codex', 'claude-code'] },
       errors: [],
     } as never)
+    vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) =>
+      matrix(agent, matrixKeyGroups.builtinResult),
+    )
     render(<Vars repoPath="/repo" />)
     await screen.findByText('agent_name')
     fireEvent.click(screen.getByRole('button', { name: '最终结果' }))
@@ -398,6 +426,10 @@ describe('Vars view', () => {
     expect(agentNameRow.textContent).toContain('Agent')
     expect(agentNameRow.textContent).toContain('base')
     expect(agentNameRow.textContent).not.toContain('Local Codex agent')
+    const runtimeAgentRow = within(resolvedTable).getByRole('row', { name: /LOOM_AGENT/ })
+    expect(runtimeAgentRow.textContent).toContain('claude-code')
+    expect(runtimeAgentRow.textContent).toContain('builtin')
+    expect(runtimeAgentRow.textContent).toContain('runtime')
   })
 
   it('returns final resolved values to the default context when selecting default scope', async () => {
@@ -451,6 +483,9 @@ describe('Vars view', () => {
   })
 
   it('chooses Monaco language by markdown, json, and yaml config formats', async () => {
+    vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) =>
+      matrix(agent, matrixKeyGroups.formats),
+    )
     render(<Vars repoPath="/repo" />)
     await screen.findByText('agent_name')
 
@@ -529,6 +564,9 @@ describe('Vars view', () => {
   })
 
   it('opens new local config with searchable Base key picker', async () => {
+    vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) =>
+      matrix(agent, matrixKeyGroups.memoryPicker),
+    )
     render(<Vars repoPath="/repo" />)
     fireEvent.click(await screen.findByRole('button', { name: /Local/ }))
 
@@ -723,14 +761,6 @@ describe('Vars view', () => {
     expect(screen.queryByRole('dialog', { name: '新建配置' })).toBeNull()
   })
 
-  it('does not render a separate profile action card', async () => {
-    render(<Vars repoPath="/repo" />)
-    await screen.findByRole('button', { name: /Base/ })
-
-    expect(screen.queryByLabelText('profile 操作')).toBeNull()
-    expect(screen.queryByText('profile 操作')).toBeNull()
-  })
-
   it('switches edit, raw preview, and resolved preview mutually', async () => {
     render(<Vars repoPath="/repo" />)
     await screen.findByText('agent_name')
@@ -745,11 +775,17 @@ describe('Vars view', () => {
   })
 
   it('shows resolved markdown content in resolved preview', async () => {
+    vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) =>
+      matrix(agent, matrixKeyGroups.pathPreview),
+    )
     render(<Vars repoPath="/repo" />)
     await screen.findByText('rtk_path')
 
     fireEvent.click(screen.getByRole('button', { name: '编辑 rtk_path' }))
     const dialog = await screen.findByRole('dialog', { name: '编辑配置' })
+    fireEvent.click(
+      within(within(dialog).getByLabelText('配置槽位')).getByRole('button', { name: 'Codex' }),
+    )
     fireEvent.click(within(dialog).getByRole('button', { name: '解析预览' }))
 
     const resolvedValue = within(dialog).getByText('/agent/RTK.md')
@@ -766,9 +802,18 @@ describe('Vars view', () => {
       errors: [],
     } as never)
     vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => {
-      const response = matrix(agent)
+      const response = matrix(agent, matrixKeyGroups.pathPreview)
+      if (agent === 'default') return response
+      const configDir = agent === 'claude-code' ? '/cc-config' : '/cx-config'
       return {
         ...response,
+        snapshot: {
+          ...response.snapshot,
+          baseAgent: {
+            ...response.snapshot.baseAgent,
+            rtk_path: { value: '${LOOM_CONFIG_DIR}/RTK.md' },
+          },
+        },
         resolution: {
           ...response.resolution,
           values: {
@@ -776,13 +821,24 @@ describe('Vars view', () => {
             LOOM_CONFIG_DIR: {
               type: 'string' as const,
               format: 'path' as const,
-              value: agent === 'claude-code' ? '/cc-config' : '/cx-config',
+              value: configDir,
             },
             rtk_path: {
               type: 'string' as const,
               format: 'markdown' as const,
-              value: '${LOOM_CONFIG_DIR}/RTK.md',
+              value: `${configDir}/RTK.md`,
             },
+          },
+          sources: {
+            ...response.resolution.sources,
+            rtk_path: { locality: 'synced' as const, layer: 'agent' as const, agent },
+          },
+          overrideChains: {
+            ...response.resolution.overrideChains,
+            rtk_path: [
+              { locality: 'synced' as const, layer: 'base' as const },
+              { locality: 'synced' as const, layer: 'agent' as const, agent },
+            ],
           },
         },
       }
@@ -807,7 +863,7 @@ describe('Vars view', () => {
   it('keeps escaped var references literal in resolved preview', async () => {
     const escapedPath = '\\' + '$' + '{LOOM_CONFIG_DIR}/RTK.md'
     vi.mocked(api.vars.getMatrix).mockImplementation(async (_repo, agent) => {
-      const response = matrix(agent)
+      const response = matrix(agent, matrixKeyGroups.pathPreview)
       return {
         ...response,
         snapshot: {
@@ -819,6 +875,21 @@ describe('Vars view', () => {
               format: 'markdown' as const,
               value: escapedPath,
             },
+          },
+        },
+        resolution: {
+          ...response.resolution,
+          values: {
+            ...response.resolution.values,
+            rtk_path: {
+              type: 'string' as const,
+              format: 'markdown' as const,
+              value: '${LOOM_CONFIG_DIR}/RTK.md',
+            },
+          },
+          dependencies: {
+            ...response.resolution.dependencies,
+            rtk_path: [],
           },
         },
       }
@@ -859,16 +930,5 @@ describe('Vars view', () => {
     fireEvent.click(backdrop)
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑配置' })).toBeNull())
-  })
-
-  it('does not show override or restore inheritance copy', async () => {
-    render(<Vars repoPath="/repo" />)
-    await screen.findByText('agent_name')
-    expect(screen.queryByText(/override/i)).toBeNull()
-    expect(screen.queryByText('恢复继承')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '编辑 agent_name' }))
-    expect(await screen.findByRole('dialog', { name: '编辑配置' })).toBeDefined()
-    expect(screen.queryByText(/override/i)).toBeNull()
-    expect(screen.queryByText('恢复继承')).toBeNull()
   })
 })

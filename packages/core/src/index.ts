@@ -7,6 +7,7 @@ export * from './manifest.js'
 export * from './merge.js'
 export * from './projection.js'
 export * from './source-tree.js'
+export * from './skill-id.js'
 export * from './mutators.js'
 export * from './order.js'
 export * from './vars.js'
@@ -14,6 +15,7 @@ export * from './vars-agent-aware.js'
 export * from './vars-lifecycle.js'
 export * from './vars-graph.js'
 export { normalizeVarEntry } from './vars-value.js'
+export { parseVariableTokens, rewriteVariableKey } from './vars-template.js'
 export {
   deleteVariable,
   renameVariable,

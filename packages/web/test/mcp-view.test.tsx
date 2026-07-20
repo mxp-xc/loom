@@ -2,10 +2,16 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import Mcp from '../src/views/Mcp'
+import ToastHost from '../src/components/ToastHost'
+import { clearToasts } from '../src/hooks/useToast'
 import { api } from '../src/lib/api'
 import { createMonacoEditorMock } from './monaco-test-utils'
+import { deferred } from './deferred'
 
 const monacoEditorMock = createMonacoEditorMock()
+const manifestFixture = vi.hoisted(() => ({
+  agentsByRepo: new Map<string, Array<'claude-code' | 'codex' | 'opencode'>>(),
+}))
 
 vi.mock('@monaco-editor/react', async () => {
   const { createMonacoEditorMock } = await import('./monaco-test-utils')
@@ -19,52 +25,65 @@ vi.mock('../src/lib/api', () => ({
     updateMcpServer: vi.fn(async () => ({ ok: true })),
     updateMcpAgents: vi.fn(async () => ({ ok: true })),
     deleteMcpServer: vi.fn(async () => ({ ok: true })),
-    scanMcpImports: vi.fn(async () => ({
-      ok: true,
-      sources: [
-        { agent: 'claude-code', status: 'ready', diagnostics: [] },
-        { agent: 'codex', status: 'ready', diagnostics: [] },
-        { agent: 'opencode', status: 'missing_file', diagnostics: [] },
-      ],
-      items: [
-        {
-          key: 'ready-key',
-          id: 'browser',
-          finalId: 'browser',
-          server: { id: 'browser', type: 'stdio', command: 'npx' },
-          sourceAgents: ['claude-code'],
-          agents: ['claude-code'],
-          status: 'ready',
-          selectedByDefault: true,
-          ignoredFields: [],
-          diagnostics: [],
-        },
-        {
-          key: 'renamed-key',
-          id: 'browser',
-          finalId: 'browser-cx',
-          server: { id: 'browser-cx', type: 'http', url: 'https://codex.example/mcp' },
-          sourceAgents: ['codex'],
-          agents: ['codex'],
-          status: 'renamed',
-          selectedByDefault: true,
-          ignoredFields: ['mcp_servers.browser.description'],
-          diagnostics: [],
-        },
-        {
-          key: 'disabled-key',
-          id: 'broken',
-          finalId: 'broken',
-          sourceAgents: ['claude-code'],
-          agents: ['claude-code'],
-          status: 'disabled',
-          selectedByDefault: false,
-          ignoredFields: [],
-          diagnostics: [{ code: 'missing_command', message: 'stdio MCP server 缺少 command' }],
-        },
-      ],
-      existing: { count: 2 },
-    })),
+    reorderMcpServers: vi.fn(async ({ ids }: { ids: string[] }) => ({ ok: true, ids })),
+    scanMcpImports: vi.fn(
+      async ({ sources = ['claude-code', 'codex', 'opencode'] }: { sources?: string[] }) => {
+        const requestedSources = new Set(sources)
+        const result = {
+          ok: true,
+          sources: [
+            { agent: 'claude-code', status: 'ready', diagnostics: [] },
+            { agent: 'codex', status: 'ready', diagnostics: [] },
+            { agent: 'opencode', status: 'missing_file', diagnostics: [] },
+          ],
+          items: [
+            {
+              key: 'ready-key',
+              id: 'browser',
+              finalId: 'browser',
+              server: { id: 'browser', type: 'stdio', command: 'npx' },
+              sourceAgents: ['claude-code'],
+              agents: ['claude-code'],
+              status: 'ready',
+              selectedByDefault: true,
+              ignoredFields: [],
+              diagnostics: [],
+            },
+            {
+              key: 'renamed-key',
+              id: 'browser',
+              finalId: 'browser-cx',
+              server: { id: 'browser-cx', type: 'http', url: 'https://codex.example/mcp' },
+              sourceAgents: ['codex'],
+              agents: ['codex'],
+              status: 'renamed',
+              selectedByDefault: true,
+              ignoredFields: ['mcp_servers.browser.description'],
+              diagnostics: [],
+            },
+            {
+              key: 'disabled-key',
+              id: 'broken',
+              finalId: 'broken',
+              sourceAgents: ['claude-code'],
+              agents: ['claude-code'],
+              status: 'disabled',
+              selectedByDefault: false,
+              ignoredFields: [],
+              diagnostics: [{ code: 'missing_command', message: 'stdio MCP server 缺少 command' }],
+            },
+          ],
+          existing: { count: 2 },
+        }
+        return {
+          ...result,
+          sources: result.sources.filter(({ agent }) => requestedSources.has(agent)),
+          items: result.items.filter(({ sourceAgents }) =>
+            sourceAgents.some((agent) => requestedSources.has(agent)),
+          ),
+        }
+      },
+    ),
     applyMcpImports: vi.fn(async () => ({
       ok: true,
       imported: 2,
@@ -122,7 +141,7 @@ vi.mock('../src/lib/api', () => ({
       idleExpiresAt: '2026-07-13T00:05:01.000Z',
     })),
     disconnectMcpDebugSession: vi.fn(async () => ({ ok: true })),
-    getManifest: vi.fn(async () => ({
+    getManifest: vi.fn(async (repoPath: string) => ({
       skills: { sources: [], skills: [] },
       mcp: [
         {
@@ -143,7 +162,7 @@ vi.mock('../src/lib/api', () => ({
         },
       ],
       vars: { default: {}, active: {} },
-      config: { agents: ['claude-code', 'codex', 'opencode'] },
+      config: { agents: [...(manifestFixture.agentsByRepo.get(repoPath) ?? ['codex'])] },
       errors: [],
     })),
     vars: {
@@ -196,11 +215,37 @@ vi.mock('../src/lib/api', () => ({
 }))
 
 beforeEach(() => {
+  manifestFixture.agentsByRepo.clear()
   vi.clearAllMocks()
+  clearToasts()
   monacoEditorMock.reset()
   window.localStorage.clear()
   window.history.replaceState({}, '', '/mcp')
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
 })
+
+function repoWithManifestAgents(
+  scenario: string,
+  ...agents: Array<'claude-code' | 'codex' | 'opencode'>
+) {
+  const repoPath = `/tmp/mcp-${scenario}-${agents.join('-') || 'none'}`
+  manifestFixture.agentsByRepo.set(repoPath, agents)
+  return repoPath
+}
+
+function fakeMonacoModel(line: string) {
+  return {
+    getValueInRange(range: {
+      startColumn: number
+      endColumn: number
+      startLineNumber: number
+      endLineNumber: number
+    }) {
+      expect(range.startLineNumber).toBe(range.endLineNumber)
+      return line.slice(range.startColumn - 1, range.endColumn - 1)
+    },
+  }
+}
 
 describe('MCP workbench view', () => {
   it('persists drawer navigation in the URL and restores it from browser history', async () => {
@@ -238,7 +283,8 @@ describe('MCP workbench view', () => {
   })
 
   it('separates the server title and bulk agents into a two-tier inventory toolbar', async () => {
-    render(<Mcp repoPath="/tmp/mcp-view" />)
+    const repoPath = repoWithManifestAgents('toolbar-agents', 'opencode')
+    render(<Mcp repoPath={repoPath} />)
 
     const workbench = await screen.findByRole('region', { name: 'MCP workbench' })
     const inventory = within(workbench).getByRole('complementary', { name: 'MCP inventory' })
@@ -340,11 +386,19 @@ describe('MCP workbench view', () => {
     await waitFor(() =>
       expect(api.scanMcpImports).toHaveBeenCalledWith({ repo: '/tmp/mcp-empty', sources: [] }),
     )
-    expect(screen.queryByLabelText('MCP import sources')).toBeNull()
+    const importDialog = screen.getByRole('dialog', { name: 'Import MCP servers' })
+    expect(within(importDialog).queryByLabelText('MCP import sources')).toBeNull()
+    expect(within(importDialog).getByText('未发现可导入的 MCP server')).toBeDefined()
+    expect(within(importDialog).queryByRole('checkbox')).toBeNull()
+    expect(
+      within(importDialog).getByRole<HTMLButtonElement>('button', { name: 'Confirm import' })
+        .disabled,
+    ).toBe(true)
   })
 
   it('updates global agent controls without projecting', async () => {
-    render(<Mcp repoPath="/tmp/mcp-view" />)
+    const repoPath = repoWithManifestAgents('global-agents', 'opencode')
+    render(<Mcp repoPath={repoPath} />)
 
     const globalAgents = await screen.findByRole('region', { name: '全局 MCP agents' })
 
@@ -356,6 +410,83 @@ describe('MCP workbench view', () => {
 
     await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalled())
     expect(api.project).not.toHaveBeenCalled()
+  })
+
+  it('suggests resolved vars inside the Server JSON editor', async () => {
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 playwright' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'JSON' }))
+    await waitFor(() => expect(monacoEditorMock.providers.length).toBeGreaterThan(0))
+
+    const provider = monacoEditorMock.providers[0] as {
+      provideCompletionItems: (model: unknown, position: unknown) => { suggestions: unknown[] }
+    }
+    const suggestions = provider.provideCompletionItems(fakeMonacoModel('${brow'), {
+      lineNumber: 1,
+      column: 7,
+    }).suggestions
+
+    expect(api.vars.getMatrix).toHaveBeenCalledWith('/tmp/mcp-view', 'codex')
+    expect(suggestions).toContainEqual(expect.objectContaining({ label: 'browsers_path' }))
+  })
+
+  it('updates bulk agents one server at a time', async () => {
+    let releaseFirst!: () => void
+    vi.mocked(api.updateMcpAgents).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseFirst = () => resolve({ ok: true })
+        }),
+    )
+
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: '全部 MCP servers 应用到 Codex：部分已应用',
+      }),
+    )
+
+    await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalledTimes(1))
+    releaseFirst()
+    await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalledTimes(2))
+  })
+
+  it('keeps selection while reordering and disables sorting during search', async () => {
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+
+    const first = await screen.findByLabelText('调整 playwright 顺序')
+    const second = screen.getByLabelText('调整 remote-auth 顺序')
+    ;[first, second].forEach((element, index) => {
+      element.getBoundingClientRect = () =>
+        DOMRect.fromRect({ x: 0, y: index * 100, width: 320, height: 92 })
+      const sortableItem = element.parentElement?.parentElement?.parentElement
+      if (sortableItem) {
+        sortableItem.getBoundingClientRect = () =>
+          DOMRect.fromRect({ x: 0, y: index * 100, width: 700, height: 92 })
+      }
+    })
+    fireEvent.click(screen.getByRole('button', { name: '选择 remote-auth' }))
+    expect(await screen.findByRole('heading', { name: 'remote-auth' })).toBeDefined()
+
+    first.focus()
+    fireEvent.keyDown(first, { key: ' ', code: 'Space' })
+    await waitFor(() => expect(first.getAttribute('aria-pressed')).toBe('true'))
+    fireEvent.keyDown(document, { key: 'ArrowDown', code: 'ArrowDown' })
+    fireEvent.keyDown(document, { key: ' ', code: 'Space' })
+
+    await waitFor(() =>
+      expect(api.reorderMcpServers).toHaveBeenCalledWith({
+        repo: '/tmp/mcp-view',
+        ids: ['remote-auth', 'playwright'],
+      }),
+    )
+    expect(await screen.findByRole('heading', { name: 'remote-auth' })).toBeDefined()
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'remote' } })
+    expect(screen.getByLabelText('调整 remote-auth 顺序').getAttribute('aria-disabled')).toBe(
+      'true',
+    )
   })
 
   it('keeps create/edit in the workbench and saves create without agents', async () => {
@@ -562,6 +693,111 @@ describe('MCP workbench view', () => {
     expect(await screen.findByRole('heading', { name: 'remote-auth' })).toBeDefined()
   })
 
+  it('copies the selected server through the global toast', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    render(
+      <>
+        <ToastHost />
+        <Mcp repoPath="/tmp/mcp-view" />
+      </>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择 playwright' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy server JSON' }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(writeText.mock.calls[0][0])).toEqual([
+      expect.objectContaining({ id: 'playwright', command: 'npx' }),
+    ])
+    expect(await screen.findByText('已拷贝到剪贴板')).toBeDefined()
+  })
+
+  it.each([
+    ['unavailable', undefined],
+    ['rejected', vi.fn().mockRejectedValue(new Error('permission denied'))],
+  ])('reports clipboard %s with a complete error log', async (_label, writeText) => {
+    if (writeText) {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText },
+      })
+    }
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    render(
+      <>
+        <ToastHost />
+        <Mcp repoPath="/tmp/mcp-view" />
+      </>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择 playwright' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy server JSON' }))
+
+    expect(await screen.findByText('复制失败')).toBeDefined()
+    expect(consoleError).toHaveBeenCalledWith(
+      { err: expect.any(Error) },
+      'Failed to copy MCP server',
+    )
+    consoleError.mockRestore()
+  })
+
+  it('locks delete submission and closing until the request finishes', async () => {
+    const request = deferred<{ ok: true }>()
+    vi.mocked(api.deleteMcpServer).mockImplementationOnce(() => request.promise)
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '删除 playwright' }))
+    const dialog = await screen.findByRole('dialog', { name: '删除 MCP server' })
+    const deleteButton = within(dialog).getByRole('button', { name: '删除' })
+    fireEvent.click(deleteButton)
+    fireEvent.click(deleteButton)
+
+    expect(api.deleteMcpServer).toHaveBeenCalledTimes(1)
+    expect(
+      within(dialog).getByRole<HTMLButtonElement>('button', { name: '删除中...' }).disabled,
+    ).toBe(true)
+    expect(within(dialog).getByRole<HTMLButtonElement>('button', { name: '关闭' }).disabled).toBe(
+      true,
+    )
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByRole('dialog', { name: '删除 MCP server' })).toBeDefined()
+
+    request.resolve({ ok: true })
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '删除 MCP server' })).toBeNull(),
+    )
+  })
+
+  it('keeps the delete dialog open after a failed request', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const result = {
+      ok: false,
+      error: 'delete_failed',
+      message: '删除失败',
+    } as const
+    vi.mocked(api.deleteMcpServer).mockResolvedValueOnce(result as never)
+    render(<Mcp repoPath="/tmp/mcp-view" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '删除 playwright' }))
+    const dialog = await screen.findByRole('dialog', { name: '删除 MCP server' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除' }))
+
+    await waitFor(() => expect(api.deleteMcpServer).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('dialog', { name: '删除 MCP server' })).toBeDefined()
+    expect(within(dialog).getByRole<HTMLButtonElement>('button', { name: '删除' }).disabled).toBe(
+      false,
+    )
+    expect(consoleError).toHaveBeenCalledWith(
+      { key: 'mcp:delete:playwright', result, message: result.message },
+      'Manifest operation returned ok:false',
+    )
+    consoleError.mockRestore()
+  })
+
   it('confirms before closing a dirty editor drawer', async () => {
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
@@ -602,7 +838,8 @@ describe('MCP workbench view', () => {
   })
 
   it('preserves edit agents while letting agent chips project only when requested', async () => {
-    render(<Mcp repoPath="/tmp/mcp-view" />)
+    const repoPath = repoWithManifestAgents('edit-agents', 'claude-code', 'codex')
+    render(<Mcp repoPath={repoPath} />)
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑 playwright' }))
     fireEvent.change(screen.getByLabelText('command'), { target: { value: 'node' } })
@@ -610,7 +847,7 @@ describe('MCP workbench view', () => {
 
     await waitFor(() =>
       expect(api.updateMcpServer).toHaveBeenCalledWith({
-        repo: '/tmp/mcp-view',
+        repo: repoPath,
         id: 'playwright',
         server: expect.objectContaining({ command: 'node', agents: ['codex'] }),
       }),
@@ -621,13 +858,12 @@ describe('MCP workbench view', () => {
     expect(api.project).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Project changes' }))
-    await waitFor(() =>
-      expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/mcp-view', scope: 'mcp' }),
-    )
+    await waitFor(() => expect(api.project).toHaveBeenCalledWith({ repo: repoPath, scope: 'mcp' }))
   })
 
   it('uses preview agent for transport/env/headers/settings and variable inspector', async () => {
-    render(<Mcp repoPath="/tmp/mcp-view" />)
+    const repoPath = repoWithManifestAgents('preview-agents', 'codex', 'opencode')
+    render(<Mcp repoPath={repoPath} />)
 
     fireEvent.click(await screen.findByRole('button', { name: '选择 playwright' }))
     expect((await screen.findAllByText('${browsers_path}')).length).toBeGreaterThan(0)
@@ -670,7 +906,7 @@ describe('MCP workbench view', () => {
         },
       ],
       vars: { default: {}, active: {} },
-      config: { agents: ['claude-code', 'codex', 'opencode'] },
+      config: { agents: [] },
       errors: [],
     } as never)
 
@@ -683,13 +919,14 @@ describe('MCP workbench view', () => {
   })
 
   it('imports native MCP entries through a preview dialog without projecting', async () => {
-    render(<Mcp repoPath="/tmp/mcp-view" />)
+    const repoPath = repoWithManifestAgents('import-agents', 'claude-code', 'codex', 'opencode')
+    render(<Mcp repoPath={repoPath} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Import MCP' }))
 
     const dialog = await screen.findByRole('dialog', { name: 'Import MCP servers' })
     expect(api.scanMcpImports).toHaveBeenCalledWith({
-      repo: '/tmp/mcp-view',
+      repo: repoPath,
       sources: ['claude-code', 'codex', 'opencode'],
     })
     expect(within(dialog).getByText('browser-cx')).toBeDefined()
@@ -703,7 +940,7 @@ describe('MCP workbench view', () => {
 
     await waitFor(() =>
       expect(api.applyMcpImports).toHaveBeenCalledWith({
-        repo: '/tmp/mcp-view',
+        repo: repoPath,
         sources: ['claude-code', 'codex', 'opencode'],
         keys: ['ready-key', 'renamed-key'],
       }),
@@ -712,11 +949,13 @@ describe('MCP workbench view', () => {
   })
 
   it('shows stale import preview errors without closing the dialog', async () => {
-    vi.mocked(api.applyMcpImports).mockResolvedValueOnce({
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const result = {
       ok: false,
       error: 'stale_import_preview',
       message: '导入预览已过期，请重新扫描',
-    } as never)
+    } as const
+    vi.mocked(api.applyMcpImports).mockResolvedValueOnce(result as never)
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Import MCP' }))
@@ -725,6 +964,11 @@ describe('MCP workbench view', () => {
 
     expect(await within(dialog).findByText('导入预览已过期，请重新扫描')).toBeDefined()
     expect(screen.getByRole('dialog', { name: 'Import MCP servers' })).toBeDefined()
+    expect(consoleError).toHaveBeenCalledWith(
+      { key: 'mcp:import:apply', result, message: result.message },
+      'Manifest operation returned ok:false',
+    )
+    consoleError.mockRestore()
   })
 
   it('connects a saved server debug session and calls a selected tool with editable Monaco args', async () => {
@@ -970,6 +1214,7 @@ describe('MCP workbench view', () => {
   })
 
   it('keeps invalid JSON local and does not call the tool API', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     render(<Mcp repoPath="/tmp/mcp-view" />)
 
     fireEvent.click(await screen.findByRole('button', { name: '选择 playwright' }))
@@ -988,5 +1233,10 @@ describe('MCP workbench view', () => {
 
     expect(api.callMcpDebugTool).not.toHaveBeenCalled()
     expect(await within(panel).findByText('参数 JSON 无法解析')).toBeDefined()
+    expect(consoleError).toHaveBeenCalledWith(
+      { err: expect.any(SyntaxError), args: '{', toolName: 'capture_live_filter' },
+      'Failed to parse MCP tool arguments',
+    )
+    consoleError.mockRestore()
   })
 })

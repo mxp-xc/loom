@@ -5,6 +5,10 @@
   margin-top: 16px;
 }
 .cfg-cat-tab {
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  letter-spacing: 0;
   padding: 9px 18px;
   font-size: 13px;
   font-weight: 500;
@@ -40,6 +44,10 @@
   padding: 3px;
 }
 .cfg-lvl-opt {
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  letter-spacing: 0;
   font-size: 12px;
   font-weight: 500;
   padding: 6px 14px;

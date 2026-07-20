@@ -26,16 +26,23 @@ describe('addLocalSkill', () => {
     expect(result.changed).toBe(true)
     expect(result.data.skills).toHaveLength(1)
   })
-  it('preserves unknown YAML fields via spread', () => {
-    const skills = { sources: [], skills: [{ id: 'a', customField: 'x' } as any] }
-    const result = addLocalSkill(skills, { id: 'b' })
-    expect(result.data.skills[0]).toHaveProperty('customField', 'x')
-  })
   it('does not mutate the input', () => {
     const result = addLocalSkill(emptySkills, { id: 'test' })
     expect(emptySkills.skills).toHaveLength(0)
     expect(result.data).not.toBe(emptySkills)
   })
+  it('does not append a duplicate identity', () => {
+    const skills: SkillsManifest = { sources: [], skills: [{ id: 'test' }] }
+    const result = addLocalSkill(skills, { id: 'test', path: '/other' })
+
+    expect(result).toEqual({ changed: false, data: skills })
+  })
+  it.each(['nested/skill', '../skill', 'BadSkill'])(
+    'rejects invalid identity %s before mutation',
+    (id) => {
+      expect(() => addLocalSkill(emptySkills, { id })).toThrow('Invalid local skill id')
+    },
+  )
 })
 
 describe('removeLocalSkill', () => {
@@ -54,6 +61,9 @@ describe('removeLocalSkill', () => {
     const skills: SkillsManifest = { sources: [], skills: [{ id: 'a' }] }
     removeLocalSkill(skills, 'a')
     expect(skills.skills).toHaveLength(1)
+  })
+  it('rejects invalid identity before mutation', () => {
+    expect(() => removeLocalSkill(emptySkills, '../outside')).toThrow('Invalid local skill id')
   })
 })
 
@@ -76,19 +86,23 @@ describe('addSource', () => {
       ref: 'main',
     })
   })
-  it('preserves existing sources via spread', () => {
-    const skills: SkillsManifest = {
-      sources: [{ url: 'https://github.com/a/b', ref: 'v1', custom: 'keep' } as any],
-      skills: [],
+  it('persists optional source metadata', () => {
+    const source = {
+      name: 'repo',
+      url: 'https://github.com/test/repo',
+      ref: 'v1.0.0',
+      type: 'tag' as const,
+      pinned_commit: 'abc123',
+      members: [{ name: 'skill', entry: 'skill/SKILL.md' }],
+      resources: { include: [{ path: 'shared', kind: 'directory' as const }], exclude: [] },
     }
-    const result = addSource(skills, { url: 'https://github.com/c/d', ref: 'main' })
-    expect(result.data.sources[0]).toHaveProperty('custom', 'keep')
-    expect(result.data.sources).toHaveLength(2)
+
+    expect(addSource(emptySkills, source).data.sources[0]).toEqual(source)
   })
 })
 
 describe('updateSourceMeta', () => {
-  it('updates a source name without touching members', () => {
+  it('updates source metadata without touching members', () => {
     const skills: SkillsManifest = {
       sources: [
         {
@@ -104,12 +118,21 @@ describe('updateSourceMeta', () => {
     }
     const result = updateSourceMeta(skills, 'https://github.com/test/repo', {
       name: 'new-name',
+      ref: 'v2.0.0',
+      type: 'tag',
     })
     expect(result.data.sources[0]).toEqual({
       name: 'new-name',
       url: 'https://github.com/test/repo',
-      ref: 'main',
+      ref: 'v2.0.0',
+      type: 'tag',
       members: [{ name: 'skill-a', entry: 'skills/skill-a/SKILL.md', agents: ['codex'] }],
+    })
+  })
+  it('returns changed=false when the source does not exist', () => {
+    expect(updateSourceMeta(emptySkills, 'missing', { ref: 'next' })).toEqual({
+      changed: false,
+      data: emptySkills,
     })
   })
 })
@@ -279,10 +302,9 @@ describe('setLocalSkillAgents', () => {
     expect(result.changed).toBe(true)
     expect(result.data.skills[0].agents).toEqual(['codex'])
   })
-  it('registers an auto-discovered local skill when first assigning agents', () => {
+  it('does not implicitly register an unknown local skill', () => {
     const result = setLocalSkillAgents(emptySkills, 'frontend-design', ['codex' as AgentId])
-    expect(result.changed).toBe(true)
-    expect(result.data.skills).toEqual([{ id: 'frontend-design', agents: ['codex'] }])
+    expect(result).toEqual({ changed: false, data: emptySkills })
   })
   it('preserves other fields on the skill via spread', () => {
     const skills: SkillsManifest = {
@@ -292,6 +314,11 @@ describe('setLocalSkillAgents', () => {
     const result = setLocalSkillAgents(skills, 'my-skill', ['codex' as AgentId])
     expect(result.data.skills[0].path).toBe('/some/path')
     expect(result.data.skills[0].agents).toEqual(['codex'])
+  })
+  it('rejects invalid identity before mutation', () => {
+    expect(() => setLocalSkillAgents(emptySkills, '../outside', ['codex' as AgentId])).toThrow(
+      'Invalid local skill id',
+    )
   })
 })
 
@@ -354,7 +381,7 @@ describe('updateMcpServer', () => {
   it('replaces an existing server while keeping its id stable', () => {
     const mcp: McpServer[] = [{ id: 'a', type: 'stdio', command: 'old' }]
     const replacement: McpServer = {
-      id: 'a',
+      id: 'replacement-id',
       type: 'http',
       url: 'https://example.test/mcp',
       agents: ['codex'],
@@ -363,7 +390,7 @@ describe('updateMcpServer', () => {
     const result = updateMcpServer(mcp, 'a', replacement)
 
     expect(result.changed).toBe(true)
-    expect(result.data).toEqual([replacement])
+    expect(result.data).toEqual([{ ...replacement, id: 'a' }])
   })
 
   it('returns changed=false when the server does not exist', () => {
@@ -459,9 +486,36 @@ describe('setConfigField', () => {
     )
     expect(result.changed).toBe(false)
   })
-  it('still handles top-level fields (no dot)', () => {
-    const result = setConfigField({ profile: 'default' }, 'active_repo', 'myrepo')
+  it('treats inherited fields as absent', () => {
+    const config = Object.create({ profile: 'inherited' }) as Record<string, unknown>
+    const result = setConfigField(config, 'profile', 'inherited')
+
     expect(result.changed).toBe(true)
-    expect(result.data.active_repo).toBe('myrepo')
+    expect(Object.hasOwn(result.data, 'profile')).toBe(true)
+  })
+  it('does not delete inherited fields', () => {
+    const config = Object.create({ profile: 'inherited' }) as Record<string, unknown>
+    expect(setConfigField(config, 'profile', null)).toEqual({ changed: false, data: config })
+  })
+  it.each([{ proxy: [] }, { proxy: 'http://proxy.test' }, { proxy: new Date() }])(
+    'rejects nested writes through a non-plain parent',
+    (config) => {
+      expect(() => setConfigField(config, 'proxy.http', 'http://localhost')).toThrow(
+        'Config field proxy is not an object',
+      )
+    },
+  )
+  it.each(['__proto__.polluted', 'constructor.prototype.polluted', 'proxy..http'])(
+    'rejects unsafe config path %s',
+    (field) => {
+      expect(() => setConfigField({}, field, true)).toThrow('Invalid config field path')
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+    },
+  )
+  it('supports null-prototype nested records', () => {
+    const proxy = Object.assign(Object.create(null) as Record<string, unknown>, { https: 'b' })
+    const result = setConfigField({ proxy }, 'proxy.http', 'a')
+
+    expect(result.data).toEqual({ proxy: { http: 'a', https: 'b' } })
   })
 })

@@ -237,8 +237,9 @@ function buildResolvedRows(activeMatrix: VarsMatrixResponse): VarsResolvedRow[] 
 
 export function buildVarsProfileState(input: BuildVarsProfileStateInput): VarsProfileState {
   const activeMatrix = input.activeAgent
-    ? (input.matricesByAgent[input.activeAgent] ?? input.defaultMatrix)
+    ? input.matricesByAgent[input.activeAgent]
     : input.defaultMatrix
+  if (!activeMatrix) throw new Error(`Missing Vars matrix for agent ${input.activeAgent}`)
   const definitionMatrix = activeMatrix
   const builtinEntries = buildBuiltinEntries(definitionMatrix)
   const baseEntries = buildBaseEntries(

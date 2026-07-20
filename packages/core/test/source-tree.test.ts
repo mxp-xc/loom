@@ -97,6 +97,13 @@ describe('resource selection', () => {
     expect(
       resourceSelectionState('folder/shared/archive/keep.md', 'file', resources).selected,
     ).toBe(true)
+
+    expect(
+      resourceSelectionState('folder/shared/exact.md', 'file', {
+        include: [{ path: 'folder/shared/exact.md', kind: 'file' }],
+        exclude: [{ path: 'folder/shared/exact.md', kind: 'file' }],
+      }),
+    ).toEqual({ selected: false, available: true })
   })
 
   it('marks an exact path unavailable when its persisted kind changed', () => {
@@ -146,6 +153,12 @@ describe('projection root mapping', () => {
     expect(() => mapProjectionRoots(['folder/A.md', 'folder/a.md'])).toThrow(
       /Projection destination collision:/,
     )
+  })
+
+  it('deduplicates equivalent path separators before mapping destinations', () => {
+    expect(mapProjectionRoots(['folder\\shared', 'folder/shared'])).toEqual([
+      { sourcePath: 'folder/shared', targetPath: 'shared' },
+    ])
   })
 
   it('retains a single selected root name', () => {

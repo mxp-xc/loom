@@ -23,7 +23,11 @@ describe('request validation middleware', () => {
     })
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ ok: false, error: 'invalid_id' })
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: 'invalid_id',
+      message: 'request validation failed',
+    })
   })
 
   it('can derive the error code from the failed issue path', async () => {
@@ -49,7 +53,11 @@ describe('request validation middleware', () => {
     })
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ ok: false, error: 'invalid_updates' })
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: 'invalid_updates',
+      message: 'request validation failed',
+    })
   })
 
   it('validates query input and exposes the parsed query', async () => {
@@ -66,7 +74,11 @@ describe('request validation middleware', () => {
 
     const invalid = await app.request('/demo')
     expect(invalid.status).toBe(400)
-    expect(await invalid.json()).toEqual({ ok: false, error: 'invalid_repo' })
+    expect(await invalid.json()).toEqual({
+      ok: false,
+      error: 'invalid_repo',
+      message: 'request validation failed',
+    })
 
     const valid = await app.request('/demo?repo=default')
     expect(valid.status).toBe(200)

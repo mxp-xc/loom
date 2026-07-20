@@ -55,7 +55,9 @@ Examples:
 
 Tests:
 
-- packages/web/test/views.test.tsx
+- packages/web/test/skills-view.test.tsx
+- packages/web/test/mcp-view.test.tsx
+- packages/web/test/memory-view.test.tsx
 - packages/server/test/api/local-skill-status.test.ts
 - packages/web/test/vars-view.test.tsx
 
@@ -90,7 +92,9 @@ Examples:
 Tests:
 
 - packages/web/test/manifest-operations.test.tsx
-- packages/web/test/views.test.tsx
+- packages/web/test/skills-view.test.tsx
+- packages/web/test/mcp-view.test.tsx
+- packages/web/test/memory-view.test.tsx
 
 ## R-CROSS-003 批量控制必须有明确 scope
 
@@ -120,7 +124,8 @@ Examples:
 Tests:
 
 - packages/web/test/manifest-operations.test.tsx
-- packages/web/test/views.test.tsx
+- packages/web/test/skills-view.test.tsx
+- packages/web/test/mcp-view.test.tsx
 
 ## R-CROSS-004 除非 Loom 能证明归属，否则保留 user-owned artifacts
 
@@ -178,3 +183,202 @@ Tests:
 - packages/server/test/api/open-path.test.ts
 - packages/server/test/platform/node/external-opener.test.ts
 - packages/web/test/open-with.test.tsx
+
+## R-CROSS-006 Persisted manifest 先验证容器，再进入业务逻辑
+
+Status: active
+Applies to: manifest loading, skills, MCP, config, projection
+
+Rule:
+仓库内 `skills.yaml`、`mcp.yaml`、`config.yaml` 必须先通过运行时容器验证，才能进入 mutation 或 projection。`skills.yaml` 顶层是包含 `sources` 与 `skills` 数组的对象，`mcp.yaml` 顶层是数组，`config.yaml` 顶层是对象。文件缺失使用对应空值；空 `config.yaml` 等价于空对象，显式 `null` 或 scalar 不是空配置。
+
+Implications:
+
+- 已存在但容器错误的文件产生结构化 diagnostic，不静默替换成空 desired state。
+- 非对象 list item 产生精确到文件和索引的 diagnostic；对象 item 继续接受字段级 schema 验证。
+- Config 是 open-ended 文档；已解析的未知 own fields 在读取、merge 和无关 mutation 中保留。
+- Vars/Memory filename map 与 Config merge 只消费 own properties，并使用不继承 `Object.prototype` 的动态 records。
+
+Safety:
+
+- 容器错误必须在业务写入、外部 process、Git mutation 或 projection artifact 写入前失败。
+- 不读取 inherited properties，不允许 `__proto__` 等动态 key 改变输出对象 prototype。
+- 错误响应和日志不得回显原始 YAML 内容。
+
+Examples:
+
+- `config.yaml` 内容为空时可以读取为 `{}`；内容为 `null` 时返回 invalid-config diagnostic。
+- `mcp.yaml` 写成 `{ servers: [] }` 时不能被当成没有 MCP servers。
+
+Tests:
+
+- packages/core/test/manifest.test.ts
+- packages/server/test/api/repo-config.test.ts
+- packages/server/test/projection/scan.test.ts
+- packages/server/test/mcp/application.test.ts
+- packages/server/test/skills/application.test.ts
+
+## R-CROSS-007 Caller 或 persisted path 不是 mutation authority
+
+Status: active
+Applies to: skills, projection, source update, sync, recovery
+
+Rule:
+Caller input、plan、cache metadata 或 persisted journal 中的 path 只能用于绑定已知 identity，不能单独授权读取、覆盖、移动或删除。Mutation path 必须从已授权 canonical root 和经过 schema 验证的稳定 identity 重新派生。
+
+Implications:
+
+- Persisted state 使用 versioned runtime schema；malformed state、EACCES 或 EIO 不得降级为 missing。
+- Recovery 重新验证 root、entry kind、canonical containment 和 physical identity。
+- External ref、source cache、session staging 和 agent-native destination 分别绑定其所有者 identity。
+
+Safety:
+
+- 不对 journal 中的任意 absolute path 直接执行 remove、move、replace 或 recursive copy。
+- Root、ancestor、leaf 是 link、junction、special entry或身份漂移时 fail closed，外部 sentinel 保持不变。
+
+Examples:
+
+- Source update journal 中即使存在 `stagingDir` 字段，recovery 也只操作由 canonical repository 和 session id重新派生且 ownership匹配的 staging entry。
+
+Tests:
+
+- packages/server/test/skills/update-sessions.test.ts
+- packages/server/test/projection/executor.test.ts
+
+## R-CROSS-008 Filesystem batch mutation 先完整验证再提交
+
+Status: active
+Applies to: skills mutation, source preserve, projection
+
+Rule:
+同一业务操作涉及多个 filesystem artifacts 时，必须在首次 user-visible destination mutation 前完成整批 identity、path graph、source kind、destination collision 和 ownership preflight。新内容先写入 owned staging，最终安装不能替换既有 entry。
+
+Implications:
+
+- Duplicate normalized path、file/ancestor collision 或任一 late validation error 都产生零 final mutation。
+- Copy/snapshot 不跟随 link 或 junction，只接受契约允许的 regular files 和真实 directories。
+- Commit 前出现并发 destination 时保留该 destination并失败，不能覆盖或报告成功。
+
+Safety:
+
+- Partial copy、marker write或 commit失败不能留下看似完整但未登记的 final artifact。
+- Rollback 只操作 owner token 和 physical identity 都匹配当前事务的 artifact；primary 与 rollback failure 必须同时可观测。
+
+Examples:
+
+- 同一 archive 同时包含 `docs` 文件和 `docs/usage.md` 时，在创建 skill directory 前拒绝整个 batch。
+
+Tests:
+
+- packages/server/test/skills/application.test.ts
+- packages/server/test/projection/executor.test.ts
+
+## R-CROSS-009 B2 API failure 使用稳定 HTTP contract
+
+Status: active
+Applies to: skills, MCP, MCP import, MCP debug
+
+Rule:
+B2 API 的 request validation 返回 HTTP 400，not found 返回 404，collision 或 stale state 返回 409，invalid persisted configuration 返回 422，operational 或 unexpected failure 返回 500。Failure response 不得使用 HTTP 200。
+
+Implications:
+
+- Typed Application error 保留稳定 code 与分类后的 status；route 不信任缺省或未知 lifecycle status。
+- Repository authorization error 继续使用 R-REPOSITORY-002 的 `invalid_repo` / `repo_unavailable` contract，不得被 operation-specific error 覆盖。
+- MCP debug 的 missing session、session capacity、connect/list-tools/tool-call failure 分别映射为 404、409、500。
+
+Safety:
+
+- Response 使用固定安全 message，不回显 unexpected `error.message`、path、stack、cause 或 secret。
+- Catch/error boundary 记录完整 `{ err }`；同一 route boundary 不重复记录同一 failure。
+
+Examples:
+
+- Stale MCP import preview 返回 HTTP 409 `stale_import_preview`。
+- MCP debug transport connect failure 返回 HTTP 500 `connect_failed`，底层 process 或 network message 只进入日志。
+
+Tests:
+
+- packages/server/test/api/b2-route-contracts.test.ts
+- packages/server/test/api/mcp-import-routes.test.ts
+- packages/server/test/api/mcp-debug-routes.test.ts
+
+## R-CROSS-010 跨资源命令使用统一 lease
+
+Status: active
+Applies to: repository state, local config, projection, source update, MCP import, Sync
+
+Rule:
+读取或修改多个持久化 artifact 的顶层命令必须通过 server-wide resource lease coordinator 获取完整资源集。资源 key 使用已授权 canonical identity，获取前去重并按固定全序排列；同一资源按到达顺序执行，只有资源集不相交的命令可以并行。
+
+Implications:
+
+- `read` 与 `mutation` 双向排斥，writer等待active reader，reader等待先到writer；读取不得观察跨文件 mutation 的中间状态。
+- 同一命令的read、validate、write、projection、rollback与cleanup属于同一 lease；不能只锁最终文件写入。
+- Local config使用canonical home identity，不挂到任一repository key；需要repo与local config的命令一次获取两个key。
+- Projection同时获取repository、projection state与所有可能触达的agent-native target key；MCP import同时获取实际native source config key。不同repository只有完整资源集不相交时才能并行。
+- Sync、普通API和child process复用同一跨进程lock protocol；push、force-push与remote update不得绕过。
+- 跨进程协议必须能锁定尚不存在的逻辑资源，不得为了加锁预先创建业务文件或目录。
+- Top-level command只获取一次。内部callback使用已持有上下文或unlocked helper，不得重入同一non-reentrant resource。
+
+Safety:
+
+- 无效request先完成authorization再排队；依赖当前状态的validation在lease内重读。
+- Operation、rollback或release失败后必须释放内存调度状态，使后续waiter可以从最终状态继续。
+- 不存在的目标使用canonical existing parent与validated basename形成稳定key，不能等待创建后才决定锁身份。
+
+Tests:
+
+- packages/server/test/concurrency/resource-lease-coordinator.test.ts
+- packages/server/test/api/resource-lease-integration.test.ts
+- packages/server/test/sync/session-manager.test.ts
+
+## R-CROSS-011 API failure envelope 与 status policy
+
+Status: active
+Applies to: HTTP API、Web API client
+
+Rule:
+非 2xx API failure 使用 `{ ok: false, error: string, message: string, diagnostics? }`；request validation为400、not found为404、state conflict为409、quota为413、invalid persisted input为422、operational或unexpected failure为500。明确建模为discriminated union的业务结果可以使用HTTP 200。
+
+Implications:
+
+- Web client在API统一期间同时解码flat `error: string`与nested `error: { code, message }`，并保留稳定code、message和diagnostics。
+- Sync push的Git拒绝是HTTP 200 business result；Sync session、pull、save与transport failure使用互斥success DTO或非2xx `ApiError`，不能用optional fields拼出不可能状态。
+- Config与Memory对malformed persisted config统一返回422；unexpected read/write failure返回500。
+
+Safety:
+
+- Unexpected error的原始message、path、stack、cause或secret只进入包含完整`{ err }`的日志，不进入response。
+- 同一route boundary只记录一次同一failure。
+
+Tests:
+
+- packages/web/test/api.test.ts
+- packages/web/test/sync.test.tsx
+- packages/server/test/api/memory.test.ts
+- packages/server/test/api/routes.test.ts
+
+## R-CROSS-012 Runtime owner负责释放后台资源
+
+Status: active
+Applies to: API route runtime、Sync maintenance、MCP debug sessions
+
+Rule:
+创建maintenance timer、session manager或transport的runtime必须暴露幂等`dispose()`并释放自己创建的资源；注入的dependency保持caller-owned，除非显式转移ownership。
+
+Implications:
+
+- Runtime dispose先停止maintenance，再等待进行中的recovery、session create与cleanup，重复或并发调用不得重复释放。
+- MCP session capacity包含正在连接的session；dispose开始后拒绝新session，已开始的create不能在dispose完成后留下session或transport。
+
+Safety:
+
+- Expired session的异步cleanup必须可被dispose观察和等待。
+- Runtime shutdown完成时不得遗留owned MCP client或session。
+
+Tests:
+
+- packages/server/test/mcp/debug-session.test.ts
+- packages/server/test/api/routes.test.ts

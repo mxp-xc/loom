@@ -20,6 +20,129 @@ function createClient(overrides: Partial<McpDebugClient> = {}) {
 }
 
 describe('McpDebugSessionManager', () => {
+  it('reserves capacity before asynchronous connections finish', async () => {
+    let resolveConnect!: (client: McpDebugClient) => void
+    const connect = vi.fn(
+      () =>
+        new Promise<McpDebugClient>((resolve) => {
+          resolveConnect = resolve
+        }),
+    )
+    const manager = new McpDebugSessionManager({ connect, maxSessions: 1 })
+    const first = manager.createSession({
+      source: 'saved',
+      previewAgent: 'codex',
+      server: { id: 'first', type: 'stdio', command: 'mcp-server' },
+    })
+
+    await expect(
+      manager.createSession({
+        source: 'saved',
+        previewAgent: 'codex',
+        server: { id: 'second', type: 'stdio', command: 'mcp-server' },
+      }),
+    ).rejects.toMatchObject({ code: 'too_many_sessions' })
+
+    resolveConnect(createClient())
+    await first
+    expect(connect).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits for an in-flight create during idempotent disposal', async () => {
+    let resolveConnect!: (client: McpDebugClient) => void
+    const client = createClient()
+    const manager = new McpDebugSessionManager({
+      connect: () =>
+        new Promise<McpDebugClient>((resolve) => {
+          resolveConnect = resolve
+        }),
+    })
+    const creating = manager.createSession({
+      source: 'saved',
+      previewAgent: 'codex',
+      server: { id: 'pending', type: 'stdio', command: 'mcp-server' },
+    })
+
+    const firstDispose = manager.dispose()
+    const secondDispose = manager.dispose()
+    expect(secondDispose).toBe(firstDispose)
+    resolveConnect(client)
+
+    await expect(creating).rejects.toMatchObject({ code: 'manager_disposed' })
+    await firstDispose
+    expect(client.close).toHaveBeenCalledTimes(1)
+    expect(manager.sessionCountForTest()).toBe(0)
+    await expect(
+      manager.createSession({
+        source: 'saved',
+        previewAgent: 'codex',
+        server: { id: 'late', type: 'stdio', command: 'mcp-server' },
+      }),
+    ).rejects.toMatchObject({ code: 'manager_disposed' })
+  })
+
+  it('maps connection and tool failures while logging their full errors', async () => {
+    const connectError = new Error('spawn failed with secret')
+    const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn() }
+    const failedManager = new McpDebugSessionManager({
+      connect: vi.fn(async () => {
+        throw connectError
+      }),
+      logger,
+    })
+    await expect(
+      failedManager.createSession({
+        source: 'saved',
+        previewAgent: 'codex',
+        server: { id: 'broken', type: 'stdio', command: 'missing' },
+      }),
+    ).rejects.toMatchObject({ code: 'connect_failed' })
+    expect(logger.error).toHaveBeenCalledWith(
+      'MCP debug connect failed',
+      expect.objectContaining({ err: connectError, serverId: 'broken' }),
+    )
+
+    const client = createClient({
+      callTool: vi.fn(async () => ({ isError: true, content: [{ type: 'text', text: 'failed' }] })),
+    })
+    const manager = new McpDebugSessionManager({
+      connect: vi.fn(async () => client),
+      createId: () => 'tool-error',
+      logger,
+    })
+    await manager.createSession({
+      source: 'saved',
+      previewAgent: 'codex',
+      server: { id: 'tool-server', type: 'stdio', command: 'mcp-server' },
+    })
+    await expect(
+      manager.callTool('tool-error', { toolName: 'fail', arguments: {} }),
+    ).rejects.toMatchObject({ code: 'tool_call_failed' })
+    expect(logger.error).toHaveBeenCalledWith(
+      'MCP debug tool call failed',
+      expect.objectContaining({ err: expect.any(Error), sessionId: 'tool-error' }),
+    )
+  })
+
+  it('starts one maintenance timer and stops it during disposal', async () => {
+    vi.useFakeTimers()
+    try {
+      const manager = new McpDebugSessionManager()
+      const sweep = vi.spyOn(manager, 'sweepExpired')
+      manager.startMaintenance(100)
+      manager.startMaintenance(100)
+
+      await vi.advanceTimersByTimeAsync(100)
+      expect(sweep).toHaveBeenCalledTimes(1)
+
+      await manager.dispose()
+      await vi.advanceTimersByTimeAsync(100)
+      expect(sweep).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('connects once, returns listed tools, and reuses the session for tool calls', async () => {
     let now = 1000
     const client = createClient()

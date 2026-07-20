@@ -20,6 +20,7 @@ function Controlled({ onClose }: { onClose?: () => void }) {
         }}
         title="编辑环境"
       >
+        <input type="file" hidden />
         <input
           data-autofocus
           aria-label="名称"

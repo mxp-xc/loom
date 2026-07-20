@@ -172,6 +172,18 @@ export function createLogger(opts: LoggerOptions): Logger {
   return createLoggerInternal(opts)
 }
 
+function createSilentLogger(): Logger {
+  const logger: Logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    child: () => logger,
+    flush: async () => {},
+  }
+  return logger
+}
+
 // Clean up log files older than `days`. Exported so the server entry point
 // can call it explicitly on startup instead of running on module import.
 export async function cleanupOldLogs(dir: string, days: number): Promise<void> {
@@ -207,7 +219,10 @@ function resolveLevel(): LogLevel {
   return 'INFO'
 }
 
-export const logger: Logger = createLogger({
-  logDir: resolveLogDir(),
-  level: resolveLevel(),
-})
+export const logger: Logger =
+  process.env.NODE_ENV === 'test'
+    ? createSilentLogger()
+    : createLogger({
+        logDir: resolveLogDir(),
+        level: resolveLevel(),
+      })

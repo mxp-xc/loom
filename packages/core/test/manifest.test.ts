@@ -34,9 +34,115 @@ describe('loadRepoManifest safeParse', () => {
     expect(result.skills.sources[0].url).toBe('https://github.com/test/repo')
     // should not throw — error collected in validateManifest
   })
+
+  it.each([
+    ['empty skills', { 'skills.yaml': '' }, 'skills.yaml', 'manifest_container_invalid'],
+    ['scalar skills', { 'skills.yaml': 'invalid\n' }, 'skills.yaml', 'manifest_container_invalid'],
+    ['list skills', { 'skills.yaml': '[]\n' }, 'skills.yaml', 'manifest_container_invalid'],
+    ['object mcp', { 'mcp.yaml': 'servers: []\n' }, 'mcp.yaml', 'manifest_container_invalid'],
+    ['scalar config', { 'config.yaml': 'invalid\n' }, 'config.yaml', 'manifest_container_invalid'],
+    ['null config', { 'config.yaml': 'null\n' }, 'config.yaml', 'manifest_container_invalid'],
+  ])('uses safe fallbacks and diagnostics for %s', (_label, input, file, code) => {
+    const result = loadRepoManifest(input)
+    expect(result.skills).toEqual({ sources: [], skills: [] })
+    expect(result.mcp).toEqual([])
+    expect(result.repoConfig).toEqual({})
+    expect(result.loadDiagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ file, code })]),
+    )
+    expect(() => buildManifest(result, {})).not.toThrow()
+    expect(buildManifest(result, {}).errors).toEqual(
+      expect.arrayContaining([expect.stringContaining(file)]),
+    )
+  })
+
+  it('reports malformed fields and filters non-object items without hiding object field errors', () => {
+    const result = loadRepoManifest({
+      'skills.yaml': [
+        'sources: wrong',
+        'skills:',
+        '  - null',
+        '  - invalid',
+        '  - id: valid-shape',
+        '    unknown: true',
+        'group_order: wrong',
+      ].join('\n'),
+      'mcp.yaml': ['- null', '- invalid', '- id: missing-transport'].join('\n'),
+    })
+
+    expect(result.skills.sources).toEqual([])
+    expect(result.skills.skills).toEqual([{ id: 'valid-shape', unknown: true }])
+    expect(result.mcp).toEqual([{ id: 'missing-transport' }])
+    expect(result.loadDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'manifest_field_invalid', path: 'sources' }),
+        expect.objectContaining({ code: 'manifest_item_invalid', path: 'skills[0]' }),
+        expect.objectContaining({ code: 'manifest_item_invalid', path: 'skills[1]' }),
+        expect.objectContaining({ code: 'manifest_field_invalid', path: 'group_order' }),
+        expect.objectContaining({ code: 'manifest_item_invalid', file: 'mcp.yaml', path: '[0]' }),
+        expect.objectContaining({ code: 'manifest_item_invalid', file: 'mcp.yaml', path: '[1]' }),
+      ]),
+    )
+    const errors = validateManifest(result)
+    expect(errors).toEqual(
+      expect.arrayContaining([expect.stringMatching(/skills\.skills\[2\]\.\:.*unknown/)]),
+    )
+    expect(errors).toEqual(expect.arrayContaining([expect.stringContaining('mcp[2]')]))
+  })
+
+  it('accepts an empty config document and preserves forward-compatible own fields', () => {
+    expect(loadRepoManifest({ 'config.yaml': '' }).loadDiagnostics).toEqual([])
+    const result = loadRepoManifest({
+      'config.yaml': ['future:', '  enabled: true', '"__proto__":', '  safe: true'].join('\n'),
+    })
+    const config = result.repoConfig as Config & Record<string, unknown>
+    expect(Object.getPrototypeOf(config)).toBeNull()
+    expect(config.future).toEqual({ enabled: true })
+    expect(Object.hasOwn(config, '__proto__')).toBe(true)
+    expect(config.__proto__).toEqual({ safe: true })
+    expect((Object.prototype as Record<string, unknown>).safe).toBeUndefined()
+  })
+
+  it('uses prototype-safe dictionaries for vars and memory filenames', () => {
+    const result = loadRepoManifest({
+      'config.yaml': 'profile: __proto__\nactive_memory: __proto__\n',
+      'vars/__proto__.yaml': 'VALUE: safe\n',
+      'memories/__proto__.md': '# safe',
+    })
+    expect(Object.getPrototypeOf(result.varsFiles)).toBeNull()
+    expect(Object.getPrototypeOf(result.memoriesFiles)).toBeNull()
+    expect(Object.hasOwn(result.varsFiles, '__proto__')).toBe(true)
+    expect(Object.hasOwn(result.memoriesFiles, '__proto__')).toBe(true)
+    const manifest = buildManifest(result, {})
+    expect(manifest.vars.active).toEqual({ VALUE: 'safe' })
+    expect(manifest.memory.active).toMatchObject({ name: '__proto__', content: '# safe' })
+  })
 })
 
 describe('validateManifest (zod discriminatedUnion)', () => {
+  it.each(['nested/skill', '../skill', '.', 'BadSkill', 'bad_skill', 'bad skill'])(
+    'rejects invalid local skill id %s',
+    (id) => {
+      const manifest = loadRepoManifest({
+        'skills.yaml': `sources: []\nskills:\n  - id: ${JSON.stringify(id)}\n`,
+        'mcp.yaml': '[]\n',
+      })
+
+      expect(validateManifest(manifest)).toEqual([expect.stringContaining('skills.skills[0].id')])
+    },
+  )
+
+  it('rejects duplicate local skill identities', () => {
+    const manifest = loadRepoManifest({
+      'skills.yaml': 'sources: []\nskills:\n  - id: shared\n  - id: shared\n',
+      'mcp.yaml': '[]\n',
+    })
+
+    expect(validateManifest(manifest)).toEqual([
+      expect.stringContaining('duplicate local skill id: shared'),
+    ])
+  })
+
   it('flags mcp stdio missing command', () => {
     const m = loadRepoManifest({
       'mcp.yaml': '- id: x\n  type: stdio\n',
@@ -106,15 +212,74 @@ describe('validateManifest (zod discriminatedUnion)', () => {
     })
     expect(validateManifest(m).some((e) => e.includes('duplicate source name: shared'))).toBe(true)
   })
+  it('reports a legacy source URL without a repository name instead of throwing', () => {
+    const manifest = loadRepoManifest({
+      'skills.yaml': 'sources:\n  - url: https://github.com/\n    ref: main\nskills: []\n',
+      'mcp.yaml': '[]\n',
+    })
+
+    expect(() => validateManifest(manifest)).not.toThrow()
+    expect(validateManifest(manifest)).toEqual(['source[0].url: invalid repository URL'])
+    expect(() => buildManifest(manifest, {})).not.toThrow()
+    expect(buildManifest(manifest, {}).errors).toEqual(['source[0].url: invalid repository URL'])
+  })
   it('flags duplicate source urls', () => {
     const m = loadRepoManifest({
       'skills.yaml':
         'sources:\n  - name: first\n    url: github:a/shared\n    ref: main\n  - name: second\n    url: github:a/shared\n    ref: main\nskills: []\n',
       'mcp.yaml': '[]\n',
     })
-    expect(
-      validateManifest(m).some((e) => e.includes('duplicate source url: github:a/shared')),
-    ).toBe(true)
+    expect(validateManifest(m)).toEqual(
+      expect.arrayContaining(['source[1].url: duplicate source URL already used by source[0]']),
+    )
+  })
+  it('does not expose source URL credentials in manifest errors', () => {
+    const secret = 'manifest-secret-7e27'
+    const url = `https://user:${secret}@example.test/`
+    const manifest = loadRepoManifest({
+      'skills.yaml': [
+        'sources:',
+        `  - url: ${url}`,
+        '    ref: main',
+        `  - url: ${url}`,
+        '    ref: main',
+        'skills: []',
+      ].join('\n'),
+      'mcp.yaml': '[]\n',
+    })
+
+    const errors = buildManifest(manifest, {}).errors
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        'source[0].url: invalid repository URL',
+        'source[1].url: duplicate source URL already used by source[0]',
+        'source[1].url: invalid repository URL',
+      ]),
+    )
+    expect(errors.join('\n')).not.toContain(secret)
+    expect(errors.join('\n')).not.toContain(url)
+  })
+
+  it('keeps original indexes after filtering invalid list items', () => {
+    const manifest = loadRepoManifest({
+      'skills.yaml': [
+        'sources:',
+        '  - null',
+        '  - ref: main',
+        'skills:',
+        '  - null',
+        '  - id: BadSkill',
+      ].join('\n'),
+      'mcp.yaml': ['- null', '- id: missing-transport'].join('\n'),
+    })
+
+    expect(validateManifest(manifest)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('source[1].url'),
+        expect.stringContaining('skills.skills[1].id'),
+        expect.stringContaining('mcp[1].type'),
+      ]),
+    )
   })
   it('rejects the removed source scan field instead of silently stripping it', () => {
     const m = loadRepoManifest({
@@ -213,6 +378,24 @@ describe('mergeConfig (two-level, deep merge)', () => {
     expect(
       mergeConfig({ profile: 'repo' }, { profile: null as unknown as string } as Config).profile,
     ).toBe(null)
+  })
+
+  it('keeps own __proto__ fields without changing merged object prototypes', () => {
+    const repo = Object.create(null) as Config & Record<string, unknown>
+    repo.proxy = { http: 'repo', https: 'repo' }
+    repo.__proto__ = { repo: true }
+    const local = Object.create(null) as Config & Record<string, unknown>
+    local.proxy = { http: 'local' }
+    local.__proto__ = { local: true }
+
+    const result = mergeConfig(repo, local) as Config & Record<string, unknown>
+    expect(Object.getPrototypeOf(result)).toBeNull()
+    expect(Object.getPrototypeOf(result.proxy)).toBeNull()
+    expect(result.proxy).toEqual({ http: 'local', https: 'repo' })
+    expect(Object.hasOwn(result, '__proto__')).toBe(true)
+    expect(result.__proto__).toEqual({ repo: true, local: true })
+    expect((Object.prototype as Record<string, unknown>).repo).toBeUndefined()
+    expect((Object.prototype as Record<string, unknown>).local).toBeUndefined()
   })
 })
 

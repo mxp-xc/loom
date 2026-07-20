@@ -1,66 +1,121 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Settings from '../src/views/Settings'
 import { api } from '../src/lib/api'
+import { deferred } from './deferred'
+
+const config = {
+  effective: { active_repo: 'default', profile: 'work', agents: ['claude-code'] },
+  repo: { profile: 'work', agents: ['claude-code'] },
+  local: { active_repo: 'default' },
+  profiles: ['work', 'personal'],
+}
 
 vi.mock('../src/lib/api', () => ({
   api: {
-    getConfig: vi.fn(async () => ({
-      effective: { active_repo: 'default', agents: ['claude-code'] },
-      repo: { agents: ['claude-code'] },
-      local: { active_repo: 'default' },
-    })),
-    putConfig: vi.fn(async () => ({ ok: true })),
-    getManifest: vi.fn(async () => ({
-      skills: { sources: [], skills: [] },
-      mcp: [],
-      vars: { default: {}, active: {} },
-      config: { agents: ['claude-code'] },
-      errors: [],
-    })),
+    getConfig: vi.fn(),
+    putConfig: vi.fn(),
+    getManifest: vi.fn(),
   },
 }))
 
 describe('Settings', () => {
-  it('renders three state tabs (最终结果/仓库级/本地级)', async () => {
-    render(<Settings repoPath="/tmp/r" />)
-    expect(await screen.findByText('最终结果')).toBeDefined()
-    expect(screen.getByText('仓库级')).toBeDefined()
-    expect(screen.getByText('本地级')).toBeDefined()
+  beforeEach(() => {
+    vi.resetAllMocks()
+    localStorage.clear()
+    vi.mocked(api.getConfig).mockResolvedValue(config)
+    vi.mocked(api.putConfig).mockResolvedValue({ ok: true })
+    vi.mocked(api.getManifest).mockResolvedValue({
+      skills: { sources: [], skills: [] },
+      mcp: [],
+      memory: { memories: [], active: null, activeContent: '' },
+      vars: { default: {}, active: {} },
+      config: { agents: ['claude-code'] },
+      errors: [],
+    })
   })
 
-  it('sdot: effective tab active_repo=fixed, agents=repo', async () => {
+  it('falls back from an invalid persisted category', async () => {
+    localStorage.setItem('loom:settings:catTab', 'deleted-category')
+
     render(<Settings repoPath="/tmp/r" />)
-    await screen.findByText('最终结果')
-    expect(screen.getByTitle('固定本地级')).toBeDefined()
-    expect(screen.getByTitle('仓库级已设')).toBeDefined()
+
+    expect((await screen.findByRole('tab', { name: '通用' })).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    expect(screen.getByText('Workspace')).toBeDefined()
   })
 
-  it('switching to repo tab still shows active_repo as fixed', async () => {
+  it('uses tabs and pressed buttons for category and level navigation', async () => {
     render(<Settings repoPath="/tmp/r" />)
-    await screen.findByText('最终结果')
-    fireEvent.click(screen.getByText('仓库级'))
-    // active_repo is fixed local — dot stays fixed in all panes
-    expect(screen.getByTitle('固定本地级')).toBeDefined()
+    const general = await screen.findByRole('tab', { name: '通用' })
+    const network = screen.getByRole('tab', { name: '网络' })
+    expect(general.getAttribute('aria-selected')).toBe('true')
+
+    fireEvent.click(network)
+    expect(network.getAttribute('aria-selected')).toBe('true')
+    expect(localStorage.getItem('loom:settings:catTab')).toBe('network')
+
+    const repoLevel = screen.getByRole('button', { name: '仓库级' })
+    fireEvent.click(repoLevel)
+    expect(repoLevel.getAttribute('aria-pressed')).toBe('true')
+    expect(localStorage.getItem('loom:settings:level')).toBe('repo')
   })
 
-  it('refreshes shared manifest after saving agents', async () => {
-    const getConfigCallsBefore = vi.mocked(api.getConfig).mock.calls.length
+  it('renders loading until the config request completes', async () => {
+    const request = deferred<typeof config>()
+    vi.mocked(api.getConfig).mockReturnValue(request.promise)
     render(<Settings repoPath="/tmp/r" />)
-    await screen.findByText('最终结果')
-    fireEvent.click(screen.getByText('仓库级'))
-    fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }))
 
+    expect(screen.getByRole('status').textContent).toContain('加载中')
+    request.resolve(config)
+    expect(await screen.findByRole('tab', { name: '通用' })).toBeDefined()
+  })
+
+  it('shows a load error and retries', async () => {
+    const cause = new Error('config unavailable')
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.mocked(api.getConfig).mockRejectedValueOnce(cause).mockResolvedValueOnce(config)
+    render(<Settings repoPath="/tmp/r" />)
+
+    expect(await screen.findByText('配置加载失败')).toBeDefined()
+    expect(consoleError).toHaveBeenCalledWith(
+      { err: cause, repoPath: '/tmp/r' },
+      'Failed to load settings',
+    )
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByRole('tab', { name: '通用' })).toBeDefined()
+  })
+
+  it('saves a profile through the native select and refreshes config and manifest', async () => {
+    render(<Settings repoPath="/tmp/r" />)
+    await screen.findByRole('tab', { name: '通用' })
+    fireEvent.click(screen.getByRole('button', { name: '仓库级' }))
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Profile' }), {
+      target: { value: 'personal' },
+    })
+
+    await waitFor(() =>
+      expect(api.putConfig).toHaveBeenCalledWith({
+        repo: '/tmp/r',
+        level: 'repo',
+        field: 'profile',
+        value: 'personal',
+      }),
+    )
     await waitFor(() => expect(api.getManifest).toHaveBeenCalledWith('/tmp/r'))
-    await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(getConfigCallsBefore + 2))
+    expect(api.getConfig).toHaveBeenCalledTimes(2)
   })
 
-  it('does not render the old global save bar actions', async () => {
+  it('keeps active_repo visibly read-only without a transactional switch API', async () => {
     render(<Settings repoPath="/tmp/r" />)
-    await screen.findByText('最终结果')
+    await screen.findByRole('tab', { name: '通用' })
+    fireEvent.click(screen.getByRole('button', { name: '本地级' }))
 
-    expect(screen.queryByRole('button', { name: '放弃' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '保存' })).toBeNull()
+    const activeRepo = screen.getByRole('combobox', { name: 'Active repo' })
+    expect((activeRepo as HTMLSelectElement).value).toBe('default')
+    expect(activeRepo.hasAttribute('disabled')).toBe(true)
   })
 })

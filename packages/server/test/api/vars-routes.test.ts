@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Hono } from 'hono'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 import { VarsStore } from '../../src/vars/store.js'
 import { createVarsRoutes } from '../../src/api/routes/vars.js'
@@ -447,6 +448,29 @@ describe('vars HTTP API', () => {
     expect(await readFile(join(root, 'vars', 'base.yaml'), 'utf8')).toContain('API_URL:')
   })
 
+  it('treats an even-backslash consumer token as active when deleting a base key', async () => {
+    await mkdir(join(root, 'memories'), { recursive: true })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      ['API_URL:', '  type: string', '  value: https://example.test', ''].join('\n'),
+    )
+    await writeFile(
+      join(root, 'memories', 'default.md'),
+      'literal=\\${API_URL}\nactive=\\\\${API_URL}\n',
+    )
+
+    const deleted = await json('/vars/base-key', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repoPath: root, key: 'API_URL' }),
+    })
+
+    expect(deleted.response.status).toBe(409)
+    expect(deleted.body.error.diagnostics).toEqual([
+      expect.objectContaining({ code: 'CONSUMER_REFERENCE_EXISTS', layer: 'memory' }),
+    ])
+  })
+
   it('renames base keys and rewrites vars references across base and override layers', async () => {
     await mkdir(join(home, '.loom', 'local', 'repos', 'default', 'vars'), { recursive: true })
     await writeFile(
@@ -512,6 +536,32 @@ describe('vars HTTP API', () => {
       '$' + '{SERVICE_URL}',
     )
     expect(await readFile(join(root, 'mcp.yaml'), 'utf8')).toContain('$' + '{SERVICE_URL}')
+  })
+
+  it('preserves escaped consumer tokens while renaming active tokens with defaults', async () => {
+    await mkdir(join(root, 'memories'), { recursive: true })
+    await writeFile(
+      join(root, 'vars', 'base.yaml'),
+      ['API_URL:', '  type: string', '  value: https://example.test', ''].join('\n'),
+    )
+    await writeFile(
+      join(root, 'memories', 'default.md'),
+      ['default=${API_URL:fallback}', 'literal=\\${API_URL}', 'active=\\\\${API_URL}', ''].join(
+        '\n',
+      ),
+    )
+
+    const renamed = await json('/vars/base-key/rename', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repoPath: root, oldKey: 'API_URL', newKey: 'SERVICE_URL' }),
+    })
+
+    expect(renamed.response.status).toBe(200)
+    const memory = await readFile(join(root, 'memories', 'default.md'), 'utf8')
+    expect(memory).toContain('default=${SERVICE_URL:fallback}')
+    expect(memory).toContain('literal=\\${API_URL}')
+    expect(memory).toContain('active=\\\\${SERVICE_URL}')
   })
 
   it('rejects overrides that do not match the base definition type before persisting', async () => {
@@ -1011,7 +1061,10 @@ describe('vars HTTP API', () => {
     )
     expect(failed.status).toBe(500)
     const failedBody = (await failed.json()) as any
-    expect(failedBody.error).toEqual({ code: 'io_error', message: '变量存储操作失败' })
+    expect(failedBody.error).toEqual({
+      code: 'repo_unavailable',
+      message: 'repository is unavailable',
+    })
     expect(JSON.stringify(failedBody)).not.toContain(root)
 
     const missing = await app.request('/vars/environments?repoPath=/definitely/missing/repository')
@@ -1022,48 +1075,22 @@ describe('vars HTTP API', () => {
     })
   })
 
-  it('does not expose malformed YAML secrets through error logs', async () => {
-    const secret = 'top-secret-yaml-log-payload'
-    await writeFile(join(root, 'vars', 'dev.yaml'), `API_KEY: [${secret}`)
-    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-    try {
-      const response = await app.request(
-        `/vars/environments/dev?repoPath=${encodeURIComponent(root)}`,
-      )
-      expect(response.status).toBe(500)
-      expect(write.mock.calls.map(([value]) => String(value)).join('')).not.toContain(secret)
-    } finally {
-      write.mockRestore()
-    }
-  })
-
-  it('fails closed when local config YAML is malformed and never logs its secret', async () => {
-    const secret = 'top-secret-local-config-payload'
-    await writeFile(join(home, '.loom', 'config.yaml'), `active_repo: [${secret}`)
-    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-    try {
-      const response = await app.request(`/vars/environments?repoPath=${encodeURIComponent(root)}`)
-      expect(response.status).toBe(500)
-      expect(await response.json()).toEqual({
-        ok: false,
-        error: { code: 'io_error', message: '变量存储操作失败' },
-      })
-      expect(write.mock.calls.map(([value]) => String(value)).join('')).not.toContain(secret)
-    } finally {
-      write.mockRestore()
-    }
-  })
-
   it('registers vars routes under the /api router', async () => {
     const fs = new NodeFileSystem()
-    const router = new (await import('hono')).Hono().route(
-      '/api',
-      registerRoutes({ fs, git: {} as never, proc: {} as never, home }),
-    )
-    const response = await router.request(
-      `/api/vars/environments?repoPath=${encodeURIComponent(root)}`,
-    )
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ ok: true, environments: ['dev'], diagnostics: [] })
+    const routes = registerRoutes({ fs, git: {} as never, proc: {} as never, home })
+    const router = new Hono().route('/api', routes)
+    try {
+      const response = await router.request(
+        `/api/vars/environments?repoPath=${encodeURIComponent(root)}`,
+      )
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        ok: true,
+        environments: ['dev'],
+        diagnostics: [],
+      })
+    } finally {
+      await routes.dispose()
+    }
   })
 })

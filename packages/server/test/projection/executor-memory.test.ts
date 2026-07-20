@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -13,15 +13,12 @@ describe('executeProjection memory phase', () => {
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'loom-exec-'))
     fs = new NodeFileSystem()
-    process.env.CLAUDE_CONFIG_DIR = join(home, 'claude')
-    process.env.CODEX_HOME = join(home, 'codex')
-    process.env.OPENCODE_CONFIG_DIR = join(home, 'opencode')
+    vi.stubEnv('CLAUDE_CONFIG_DIR', join(home, 'claude'))
+    vi.stubEnv('CODEX_HOME', join(home, 'codex'))
+    vi.stubEnv('OPENCODE_CONFIG_DIR', join(home, 'opencode'))
   })
   afterEach(() => {
     rmSync(home, { recursive: true, force: true })
-    delete process.env.CLAUDE_CONFIG_DIR
-    delete process.env.CODEX_HOME
-    delete process.env.OPENCODE_CONFIG_DIR
   })
 
   const buildPlan = (mf: Manifest, agents: AgentId[]) =>

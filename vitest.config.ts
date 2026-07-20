@@ -1,21 +1,22 @@
-import { defineConfig } from 'vitest/config'
-import { fileURLToPath } from 'node:url'
+import { configDefaults, defineConfig } from 'vitest/config'
+import { availableParallelism } from 'node:os'
 
-const webSrc = fileURLToPath(new URL('./packages/web/src/', import.meta.url))
-const webTestSetup = fileURLToPath(new URL('./packages/web/test/setup.ts', import.meta.url))
+const maxWorkers = Math.min(6, Math.max(1, Math.round(availableParallelism() * 0.6)))
 
 export default defineConfig({
-  resolve: {
-    alias: { '@': webSrc },
-  },
   test: {
-    projects: ['packages/*'],
     coverage: { include: ['packages/*/src/**'] },
-    setupFiles: [webTestSetup],
     testTimeout: 30000,
-    globals: true,
-    maxConcurrency: 8,
-    poolOptions: { threads: { maxThreads: 4 } },
-    exclude: ['**/node_modules/**', '**/.claude/worktrees/**', '**/.worktrees/**'],
+    pool: 'forks',
+    isolate: true,
+    fileParallelism: true,
+    minWorkers: 1,
+    maxWorkers,
+    exclude: [
+      ...configDefaults.exclude,
+      '**/.claude/worktrees/**',
+      '**/.worktrees/**',
+      '**/temp/**',
+    ],
   },
 })

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { agentIds, agentName } from '@/lib/agents'
 import { IconButton } from '@/components/ui/IconButton'
 import { AgentChip } from '@/components/ui/AgentChip'
@@ -148,6 +148,7 @@ interface ConfigFieldProps {
   effectiveValue: unknown
   inRepo: boolean
   inLocal: boolean
+  options?: string[]
   onCommit: (key: string, value: unknown) => Promise<void>
   draft: string | undefined
   onDraftChange: (key: string, value: string | undefined) => void
@@ -160,12 +161,14 @@ export function ConfigField({
   effectiveValue,
   inRepo,
   inLocal,
+  options,
   onCommit,
   draft,
   onDraftChange,
 }: ConfigFieldProps) {
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const savingRef = useRef(false)
 
   const isFixed = field.fixed === true
   const isReadonly = level === 'effective'
@@ -180,32 +183,26 @@ export function ConfigField({
   const editValue = draft ?? ''
   const displayValue = isInherited ? effectiveValue : value
 
-  const save = async (v: unknown) => {
+  const commit = async (value: unknown, clearDraft: boolean) => {
     if (level === 'effective') return
+    if (savingRef.current) return
+    savingRef.current = true
     setSaving(true)
     setErr(null)
     try {
-      await onCommit(field.key, v)
-      onDraftChange(field.key, undefined)
+      await onCommit(field.key, value)
+      if (clearDraft) onDraftChange(field.key, undefined)
     } catch (e) {
+      console.error({ err: e, field: field.key, level }, 'Failed to save config field')
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
 
-  // Clear a saved value at the current level (saves null)
-  const clearValue = async () => {
-    setSaving(true)
-    setErr(null)
-    try {
-      await onCommit(field.key, null)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSaving(false)
-    }
-  }
+  const save = (value: unknown) => commit(value, true)
+  const clearValue = () => commit(null, false)
 
   const dotClick = () => {
     if (level !== 'local' || isFixed) return
@@ -236,7 +233,18 @@ export function ConfigField({
   return (
     <div className={styles['cfg-field']} data-level={level}>
       <div className={styles['cfg-field-row']}>
-        <span className={cn(styles.sdot2, styles[ds])} title={dotTitle(ds)} onClick={dotClick} />
+        {level === 'local' && !isFixed ? (
+          <button
+            type="button"
+            className={cn(styles.sdot2, styles[ds])}
+            title={dotTitle(ds)}
+            aria-label={dotTitle(ds)}
+            disabled={saving}
+            onClick={dotClick}
+          />
+        ) : (
+          <span className={cn(styles.sdot2, styles[ds])} title={dotTitle(ds)} />
+        )}
         <span className={styles['cfg-field-label']}>
           {field.label}
           {help && (
@@ -247,31 +255,60 @@ export function ConfigField({
         </span>
         <div className={cn(styles['cfg-field-ctrl'], isDisabled && styles['cfg-ctrl-disabled'])}>
           {field.control === 'select' && (
-            <div
+            <select
+              aria-label={field.label}
               className={cn(
                 styles['cfg-select'],
                 isDisabled && styles['cfg-ctrl-disabled'],
                 isInherited && styles['cfg-ctrl-inherited'],
               )}
+              value={typeof value === 'string' ? value : ''}
+              disabled={
+                isDisabled ||
+                saving ||
+                (!options?.length &&
+                  (field.key !== 'profile' || !(typeof value === 'string' && value.length > 0)))
+              }
+              onChange={(event) => void save(event.target.value === '' ? null : event.target.value)}
             >
-              {(value as string) || '— 未设置'} <span className={styles.caret}>▼</span>
-            </div>
+              <option value="">— 未设置</option>
+              {typeof value === 'string' && value && !options?.includes(value) && (
+                <option value={value}>{value}</option>
+              )}
+              {options?.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           )}
           {field.control === 'segmented' && (
-            <div className={cn(styles['cfg-seg'], isDisabled && styles['cfg-ctrl-disabled'])}>
+            <div
+              className={cn(styles['cfg-seg'], isDisabled && styles['cfg-ctrl-disabled'])}
+              role="group"
+              aria-label={field.label}
+            >
               {(field.options ?? []).map((opt) => (
-                <div
+                <button
+                  type="button"
                   key={opt}
+                  aria-pressed={value === opt}
+                  disabled={isDisabled || saving}
                   className={cn(styles['cfg-seg-opt'], value === opt && styles.on)}
                   onClick={() => onControlClick(opt)}
                 >
                   {opt}
-                </div>
+                </button>
               ))}
             </div>
           )}
           {field.control === 'toggle' && (
-            <div
+            <button
+              type="button"
+              role="switch"
+              aria-label={field.label}
+              aria-checked={value === true}
+              disabled={isDisabled || saving}
               className={cn(
                 styles['cfg-toggle'],
                 value === true && styles.on,
@@ -309,6 +346,7 @@ export function ConfigField({
                 <input
                   className={cn(styles['cfg-input'], styles['with-unit'])}
                   value={editValue}
+                  disabled={saving}
                   onChange={(e) => onDraftChange(field.key, e.target.value)}
                   autoFocus
                 />
@@ -325,6 +363,7 @@ export function ConfigField({
                 <IconButton
                   label={`取消编辑 ${field.label}`}
                   tooltip="取消"
+                  disabled={saving}
                   onClick={() => {
                     onDraftChange(field.key, undefined)
                     setErr(null)
@@ -332,11 +371,13 @@ export function ConfigField({
                 >
                   <X className="h-3.5 w-3.5" />
                 </IconButton>
-                {err && <span style={{ fontSize: 11, color: 'var(--error)' }}>{err}</span>}
               </>
             ) : (
               <>
-                <span
+                <button
+                  type="button"
+                  aria-label={`编辑 ${field.label}`}
+                  disabled={!canEdit || saving}
                   className={cn(
                     styles['cfg-input'],
                     styles['with-unit'],
@@ -346,7 +387,7 @@ export function ConfigField({
                   onClick={canEdit ? startEdit : undefined}
                 >
                   {value != null ? String(value) : '—'}
-                </span>
+                </button>
                 <span className={styles['cfg-unit']}>{field.unit}</span>
                 {canEdit && value != null && (
                   <IconButton
@@ -367,6 +408,7 @@ export function ConfigField({
                 <input
                   className={styles['cfg-input']}
                   value={editValue}
+                  disabled={saving}
                   onChange={(e) => onDraftChange(field.key, e.target.value)}
                   autoFocus
                 />
@@ -382,6 +424,7 @@ export function ConfigField({
                 <IconButton
                   label={`取消编辑 ${field.label}`}
                   tooltip="取消"
+                  disabled={saving}
                   onClick={() => {
                     onDraftChange(field.key, undefined)
                     setErr(null)
@@ -389,11 +432,13 @@ export function ConfigField({
                 >
                   <X className="h-3.5 w-3.5" />
                 </IconButton>
-                {err && <span style={{ fontSize: 11, color: 'var(--error)' }}>{err}</span>}
               </>
             ) : (
               <>
-                <span
+                <button
+                  type="button"
+                  aria-label={`编辑 ${field.label}`}
+                  disabled={!canEdit || saving}
                   className={cn(styles['cfg-input'], isInherited && styles['cfg-ctrl-inherited'])}
                   style={{
                     border: 'none',
@@ -405,7 +450,7 @@ export function ConfigField({
                   {displayValue != null && String(displayValue) !== ''
                     ? String(displayValue)
                     : '— 未设置'}
-                </span>
+                </button>
                 {canEdit && value != null && (
                   <IconButton
                     label={`清空 ${field.label}`}
@@ -421,6 +466,11 @@ export function ConfigField({
             ))}
         </div>
       </div>
+      {err && (
+        <div role="alert" className={styles['cfg-field-error']}>
+          {err}
+        </div>
+      )}
     </div>
   )
 }

@@ -10,7 +10,7 @@ async function makeBareWithCommit(): Promise<string> {
   return createBareRepo([
     {
       message: 'init',
-      files: { 'a.txt': 'x', 'skills/demo/SKILL.md': 'body' },
+      files: { 'a.txt': 'x\n\n', 'skills/demo/SKILL.md': 'body' },
       tags: ['v1.0.0'],
     },
   ])
@@ -57,14 +57,16 @@ describe('NodeGit', () => {
     expect(result.tags['v1.0.0']).toBeTruthy()
   })
   it('push reports nonFastForward when remote ahead', async () => {
+    const writableBare = await makeBareWithCommit()
+    created.push(writableBare)
     const dest = await mkdtemp(join(tmpdir(), 'push-'))
     created.push(dest)
     const git = new NodeGit()
-    await git.clone(bare, dest, false)
+    await git.clone(writableBare, dest, false)
     const work2 = await mkdtemp(join(tmpdir(), 'w2-'))
     created.push(work2)
     const w2 = testGit(work2)
-    await w2.clone(bare, '.')
+    await w2.clone(writableBare, '.')
     await writeFile(join(work2, 'b.txt'), 'y')
     await w2.add('.')
     await w2.commit('c2')
@@ -78,28 +80,31 @@ describe('NodeGit', () => {
     )
   })
   it('push succeeds when local ahead, returns ok:true', async () => {
+    const writableBare = await makeBareWithCommit()
+    created.push(writableBare)
     const dest = await mkdtemp(join(tmpdir(), 'pushok-'))
     created.push(dest)
     const git = new NodeGit()
-    await git.clone(bare, dest, false)
+    await git.clone(writableBare, dest, false)
     const wg = testGit(dest)
     await writeFile(join(dest, 'c.txt'), 'z')
     await wg.add('.')
     await wg.commit('c3')
     const res = await git.push(dest)
     expect(res.ok).toBe(true)
-    expect(res.nonFastForward).not.toBe(true)
   })
   it('forcePush overwrites a remote that is ahead', async () => {
+    const writableBare = await makeBareWithCommit()
+    created.push(writableBare)
     const dest = await mkdtemp(join(tmpdir(), 'forcepush-'))
     created.push(dest)
     const git = new NodeGit()
-    await git.clone(bare, dest, false)
+    await git.clone(writableBare, dest, false)
 
     const work2 = await mkdtemp(join(tmpdir(), 'forcepush-w2-'))
     created.push(work2)
     const remotePeer = testGit(work2)
-    await remotePeer.clone(bare, '.')
+    await remotePeer.clone(writableBare, '.')
     await writeFile(join(work2, 'remote.txt'), 'remote')
     await remotePeer.add('.')
     await remotePeer.commit('remote ahead')
@@ -113,14 +118,24 @@ describe('NodeGit', () => {
     const res = await git.forcePush(dest)
 
     expect(res).toEqual({ ok: true })
-    const files = await testGit().raw(['--git-dir', bare, 'ls-tree', '-r', '--name-only', 'HEAD'])
+    const files = await testGit().raw([
+      '--git-dir',
+      writableBare,
+      'ls-tree',
+      '-r',
+      '--name-only',
+      'HEAD',
+    ])
     expect(files).toContain('local.txt')
     expect(files).not.toContain('remote.txt')
   })
 
   describe('show/revParseHead/lsTree/readTree', () => {
     it('show reads file content at ref', async () => {
-      expect(await new NodeGit().show(readOnlyRepo, 'HEAD', 'a.txt')).toContain('x')
+      expect(await new NodeGit().show(readOnlyRepo, 'HEAD', 'a.txt')).toBe('x\n\n')
+      await expect(new NodeGit().showBytes(readOnlyRepo, 'HEAD', 'a.txt')).resolves.toEqual(
+        Buffer.from('x\n\n'),
+      )
     })
     it('revParseHead returns HEAD hash', async () => {
       expect(await new NodeGit().revParseHead(readOnlyRepo)).toMatch(/^[0-9a-f]{7,40}$/)

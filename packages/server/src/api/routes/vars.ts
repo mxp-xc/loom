@@ -1,5 +1,4 @@
 import { Hono, type Context, type MiddlewareHandler } from 'hono'
-import { isAbsolute, join, normalize } from 'node:path'
 import { z } from 'zod'
 import {
   AgentIdSchema,
@@ -16,6 +15,10 @@ import { type VarsLayerKind } from '../../vars/agent-aware.js'
 import { readLocalConfig } from '../repo-config.js'
 import { paramValidator, queryValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
+import { assertRepositoryRoot, authorizeRepository, type RepositoryAuthorization } from '../repo.js'
+import { repositoryRouteError } from '../repository-route-error.js'
+import { canonicalRepositoryHome, runAuthorizedRepositoryLease } from '../repository-lease.js'
+import { resourceLeases } from '../../concurrency/resource-lease-coordinator.js'
 
 const apiLogger = logger.child('vars-api')
 const ENVIRONMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/
@@ -162,6 +165,24 @@ function varsValidationMessage(issues: z.ZodIssue[]): string {
 }
 
 function errorResponse(c: Context, error: unknown, operation: string, repoPath?: string) {
+  const repositoryFailure = repositoryRouteError(error)
+  if (repositoryFailure) {
+    apiLogger.error('vars repository authorization failed', {
+      err: error,
+      operation,
+      ...(repoPath ? { repoPath } : {}),
+    })
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: repositoryFailure.code,
+          message: repositoryFailure.message,
+        },
+      },
+      repositoryFailure.status,
+    )
+  }
   if (error instanceof ApiError || error instanceof VarsApplicationError) {
     return c.json(
       {
@@ -206,37 +227,56 @@ async function run(
   }
 }
 
-async function resolveAuthorizedRepo(deps: RouteDeps, repoPath: string): Promise<string> {
+async function resolveRequestedRepo(
+  deps: RouteDeps,
+  repoPath: string,
+): Promise<RepositoryAuthorization> {
+  await assertRepositoryRoot(deps.fs, deps.home)
   const localConfig = await readLocalConfig(deps.fs, deps.home)
   const activeRepo = localConfig.active_repo ?? 'default'
-  if (typeof activeRepo !== 'string' || !ENVIRONMENT.test(activeRepo) || activeRepo.includes('..'))
-    throw new Error('invalid active repository configuration')
+  const authorization = await authorizeRepository(
+    deps.fs,
+    typeof activeRepo === 'string' ? activeRepo : '',
+    deps.home,
+  )
   const requestedPath =
-    !isAbsolute(repoPath) && ENVIRONMENT.test(repoPath) && !repoPath.includes('..')
-      ? join(deps.home, '.loom', 'repos', repoPath)
-      : repoPath
-  const [allowed, requested] = await Promise.all([
-    deps.fs.realPath(join(deps.home, '.loom', 'repos', activeRepo)),
-    deps.fs.realPath(requestedPath),
-  ])
-  if (normalize(allowed) !== normalize(requested))
+    ENVIRONMENT.test(repoPath) && !repoPath.includes('..')
+      ? (await authorizeRepository(deps.fs, repoPath, deps.home)).path
+      : await deps.fs.realPath(repoPath)
+  if (requestedPath !== authorization.path) {
     throw new ApiError(403, 'repo_not_authorized', '仓库未授权')
-  return normalize(requested)
+  }
+  return authorization
 }
 
 async function withRepoAccess<T>(
   deps: RouteDeps,
   repoPath: string,
-  _mode: 'read' | 'write',
-  action: (authorizedRepoPath: string) => Promise<T>,
+  mode: 'read' | 'write',
+  action: (authorizedRepoPath: string, varsApp: VarsApplication) => Promise<T>,
 ): Promise<T> {
-  const authorizedRepoPath = await resolveAuthorizedRepo(deps, repoPath)
-  return action(authorizedRepoPath)
+  const canonicalHome = await canonicalRepositoryHome(deps)
+  const leases = resourceLeases(deps, deps.leases)
+  const scopedDeps = { ...deps, home: canonicalHome, leases }
+  const authorization = await resolveRequestedRepo(scopedDeps, repoPath)
+  return runAuthorizedRepositoryLease(
+    scopedDeps,
+    authorization,
+    mode === 'read' ? 'read' : 'mutation',
+    (repoPath) => [canonicalHome, repoPath],
+    async (authorizedRepoPath) => {
+      const localConfig = await readLocalConfig(deps.fs, canonicalHome)
+      const activeRepo = localConfig.active_repo ?? 'default'
+      if (activeRepo !== authorization.name) {
+        throw new ApiError(403, 'repo_not_authorized', '仓库未授权')
+      }
+      return action(authorizedRepoPath, new VarsApplication(deps.fs, canonicalHome))
+    },
+  )
 }
 
 export function createVarsRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
-  const varsApp = new VarsApplication(deps.fs, deps.home)
 
   app.get('/vars/preview', varsQueryValidator(VarsAgentQuery), (c) =>
     run(
@@ -244,7 +284,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'agent-aware-preview',
       async () => {
         const { repoPath, agent } = c.req.valid('query')
-        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) =>
+        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath, varsApp) =>
           c.json(await varsApp.preview(authorizedRepoPath, agent)),
         )
       },
@@ -257,7 +297,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'agent-aware-matrix',
       async () => {
         const { repoPath, agent } = c.req.valid('query')
-        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) =>
+        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath, varsApp) =>
           c.json(await varsApp.matrix(authorizedRepoPath, agent)),
         )
       },
@@ -272,7 +312,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'set-base-key',
       async () => {
         const { repoPath, key, definition } = request
-        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
+        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath, varsApp) => {
           await varsApp.setBaseKey(authorizedRepoPath, key, definition)
           return c.json({ ok: true })
         })
@@ -288,7 +328,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'delete-base-key',
       async () => {
         const { repoPath, key } = request
-        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
+        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath, varsApp) => {
           await varsApp.deleteBaseKey(authorizedRepoPath, key)
           return c.json({ ok: true })
         })
@@ -304,7 +344,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'rename-base-key',
       async () => {
         const { repoPath, oldKey, newKey } = request
-        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
+        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath, varsApp) => {
           await varsApp.renameBaseKey(authorizedRepoPath, oldKey, newKey)
           return c.json({ ok: true })
         })
@@ -320,7 +360,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'set-override',
       async () => {
         const { repoPath, key, layer, override } = request
-        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
+        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath, varsApp) => {
           await varsApp.setOverride(
             authorizedRepoPath,
             layer === 'local'
@@ -341,7 +381,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'clear-override',
       async () => {
         const { repoPath, key, layer } = request
-        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath) => {
+        return withRepoAccess(deps, repoPath, 'write', async (authorizedRepoPath, varsApp) => {
           await varsApp.clearOverride(
             authorizedRepoPath,
             layer === 'local' ? { layer, key } : { layer, agent: request.agent!, key },
@@ -358,7 +398,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'list-environments',
       async () => {
         const { repoPath } = c.req.valid('query')
-        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) =>
+        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath, varsApp) =>
           c.json({ ok: true, ...(await varsApp.listEnvironments(authorizedRepoPath)) }),
         )
       },
@@ -377,7 +417,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
         async () => {
           const { repoPath } = c.req.valid('query')
           const { environment } = c.req.valid('param')
-          return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) =>
+          return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath, varsApp) =>
             c.json({
               ok: true,
               ...(await varsApp.getEnvironment(authorizedRepoPath, environment)),
@@ -395,7 +435,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'create-environment',
       async () => {
         const { repoPath, environment } = request
-        await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath) =>
+        await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath, varsApp) =>
           varsApp.createEnvironment(authorizedRepoPath, environment),
         )
         return c.json({ ok: true, environment }, 201)
@@ -411,7 +451,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'delete-environment',
       async () => {
         const { repoPath, environment } = request
-        await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath) =>
+        await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath, varsApp) =>
           varsApp.deleteEnvironment(authorizedRepoPath, environment),
         )
         return c.json({ ok: true })
@@ -427,12 +467,16 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'set-variable',
       async () => {
         const { repoPath, environment, key, entry } = request
-        const result = await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath) =>
-          varsApp.setVariable(authorizedRepoPath, {
-            environment,
-            key,
-            entry,
-          }),
+        const result = await withRepoAccess(
+          deps,
+          repoPath,
+          'write',
+          (authorizedRepoPath, varsApp) =>
+            varsApp.setVariable(authorizedRepoPath, {
+              environment,
+              key,
+              entry,
+            }),
         )
         return c.json({ ok: true, changed: result.changed, diagnostics: result.diagnostics })
       },
@@ -447,12 +491,16 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'rename-variable',
       async () => {
         const { repoPath, environment, oldKey, newKey } = request
-        const result = await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath) =>
-          varsApp.renameVariable(authorizedRepoPath, {
-            environment,
-            oldKey,
-            newKey,
-          }),
+        const result = await withRepoAccess(
+          deps,
+          repoPath,
+          'write',
+          (authorizedRepoPath, varsApp) =>
+            varsApp.renameVariable(authorizedRepoPath, {
+              environment,
+              oldKey,
+              newKey,
+            }),
         )
         return c.json({ ok: true, changed: result.changed, diagnostics: result.diagnostics })
       },
@@ -467,7 +515,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'delete-impact',
       async () => {
         const { repoPath, environment, key } = request
-        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
+        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath, varsApp) => {
           return c.json({
             ok: true,
             impact: await varsApp.deleteImpact(authorizedRepoPath, environment, key),
@@ -486,13 +534,17 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       async () => {
         const { repoPath, environment, key } = request
         const confirmed = request.confirmed === true
-        const result = await withRepoAccess(deps, repoPath, 'write', (authorizedRepoPath) =>
-          varsApp.deleteVariable(authorizedRepoPath, {
-            environment,
-            key,
-            confirmed,
-            ...(request.impactToken !== undefined ? { impactToken: request.impactToken } : {}),
-          }),
+        const result = await withRepoAccess(
+          deps,
+          repoPath,
+          'write',
+          (authorizedRepoPath, varsApp) =>
+            varsApp.deleteVariable(authorizedRepoPath, {
+              environment,
+              key,
+              confirmed,
+              ...(request.impactToken !== undefined ? { impactToken: request.impactToken } : {}),
+            }),
         )
         return c.json({ ok: true, changed: result.changed, diagnostics: result.diagnostics })
       },
@@ -507,7 +559,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'resolve',
       async () => {
         const { repoPath, chain } = request
-        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
+        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath, varsApp) => {
           return c.json(await varsApp.resolve(authorizedRepoPath, chain))
         })
       },
@@ -522,7 +574,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'validate-variable',
       async () => {
         const { repoPath, environment, key, entry, chain } = request
-        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
+        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath, varsApp) => {
           return c.json({
             ok: true,
             ...(await varsApp.validateDraft(authorizedRepoPath, {
@@ -545,7 +597,7 @@ export function createVarsRoutes(deps: RouteDeps): Hono {
       'reveal-variable',
       async () => {
         const { repoPath, environment, key } = request
-        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath) => {
+        return withRepoAccess(deps, repoPath, 'read', async (authorizedRepoPath, varsApp) => {
           return c.json({
             ok: true,
             entry: await varsApp.revealVariable(authorizedRepoPath, environment, key),

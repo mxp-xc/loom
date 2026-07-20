@@ -10,7 +10,7 @@ import {
   type McpServer,
 } from '@loom/core'
 import type { IFileSystem } from '../ports/fs.js'
-import { readYaml, writeYaml } from '../api/repo-config.js'
+import { readMcpManifest, RepoManifestError, writeYaml } from '../api/repo-config.js'
 
 export class McpApplicationError extends Error {
   constructor(
@@ -70,7 +70,13 @@ export class McpApplication {
   }
 
   private async readServers(repoPath: string): Promise<McpServer[]> {
-    return (await readYaml(this.fs, this.mcpYamlPath(repoPath))) ?? []
+    try {
+      return await readMcpManifest(this.fs, repoPath)
+    } catch (error) {
+      if (error instanceof RepoManifestError)
+        throw new McpApplicationError(422, 'invalid_mcp_manifest', error.message)
+      throw error
+    }
   }
 
   private async writeServers(repoPath: string, servers: McpServer[]): Promise<void> {

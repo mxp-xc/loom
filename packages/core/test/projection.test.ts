@@ -71,6 +71,37 @@ describe('planProjection', () => {
     const fd = p.links.find((l) => l.skillId === 'frontend-design')!
     expect(fd.agents).toEqual([])
   })
+  it('preserves an explicit local skill path in the projection plan', () => {
+    const withExternalLocal: Manifest = {
+      ...manifest,
+      skills: {
+        ...manifest.skills,
+        skills: [{ id: 'external-skill', path: '../external-skill', agents: ['codex'] }],
+      },
+    }
+
+    expect(
+      planProjection(withExternalLocal, withExternalLocal.config, new Set(['codex'])).links[0],
+    ).toMatchObject({
+      skillId: 'external-skill',
+      localPath: '../external-skill',
+      source: 'local',
+    })
+  })
+
+  it('rejects an invalid local identity before producing a destination', () => {
+    const invalid: Manifest = {
+      ...manifest,
+      skills: {
+        ...manifest.skills,
+        skills: [{ id: 'nested/skill', agents: ['codex'] }],
+      },
+    }
+
+    expect(() => planProjection(invalid, invalid.config, new Set(['codex']))).toThrow(
+      'Invalid local skill id',
+    )
+  })
   it('source member is planned inside its source namespace', () => {
     const p = planProjection(
       manifest,
@@ -158,18 +189,6 @@ describe('planProjection', () => {
     expect(
       p.sourcePlans.some((plan) => plan.entries.some((entry) => entry.sourcePath.endsWith('/tdd'))),
     ).toBe(false)
-  })
-  it('member override agents 生效', () => {
-    const p = planProjection(
-      manifest,
-      manifest.config,
-      new Set(['claude-code', 'codex', 'opencode']),
-    )
-    expect(p.sourcePlans.find((plan) => plan.agent === 'codex')?.entries).toContainEqual({
-      kind: 'bundle',
-      sourcePath: 'skills/writing',
-      targetPath: 'writing',
-    })
   })
   it('mcp server projected to its own agents, not global', () => {
     const p = planProjection(manifest, manifest.config, new Set(['claude-code', 'codex']))
@@ -304,41 +323,66 @@ describe('planProjection', () => {
       ...withoutOverlap,
       skills: {
         ...withoutOverlap.skills,
-        skills: [{ id: 'superpowers/custom', agents: ['codex'] }],
+        skills: [{ id: 'superpowers', agents: ['codex'] }],
       },
     }
     expect(() => planProjection(withOverlap, withOverlap.config, new Set(['codex']))).toThrow(
-      'Local skill destination "superpowers/custom" overlaps source namespace "superpowers" for codex',
+      'Local skill destination "superpowers" overlaps source namespace "superpowers" for codex',
     )
   })
-  it.each(['superpowers', 'superpowers/custom'])(
-    'rejects local skill destination %s overlapping a source namespace on the same agent',
-    (localSkillId) => {
-      const m: Manifest = {
-        ...manifest,
-        skills: {
-          sources: [
-            {
-              ...manifest.skills.sources[0],
-              members: [
-                {
-                  name: 'writing',
-                  entry: 'skills/writing/SKILL.md',
-                  agents: ['codex'],
-                },
-              ],
-              sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
-            },
-          ],
-          skills: [{ id: localSkillId, agents: ['codex'] }],
-        },
-      }
+  it('rejects a local skill destination overlapping a source namespace on the same agent', () => {
+    const localSkillId = 'superpowers'
+    const m: Manifest = {
+      ...manifest,
+      skills: {
+        sources: [
+          {
+            ...manifest.skills.sources[0],
+            members: [
+              {
+                name: 'writing',
+                entry: 'skills/writing/SKILL.md',
+                agents: ['codex'],
+              },
+            ],
+            sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
+          },
+        ],
+        skills: [{ id: localSkillId, agents: ['codex'] }],
+      },
+    }
 
-      expect(() => planProjection(m, m.config, new Set(['codex']))).toThrow(
-        `Local skill destination "${localSkillId}" overlaps source namespace "superpowers" for codex`,
-      )
-    },
-  )
+    expect(() => planProjection(m, m.config, new Set(['codex']))).toThrow(
+      `Local skill destination "${localSkillId}" overlaps source namespace "superpowers" for codex`,
+    )
+  })
+
+  it('case-folds source namespace names when checking local destination collisions', () => {
+    const m: Manifest = {
+      ...manifest,
+      skills: {
+        sources: [
+          {
+            ...manifest.skills.sources[0],
+            name: 'SuperPowers',
+            members: [
+              {
+                name: 'writing',
+                entry: 'skills/writing/SKILL.md',
+                agents: ['codex'],
+              },
+            ],
+            sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
+          },
+        ],
+        skills: [{ id: 'superpowers', agents: ['codex'] }],
+      },
+    }
+
+    expect(() => planProjection(m, m.config, new Set(['codex']))).toThrow(
+      'Local skill destination "superpowers" overlaps source namespace "SuperPowers" for codex',
+    )
+  })
 
   it('allows matching local and source names when their agents do not overlap', () => {
     const m: Manifest = {
@@ -372,6 +416,159 @@ describe('planProjection', () => {
     expect(pCopy.strategy).toBe('copy')
     const pDefault = planProjection(manifest, { agents: ['claude-code'] }, new Set(['claude-code']))
     expect(pDefault.strategy).toBe('link')
+  })
+
+  it.each([
+    {
+      name: 'missing SourceTree',
+      sourceTree: undefined,
+      expected: 'SourceTree unavailable for github:obra/superpowers',
+    },
+    {
+      name: 'SourceTree diagnostics',
+      sourceTree: {
+        commit: 'aaa',
+        diagnostics: [
+          {
+            code: 'invalid-nested-bundle' as const,
+            message: 'source tree is invalid',
+            path: '',
+          },
+        ],
+        nodes: [],
+      },
+      expected: 'source tree is invalid',
+    },
+    {
+      name: 'missing selected bundle',
+      sourceTree: { commit: 'aaa', diagnostics: [], nodes: [] },
+      expected: 'Selected bundle unavailable: skills/writing/SKILL.md',
+    },
+  ])('fails fast for $name', ({ sourceTree, expected }) => {
+    const source = {
+      ...manifest.skills.sources[0],
+      members: [
+        {
+          name: 'writing',
+          entry: 'skills/writing/SKILL.md',
+          agents: ['codex' as const],
+        },
+      ],
+      sourceTree,
+    }
+    const invalid: Manifest = {
+      ...manifest,
+      skills: { sources: [source], skills: [] },
+    }
+
+    expect(() => planProjection(invalid, invalid.config, new Set(['codex']))).toThrow(expected)
+  })
+
+  it('uses the resource-directory fast path when the selected directory has no boundary', () => {
+    const source = {
+      ...manifest.skills.sources[0],
+      members: [
+        {
+          name: 'writing',
+          entry: 'skill/SKILL.md',
+          agents: ['codex' as const],
+        },
+      ],
+      resources: { include: [{ path: 'shared', kind: 'directory' as const }], exclude: [] },
+      sourceTree: {
+        commit: 'aaa',
+        diagnostics: [],
+        nodes: [
+          ...sourceTreeFor(['skill/SKILL.md']).nodes,
+          {
+            kind: 'container' as const,
+            name: 'shared',
+            path: 'shared',
+            mode: '040000',
+            oid: 'shared',
+            children: [
+              {
+                kind: 'resource' as const,
+                name: 'workflow.md',
+                path: 'shared/workflow.md',
+                mode: '100644',
+                oid: 'workflow',
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const planned = planProjection(
+      { ...manifest, skills: { sources: [source], skills: [] } },
+      manifest.config,
+      new Set(['codex']),
+    ).sourcePlans[0]
+
+    expect(planned.entries).toEqual([
+      { kind: 'resource-directory', sourcePath: 'shared', targetPath: 'shared' },
+      { kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' },
+    ])
+  })
+
+  it('falls back to resource files when a selected directory contains a bundle boundary', () => {
+    const source = {
+      ...manifest.skills.sources[0],
+      members: [
+        {
+          name: 'skill',
+          entry: 'skill/SKILL.md',
+          agents: ['codex' as const],
+        },
+      ],
+      resources: { include: [{ path: 'shared', kind: 'directory' as const }], exclude: [] },
+      sourceTree: {
+        commit: 'aaa',
+        diagnostics: [],
+        nodes: [
+          ...sourceTreeFor(['skill/SKILL.md']).nodes,
+          {
+            kind: 'container' as const,
+            name: 'shared',
+            path: 'shared',
+            mode: '040000',
+            oid: 'shared',
+            children: [
+              {
+                kind: 'bundle' as const,
+                name: 'boundary',
+                path: 'shared/boundary',
+                entry: 'shared/boundary/SKILL.md',
+                mode: '040000',
+                oid: 'boundary',
+              },
+              {
+                kind: 'resource' as const,
+                name: 'workflow.md',
+                path: 'shared/workflow.md',
+                mode: '100644',
+                oid: 'workflow',
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const planned = planProjection(
+      { ...manifest, skills: { sources: [source], skills: [] } },
+      manifest.config,
+      new Set(['codex']),
+    ).sourcePlans[0]
+
+    expect(planned.projectionBase).toBe('')
+    expect(planned.entries).toEqual([
+      {
+        kind: 'resource-file',
+        sourcePath: 'shared/workflow.md',
+        targetPath: 'shared/workflow.md',
+      },
+      { kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' },
+    ])
   })
 
   it('keeps selected roots relative while omitting their common unselected parent', () => {

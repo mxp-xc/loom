@@ -11,7 +11,9 @@
   "scripts": {
     "dev": "bun --watch --no-clear-screen src/index.ts",
     "start": "bun src/index.ts",
-    "test": "bun vitest run"
+    "test": "bun vitest run",
+    "typecheck": "bun --bun tsc --noEmit -p tsconfig.json",
+    "typecheck:test": "bun --bun tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.6",
@@ -21,6 +23,7 @@
     "gray-matter": "^4.0.3",
     "hono": "^4.12.27",
     "js-yaml": "^4.1.0",
+    "koffi": "3.1.1",
     "proper-lockfile": "^4.1.2",
     "simple-git": "^3.25.0",
     "tinyglobby": "^0.2.17",

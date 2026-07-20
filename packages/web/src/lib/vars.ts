@@ -9,14 +9,17 @@ export type NonSecretVarEntry =
   | { type: 'boolean'; value: boolean }
   | { type: 'json'; value: JsonValue }
 
-export type VarEntryInput = NonSecretVarEntry | { type: 'secret'; value: string }
+export type VarEntryInput =
+  NonSecretVarEntry | { type: 'secret'; value: string; format?: StringFormat }
 
-export type VarEntry = NonSecretVarEntry | { type: 'secret'; value: '••••••••'; masked: true }
+export type VarEntry =
+  NonSecretVarEntry | { type: 'secret'; value: '••••••••'; format?: StringFormat; masked: true }
 
 export type VarType = VarEntryInput['type']
 export type ResolvedVarEntry = VarEntry | { type: VarType; value: '••••••••'; masked: true }
 
-export type RevealedVarEntry = NonSecretVarEntry | { type: 'secret'; value: string; masked?: false }
+export type RevealedVarEntry =
+  NonSecretVarEntry | { type: 'secret'; value: string; format?: StringFormat; masked?: false }
 
 export interface VarsEnvironment {
   format: 'legacy' | 'typed'

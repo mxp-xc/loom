@@ -22,7 +22,8 @@ Implications:
 Safety:
 
 - 保留不属于 known managed artifact 的 user-owned 文件和目录。
-- Projection 失败时，在可回滚范围内回滚已创建的 projection artifacts。
+- Projection 失败时，按实际 mutation 的逆序回滚文件、namespace backup 与 managed state；state setter 部分写入后失败也必须恢复调用前状态。
+- 全部可失败的 artifact 与 state 写入完成前，不清理空 skills parent 或删除 namespace backup。
 
 Examples:
 
@@ -47,12 +48,13 @@ Implications:
 
 - 带 marker 的 copied directories 可以在 reconciliation 中被替换或删除。
 - 没有 marker 的真实目录必须保留，即使其路径看起来像 source member id。
-- Rollback 只有在 copied artifact 带 marker 时才可以删除它。
+- Marker 必须匹配 version、managedBy、kind、ownerRepo、skillId 和 source；malformed、读取失败或 identity mismatch 均不得授权删除。
 
 Safety:
 
 - 不删除没有 marker 的 legacy 或用户创建目录。
 - 不只用 source/member 路径形状证明归属。
+- Marker parse/read error 记录完整 error；identity mismatch 记录结构化 warning。
 
 Examples:
 
@@ -77,6 +79,7 @@ Implications:
 - 删除最后一个 managed skill 后，如果 skills root 为空，也会删除 skills root。
 - 非空 parent directory 保留。
 - Parent cleanup 是 managed child cleanup 的后续动作，不是独立扫描并删除目录。
+- Parent cleanup 只在 artifact、MCP、memory 与 managed state 写入均完成后执行，保证失败 rollback 仍可恢复原 artifact。
 
 Safety:
 
@@ -107,10 +110,13 @@ Implications:
 - 从 Loom 删除一个 MCP server，会删除对应 managed projected entry。
 - Loom managed ids 之外的既有 entries 保留。
 - 如果 managed state 缺失，MCP merge 安全降级为保留既有 entries。
+- Managed state 使用 canonical repo identity 目录和 `{ version, ownerRepo, agents }` schema；malformed、wrong-owner 或读取错误 fail closed。
 
 Safety:
 
 - First run 或 state 丢失后，不删除 unknown MCP entries。
+- 同 basename repositories 不共享 managed state。
+- Legacy basename state 只允许 canonical `~/.loom/repos/<name>` direct child 迁移；先原子写入 identity state，再按 entry identity 删除 legacy 文件，失败可重试。
 
 Examples:
 
@@ -168,6 +174,8 @@ Implications:
 Safety:
 
 - Namespace root 必须有能证明 repo 和 source 归属的 marker；marker 不保存可能包含凭据的原始 Git URL。
+- Marker完整绑定owner repository、source cache identity、source name、实际namespace name、kind和version；任一字段missing、mismatch、malformed或read failure都保留artifact并使需要该destination的projection失败。
+- Source cache id是safe segment，cache root和entry必须是canonical repository内的真实目录；cache escape、ancestor link、junction或identity drift在任何Git read/checkout前fail closed。
 - 同一 agent 中，local skill destination 不得与 source namespace 重合或位于其下；planner 必须在任何文件系统写入前拒绝冲突。
 - 替换或删除现有 namespace 前必须验证 marker ownership；没有 marker、marker 不匹配或 destination collision 时 projection 失败并保留原内容。
 - Namespace staging、替换和跨 agent 执行必须可回滚；全部成功前不能删除 backups 或报告成功。
@@ -176,6 +184,7 @@ Safety:
 - 当前机器缺少或无法读取某个 source cache 时，projection 跳过该 source、保留其已有 managed namespace，并继续 reconcile 其他 source 与 local skills；结果必须暴露 source-specific warning。
 - Link projection 必须区分 file/directory link；稀疏目录不得用覆盖 excludes 的整目录 link。Copy 必须保持二进制内容。
 - Source 改名后的 orphan cleanup 只能删除 marker 能证明属于同一 repo/source 的旧 namespace。
+- Orphan cleanup 只枚举 agent skills root 的 direct children，不递归进入 namespace，也不跟随 child links。
 
 Examples:
 
@@ -187,3 +196,62 @@ Tests:
 - packages/core/test/projection.test.ts
 - packages/server/test/projection/executor.test.ts
 - packages/server/test/projection/executor-source-namespace.test.ts
+
+## R-PROJECTION-007 Agent-native destination 与 source identity 必须在 apply 时仍有效
+
+Status: active
+Applies to: skills, MCP, memory projection
+
+Rule:
+Projection在首次agent-native write前验证全部source与destination roots、ancestors和leaf；apply时重新绑定preflight所授权的physical identity。只证明同一路径当前仍存在，不等于仍是已授权对象。
+
+Implications:
+
+- Agent config、skills root、memory file和所有parent使用同一套no-follow/canonical containment policy。
+- Agent path override必须是absolute trust root；relative override直接拒绝。未设置override时，home/XDG fallback从其声明的trust root验证完整directory chain。
+- Local/remote source的root、tracked file和intermediate directories携带preflight identity到materialization。
+- Existing hardlink不被in-place改写；写入使用不会修改外部inode的replacement语义或明确fail closed。
+
+Safety:
+
+- Source subtree中的link、junction、special entry或canonical escape不能被copy或link到agent目录。
+- Preflight后发生source/destination identity swap时，保留新对象并回滚已完成的本次writes。
+- Boundary failure发生在任何agent scope write之前；外部sentinel保持不变。
+
+Examples:
+
+- `~/.config` 指向外部目录时，OpenCode projection失败，不能在link target创建agent文件。
+- Local skill在preflight后被同路径replacement directory替换时，不能把replacement内容投影给agent。
+
+Tests:
+
+- packages/server/test/projection/executor-boundary.test.ts
+- packages/server/test/projection/executor-source-namespace.test.ts
+
+## R-PROJECTION-008 Desired collision 与 unavailable source 不得伪装成功
+
+Status: active
+Applies to: skills projection reconciliation
+
+Rule:
+Desired enabled artifact遇到user-owned destination collision时projection失败；desired source暂时missing或unreadable时保留既有managed artifact与ownership state并返回source-specific warning。只有desired state明确移除该artifact时才cleanup。
+
+Implications:
+
+- Enabled collision在preflight发现时产生全计划零写入；apply-time collision触发rollback。
+- First-run source unavailable不创建destination，但结果明确包含warning。
+- Disabled或stale cleanup遇到unowned artifact时保留它，不把保留本身视为enabled desired state已满足。
+
+Safety:
+
+- 不因source临时不可用删除仍属于desired state的旧link/copy/namespace。
+- 不覆盖或删除并发创建的user artifact。
+
+Examples:
+
+- Manifest仍为local skill选择Codex，但external ref暂时不可读时，既有managed Codex skill保留。
+
+Tests:
+
+- packages/server/test/projection/executor.test.ts
+- packages/server/test/projection/executor-boundary.test.ts

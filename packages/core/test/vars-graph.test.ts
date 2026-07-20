@@ -18,6 +18,18 @@ describe('vars reference graph', () => {
     ).toEqual(['api.host', 'api-port', 'feature.enabled'])
   })
 
+  it('includes only tokens with an even number of leading backslashes', () => {
+    const value = [0, 1, 2, 3, 4]
+      .map((count) => '\\'.repeat(count) + '${key' + count + '}')
+      .join('|')
+    expect(extractVariableReferences(value)).toEqual(['key0', 'key2', 'key4'])
+
+    const graph = buildVariableReferenceGraph({
+      base: typed({ use: { type: 'string', value } }),
+    })
+    expect(graph.edges.map((edge) => edge.referencedKey)).toEqual(['key0', 'key2', 'key4'])
+  })
+
   it('builds raw cross-environment edges for string and secret entries', () => {
     const graph = buildVariableReferenceGraph({
       base: typed({

@@ -20,12 +20,13 @@ describe('renderText', () => {
     expect(renderText('@${LOOM_CONFIG_DIR}/RTK.md', ctx)).toBe('@/home/u/.codex/RTK.md')
   })
 
-  it('escaped \\${} stays literal', () => {
-    expect(renderText('use \\${HOME} for dir', ctx)).toBe('use ${HOME} for dir')
-  })
-
-  it('escaped \\${} is NOT resolved', () => {
-    expect(renderText('\\${LOOM_AGENT}', ctx)).toBe('${LOOM_AGENT}')
+  it('uses even backslashes for active tokens and odd backslashes for literals', () => {
+    for (const count of [0, 1, 2, 3, 4]) {
+      const input = '\\'.repeat(count) + '${LOOM_AGENT}'
+      const expected =
+        '\\'.repeat(Math.floor(count / 2)) + (count % 2 === 0 ? 'codex' : '${LOOM_AGENT}')
+      expect(renderText(input, ctx)).toBe(expected)
+    }
   })
 
   it('mixed escape and resolve', () => {
@@ -41,7 +42,7 @@ describe('renderText', () => {
     expect(() => renderText('${NOPE}', ctx)).toThrow(/NOPE/)
   })
 
-  it('literal text containing visible DOLLAR_BRACE is not corrupted (ESC uses NUL bytes)', () => {
+  it('does not modify unrelated DOLLAR_BRACE text', () => {
     expect(renderText('Before DOLLAR_BRACE After', ctx)).toBe('Before DOLLAR_BRACE After')
   })
 })

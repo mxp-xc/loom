@@ -466,7 +466,6 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
                 repoPath={repoPath}
                 sourceUrl={source.url}
                 sourceRef={ref}
-                sourceName={name.trim() || repoId}
                 bundle={previewBundle}
                 onBack={() => setPreviewBundle(null)}
               />
@@ -474,9 +473,9 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
               <SourceTreeSelection
                 nodes={tree?.nodes ?? []}
                 diagnostics={tree?.diagnostics}
-                sourceName={name.trim() || repoId}
                 sourceUrl={source.url}
                 sourceRef={ref}
+                sourceName={name.trim() || repoId}
                 value={selection}
                 onChange={setSelection}
                 onOpenBundle={tree?.commit === liveCacheCommit ? setPreviewBundle : undefined}

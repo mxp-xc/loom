@@ -285,6 +285,7 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
   )
 
   const language = useMemo(() => languageForFile(conflict.path, 'yaml'), [conflict.path])
+  const unsupported = conflict.binary || conflict.unsupportedReason !== undefined
 
   useEffect(() => {
     setModel(buildMergeModel(conflict.base ?? '', conflict.ours ?? '', conflict.theirs ?? ''))
@@ -325,14 +326,6 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
     })
   }
 
-  const chooseBinaryFile = (value: string | null) =>
-    setModel({
-      result: value ?? '',
-      blocks: [],
-      changes: { local: [], remote: [] },
-      unresolvedCount: 0,
-    })
-
   const mountDecoratedEditor = (
     targetRef: MutableRefObject<DecorationTarget | null>,
     text: string,
@@ -369,7 +362,7 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
     <section className={styles['conflict-editor-shell']}>
       <header className={styles['conflict-editor-header']}>
         <strong>{conflict.path}</strong>
-        {!conflict.binary && (
+        {!unsupported && (
           <div className={styles['conflict-editor-file-actions']}>
             <Button size="sm" variant="secondary" onClick={keepAutomaticMerge}>
               保留两者
@@ -393,17 +386,17 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
         </div>
       )}
 
-      {conflict.binary ? (
+      {unsupported ? (
         <div className={styles['conflict-binary']}>
-          <p>二进制文件不能在线编辑，请选择保留的版本。</p>
-          <div>
-            <Button size="sm" variant="secondary" onClick={() => chooseBinaryFile(conflict.ours)}>
-              使用本地
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => chooseBinaryFile(conflict.theirs)}>
-              使用远程
-            </Button>
-          </div>
+          <p>
+            {conflict.unsupportedReason === 'non-regular-mode'
+              ? '该冲突涉及符号链接或其他非普通文件，不能在线解决。'
+              : conflict.unsupportedReason === 'too-large'
+                ? '该冲突文件超过在线处理大小限制。'
+                : conflict.unsupportedReason === 'invalid-utf8'
+                  ? '该冲突不是有效的 UTF-8 文本，不能在线解决。'
+                  : '该冲突包含二进制内容，不能在线解决。'}
+          </p>
         </div>
       ) : (
         <>
@@ -522,14 +515,16 @@ export default function ConflictEditor({ conflict, index, total, saving, onSave,
         <Button size="sm" variant="secondary" onClick={onAbort} disabled={saving}>
           放弃合并
         </Button>
-        <Button
-          size="sm"
-          variant="primary"
-          onClick={() => onSave(conflict.path, model.result)}
-          disabled={saving || model.unresolvedCount > 0}
-        >
-          {saving ? '保存中…' : total > 1 ? '保存并继续' : '保存并完成合并'}
-        </Button>
+        {!unsupported && (
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => onSave(conflict.path, model.result)}
+            disabled={saving || model.unresolvedCount > 0}
+          >
+            {saving ? '保存中…' : total > 1 ? '保存并继续' : '保存并完成合并'}
+          </Button>
+        )}
       </footer>
     </section>
   )

@@ -184,6 +184,50 @@ describe('scanMcpImports', () => {
 })
 
 describe('applyMcpImports', () => {
+  it('does not write when no import keys are selected', async () => {
+    files['/repo/mcp.yaml'] = yaml.dump([{ id: 'existing', type: 'stdio', command: 'node' }])
+
+    const result = await applyMcpImports({
+      fs,
+      repoPath: '/repo',
+      sources: [],
+      keys: [],
+      logger,
+    })
+
+    expect(result).toMatchObject({ ok: true, imported: 0 })
+    expect(fs.mkdir).not.toHaveBeenCalled()
+    expect(fs.writeFile).not.toHaveBeenCalled()
+  })
+
+  it('does not rewrite an unchanged selected entry', async () => {
+    files['/repo/mcp.yaml'] = yaml.dump([
+      { id: 'browser', type: 'stdio', command: 'npx', agents: ['claude-code'] },
+    ])
+    files['/home/tester/.claude.json'] = JSON.stringify({
+      mcpServers: { browser: { type: 'stdio', command: 'npx' } },
+    })
+    const scan = await scanMcpImports({
+      fs,
+      repoPath: '/repo',
+      sources: ['claude-code'],
+      logger,
+    })
+
+    const result = await applyMcpImports({
+      fs,
+      repoPath: '/repo',
+      sources: ['claude-code'],
+      keys: [scan.items[0].key],
+      logger,
+    })
+
+    expect(scan.items[0].status).toBe('unchanged')
+    expect(result).toMatchObject({ ok: true, imported: 0 })
+    expect(fs.mkdir).not.toHaveBeenCalled()
+    expect(fs.writeFile).not.toHaveBeenCalled()
+  })
+
   it('writes selected import keys into mcp.yaml without modifying agent-native files', async () => {
     files['/home/tester/.claude.json'] = JSON.stringify({
       mcpServers: { browser: { type: 'stdio', command: 'npx' } },
@@ -239,6 +283,7 @@ describe('applyMcpImports', () => {
       message: '导入预览已过期，请重新扫描',
     })
     expect(files['/repo/mcp.yaml']).toBeUndefined()
+    expect(fs.writeFile).not.toHaveBeenCalled()
   })
 })
 

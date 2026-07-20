@@ -1,6 +1,8 @@
-import type { JsonValue, VarEntry } from './vars-types.js'
+import { STRING_FORMATS, type JsonValue, type VarEntry } from './vars-types.js'
 
-function cloneJsonValue(value: unknown, ancestors: Set<object>): JsonValue | undefined {
+const stringFormats = new Set<string>(STRING_FORMATS)
+
+function cloneUnknownJsonValue(value: unknown, ancestors: Set<object>): JsonValue | undefined {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
   if (typeof value !== 'object' || ancestors.has(value)) return undefined
@@ -25,7 +27,7 @@ function cloneJsonValue(value: unknown, ancestors: Set<object>): JsonValue | und
         ancestors.delete(value)
         return undefined
       }
-      const item = cloneJsonValue(descriptor.value, ancestors)
+      const item = cloneUnknownJsonValue(descriptor.value, ancestors)
       if (item === undefined) {
         ancestors.delete(value)
         return undefined
@@ -47,7 +49,7 @@ function cloneJsonValue(value: unknown, ancestors: Set<object>): JsonValue | und
       ancestors.delete(value)
       return undefined
     }
-    const item = cloneJsonValue(descriptor.value, ancestors)
+    const item = cloneUnknownJsonValue(descriptor.value, ancestors)
     if (item === undefined) {
       ancestors.delete(value)
       return undefined
@@ -58,13 +60,24 @@ function cloneJsonValue(value: unknown, ancestors: Set<object>): JsonValue | und
   return clone
 }
 
+export function cloneJsonValue(value: JsonValue): JsonValue {
+  const clone = cloneUnknownJsonValue(value, new Set())
+  if (clone === undefined) throw new TypeError('Invalid JSON value')
+  return clone
+}
+
 export function normalizeVarEntry(entry: unknown): VarEntry | undefined {
   if (!entry || typeof entry !== 'object') return undefined
   const prototype = Object.getPrototypeOf(entry)
   if (prototype !== Object.prototype && prototype !== null) return undefined
   const descriptors = Object.getOwnPropertyDescriptors(entry)
   const keys = Reflect.ownKeys(descriptors)
-  if (keys.length !== 2 || !keys.includes('type') || !keys.includes('value')) return undefined
+  if (
+    keys.some((key) => typeof key === 'symbol') ||
+    !keys.includes('type') ||
+    !keys.includes('value')
+  )
+    return undefined
   const typeDescriptor = descriptors.type
   const valueDescriptor = descriptors.value
   if (
@@ -78,8 +91,19 @@ export function normalizeVarEntry(entry: unknown): VarEntry | undefined {
   const rawValue = valueDescriptor.value
 
   if ((type === 'string' || type === 'secret') && typeof rawValue === 'string') {
-    return { type, value: rawValue }
+    const hasFormat = keys.includes('format')
+    if (keys.length !== (hasFormat ? 3 : 2)) return undefined
+    if (!hasFormat) return { type, value: rawValue }
+    const formatDescriptor = descriptors.format
+    if (
+      !formatDescriptor?.enumerable ||
+      !('value' in formatDescriptor) ||
+      !stringFormats.has(formatDescriptor.value)
+    )
+      return undefined
+    return { type, value: rawValue, format: formatDescriptor.value }
   }
+  if (keys.length !== 2) return undefined
   if (type === 'number' && typeof rawValue === 'number' && Number.isFinite(rawValue)) {
     return { type: 'number', value: rawValue }
   }
@@ -87,7 +111,7 @@ export function normalizeVarEntry(entry: unknown): VarEntry | undefined {
     return { type: 'boolean', value: rawValue }
   }
   if (type === 'json') {
-    const value = cloneJsonValue(rawValue, new Set())
+    const value = cloneUnknownJsonValue(rawValue, new Set())
     if (value !== undefined) return { type: 'json', value }
   }
   return undefined

@@ -21,12 +21,18 @@ import type { IExternalOpener } from '../ports/external-opener.js'
 import { NodeExternalOpener } from '../platform/node/external-opener.js'
 import { createOpenPathRoutes } from './routes/open-path.js'
 import { projectRepository } from '../projection/workflow.js'
+import {
+  ResourceLeaseCoordinator,
+  resourceLeases,
+} from '../concurrency/resource-lease-coordinator.js'
+import { projectionResourceKeys } from '../concurrency/resource-keys.js'
 
 export interface RouteDeps {
   fs: IFileSystem
   git: IGit
   proc: IProcess
   home: string
+  leases?: ResourceLeaseCoordinator
 }
 
 type RegisterRouteDeps = RouteDeps & {
@@ -37,21 +43,38 @@ type RegisterRouteDeps = RouteDeps & {
 
 export type SyncRouteDeps = RouteDeps & { sync: SyncSessionManager }
 
-export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
+export type RouteApp = Hono & { dispose(): Promise<void> }
+
+export function registerRoutes(routeDeps?: RegisterRouteDeps): RouteApp {
   const syncLogger = logger.child('sync-session')
-  const baseDeps: RegisterRouteDeps =
+  const platformDeps: RegisterRouteDeps =
     routeDeps ??
     (() => {
       const { fs, git, proc, externalOpener } = createNodePlatform()
       const home = process.env.HOME || process.env.USERPROFILE || ''
       return { fs, git, proc, externalOpener, home }
     })()
+  if (routeDeps?.sync && !routeDeps.leases) {
+    throw new Error('Injected SyncSessionManager requires an explicit lease coordinator')
+  }
+  const leases = routeDeps
+    ? resourceLeases(routeDeps, routeDeps.leases)
+    : typeof platformDeps.fs.realPath === 'function'
+      ? new ResourceLeaseCoordinator()
+      : resourceLeases(platformDeps)
+  if (routeDeps?.sync && !routeDeps.sync.usesLeaseCoordinator(leases)) {
+    throw new Error('Injected SyncSessionManager must use the route lease coordinator')
+  }
+  const baseDeps = { ...platformDeps, leases }
+  const ownsSync = !baseDeps.sync
   const sync =
     baseDeps.sync ??
     new SyncSessionManager({
       home: baseDeps.home,
-      onApplied: async (repoPath) => {
-        const result = await projectRepository(baseDeps, repoPath, {})
+      leases,
+      leaseKeys: (repoPath, home) => projectionResourceKeys(home, repoPath, home),
+      onApplied: async (repoPath, home) => {
+        const result = await projectRepository({ ...baseDeps, home }, repoPath, {})
         if (!result.ok) throw result.failure.originalError
         if (result.warnings?.length) {
           syncLogger.warn('sync projection completed with unavailable sources', {
@@ -69,16 +92,28 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): Hono {
   const recovery = sync
     .recover()
     .catch((err: unknown) => syncLogger.error('sync recovery failed', { err }))
-  sync.startMaintenance()
+  if (ownsSync) sync.startMaintenance()
   let mcpDebug = baseDeps.mcpDebug
+  let ownedMcpDebug: ReturnType<typeof createDefaultMcpDebugManager> | null = null
   if (!mcpDebug) {
     const manager = createDefaultMcpDebugManager()
     manager.startMaintenance()
     mcpDebug = manager
+    ownedMcpDebug = manager
   }
   const deps = { ...baseDeps, sync, mcpDebug }
 
-  const app = new Hono()
+  let disposePromise: Promise<void> | null = null
+  const app = Object.assign(new Hono(), {
+    dispose: () => {
+      if (!disposePromise) {
+        const syncDisposal = ownsSync ? sync.dispose() : Promise.resolve()
+        const mcpDisposal = ownedMcpDebug?.dispose() ?? Promise.resolve()
+        disposePromise = Promise.all([recovery, syncDisposal, mcpDisposal]).then(() => undefined)
+      }
+      return disposePromise
+    },
+  })
   app.use('*', async (_c, next) => {
     await recovery
     await next()

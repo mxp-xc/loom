@@ -19,14 +19,40 @@ function parse(text: string): unknown {
   return yaml.load(text) ?? (text.trim() === '' ? null : text)
 }
 
-function asArray<T>(v: unknown): T[] {
-  return Array.isArray(v) ? (v as T[]) : []
-}
-function asObj(v: unknown): Record<string, unknown> {
-  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
-}
 function isPlain(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === 'object' && !Array.isArray(v)
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return false
+  const prototype = Object.getPrototypeOf(v)
+  return prototype === Object.prototype || prototype === null
+}
+
+function ownValue(record: Record<string, unknown> | undefined, key: string): unknown {
+  return record && Object.hasOwn(record, key) ? record[key] : undefined
+}
+
+function asArray<T>(value: unknown, path: string, optional = false): T[] {
+  if (value === undefined && optional) return []
+  if (!Array.isArray(value)) throw new Error(`${path} must be an array`)
+  return value as T[]
+}
+
+function asObj(value: unknown, path: string): Record<string, unknown> {
+  if (!isPlain(value)) throw new Error(`${path} must be an object`)
+  return value
+}
+
+function asKeyedList(value: unknown, path: string, key: string, optional = false) {
+  const items = asArray<unknown>(value, path, optional)
+  const identities = new Set<string>()
+  return items.map((item, index) => {
+    const record = asObj(item, `${path}[${index}]`)
+    const identity = record[key]
+    if (typeof identity !== 'string' || !identity.trim()) {
+      throw new Error(`${path}[${index}].${key} must be a non-empty string`)
+    }
+    if (identities.has(identity)) throw new Error(`${path} contains duplicate ${key}: ${identity}`)
+    identities.add(identity)
+    return record
+  })
 }
 
 function deepEq(a: unknown, b: unknown): boolean {
@@ -41,55 +67,66 @@ function deepEq(a: unknown, b: unknown): boolean {
   const bTag = Object.prototype.toString.call(b)
   if (aTag !== bTag) return false
   if (aTag !== '[object Object]') return JSON.stringify(a) === JSON.stringify(b)
-  const aObj = asObj(a)
-  const bObj = asObj(b)
+  const aObj = a as Record<string, unknown>
+  const bObj = b as Record<string, unknown>
   const aKeys = Object.keys(aObj)
   const bKeys = Object.keys(bObj)
   if (aKeys.length !== bKeys.length) return false
   return aKeys.every((key) => Object.hasOwn(bObj, key) && deepEq(aObj[key], bObj[key]))
 }
 
-function mergeList<T extends Record<string, unknown>>(
-  base: T[],
-  ours: T[],
-  theirs: T[],
+function mergeList(
+  base: Record<string, unknown>[],
+  ours: Record<string, unknown>[],
+  theirs: Record<string, unknown>[],
   key: string,
   file: string,
   conflicts: Conflict[],
-): T[] {
-  const byKey = (arr: T[]) => new Map(arr.map((i) => [String(i[key]), i] as const))
+): Record<string, unknown>[] {
+  const byKey = (arr: Record<string, unknown>[]) =>
+    new Map(arr.map((i) => [String(i[key]), i] as const))
   const bk = byKey(base),
     ok = byKey(ours),
     tk = byKey(theirs)
   const allKeys = new Set([...ok.keys(), ...tk.keys()])
-  const out: T[] = []
+  const out: Record<string, unknown>[] = []
   for (const k of allKeys) {
     const o = ok.get(k),
       t = tk.get(k),
       b = bk.get(k)
     if (o && !t) {
-      out.push(o)
+      if (!b) out.push(o)
+      else if (!deepEq(o, b)) {
+        conflicts.push({ file, path: k, field: '', base: b, ours: o, theirs: undefined })
+        out.push(o)
+      }
       continue
     }
     if (!o && t) {
-      out.push(t)
+      if (!b) out.push(t)
+      else if (!deepEq(t, b)) {
+        conflicts.push({ file, path: k, field: '', base: b, ours: undefined, theirs: t })
+      }
       continue
     }
     if (o && t) {
-      const merged = { ...o }
+      const merged = Object.assign(Object.create(null) as Record<string, unknown>, o)
       for (const f of new Set([...Object.keys(o ?? {}), ...Object.keys(t ?? {})])) {
-        const ov = (o as any)[f],
-          tv = (t as any)[f],
-          bv = (b as any)?.[f]
+        const ov = ownValue(o, f),
+          tv = ownValue(t, f),
+          bv = ownValue(b, f)
         if (deepEq(ov, tv)) {
-          ;(merged as any)[f] = ov
-        } else if (bv !== undefined && deepEq(ov, bv)) {
-          ;(merged as any)[f] = tv
-        } else if (bv !== undefined && deepEq(tv, bv)) {
-          ;(merged as any)[f] = ov
+          if (ov === undefined) delete merged[f]
+          else merged[f] = ov
+        } else if (deepEq(ov, bv)) {
+          if (tv === undefined) delete merged[f]
+          else merged[f] = tv
+        } else if (deepEq(tv, bv)) {
+          if (ov === undefined) delete merged[f]
+          else merged[f] = ov
         } else {
           conflicts.push({ file, path: k, field: f, base: bv, ours: ov, theirs: tv })
-          ;(merged as any)[f] = ov
+          merged[f] = ov
         }
       }
       out.push(merged)
@@ -106,20 +143,24 @@ function mergeObj(
   pathPrefix: string,
   conflicts: Conflict[],
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
+  const out = Object.create(null) as Record<string, unknown>
   for (const k of new Set([...Object.keys(ours), ...Object.keys(theirs)])) {
-    const o = ours[k],
-      t = theirs[k],
-      b = base[k]
+    const o = ownValue(ours, k),
+      t = ownValue(theirs, k),
+      b = ownValue(base, k)
     const path = pathPrefix ? `${pathPrefix}.${k}` : k
-    if (deepEq(o, t) || (b !== undefined && deepEq(o, b))) out[k] = t === undefined ? o : t
-    else if (b !== undefined && deepEq(t, b)) out[k] = o
-    else if (isPlain(o) && isPlain(t) && isPlain(b))
+    if (deepEq(o, t)) {
+      if (o !== undefined) out[k] = o
+    } else if (deepEq(o, b)) {
+      if (t !== undefined) out[k] = t
+    } else if (deepEq(t, b)) {
+      if (o !== undefined) out[k] = o
+    } else if (isPlain(o) && isPlain(t) && isPlain(b))
       out[k] = mergeObj(b, o, t, file, path, conflicts)
-    else if (o !== undefined && t !== undefined && !deepEq(o, t)) {
+    else {
       conflicts.push({ file, path, field: '', base: b, ours: o, theirs: t })
-      out[k] = o
-    } else out[k] = o ?? t
+      if (o !== undefined) out[k] = o
+    }
   }
   return out
 }
@@ -136,39 +177,71 @@ export function threeWayMerge(
   const conflicts: Conflict[] = []
   let merged: unknown
   if (kind === 'mcp') {
-    merged = mergeList<any>(
-      asArray(base),
-      asArray(ours),
-      asArray(theirs),
+    merged = mergeList(
+      asKeyedList(base, 'base mcp', 'id'),
+      asKeyedList(ours, 'ours mcp', 'id'),
+      asKeyedList(theirs, 'theirs mcp', 'id'),
       'id',
       'mcp.yaml',
       conflicts,
     )
   } else if (kind === 'vars') {
-    merged = mergeObj(asObj(base), asObj(ours), asObj(theirs), 'vars', '', conflicts)
+    merged = mergeObj(
+      asObj(base, 'base vars'),
+      asObj(ours, 'ours vars'),
+      asObj(theirs, 'theirs vars'),
+      'vars',
+      '',
+      conflicts,
+    )
   } else if (kind === 'skills') {
-    const bo = asObj(base),
-      oo = asObj(ours),
-      to = asObj(theirs)
-    const sources = mergeList<any>(
-      asArray(bo.sources),
-      asArray(oo.sources),
-      asArray(to.sources),
+    const bo = asObj(base, 'base skills'),
+      oo = asObj(ours, 'ours skills'),
+      to = asObj(theirs, 'theirs skills')
+    for (const [label, value] of [
+      ['base', bo.group_order],
+      ['ours', oo.group_order],
+      ['theirs', to.group_order],
+    ] as const) {
+      if (value !== undefined) asArray(value, `${label} skills.group_order`)
+    }
+    const sources = mergeList(
+      asKeyedList(bo.sources, 'base skills.sources', 'url', true),
+      asKeyedList(oo.sources, 'ours skills.sources', 'url', true),
+      asKeyedList(to.sources, 'theirs skills.sources', 'url', true),
       'url',
       'skills.yaml',
       conflicts,
     )
-    const skills = mergeList<any>(
-      asArray(bo.skills),
-      asArray(oo.skills),
-      asArray(to.skills),
+    const skills = mergeList(
+      asKeyedList(bo.skills, 'base skills.skills', 'id', true),
+      asKeyedList(oo.skills, 'ours skills.skills', 'id', true),
+      asKeyedList(to.skills, 'theirs skills.skills', 'id', true),
       'id',
       'skills.yaml',
       conflicts,
     )
-    merged = { sources, skills }
+    const { sources: _baseSources, skills: _baseSkills, ...baseMetadata } = bo
+    const { sources: _ourSources, skills: _ourSkills, ...ourMetadata } = oo
+    const { sources: _theirSources, skills: _theirSkills, ...theirMetadata } = to
+    const metadata = mergeObj(
+      baseMetadata,
+      ourMetadata,
+      theirMetadata,
+      'skills.yaml',
+      '',
+      conflicts,
+    )
+    merged = { ...metadata, sources, skills }
   } else {
-    merged = mergeObj(asObj(base), asObj(ours), asObj(theirs), 'config.yaml', '', conflicts)
+    merged = mergeObj(
+      asObj(base === null ? {} : base, 'base config'),
+      asObj(ours === null ? {} : ours, 'ours config'),
+      asObj(theirs === null ? {} : theirs, 'theirs config'),
+      'config.yaml',
+      '',
+      conflicts,
+    )
   }
   return { merged: yaml.dump(merged, { lineWidth: -1 }), conflicts }
 }

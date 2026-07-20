@@ -34,6 +34,13 @@ describe('planProjection memory', () => {
     expect(plan.memoryPlan.active?.name).toBe('v1')
     expect(plan.memoryPlan.content).toBe('# hi ${LOOM_AGENT}')
     expect(plan.memoryPlan.agents).toEqual(['claude-code', 'codex'])
+    expect(plan.memoryPlan.entries).toEqual([
+      {
+        memory: { name: 'v1' },
+        content: '# hi ${LOOM_AGENT}',
+        agents: ['claude-code', 'codex'],
+      },
+    ])
   })
 
   it('memoryPlan.agents filters to installed agents', () => {
@@ -43,6 +50,9 @@ describe('planProjection memory', () => {
     const cfg: Config = { agents: ['claude-code', 'codex', 'opencode'] }
     const plan = planProjection(mf, cfg, new Set(['claude-code']))
     expect(plan.memoryPlan.agents).toEqual(['claude-code'])
+    expect(plan.memoryPlan.entries).toEqual([
+      { memory: { name: 'v1' }, content: 'x', agents: ['claude-code'] },
+    ])
     expect(plan.skippedAgents).toContain('codex')
     expect(plan.skippedAgents).toContain('opencode')
   })

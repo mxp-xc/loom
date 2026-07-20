@@ -22,7 +22,6 @@ interface Props {
   repoPath: string
   sourceUrl: string
   sourceRef: string
-  sourceName: string
   bundle: SourceTreeBundleNode
   onBack: () => void
 }
@@ -33,7 +32,6 @@ export default function SourceSkillPreview({
   repoPath,
   sourceUrl,
   sourceRef,
-  sourceName,
   bundle,
   onBack,
 }: Props) {
@@ -50,7 +48,11 @@ export default function SourceSkillPreview({
     setMode('preview')
     setCopied(false)
     api
-      .getSkillContent(repoPath, `${sourceName}-${bundle.name}`, sourceUrl, bundle.entry)
+      .getSkillContent(repoPath, {
+        kind: 'source',
+        sourceUrl,
+        memberEntry: bundle.entry,
+      })
       .then((result) => {
         if (!active) return
         if (!result.ok) {
@@ -67,7 +69,7 @@ export default function SourceSkillPreview({
     return () => {
       active = false
     }
-  }, [bundle.entry, bundle.name, reloadKey, repoPath, sourceName, sourceUrl])
+  }, [bundle.entry, reloadKey, repoPath, sourceUrl])
 
   const copyContent = async () => {
     if (!navigator.clipboard || content == null) return

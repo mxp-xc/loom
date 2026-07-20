@@ -8,6 +8,8 @@ import {
   defineAgentCatalog,
   formatAgentFallbackPath,
   getAgent,
+  supportsAgentCapability,
+  type AgentDefinition,
 } from '../src/index.js'
 
 describe('Agent Catalog', () => {
@@ -76,5 +78,25 @@ describe('Agent Catalog', () => {
     expect(formatAgentFallbackPath('opencode', getAgent('opencode').mcp.path)).toBe(
       '~/.config/opencode/opencode.json',
     )
+  })
+
+  it('checks capabilities on a partial definition without catalog lookup', () => {
+    const memoryOnly: AgentDefinition = {
+      id: 'memory-only',
+      display: {
+        name: 'Memory Only',
+        short: 'MO',
+        color: '#000000',
+        icon: { kind: 'text', text: 'M' },
+      },
+      command: 'memory-only',
+      configDir: { fallback: { root: 'home', segments: ['.memory-only'] } },
+      memory: { path: { root: 'config', segments: ['MEMORY.md'] } },
+    }
+
+    expect(supportsAgentCapability(memoryOnly, 'memory')).toBe(true)
+    expect(supportsAgentCapability(memoryOnly, 'vars')).toBe(true)
+    expect(supportsAgentCapability(memoryOnly, 'skills')).toBe(false)
+    expect(supportsAgentCapability(memoryOnly, 'mcp')).toBe(false)
   })
 })

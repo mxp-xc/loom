@@ -2,11 +2,14 @@ import {
   formatAgentFallbackPath,
   getMcpCodec,
   getAgent,
+  parseVariableTokens,
+  renderTextWithResolvedVars,
   toNativeMcpEntry,
   type AgentId,
   type McpServer,
+  type VarEntry,
 } from '@loom/core'
-import type { VarsDiagnostic, VarsLayerRef, VarsMatrixResponse } from '@/lib/vars'
+import type { ResolvedVarEntry, VarsDiagnostic, VarsLayerRef, VarsMatrixResponse } from '@/lib/vars'
 import { agentName } from '@/lib/agents'
 
 type ResolvedMatrix = VarsMatrixResponse & {
@@ -38,29 +41,21 @@ function isResolvedMatrix(matrix: VarsMatrixResponse | null | undefined): matrix
   return matrix?.resolution.ok === true
 }
 
-function diagnostic(
-  code: string,
-  message: string,
-  key?: string,
-  referencedKey?: string,
-): VarsDiagnostic {
-  return { code, severity: 'error', key, referencedKey, path: key ? [key] : undefined, message }
+function coreRenderValue(entry: ResolvedVarEntry): VarEntry {
+  if ('masked' in entry) return { type: 'secret', value: entry.value }
+  return entry
+}
+
+function coreRenderValues(values: Record<string, ResolvedVarEntry>): Record<string, VarEntry> {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, entry]) => [key, coreRenderValue(entry)]),
+  )
 }
 
 export function getMcpVariableTokens(text: string): McpVariableToken[] {
-  const tokens: McpVariableToken[] = []
-  const matcher = /(^|[^\\])\$\{([^}]+)\}/g
-  let match: RegExpExecArray | null
-  while ((match = matcher.exec(text))) {
-    const prefixLength = match[1].length
-    const start = match.index + prefixLength
-    const raw = match[2]
-    const key = raw.split(':')[0]
-    if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key) || raw.includes(':')) continue
-    const token = '${' + raw + '}'
-    tokens.push({ key, token, start, end: start + token.length })
-  }
-  return tokens
+  return parseVariableTokens(text)
+    .filter((token) => token.defaultValue === undefined)
+    .map(({ key, start, end }) => ({ key, token: text.slice(start, end), start, end }))
 }
 
 function renderText(
@@ -70,34 +65,28 @@ function renderText(
   if (value === undefined) return { value, diagnostics: [] }
   if (!isResolvedMatrix(matrix)) return { value, diagnostics: matrix?.resolution.diagnostics ?? [] }
 
-  const diagnostics: VarsDiagnostic[] = []
-  const ESC = String.fromCharCode(0) + 'DOLLAR_BRACE' + String.fromCharCode(0)
-  const rendered = value
-    .replaceAll('\\${', ESC)
-    .replace(/\$\{([^}]+)\}/g, (full, raw: string) => {
-      const [key, ...defaultParts] = raw.split(':')
-      if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key)) return full
-      if (defaultParts.length > 0) {
-        diagnostics.push(
-          diagnostic('UNSUPPORTED_DEFAULT', '变量默认值语法暂不支持: ' + raw, key, key),
-        )
-        return full
-      }
-      const entry = matrix.resolution.values[key]
-      if (!entry) {
-        diagnostics.push(diagnostic('MISSING_REFERENCE', '模板引用了不存在的变量 ' + key, key, key))
-        return full
-      }
-      if (entry.type === 'json') {
-        diagnostics.push(
-          diagnostic('JSON_TEXT_INTERPOLATION', 'JSON 变量不能直接插入文本: ' + key, key, key),
-        )
-        return full
-      }
-      return String(entry.value)
-    })
-    .replaceAll(ESC, '${')
-  return { value: rendered, diagnostics }
+  const rendered = renderTextWithResolvedVars(value, {
+    values: coreRenderValues(matrix.resolution.values),
+  })
+  return rendered.ok
+    ? { value: rendered.text, diagnostics: [] }
+    : { value, diagnostics: rendered.diagnostics }
+}
+
+function uniqueDiagnostics(diagnostics: VarsDiagnostic[]): VarsDiagnostic[] {
+  const seen = new Set<string>()
+  return diagnostics.filter((item) => {
+    const identity = JSON.stringify([
+      item.code,
+      item.key,
+      item.referencedKey,
+      item.path,
+      item.message,
+    ])
+    if (seen.has(identity)) return false
+    seen.add(identity)
+    return true
+  })
 }
 
 function renderArray(
@@ -167,7 +156,7 @@ export function buildResolvedMcpServer(
   if (resolved.env) sections.push('env')
   if (resolved.headers) sections.push('headers')
   void context
-  return { server: resolved, sections, diagnostics }
+  return { server: resolved, sections, diagnostics: uniqueDiagnostics(diagnostics) }
 }
 
 export function buildMcpSettingsPreview(

@@ -46,7 +46,7 @@ describe('agent paths', () => {
     expect(agentMcpFile('opencode')).toBe(join(home, 'opencode', 'opencode.json'))
   })
   it('opencode config dir is ~/.config/opencode on darwin (not Library/Application Support)', () => {
-    delete process.env.OPENCODE_CONFIG_DIR
+    vi.stubEnv('OPENCODE_CONFIG_DIR', undefined)
     const dir = agentConfigDir('opencode')
     expect(dir.endsWith(join('.config', 'opencode'))).toBe(true)
     expect(dir).not.toContain('Application Support')

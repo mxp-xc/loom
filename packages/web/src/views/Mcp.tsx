@@ -48,6 +48,7 @@ import {
   X,
 } from 'lucide-react'
 import MonacoTextEditor from '@/components/monaco/MonacoTextEditor'
+import Modal from '@/components/Modal'
 import { registerVarsCompletionProvider } from '@/components/monaco/varsCompletion'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/IconButton'
@@ -2284,14 +2285,15 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
   const [editorDirty, setEditorDirty] = useState(false)
   const [dirtyCloseOpen, setDirtyCloseOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<McpServer | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [inspectedVar, setInspectedVar] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [serverOrder, setServerOrder] = useState<string[]>([])
   const [createdServer, setCreatedServer] = useState<McpServer | null>(null)
   const [drawerEntered, setDrawerEntered] = useState(false)
   const pendingHistoryCloseRef = useRef(false)
   const historyNavigationRef = useRef<'restore-editor' | 'confirm-close' | null>(null)
+  const deleteBusyRef = useRef(false)
 
   const manifestServers = manifest?.mcp ?? []
   const orderedServerIds = normalizeOrder(
@@ -2438,19 +2440,33 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
     return null
   }
 
-  const copySelected = () => {
+  const copySelected = async () => {
     if (!selectedServer) return
-    navigator.clipboard
-      ?.writeText(JSON.stringify([selectedServer], null, 2))
-      .then(() => {
-        setCopied(true)
-        showToast('已拷贝到剪贴板')
-        setTimeout(() => setCopied(false), 1200)
-      })
-      .catch((err) => {
-        console.error({ err }, 'Failed to copy MCP server')
-        showErrorToast(err, { title: '复制失败', message: '请检查剪贴板权限后重试' })
-      })
+    try {
+      const writeText = navigator.clipboard?.writeText
+      if (!writeText) throw new Error('Clipboard API unavailable')
+      await writeText.call(navigator.clipboard, JSON.stringify([selectedServer], null, 2))
+      showToast('已拷贝到剪贴板')
+    } catch (err) {
+      console.error({ err }, 'Failed to copy MCP server')
+      showErrorToast(err, { title: '复制失败', message: '请检查剪贴板权限后重试' })
+    }
+  }
+
+  const deleteServer = async () => {
+    if (!deleteTarget || deleteBusyRef.current) return
+    const id = deleteTarget.id
+    deleteBusyRef.current = true
+    setDeleteBusy(true)
+    try {
+      const result = await operations.deleteMcpServer(id)
+      if (!result.ok) return
+      setDeleteTarget(null)
+      if (selected === id) setSelected(null)
+    } finally {
+      deleteBusyRef.current = false
+      setDeleteBusy(false)
+    }
   }
 
   const reorderServers = async (next: McpServer[]) => {
@@ -2725,94 +2741,64 @@ export default function Mcp({ repoPath }: { repoPath: string }) {
           </aside>
         </div>
       )}
-      {deleteTarget && (
-        <div
-          className={styles.variableOverlay}
-          role="presentation"
-          onMouseDown={() => setDeleteTarget(null)}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-label="删除 MCP server"
-            className={styles.confirmPanel}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <h3>删除 {deleteTarget.id}？</h3>
-            <p>
-              只删除 Loom desired state；已投影到 agent 的配置需要之后通过 Project changes
-              显式同步。
-            </p>
-            <div>
-              <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
-                取消
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={async () => {
-                  const id = deleteTarget.id
-                  const result = await operations.deleteMcpServer(id)
-                  if (result.ok) {
-                    setDeleteTarget(null)
-                    if (selected === id) setSelected(null)
-                  }
-                }}
-              >
-                删除
-              </Button>
-            </div>
-          </section>
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title={`删除 ${deleteTarget?.id ?? ''}？`}
+        ariaLabel="删除 MCP server"
+        width={380}
+        busy={deleteBusy}
+      >
+        <div className={styles.confirmBody}>
+          <p>
+            只删除 Loom desired state；已投影到 agent 的配置需要之后通过 Project changes 显式同步。
+          </p>
+          <div className={styles.confirmActions}>
+            <Button variant="ghost" disabled={deleteBusy} onClick={() => setDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteServer()}>
+              {deleteBusy ? '删除中...' : '删除'}
+            </Button>
+          </div>
         </div>
-      )}
-      {dirtyCloseOpen && (
-        <div
-          className={styles.variableOverlay}
-          role="presentation"
-          onMouseDown={() => setDirtyCloseOpen(false)}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-label="放弃未保存的更改"
-            className={styles.confirmPanel}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <h3>放弃未保存的更改？</h3>
-            <p>关闭后，本次对 Server 定义的修改不会保存。</p>
-            <div>
-              <Button variant="ghost" onClick={() => setDirtyCloseOpen(false)}>
-                继续编辑
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  setDirtyCloseOpen(false)
-                  if (pendingHistoryCloseRef.current) {
-                    pendingHistoryCloseRef.current = false
-                    historyNavigationRef.current = 'confirm-close'
-                    window.history.back()
-                    return
-                  }
-                  closeDrawer()
-                }}
-              >
-                放弃更改
-              </Button>
-            </div>
-          </section>
+      </Modal>
+      <Modal
+        open={dirtyCloseOpen}
+        onClose={() => setDirtyCloseOpen(false)}
+        title="放弃未保存的更改？"
+        ariaLabel="放弃未保存的更改"
+        width={380}
+      >
+        <div className={styles.confirmBody}>
+          <p>关闭后，本次对 Server 定义的修改不会保存。</p>
+          <div className={styles.confirmActions}>
+            <Button variant="ghost" onClick={() => setDirtyCloseOpen(false)}>
+              继续编辑
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setDirtyCloseOpen(false)
+                if (pendingHistoryCloseRef.current) {
+                  pendingHistoryCloseRef.current = false
+                  historyNavigationRef.current = 'confirm-close'
+                  window.history.back()
+                  return
+                }
+                closeDrawer()
+              }}
+            >
+              放弃更改
+            </Button>
+          </div>
         </div>
-      )}
+      </Modal>
       <McpVariableInspector
         variableKey={inspectedVar}
         matrix={matrices[configView === 'raw' ? 'default' : configView]}
         onClose={() => setInspectedVar(null)}
       />
-      {copied && (
-        <div className={styles.copyToast}>
-          <Check className="h-3.5 w-3.5" />
-          Copied
-        </div>
-      )}
     </div>
   )
 }

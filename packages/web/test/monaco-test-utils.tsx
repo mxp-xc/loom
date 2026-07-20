@@ -11,21 +11,6 @@ interface MonacoEditorMockProps {
   [key: string]: any
 }
 
-type MonacoEditorMockRenderMode =
-  | { kind: 'normal' }
-  | { kind: 'render-error'; err: unknown }
-  | { kind: 'mount-error'; err: unknown }
-
-const renderModeKey = Symbol.for('loom.monacoEditorMock.renderMode')
-
-function consumeGlobalRenderError() {
-  const state = globalThis as typeof globalThis & { [renderModeKey]?: MonacoEditorMockRenderMode }
-  if (state[renderModeKey]?.kind !== 'render-error') return null
-  const err = state[renderModeKey].err
-  state[renderModeKey] = { kind: 'normal' }
-  return err
-}
-
 interface MonacoEditorMockEditor {
   getDomNode: () => HTMLTextAreaElement | null
   deltaDecorations: ReturnType<typeof vi.fn>
@@ -61,9 +46,6 @@ export interface MonacoEditorMockController {
   setTheme: ReturnType<typeof vi.fn>
   deltaDecorations: ReturnType<typeof vi.fn>
   disposeCallbacks: Array<() => void>
-  nextRenderError: (err: unknown) => void
-  nextMountError: (err: unknown) => void
-  lastTextarea: () => HTMLTextAreaElement | null
   disposeLast: () => void
   reset: () => void
   module: () => { default: (props: MonacoEditorMockProps) => JSX.Element }
@@ -77,9 +59,6 @@ export function createMonacoEditorMock(): MonacoEditorMockController {
   const props: MonacoEditorMockProps[] = []
   const providers: any[] = []
   const disposeCallbacks: Array<() => void> = []
-  let renderMode: MonacoEditorMockRenderMode = { kind: 'normal' }
-  let textarea: HTMLTextAreaElement | null = null
-
   const setTheme = vi.fn()
   const deltaDecorations = vi.fn((_oldIds: string[], decorations: unknown[]) =>
     decorations.map((_decoration, index) => `decoration-${index}`),
@@ -118,23 +97,11 @@ export function createMonacoEditorMock(): MonacoEditorMockController {
   }
 
   function Editor(props: MonacoEditorMockProps) {
-    const globalRenderError = consumeGlobalRenderError()
-    if (globalRenderError) throw globalRenderError
-    if (renderMode.kind === 'render-error') {
-      const err = renderMode.err
-      renderMode = { kind: 'normal' }
-      throw err
-    }
     const ref = useRef<HTMLTextAreaElement | null>(null)
     const latestProps = useRef(props)
     latestProps.current = props
 
     useEffect(() => {
-      if (renderMode.kind === 'mount-error') {
-        const err = renderMode.err
-        renderMode = { kind: 'normal' }
-        throw err
-      }
       const editor: MonacoEditorMockEditor = {
         getDomNode: () => ref.current,
         deltaDecorations,
@@ -152,10 +119,7 @@ export function createMonacoEditorMock(): MonacoEditorMockController {
 
     return (
       <textarea
-        ref={(node) => {
-          ref.current = node
-          textarea = node
-        }}
+        ref={ref}
         aria-label={props.ariaLabel ?? props['aria-label']}
         readOnly={Boolean(props.options?.readOnly)}
         value={props.value ?? ''}
@@ -170,16 +134,6 @@ export function createMonacoEditorMock(): MonacoEditorMockController {
     setTheme,
     deltaDecorations,
     disposeCallbacks,
-    nextRenderError: (err) => {
-      renderMode = { kind: 'render-error', err }
-      ;(globalThis as typeof globalThis & { [renderModeKey]?: MonacoEditorMockRenderMode })[
-        renderModeKey
-      ] = { kind: 'render-error', err }
-    },
-    nextMountError: (err) => {
-      renderMode = { kind: 'mount-error', err }
-    },
-    lastTextarea: () => textarea,
     disposeLast: () => {
       for (const callback of [...disposeCallbacks]) callback()
     },
@@ -187,8 +141,6 @@ export function createMonacoEditorMock(): MonacoEditorMockController {
       props.length = 0
       providers.length = 0
       disposeCallbacks.length = 0
-      renderMode = { kind: 'normal' }
-      textarea = null
       setTheme.mockClear()
       deltaDecorations.mockClear()
       deltaDecorations.mockImplementation((_oldIds: string[], decorations: unknown[]) =>
@@ -198,13 +150,6 @@ export function createMonacoEditorMock(): MonacoEditorMockController {
     },
     module: () => ({
       default: (editorProps: MonacoEditorMockProps) => {
-        if (renderMode.kind === 'render-error') {
-          const err = renderMode.err
-          renderMode = { kind: 'normal' }
-          throw err
-        }
-        const globalRenderError = consumeGlobalRenderError()
-        if (globalRenderError) throw globalRenderError
         props.push(editorProps)
         return <Editor {...editorProps} />
       },

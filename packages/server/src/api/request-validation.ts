@@ -14,8 +14,10 @@ export interface ValidationOptions {
 type ValidationErrorBody = {
   ok: false
   error: string
-  message?: string
+  message: string
 }
+
+const DEFAULT_VALIDATION_MESSAGE = 'request validation failed'
 
 export function requestValidator<T extends z.ZodTypeAny, Target extends keyof ValidationTargets>(
   target: Target,
@@ -54,8 +56,6 @@ function defaultErrorBody(
   message: ValidationErrorMessage | undefined,
   issues: z.ZodIssue[],
 ): ValidationErrorBody {
-  const body: ValidationErrorBody = { ok: false, error }
   const resolvedMessage = typeof message === 'function' ? message(issues) : message
-  if (resolvedMessage) body.message = resolvedMessage
-  return body
+  return { ok: false, error, message: resolvedMessage || DEFAULT_VALIDATION_MESSAGE }
 }

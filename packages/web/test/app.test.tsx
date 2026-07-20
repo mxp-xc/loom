@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { ThemeProvider } from '../src/theme'
 import App from '../src/App'
 import { api } from '../src/lib/api'
+import { deferred } from './deferred'
 
 const routerFuture = { v7_startTransition: true, v7_relativeSplatPath: true } as const
 
@@ -29,7 +30,7 @@ vi.mock('../src/lib/api', () => ({
 }))
 
 vi.mock('../src/views/skills/Skills', () => ({
-  default: () => <div>Skills page</div>,
+  default: ({ repoPath }: { repoPath: string }) => <div>Skills page:{repoPath}</div>,
 }))
 
 vi.mock('../src/views/Mcp', () => ({
@@ -58,7 +59,13 @@ vi.mock('../src/views/Settings', () => ({
 
 describe('App', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     localStorage.clear()
+    vi.mocked(api.init).mockResolvedValue({
+      ok: true,
+      active_repo: 'default',
+      repoPath: '/tmp/r',
+    })
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
       writable: true,
@@ -107,7 +114,7 @@ describe('App', () => {
 
     renderApp('/')
 
-    expect(await screen.findByText('Skills page')).toBeDefined()
+    expect(await screen.findByText('Skills page:default')).toBeDefined()
   })
 
   it('keeps an explicit URL ahead of the stored sidebar page', async () => {
@@ -119,7 +126,6 @@ describe('App', () => {
   })
 
   it('initializes once during StrictMode effect replay', async () => {
-    const callsBefore = vi.mocked(api.init).mock.calls.length
     render(
       <StrictMode>
         <ThemeProvider defaultTheme="light">
@@ -131,21 +137,70 @@ describe('App', () => {
     )
 
     await screen.findByRole('link', { name: 'Skills' })
-    expect(api.init).toHaveBeenCalledTimes(callsBefore + 1)
+    expect(api.init).toHaveBeenCalledTimes(1)
+  })
+
+  it('passes the authorized repository name to routed pages', async () => {
+    renderApp('/skills')
+
+    expect(await screen.findByText('Skills page:default')).toBeDefined()
+    expect(screen.getByText('default')).toBeDefined()
+  })
+
+  it('keeps the loading state until initialization resolves', async () => {
+    const request = deferred<{ ok: true; active_repo: string; repoPath: string }>()
+    vi.mocked(api.init).mockReturnValue(request.promise)
+    renderApp('/skills')
+
+    expect(screen.getByRole('status').textContent).toContain('initializing')
+    request.resolve({ ok: true, active_repo: 'default', repoPath: '/tmp/r' })
+    expect(await screen.findByText('Skills page:default')).toBeDefined()
   })
 
   it.each([
-    ['/skills', 'workbench'],
-    ['/mcp', 'workbench'],
-    ['/memory', 'fullHeight'],
-    ['/vars', 'fullHeight'],
-    ['/vars-lab', 'fullHeight'],
-    ['/sync', 'content'],
-    ['/settings', 'content'],
-  ])('wraps %s in the %s page layout', async (path, variant) => {
+    ['empty repository path', { ok: true, active_repo: 'default', repoPath: '' }],
+    ['empty active repository', { ok: true, active_repo: '', repoPath: '/tmp/r' }],
+  ])('shows an initialization error for %s', async (_label, response) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.mocked(api.init).mockResolvedValue(response)
+    renderApp('/skills')
+
+    expect(await screen.findByText('Loom 初始化失败')).toBeDefined()
+    expect(consoleError).toHaveBeenCalledWith(
+      { err: expect.objectContaining({ message: '初始化响应缺少有效的 repository' }) },
+      'Failed to initialize Loom',
+    )
+    expect(screen.queryByText('Skills page:default')).toBeNull()
+  })
+
+  it('redirects unknown routes to Skills', async () => {
+    renderApp('/missing-page')
+
+    expect(await screen.findByText('Skills page:default')).toBeDefined()
+    expect(screen.getByRole('link', { name: 'Skills' }).getAttribute('aria-current')).toBe('page')
+  })
+
+  it('navigates between primary pages', async () => {
+    renderApp('/skills')
+    await screen.findByText('Skills page:default')
+
+    fireEvent.click(screen.getByRole('link', { name: 'Settings' }))
+
+    expect(await screen.findByText('Settings page')).toBeDefined()
+  })
+
+  it.each([
+    ['/skills', 'workbench', 'Skills page:default'],
+    ['/mcp', 'workbench', 'MCP page'],
+    ['/memory', 'fullHeight', 'Memory page'],
+    ['/vars', 'fullHeight', 'Vars page'],
+    ['/vars-lab', 'fullHeight', 'Vars lab page'],
+    ['/sync', 'content', 'Sync page'],
+    ['/settings', 'content', 'Settings page'],
+  ])('wraps %s in the %s page layout', async (path, variant, pageText) => {
     renderApp(path)
 
-    await screen.findByRole('link', { name: 'Skills' })
+    await screen.findByText(pageText)
 
     await waitFor(() => {
       const layout = document.querySelector('[data-page-layout]')

@@ -23,15 +23,13 @@ describe('parseSkillMeta', () => {
       'other-skill',
     )
   })
-  it('rejects invalid dir name (uppercase)', () => {
-    expect(parseSkillMeta('---\nname: bad-name\n---\n', 'BadName', '/p')).toBeNull()
-  })
-  it('rejects invalid dir name (spaces)', () => {
-    expect(parseSkillMeta('---\nname: dir\n---\n', 'bad name', '/p')).toBeNull()
-  })
-  it('accepts valid dir name with hyphens', () => {
-    expect(parseSkillMeta('---\nname: other-skill\n---\n', 'my-cool-skill', '/p')!.name).toBe(
-      'my-cool-skill',
+  it.each([
+    ['BadName', null],
+    ['bad name', null],
+    ['my-cool-skill', 'my-cool-skill'],
+  ])('validates directory name %j', (directoryName, expectedName) => {
+    expect(parseSkillMeta('---\nname: other-skill\n---\n', directoryName, '/p')?.name ?? null).toBe(
+      expectedName,
     )
   })
   it('reads frontmatter name separately for diagnostics', () => {

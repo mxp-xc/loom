@@ -1,18 +1,15 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import { applyMcpImports, scanMcpImports } from '../../mcp/importer.js'
 import { logger } from '../../lib/logger.js'
-import { resolveRepoPath } from '../repo.js'
 import type { RouteDeps } from '../router.js'
-import {
-  AgentIdSchema,
-  applicableAgents,
-  loadRepoManifest,
-  mergeConfig,
-  type AgentId,
-} from '@loom/core'
-import { readLocalConfig, readRepoFiles } from '../repo-config.js'
+import { AgentIdSchema, applicableAgents, mergeConfig, type AgentId, type Config } from '@loom/core'
+import { readLocalConfig, readRepoConfig, RepoConfigError } from '../repo-config.js'
 import { runtimeAgentPathContext } from '../../adapters/paths.js'
+import { repositoryErrorResponse } from '../repository-route-error.js'
+import { homeResourceKey, mcpImportResourceKeys } from '../../concurrency/resource-keys.js'
+import { withRepositoryLease } from '../repository-lease.js'
+import { resourceLeases } from '../../concurrency/resource-lease-coordinator.js'
 
 const apiLogger = logger.child('api.mcp-import')
 const NonEmptyString = z.string().min(1)
@@ -28,6 +25,7 @@ type ImportValidationError = 'invalid_repo' | 'invalid_sources' | 'invalid_keys'
 
 export function createMcpImportRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
+  const leases = resourceLeases(deps, deps.leases)
   const importLogger = {
     error: (obj: unknown, msg: string) => apiLogger.error(msg, obj as Record<string, unknown>),
     warn: (obj: unknown, msg: string) => apiLogger.warn(msg, obj as Record<string, unknown>),
@@ -35,56 +33,86 @@ export function createMcpImportRoutes(deps: RouteDeps): Hono {
 
   app.post('/mcp/import/scan', async (c) => {
     try {
-      const { repo, sources } = parseImportBody(await c.req.json(), ImportScanBody, 'scan')
-      const repoPath = await resolveImportRepo(deps, repo, 'scan')
-      const resolvedSources = await resolveImportSources(deps, repoPath, sources)
+      const { repo, sources } = await readImportBody(c, ImportScanBody, 'scan')
+      const home = await homeResourceKey(deps.fs, deps.home)
+      const scopedDeps = { ...deps, home, leases }
       return c.json(
-        await scanMcpImports({
-          fs: deps.fs,
-          repoPath,
-          sources: resolvedSources,
-          pathContext: runtimeAgentPathContext(deps.home),
-          logger: importLogger,
-        }),
+        await withRepositoryLease(
+          scopedDeps,
+          repo,
+          'read',
+          (repoPath) => mcpImportResourceKeys(home, repoPath, home),
+          async (repoPath) => {
+            const resolvedSources = await resolveImportSources(
+              scopedDeps,
+              repoPath,
+              sources,
+              'scan',
+            )
+            return scanMcpImports({
+              fs: deps.fs,
+              repoPath,
+              sources: resolvedSources,
+              pathContext: runtimeAgentPathContext(home),
+              logger: importLogger,
+            })
+          },
+        ),
       )
     } catch (err) {
-      if (err instanceof ImportRouteError) {
-        apiLogger.error(err.logMessage, { err, ...(err.context ?? {}) })
-        return c.json({ ok: false, error: err.code, message: err.message }, err.status)
-      }
-      apiLogger.error('MCP import scan route failed', { err })
-      return c.json(
-        { ok: false, error: 'scan_failed', message: String((err as Error)?.message ?? err) },
-        500,
-      )
+      return mcpImportErrorResponse(c, err, {
+        code: 'scan_failed',
+        message: 'Failed to scan MCP imports',
+        logMessage: 'MCP import scan failed',
+      })
     }
   })
 
   app.post('/mcp/import/apply', async (c) => {
     try {
-      const { repo, sources, keys } = parseImportBody(await c.req.json(), ImportApplyBody, 'apply')
-      const repoPath = await resolveImportRepo(deps, repo, 'apply')
-      const resolvedSources = await resolveImportSources(deps, repoPath, sources)
-      const result = await applyMcpImports({
-        fs: deps.fs,
-        repoPath,
-        sources: resolvedSources,
-        keys,
-        pathContext: runtimeAgentPathContext(deps.home),
-        logger: importLogger,
-      })
-      if (!result.ok) return c.json(result, 409)
+      const { repo, sources, keys } = await readImportBody(c, ImportApplyBody, 'apply')
+      const home = await homeResourceKey(deps.fs, deps.home)
+      const scopedDeps = { ...deps, home, leases }
+      const result = await withRepositoryLease(
+        scopedDeps,
+        repo,
+        'mutation',
+        (repoPath) => mcpImportResourceKeys(home, repoPath, home),
+        async (repoPath) => {
+          const resolvedSources = await resolveImportSources(scopedDeps, repoPath, sources, 'apply')
+          return applyMcpImports({
+            fs: deps.fs,
+            repoPath,
+            sources: resolvedSources,
+            keys,
+            pathContext: runtimeAgentPathContext(home),
+            logger: importLogger,
+          })
+        },
+      )
+      if (!result.ok) {
+        return mcpImportErrorResponse(
+          c,
+          new ImportRouteError(
+            409,
+            result.error,
+            '导入预览已过期，请重新扫描',
+            'stale MCP import preview',
+          ),
+          {
+            code: 'apply_failed',
+            message: 'Failed to apply MCP imports',
+            logMessage: 'MCP import apply failed',
+          },
+        )
+      }
       return c.json(result)
     } catch (err) {
-      if (err instanceof ImportRouteError) {
-        apiLogger.error(err.logMessage, { err, ...(err.context ?? {}) })
-        return c.json({ ok: false, error: err.code, message: err.message }, err.status)
-      }
-      apiLogger.error('MCP import apply route failed', { err })
-      return c.json(
-        { ok: false, error: 'apply_failed', message: String((err as Error)?.message ?? err) },
-        500,
-      )
+      return mcpImportErrorResponse(c, err, {
+        code: 'apply_failed',
+        message: 'Failed to apply MCP imports',
+        logMessage: 'MCP import apply failed',
+      })
     }
   })
 
@@ -95,30 +123,40 @@ async function resolveImportSources(
   deps: RouteDeps,
   repoPath: string,
   sources: AgentId[] | undefined,
+  action: ImportAction,
 ): Promise<AgentId[]> {
   if (sources !== undefined) return applicableAgents(sources, 'mcp')
-  const repo = loadRepoManifest(await readRepoFiles(deps.fs, repoPath))
-  const local = await readLocalConfig(deps.fs, deps.home)
-  return applicableAgents(mergeConfig(repo.repoConfig, local).agents, 'mcp')
-}
 
-async function resolveImportRepo(
-  deps: RouteDeps,
-  repo: string,
-  action: ImportAction,
-): Promise<string> {
+  let repoConfig: Config
   try {
-    return await resolveRepoPath(deps.fs, repo, deps.home)
+    repoConfig = await readRepoConfig(deps.fs, repoPath)
   } catch (err) {
+    if (!(err instanceof RepoConfigError)) throw err
     throw new ImportRouteError(
-      400,
-      'invalid_repo',
-      String((err as Error)?.message ?? err),
-      'invalid repository path for MCP import ' + action,
-      { repo },
+      422,
+      'invalid_config',
+      err.message,
+      'invalid repository config for MCP import ' + action,
+      { repoPath },
       err,
     )
   }
+
+  let local: Record<string, unknown>
+  try {
+    local = await readLocalConfig(deps.fs, deps.home)
+  } catch (err) {
+    if (!(err instanceof RepoConfigError)) throw err
+    throw new ImportRouteError(
+      422,
+      'invalid_config',
+      err.message,
+      'invalid local config for MCP import ' + action,
+      { repoPath },
+      err,
+    )
+  }
+  return applicableAgents(mergeConfig(repoConfig, local).agents, 'mcp')
 }
 
 function parseImportBody<T extends z.ZodTypeAny>(
@@ -137,6 +175,27 @@ function parseImportBody<T extends z.ZodTypeAny>(
     importValidationContext(value, error),
     result.error,
   )
+}
+
+async function readImportBody<T extends z.ZodTypeAny>(
+  c: Context,
+  schema: T,
+  action: ImportAction,
+): Promise<z.infer<T>> {
+  let value: unknown
+  try {
+    value = await c.req.json()
+  } catch (err) {
+    throw new ImportRouteError(
+      400,
+      'invalid_request',
+      'MCP import request is invalid',
+      'invalid MCP import JSON for ' + action,
+      undefined,
+      err,
+    )
+  }
+  return parseImportBody(value, schema, action)
 }
 
 function importValidationError(issues: z.ZodIssue[]): ImportValidationError {
@@ -170,7 +229,7 @@ function importValidationContext(
 
 class ImportRouteError extends Error {
   constructor(
-    readonly status: 400,
+    readonly status: 400 | 409 | 422,
     readonly code: string,
     message: string,
     readonly logMessage: string,
@@ -179,4 +238,27 @@ class ImportRouteError extends Error {
   ) {
     super(message, { cause })
   }
+}
+
+function mcpImportErrorResponse(
+  c: Context,
+  error: unknown,
+  options: { code: string; message: string; logMessage: string },
+): Response {
+  const repoFailure = repositoryErrorResponse(c, error, apiLogger, options.logMessage)
+  if (repoFailure) return repoFailure
+
+  if (error instanceof ImportRouteError) {
+    apiLogger.error(error.logMessage, { err: error, ...(error.context ?? {}) })
+    const message =
+      error.status === 400
+        ? 'Invalid MCP import request'
+        : error.status === 409
+          ? '导入预览已过期，请重新扫描'
+          : 'MCP import configuration is invalid'
+    return c.json({ ok: false, error: error.code, message }, error.status)
+  }
+
+  apiLogger.error(options.logMessage, { err: error })
+  return c.json({ ok: false, error: options.code, message: options.message }, 500)
 }

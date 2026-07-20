@@ -12,13 +12,16 @@ export interface McpFragment {
   agents?: AgentId[]
 }
 export type UndoAction =
-  | { kind: 'unlink'; path: string }
-  | { kind: 'restoreNamespace'; path: string; backupPath: string | null }
-  | { kind: 'restoreMcp'; path: string; backup: string | null }
-  | { kind: 'restoreMemory'; path: string; backup: string | null }
-export interface ProjectionJournal {
-  undos: UndoAction[]
-}
+  | {
+      kind: 'restoreNamespace'
+      path: string
+      backupPath: string | null
+      backupIdentity?: string
+      installedKind?: 'directory' | 'link'
+      installedIdentity?: string
+    }
+  | { kind: 'restoreMcp'; path: string; backup: string | null; installedIdentity?: string }
+  | { kind: 'restoreMemory'; path: string; backup: string | null; installedIdentity?: string }
 export interface ProjectionFailure {
   failedStep: string
   originalError: unknown

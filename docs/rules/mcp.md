@@ -29,7 +29,6 @@ Examples:
 Tests:
 
 - packages/web/test/mcp-view.test.tsx
-- packages/web/test/views.test.tsx
 
 ## R-MCP-002 MCP projection 必须显式触发
 
@@ -57,7 +56,6 @@ Examples:
 Tests:
 
 - packages/web/test/mcp-view.test.tsx
-- packages/web/test/views.test.tsx
 - packages/server/test/projection/mcp-merge.test.ts
 
 ## R-MCP-003 配置视图是只读解析上下文
@@ -209,4 +207,4 @@ Tests:
 
 - packages/server/test/mcp/application.test.ts
 - packages/server/test/api/routes-fixes.test.ts
-- packages/web/test/views.test.tsx
+- packages/web/test/mcp-view.test.tsx

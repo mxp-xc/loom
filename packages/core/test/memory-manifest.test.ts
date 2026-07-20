@@ -65,6 +65,37 @@ describe('memory manifest', () => {
     ])
   })
 
+  it('uses memory_order before appending unordered memories', () => {
+    const manifest = buildManifest(
+      loadRepoManifest({
+        'config.yaml': 'memory_order: [personal, team]\n',
+        'memories/archive.md': '# archive',
+        'memories/team.md': '# team',
+        'memories/personal.md': '# personal',
+      }),
+      {},
+    )
+
+    expect(manifest.memory.memories.map((memory) => memory.name)).toEqual([
+      'personal',
+      'team',
+      'archive',
+    ])
+  })
+
+  it('assigns active_memory to legacy global agents when memory_agents is absent', () => {
+    const manifest = buildManifest(
+      loadRepoManifest({
+        'config.yaml': ['agents: [codex, opencode]', 'active_memory: team'].join('\n'),
+        'memories/team.md': '# team',
+      }),
+      {},
+    )
+
+    expect(manifest.memory.assignments).toEqual({ codex: 'team', opencode: 'team' })
+    expect(manifest.memory.memories[0].agents).toEqual(['codex', 'opencode'])
+  })
+
   it('records invalid memory agent references without assigning them', () => {
     const rm = loadRepoManifest({
       'config.yaml': ['memory_agents:', '  codex: missing', '  unknown-agent: team'].join('\n'),

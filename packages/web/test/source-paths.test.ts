@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vitest'
 import { skillFolderDisplayPath } from '../src/views/skills/source-paths'
 

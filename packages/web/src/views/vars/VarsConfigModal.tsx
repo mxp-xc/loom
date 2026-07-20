@@ -38,7 +38,6 @@ type VarsConfigModalProps = {
   onClose: () => void
   onSaved: () => Promise<void>
   onError: (message: string) => void
-  setPending: (pending: boolean) => void
 }
 
 const varTypeOptions: Array<VarEntryInput['type']> = [
@@ -120,10 +119,12 @@ function diagnosticText(diagnostic: VarsDiagnostic) {
 function BaseKeyPicker({
   entries,
   selectedKey,
+  disabled,
   onChange,
 }: {
   entries: VarsProfileEntry[]
   selectedKey: string
+  disabled?: boolean
   onChange: (key: string) => void
 }) {
   const [query, setQuery] = useState('')
@@ -147,6 +148,7 @@ function BaseKeyPicker({
           <button
             key={entry.key}
             type="button"
+            disabled={disabled}
             role="option"
             aria-selected={entry.key === selectedKey}
             className={cn(styles['vars-key-option'], entry.key === selectedKey && styles.on)}
@@ -200,7 +202,6 @@ export default function VarsConfigModal({
   onClose,
   onSaved,
   onError,
-  setPending,
 }: VarsConfigModalProps) {
   const isReadonly = modal.kind === 'view' || profile.id === 'builtin'
   const initialKey = modal.entry?.key ?? baseEntries[0]?.key ?? ''
@@ -231,13 +232,31 @@ export default function VarsConfigModal({
   const [baseKeyDraft, setBaseKeyDraft] = useState('')
   const [baseTypeDraft, setBaseTypeDraft] = useState<VarEntryInput['type']>('string')
   const [baseFormatDraft, setBaseFormatDraft] = useState<StringFormat>('plain')
+  const [pending, setPending] = useState(false)
+  const pendingRef = useRef(false)
   const backdropPointerDownRef = useRef(false)
+
+  const requestClose = () => {
+    if (!pendingRef.current) onClose()
+  }
+
+  const beginOperation = () => {
+    if (pendingRef.current) return false
+    pendingRef.current = true
+    setPending(true)
+    return true
+  }
+
+  const endOperation = () => {
+    pendingRef.current = false
+    setPending(false)
+  }
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.stopPropagation()
-      onClose()
+      requestClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -288,10 +307,11 @@ export default function VarsConfigModal({
     if (!key) return
     if (!selectedEntry && !(isNewBaseDefinition && slot === 'default')) return
     if (type === 'secret' && draft === secretPreviewMask && !draftChanged) {
-      onClose()
+      requestClose()
       return
     }
-    setPending(true)
+    if (!beginOperation()) return
+    let succeeded = false
     try {
       if (profile.id === 'base' && slot === 'default') {
         await api.vars.setBaseKey(repoPath, key, parseVarDraft(type, draft, format))
@@ -315,18 +335,20 @@ export default function VarsConfigModal({
         )
       }
       await onSaved()
-      onClose()
+      succeeded = true
     } catch (err) {
       console.error({ err }, 'Failed to save vars config')
       onError(err instanceof Error ? err.message : '保存失败')
     } finally {
-      setPending(false)
+      endOperation()
     }
+    if (succeeded) onClose()
   }
 
   const clearConfig = async () => {
     if (!key) return
-    setPending(true)
+    if (!beginOperation()) return
+    let succeeded = false
     try {
       if (profile.id === 'base' && slot !== 'default') {
         await api.vars.clearOverride(repoPath, 'base-agent', key, slot)
@@ -336,13 +358,14 @@ export default function VarsConfigModal({
         await api.vars.clearOverride(repoPath, 'local-agent', key, slot)
       }
       await onSaved()
-      onClose()
+      succeeded = true
     } catch (err) {
       console.error({ err }, 'Failed to clear vars config')
       onError(err instanceof Error ? err.message : '清除失败')
     } finally {
-      setPending(false)
+      endOperation()
     }
+    if (succeeded) onClose()
   }
 
   const canClear =
@@ -360,7 +383,7 @@ export default function VarsConfigModal({
         backdropPointerDownRef.current = event.target === event.currentTarget
       }}
       onClick={(event) => {
-        if (event.target === event.currentTarget && backdropPointerDownRef.current) onClose()
+        if (event.target === event.currentTarget && backdropPointerDownRef.current) requestClose()
         backdropPointerDownRef.current = false
       }}
     >
@@ -369,6 +392,7 @@ export default function VarsConfigModal({
         role="dialog"
         aria-modal="true"
         aria-label={dialogLabel}
+        aria-busy={pending}
       >
         <header className={styles['vars-modal-head']}>
           <div>
@@ -380,6 +404,7 @@ export default function VarsConfigModal({
                   <span>key</span>
                   <input
                     value={baseKeyDraft}
+                    disabled={pending}
                     onChange={(event) => setBaseKeyDraft(event.target.value)}
                     placeholder="输入新变量 key"
                   />
@@ -388,6 +413,7 @@ export default function VarsConfigModal({
                   <span>类型</span>
                   <select
                     value={baseTypeDraft}
+                    disabled={pending}
                     onChange={(event) => {
                       const nextType = event.target.value as VarEntryInput['type']
                       setBaseTypeDraft(nextType)
@@ -406,6 +432,7 @@ export default function VarsConfigModal({
                     <span>格式</span>
                     <select
                       value={baseFormatDraft}
+                      disabled={pending}
                       onChange={(event) => setBaseFormatDraft(event.target.value as StringFormat)}
                     >
                       {stringFormatOptions.map((option) => (
@@ -431,6 +458,7 @@ export default function VarsConfigModal({
                       state={slot === option ? 'on' : 'off'}
                       color={option === 'default' ? 'var(--primary)' : undefined}
                       label={option === 'default' ? 'default' : agentName[option]}
+                      disabled={pending}
                       onClick={() => setSlot(option)}
                     >
                       {option === 'default' ? 'default' : undefined}
@@ -443,7 +471,8 @@ export default function VarsConfigModal({
               type="button"
               className={styles['vars-icon-button']}
               aria-label="关闭弹窗"
-              onClick={onClose}
+              disabled={pending}
+              onClick={requestClose}
             >
               <X size={15} />
             </button>
@@ -458,6 +487,7 @@ export default function VarsConfigModal({
                 <BaseKeyPicker
                   entries={baseEntries}
                   selectedKey={selectedKey}
+                  disabled={pending}
                   onChange={setSelectedKey}
                 />
               </section>
@@ -469,6 +499,7 @@ export default function VarsConfigModal({
                   <button
                     key={mode}
                     type="button"
+                    disabled={pending}
                     className={previewMode === mode ? styles.on : undefined}
                     onClick={() => setPreviewMode(mode)}
                   >
@@ -483,7 +514,7 @@ export default function VarsConfigModal({
                   </span>
                   {type === 'secret' ? (
                     <SecretConfigValueInput
-                      disabled={isReadonly}
+                      disabled={isReadonly || pending}
                       value={draft}
                       onChange={(value) => {
                         setDraft(value)
@@ -493,7 +524,7 @@ export default function VarsConfigModal({
                   ) : (
                     <VarsMonacoValueEditor
                       ariaLabel="配置值"
-                      disabled={isReadonly}
+                      disabled={isReadonly || pending}
                       format={format}
                       type={type}
                       value={draft}
@@ -579,13 +610,19 @@ export default function VarsConfigModal({
         </div>
 
         <footer className={styles['vars-modal-footer']}>
-          <button type="button" className={styles['vars-ghost-action']} onClick={onClose}>
+          <button
+            type="button"
+            className={styles['vars-ghost-action']}
+            disabled={pending}
+            onClick={requestClose}
+          >
             取消
           </button>
           {canClear && (
             <button
               type="button"
               className={cn(styles['vars-ghost-action'], styles['vars-danger-action'])}
+              disabled={pending}
               onClick={clearConfig}
             >
               清除配置
@@ -595,11 +632,11 @@ export default function VarsConfigModal({
             <button
               type="button"
               className={styles['vars-primary-action']}
-              disabled={!canSave}
+              disabled={pending || !canSave}
               onClick={save}
             >
               <CheckCircle2 size={14} />
-              保存
+              {pending ? '保存中…' : '保存'}
             </button>
           )}
         </footer>

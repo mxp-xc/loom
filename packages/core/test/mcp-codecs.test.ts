@@ -27,13 +27,34 @@ describe.each([
   })
 })
 
-it('omits Loom-only agents from native MCP entries', () => {
-  expect(
-    toNativeMcpEntry({
+it.each([
+  [
+    'stdio',
+    {
       id: 'browser',
-      type: 'stdio',
+      type: 'stdio' as const,
       command: 'npx',
-      agents: ['codex'],
-    }),
-  ).toEqual({ type: 'stdio', command: 'npx' })
+      args: ['@playwright/mcp'],
+      env: { DEBUG: '1' },
+      agents: ['codex' as const],
+    },
+    { type: 'stdio', command: 'npx', args: ['@playwright/mcp'], env: { DEBUG: '1' } },
+  ],
+  [
+    'http',
+    {
+      id: 'remote',
+      type: 'http' as const,
+      url: 'https://example.test/mcp',
+      headers: { Authorization: 'Bearer token' },
+      agents: ['claude-code' as const],
+    },
+    {
+      type: 'http',
+      url: 'https://example.test/mcp',
+      headers: { Authorization: 'Bearer token' },
+    },
+  ],
+])('maps %s transport fields and omits Loom-only metadata', (_label, server, expected) => {
+  expect(toNativeMcpEntry(server)).toEqual(expected)
 })

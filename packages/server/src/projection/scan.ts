@@ -2,12 +2,11 @@ import { glob } from 'tinyglobby'
 import { join, dirname, basename } from 'node:path'
 import type { IFileSystem } from '../ports/fs.js'
 import type { LocalSkill } from '@loom/core'
-import { logger } from '../lib/logger.js'
+import { discoverBuiltInLocalSkills } from '../skills/local-paths.js'
 
 const LOCAL_SKILL_PATTERN = '**/SKILL.md'
 const DEFAULT_IGNORE = ['**/.git/**', '**/node_modules/**', '**/.cache/**']
 export const LOCAL_SKILL_SCAN_IGNORE = ['**/.git/**', '**/node_modules/**']
-const scanLogger = logger.child('projection.scan')
 
 export interface ScannedLocalSkill {
   name: string
@@ -29,19 +28,11 @@ export async function mergeLocalSkills(
   repoPath: string,
   existing: LocalSkill[],
 ): Promise<LocalSkill[]> {
-  const dir = join(repoPath, 'assets', 'skills')
-  if (!(await fs.exists(dir))) return existing
-  let scanned: ScannedLocalSkill[] = []
-  try {
-    scanned = await scanLocalSkills(dir)
-  } catch (err) {
-    scanLogger.error('failed to scan local skills', { err, dir })
-    return existing
-  }
+  const discovered = await discoverBuiltInLocalSkills(fs, repoPath)
   const have = new Set(existing.map((s) => s.id))
   const out = [...existing]
-  for (const name of [...new Set(scanned.map((skill) => skill.name))]) {
-    if (!have.has(name)) out.push({ id: name })
+  for (const skill of discovered) {
+    if (!have.has(skill.id)) out.push({ id: skill.id })
   }
   return out
 }
@@ -55,6 +46,7 @@ export async function scanLocalSkills(
     dot: options.dot,
     ignore: options.ignore ?? DEFAULT_IGNORE,
     onlyFiles: true,
+    followSymbolicLinks: false,
   })
   return matches
     .map((match) => {

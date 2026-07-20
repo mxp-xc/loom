@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vitest'
 import type { AgentId } from '../src/lib/agents'
 import type { VarsMatrixResponse } from '../src/lib/vars'

@@ -1,5 +1,10 @@
-import { defineProject } from 'vitest/config'
+import { configDefaults, defineProject } from 'vitest/config'
 
 export default defineProject({
-  test: { environment: 'node', include: ['test/**/*.test.ts'] },
+  test: {
+    name: 'core',
+    environment: 'node',
+    include: ['test/**/*.test.ts'],
+    exclude: [...configDefaults.exclude, '**/temp/**'],
+  },
 })

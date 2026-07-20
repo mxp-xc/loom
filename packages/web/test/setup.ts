@@ -1,4 +1,32 @@
-import { beforeEach } from 'vitest'
+import { afterEach, beforeEach } from 'vitest'
+
+const originalConsoleError = console.error
+const originalConsoleWarn = console.warn
+
+let unexpectedConsoleCalls: Array<{ method: 'error' | 'warn'; args: unknown[] }> = []
+
+beforeEach(() => {
+  unexpectedConsoleCalls = []
+  console.error = (...args: unknown[]) => {
+    unexpectedConsoleCalls.push({ method: 'error', args })
+    originalConsoleError(...args)
+  }
+  console.warn = (...args: unknown[]) => {
+    unexpectedConsoleCalls.push({ method: 'warn', args })
+    originalConsoleWarn(...args)
+  }
+})
+
+afterEach(() => {
+  console.error = originalConsoleError
+  console.warn = originalConsoleWarn
+
+  if (unexpectedConsoleCalls.length === 0) return
+  const summary = unexpectedConsoleCalls
+    .map(({ method, args }) => `console.${method}: ${args.map(String).join(' ')}`)
+    .join('\n')
+  throw new Error(`Unexpected console output:\n${summary}`)
+})
 
 function createMemoryStorage(): Storage {
   const items = new Map<string, string>()

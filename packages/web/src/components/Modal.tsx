@@ -91,13 +91,22 @@ export default function Modal({
     if (!modal) return
     const preferred =
       modal.querySelector<HTMLElement>(
-        '[data-autofocus]:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)',
+        '[data-autofocus]:not([hidden]):not(:disabled), input:not([type="hidden"]):not([type="file"]):not([hidden]):not(:disabled), select:not([hidden]):not(:disabled), textarea:not([hidden]):not(:disabled)',
       ) ??
       modal.querySelector<HTMLElement>(
         'button:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
       )
     ;(preferred ?? modal).focus()
   }, [])
+
+  useEffect(() => {
+    if (!open) return
+    if (focusTimerRef.current !== null) window.clearTimeout(focusTimerRef.current)
+    focusTimerRef.current = window.setTimeout(() => {
+      focusTimerRef.current = null
+      focusPreferredElement()
+    }, 0)
+  }, [focusPreferredElement, open])
 
   const restoreOpenerFocus = useCallback((clear = true) => {
     const opener = openerRef.current
@@ -213,13 +222,6 @@ export default function Modal({
             onClick={(event) => event.stopPropagation()}
             onOpenAutoFocus={(event) => {
               event.preventDefault()
-              if (focusTimerRef.current !== null) {
-                window.clearTimeout(focusTimerRef.current)
-              }
-              focusTimerRef.current = window.setTimeout(() => {
-                focusTimerRef.current = null
-                focusPreferredElement()
-              }, 0)
             }}
             onCloseAutoFocus={(event) => {
               event.preventDefault()

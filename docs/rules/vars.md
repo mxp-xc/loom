@@ -126,3 +126,62 @@ Tests:
 - packages/core/test/vars-graph.test.ts
 - packages/server/test/vars/store.test.ts
 - packages/server/test/api/vars-routes.test.ts
+
+## R-VARS-005 Typed VarEntry 在所有生命周期使用同一 schema
+
+Status: active
+Applies to: vars codec, lifecycle, mutation, resolver, API, UI
+
+Rule:
+Typed VarEntry 的读取、规范化、clone、mutation、解析和序列化使用同一结构契约。`string` 与 `secret` 的 value 是 string，并可选 `plain`、`markdown`、`json`、`yaml`、`toml`、`shell` 或 `path` format；`number`、`boolean` 与 `json` 使用各自类型，不能携带 `format` 或其他未知字段。
+
+Implications:
+
+- 无关的 set、rename 或 delete 不得让合法 formatted entry 崩溃或丢失 `format`。
+- `number` 只接受有限值；`json` 只接受可安全复制的 JSON value。
+- Typed entry 的未知字段是错误；legacy vars 仍按 legacy codec 规则读取。
+- Secret 遮罩后的 entry 保留 `format`，因此展示层不丢失编辑语义。
+
+Safety:
+
+- Normalization 只读取 enumerable own data properties，不执行 getter。
+- JSON value 不接受 cycle、symbol key、accessor、稀疏数组或非普通 object prototype。
+
+Tests:
+
+- packages/core/test/vars-codec.test.ts
+- packages/core/test/vars-mutators.test.ts
+- packages/core/test/vars.test.ts
+- packages/server/test/vars/application.test.ts
+
+## R-VARS-006 Vars token 使用奇偶反斜杠转义语法
+
+Status: active
+Applies to: vars graph, resolver, renderer, rename, delete impact, registered consumers
+
+Rule:
+`${key}` 与 `${key:default}` 前连续反斜杠的奇偶性决定 token 是否生效：偶数个反斜杠表示 active token，奇数个表示 literal token。渲染时每对反斜杠折叠为一个，literal token 保留 `${...}` 文本。
+
+Implications:
+
+- Graph、dangling reference、delete impact、rename、resolver 和 renderer 使用同一 token scanner。
+- Rename 只改写 active token，并原样保留 token 前的反斜杠与 default 文本。
+- Legacy resolver 支持 template default；agent-aware resolver 对 active default 返回结构化 `UNSUPPORTED_DEFAULT` diagnostic。
+- Memory 与 MCP 等已登记消费者的引用检查和 rename 遵循相同转义语法。
+
+Safety:
+
+- Literal token 不得形成依赖边、阻塞删除或被 rename。
+- 偶数反斜杠后的 active token 不得被旧的“前一字符是反斜杠”判断误当成 literal。
+
+Examples:
+
+- `\${name}` 渲染为 literal `${name}`。
+- `\\${name}` 渲染为一个反斜杠加上 `name` 的解析值。
+
+Tests:
+
+- packages/core/test/vars-render.test.ts
+- packages/core/test/vars-graph.test.ts
+- packages/core/test/vars-mutators.test.ts
+- packages/server/test/api/vars-routes.test.ts

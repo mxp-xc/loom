@@ -68,8 +68,18 @@ export default function SkillDetailEditor({
     setDirty(false)
     setCopied(false)
 
+    const identity = detail.source
+      ? detail.path
+        ? { kind: 'source' as const, sourceUrl: detail.source, memberEntry: detail.path }
+        : null
+      : { kind: 'local' as const, skillId: detail.skillId }
+    if (!identity) {
+      setSkillError('Source skill identity is unavailable')
+      return
+    }
+
     api
-      .getSkillContent(repoPath, detail.skillId, detail.source, detail.path)
+      .getSkillContent(repoPath, identity)
       .then((res) => {
         if (!active) return
         if (!res.ok) {
@@ -112,7 +122,6 @@ export default function SkillDetailEditor({
       const result = await api.saveSkillContent({
         repo: repoPath,
         skillId: detail.skillId,
-        localPath: detail.path,
         content: draft,
       })
       if (!result.ok) throw new Error(result.message ?? result.error ?? '保存失败')

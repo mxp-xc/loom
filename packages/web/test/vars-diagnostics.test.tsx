@@ -143,7 +143,10 @@ describe('Vars diagnostics actions', () => {
       expect(alert.textContent).toContain('变量加载失败')
       expect(alert.textContent).toContain('变量解析失败')
       expect(screen.queryByLabelText('Profiles')).toBeNull()
-      expect(errorSpy).toHaveBeenCalledWith('Failed to load profile vars', expect.any(ApiError))
+      expect(errorSpy).toHaveBeenCalledWith(
+        { err: expect.any(ApiError), repoPath: '/repo' },
+        'Failed to load profile vars',
+      )
     } finally {
       errorSpy.mockRestore()
     }

@@ -1,13 +1,16 @@
-import { Hono } from 'hono'
+import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import { join, sep } from 'node:path'
 import { AgentIdSchema, normalizeOrder, sameOrder, type AgentId } from '@loom/core'
 import { z } from 'zod'
-import { resolveRepoPath } from '../repo.js'
-import { readYaml, writeYaml } from '../repo-config.js'
+import { readRepoConfig, RepoManifestError, writeYaml } from '../repo-config.js'
 import { jsonValidator, queryValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
 import { renderAgentAwareText } from '../../vars/agent-aware.js'
 import { logger } from '../../lib/logger.js'
+import { repositoryErrorResponse } from '../repository-route-error.js'
+import { routeErrorResponse } from '../route-error.js'
+import { canonicalRepositoryHome, withRepositoryLease } from '../repository-lease.js'
+import { resourceLeases } from '../../concurrency/resource-lease-coordinator.js'
 
 const NAME_RE = /^[A-Za-z0-9._-]+$/
 const WINDOWS_RESERVED_NAME_RE = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i
@@ -51,10 +54,16 @@ async function hasMemoryNameConflict(fs: RouteDeps['fs'], dir: string, name: str
 }
 
 const memoryLogger = logger.child('memory-route')
+interface MemoryLeaseContext {
+  repoPath: string
+  canonicalHome?: string
+}
+
+const leasedMemoryContexts = new WeakMap<object, MemoryLeaseContext>()
 
 class MemoryRouteError extends Error {
   constructor(
-    readonly status: 409 | 422,
+    readonly status: 400 | 404 | 409 | 422,
     readonly code: string,
     message: string,
   ) {
@@ -62,8 +71,8 @@ class MemoryRouteError extends Error {
   }
 }
 
-async function readConfig(fs: any, repoPath: string): Promise<Record<string, any>> {
-  return (await readYaml(fs, join(repoPath, 'config.yaml'))) ?? {}
+async function readConfig(fs: RouteDeps['fs'], repoPath: string): Promise<Record<string, any>> {
+  return readRepoConfig(fs, repoPath)
 }
 
 async function readMemoryNames(fs: RouteDeps['fs'], repoPath: string): Promise<string[]> {
@@ -101,91 +110,117 @@ function memoryAssignments(
 
 export function createMemoryRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
+  const readLease = memoryLease(deps, 'read')
+  const mutationLease = memoryLease(deps, 'mutation')
+  const previewLease = memoryLease(deps, 'read', true)
 
-  app.get('/memory', queryValidator(MemoryQuery, { error: memoryQueryError }), async (c) => {
-    try {
-      const { repo, name: nameQuery } = c.req.valid('query')
-      const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      // ?name=<n> returns single memory raw content (for editing non-active memories)
-      if (nameQuery) {
-        const file = join(memoriesDir(repoPath), `${nameQuery}.md`)
-        if (!(await deps.fs.exists(file))) return c.json({ ok: false, error: 'not_found' }, 404)
-        return c.json({ content: await deps.fs.readFile(file) })
-      }
-      const dir = memoriesDir(repoPath)
-      const fileNames = await readMemoryNames(deps.fs, repoPath)
-      const cfg = await readConfig(deps.fs, repoPath)
-      const names = normalizeOrder(cfg.memory_order, fileNames)
-      const active = typeof cfg.active_memory === 'string' ? cfg.active_memory : null
-      const assignments = memoryAssignments(cfg, names)
-      let activeContent = ''
-      if (active && names.includes(active)) {
-        activeContent = await deps.fs.readFile(join(dir, `${active}.md`))
-      }
-      return c.json({
-        memories: names.map((n) => ({
-          name: n,
-          agents: AgentIdSchema.options.filter((agent) => assignments[agent] === n),
-        })),
-        assignments,
-        active,
-        activeContent,
-      })
-    } catch (e) {
-      return c.json({ ok: false, error: 'read_failed', message: String((e as Error).message) }, 400)
-    }
-  })
-
-  app.post('/memory', jsonValidator(CreateMemoryBody, { error: memoryBodyError }), async (c) => {
-    try {
-      const { repo, name } = c.req.valid('json')
-      const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      const dir = memoriesDir(repoPath)
-      await deps.fs.mkdir(dir, true)
-      const file = join(dir, `${name}.md`)
-      if (await hasMemoryNameConflict(deps.fs, dir, name))
-        return c.json({ ok: false, error: 'exists' }, 409)
-      if (!file.startsWith(dir + sep)) return c.json({ ok: false, error: 'invalid_name' }, 400)
-      const cfg = await readConfig(deps.fs, repoPath)
-      const names = await readMemoryNames(deps.fs, repoPath)
-      await deps.fs.writeFile(file, '')
+  app.get(
+    '/memory',
+    queryValidator(MemoryQuery, { error: memoryQueryError }),
+    readLease('query'),
+    async (c) => {
       try {
-        cfg.memory_order = [...normalizeOrder(cfg.memory_order, names), name]
-        await writeYaml(deps.fs, join(repoPath, 'config.yaml'), cfg)
-      } catch (error) {
-        try {
-          await deps.fs.removeFile(file)
-        } catch (rollbackError) {
-          memoryLogger.error('memory create rollback failed', {
-            err: rollbackError,
-            repoPath,
-            name,
-          })
-          throw new AggregateError([error, rollbackError], 'memory create and rollback failed', {
-            cause: error,
-          })
+        const { repo, name: nameQuery } = c.req.valid('query')
+        const repoPath = memoryRepoPath(c)
+        // ?name=<n> returns single memory raw content (for editing non-active memories)
+        if (nameQuery) {
+          const file = join(memoriesDir(repoPath), `${nameQuery}.md`)
+          if (!(await deps.fs.exists(file)))
+            return c.json({ ok: false, error: 'not_found', message: 'memory not found' }, 404)
+          return c.json({ content: await deps.fs.readFile(file) })
         }
-        throw error
+        const dir = memoriesDir(repoPath)
+        const fileNames = await readMemoryNames(deps.fs, repoPath)
+        const cfg = await readConfig(deps.fs, repoPath)
+        const names = normalizeOrder(cfg.memory_order, fileNames)
+        const active = typeof cfg.active_memory === 'string' ? cfg.active_memory : null
+        const assignments = memoryAssignments(cfg, names)
+        let activeContent = ''
+        if (active && names.includes(active)) {
+          activeContent = await deps.fs.readFile(join(dir, `${active}.md`))
+        }
+        return c.json({
+          memories: names.map((n) => ({
+            name: n,
+            agents: AgentIdSchema.options.filter((agent) => assignments[agent] === n),
+          })),
+          assignments,
+          active,
+          activeContent,
+        })
+      } catch (e) {
+        const repoFailure = memoryRepositoryFailure(c, e, 'memory read')
+        if (repoFailure) return repoFailure
+        return memoryErrorResponse(c, e, 'memory read failed', {
+          code: 'read_failed',
+          message: 'failed to read memories',
+        })
       }
-      return c.json({ ok: true, name })
-    } catch (e) {
-      memoryLogger.error('memory create failed', { err: e })
-      return c.json(
-        { ok: false, error: 'create_failed', message: String((e as Error).message) },
-        400,
-      )
-    }
-  })
+    },
+  )
+
+  app.post(
+    '/memory',
+    jsonValidator(CreateMemoryBody, { error: memoryBodyError }),
+    mutationLease('json'),
+    async (c) => {
+      try {
+        const { repo, name } = c.req.valid('json')
+        const repoPath = memoryRepoPath(c)
+        const dir = memoriesDir(repoPath)
+        await deps.fs.mkdir(dir, true)
+        const file = join(dir, `${name}.md`)
+        if (await hasMemoryNameConflict(deps.fs, dir, name))
+          return c.json({ ok: false, error: 'exists', message: 'memory already exists' }, 409)
+        if (!file.startsWith(dir + sep))
+          return c.json(
+            { ok: false, error: 'invalid_name', message: 'memory name is invalid' },
+            400,
+          )
+        const cfg = await readConfig(deps.fs, repoPath)
+        const names = await readMemoryNames(deps.fs, repoPath)
+        await deps.fs.writeFile(file, '')
+        try {
+          cfg.memory_order = [...normalizeOrder(cfg.memory_order, names), name]
+          await writeYaml(deps.fs, join(repoPath, 'config.yaml'), cfg)
+        } catch (error) {
+          try {
+            await deps.fs.removeFile(file)
+          } catch (rollbackError) {
+            memoryLogger.error('memory create rollback failed', {
+              err: rollbackError,
+              repoPath,
+              name,
+            })
+            throw new AggregateError([error, rollbackError], 'memory create and rollback failed', {
+              cause: error,
+            })
+          }
+          throw error
+        }
+        return c.json({ ok: true, name })
+      } catch (e) {
+        const repoFailure = memoryRepositoryFailure(c, e, 'memory create')
+        if (repoFailure) return repoFailure
+        return memoryErrorResponse(c, e, 'memory create failed', {
+          code: 'create_failed',
+          message: 'failed to create memory',
+        })
+      }
+    },
+  )
 
   app.delete(
     '/memory',
     queryValidator(RequiredMemoryQuery, { error: memoryQueryError }),
+    mutationLease('query'),
     async (c) => {
       try {
         const { repo, name } = c.req.valid('query')
-        const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const repoPath = memoryRepoPath(c)
         const file = join(memoriesDir(repoPath), `${name}.md`)
-        if (!(await deps.fs.exists(file))) return c.json({ ok: false, error: 'not_found' }, 404)
+        if (!(await deps.fs.exists(file)))
+          return c.json({ ok: false, error: 'not_found', message: 'memory not found' }, 404)
         const content = await deps.fs.readFile(file)
         const cfg = await readConfig(deps.fs, repoPath)
         const names = await readMemoryNames(deps.fs, repoPath)
@@ -217,11 +252,12 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
         }
         return c.json({ ok: true })
       } catch (e) {
-        memoryLogger.error('memory delete failed', { err: e })
-        return c.json(
-          { ok: false, error: 'delete_failed', message: String((e as Error).message) },
-          400,
-        )
+        const repoFailure = memoryRepositoryFailure(c, e, 'memory delete')
+        if (repoFailure) return repoFailure
+        return memoryErrorResponse(c, e, 'memory delete failed', {
+          code: 'delete_failed',
+          message: 'failed to delete memory',
+        })
       }
     },
   )
@@ -229,20 +265,23 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
   app.put(
     '/memory/content',
     jsonValidator(MemoryContentBody, { error: memoryContentError }),
+    mutationLease('json'),
     async (c) => {
       try {
         const { repo, name, content } = c.req.valid('json')
-        const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const repoPath = memoryRepoPath(c)
         const file = join(memoriesDir(repoPath), `${name}.md`)
-        if (!(await deps.fs.exists(file))) return c.json({ ok: false, error: 'not_found' }, 404)
+        if (!(await deps.fs.exists(file)))
+          return c.json({ ok: false, error: 'not_found', message: 'memory not found' }, 404)
         await deps.fs.writeFile(file, content)
         return c.json({ ok: true })
       } catch (e) {
-        memoryLogger.error('memory content write failed', { err: e })
-        return c.json(
-          { ok: false, error: 'write_failed', message: String((e as Error).message) },
-          400,
-        )
+        const repoFailure = memoryRepositoryFailure(c, e, 'memory content write')
+        if (repoFailure) return repoFailure
+        return memoryErrorResponse(c, e, 'memory content write failed', {
+          code: 'write_failed',
+          message: 'failed to write memory',
+        })
       }
     },
   )
@@ -250,17 +289,23 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
   app.post(
     '/memory/rename',
     jsonValidator(RenameMemoryBody, { error: memoryRenameError }),
+    mutationLease('json'),
     async (c) => {
       try {
         const { repo, name, newName } = c.req.valid('json')
-        const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const repoPath = memoryRepoPath(c)
         const dir = memoriesDir(repoPath)
         const oldFile = join(dir, `${name}.md`)
         const newFile = join(dir, `${newName}.md`)
-        if (!(await deps.fs.exists(oldFile))) return c.json({ ok: false, error: 'not_found' }, 404)
+        if (!(await deps.fs.exists(oldFile)))
+          return c.json({ ok: false, error: 'not_found', message: 'memory not found' }, 404)
         if (await hasMemoryNameConflict(deps.fs, dir, newName))
-          return c.json({ ok: false, error: 'exists' }, 409)
-        if (!newFile.startsWith(dir + sep)) return c.json({ ok: false, error: 'invalid_name' }, 400)
+          return c.json({ ok: false, error: 'exists', message: 'memory already exists' }, 409)
+        if (!newFile.startsWith(dir + sep))
+          return c.json(
+            { ok: false, error: 'invalid_name', message: 'memory name is invalid' },
+            400,
+          )
         const cfg = await readConfig(deps.fs, repoPath)
         const names = await readMemoryNames(deps.fs, repoPath)
         const assignments = memoryAssignments(cfg, names)
@@ -299,11 +344,12 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
         }
         return c.json({ ok: true, name: newName })
       } catch (e) {
-        memoryLogger.error('memory rename failed', { err: e })
-        return c.json(
-          { ok: false, error: 'rename_failed', message: String((e as Error).message) },
-          400,
-        )
+        const repoFailure = memoryRepositoryFailure(c, e, 'memory rename')
+        if (repoFailure) return repoFailure
+        return memoryErrorResponse(c, e, 'memory rename failed', {
+          code: 'rename_failed',
+          message: 'failed to rename memory',
+        })
       }
     },
   )
@@ -311,10 +357,11 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
   app.post(
     '/memory/active',
     jsonValidator(ActiveMemoryBody, { error: memoryBodyError }),
+    mutationLease('json'),
     async (c) => {
       try {
         const { repo, name } = c.req.valid('json')
-        const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const repoPath = memoryRepoPath(c)
         const cfg = await readConfig(deps.fs, repoPath)
         if (name === null) {
           delete cfg.active_memory
@@ -323,7 +370,8 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
           return c.json({ ok: true })
         }
         const file = join(memoriesDir(repoPath), `${name}.md`)
-        if (!(await deps.fs.exists(file))) return c.json({ ok: false, error: 'not_found' }, 404)
+        if (!(await deps.fs.exists(file)))
+          return c.json({ ok: false, error: 'not_found', message: 'memory not found' }, 404)
         cfg.active_memory = name
         if (cfg.memory_agents && typeof cfg.memory_agents === 'object') {
           cfg.memory_agents = Object.fromEntries(
@@ -335,11 +383,12 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
         await writeYaml(deps.fs, join(repoPath, 'config.yaml'), cfg)
         return c.json({ ok: true })
       } catch (e) {
-        memoryLogger.error('legacy memory activation failed', { err: e })
-        return c.json(
-          { ok: false, error: 'activate_failed', message: String((e as Error).message) },
-          400,
-        )
+        const repoFailure = memoryRepositoryFailure(c, e, 'memory activation')
+        if (repoFailure) return repoFailure
+        return memoryErrorResponse(c, e, 'legacy memory activation failed', {
+          code: 'activate_failed',
+          message: 'failed to activate memory',
+        })
       }
     },
   )
@@ -347,13 +396,14 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
   app.put(
     '/memory/agent',
     jsonValidator(MemoryAgentBody, { error: 'invalid_agent' }),
+    mutationLease('json'),
     async (c) => {
       try {
         const { repo, agent, name } = c.req.valid('json')
-        const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+        const repoPath = memoryRepoPath(c)
         const names = await readMemoryNames(deps.fs, repoPath)
         if (name !== null && !names.includes(name))
-          return c.json({ ok: false, error: 'not_found' }, 404)
+          return c.json({ ok: false, error: 'not_found', message: 'memory not found' }, 404)
         const cfg = await readConfig(deps.fs, repoPath)
         const assignments = memoryAssignments(cfg, names)
         if (name === null) delete assignments[agent]
@@ -363,11 +413,12 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
         await writeYaml(deps.fs, join(repoPath, 'config.yaml'), cfg)
         return c.json({ ok: true, assignments })
       } catch (e) {
-        memoryLogger.error('memory agent update failed', { err: e })
-        return c.json(
-          { ok: false, error: 'agent_update_failed', message: String((e as Error).message) },
-          400,
-        )
+        const repoFailure = memoryRepositoryFailure(c, e, 'memory agent update')
+        if (repoFailure) return repoFailure
+        return memoryErrorResponse(c, e, 'memory agent update failed', {
+          code: 'agent_update_failed',
+          message: 'failed to update memory agent',
+        })
       }
     },
   )
@@ -375,19 +426,36 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
   app.post(
     '/memory/preview',
     jsonValidator(PreviewMemoryBody, { error: 'invalid_request', message: '请求无效' }),
+    previewLease('json'),
     async (c) => {
       try {
         const { repo, content, agent } = c.req.valid('json')
-        const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-        const result = await renderAgentAwareText(deps.fs, deps.home, repoPath, agent, content)
+        const repoPath = memoryRepoPath(c)
+        const result = await renderAgentAwareText(
+          deps.fs,
+          memoryCanonicalHome(c),
+          repoPath,
+          agent,
+          content,
+        )
         if (!result.ok)
-          return c.json({ ok: false, error: 'render_failed', diagnostics: result.diagnostics }, 400)
+          return c.json(
+            {
+              ok: false,
+              error: 'render_failed',
+              message: 'memory could not be rendered',
+              diagnostics: result.diagnostics,
+            },
+            400,
+          )
         return c.json({ rendered: result.rendered, diagnostics: [], resolution: result.resolution })
       } catch (e) {
-        return c.json(
-          { ok: false, error: 'render_failed', message: String((e as Error).message) },
-          400,
-        )
+        const repoFailure = memoryRepositoryFailure(c, e, 'memory preview')
+        if (repoFailure) return repoFailure
+        return memoryErrorResponse(c, e, 'memory preview failed', {
+          code: 'render_failed',
+          message: 'failed to render memory',
+        })
       }
     },
   )
@@ -395,18 +463,12 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
   app.put(
     '/memory/order',
     jsonValidator(ReorderMemoriesBody, { error: 'invalid_order' }),
+    mutationLease('json'),
     async (c) => {
       try {
         const { repo, names: requestedNames } = c.req.valid('json')
-        const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-        const configValue = await readYaml(deps.fs, join(repoPath, 'config.yaml'))
-        if (
-          configValue !== null &&
-          (typeof configValue !== 'object' || Array.isArray(configValue))
-        ) {
-          throw new MemoryRouteError(422, 'invalid_memory_config', 'Memory config is malformed')
-        }
-        const cfg = (configValue ?? {}) as Record<string, any>
+        const repoPath = memoryRepoPath(c)
+        const cfg = await readConfig(deps.fs, repoPath)
         const memoryNames = await readMemoryNames(deps.fs, repoPath)
         if (memoryNames.some((name) => !NAME_RE.test(name))) {
           throw new MemoryRouteError(
@@ -423,18 +485,104 @@ export function createMemoryRoutes(deps: RouteDeps): Hono {
         }
         return c.json({ ok: true, names: next })
       } catch (e) {
-        if (e instanceof MemoryRouteError)
-          return c.json({ ok: false, error: e.code, message: e.message }, e.status)
-        memoryLogger.error('memory reorder failed', { err: e })
-        return c.json(
-          { ok: false, error: 'reorder_failed', message: String((e as Error).message) },
-          500,
-        )
+        const repoFailure = memoryRepositoryFailure(c, e, 'memory reorder')
+        if (repoFailure) return repoFailure
+        return memoryErrorResponse(c, e, 'memory reorder failed', {
+          code: 'reorder_failed',
+          message: 'failed to reorder memories',
+        })
       }
     },
   )
 
   return app
+}
+
+function memoryLease(deps: RouteDeps, mode: 'read' | 'mutation', includeHome = false) {
+  const leases = resourceLeases(deps, deps.leases)
+  return (target: 'json' | 'query'): MiddlewareHandler =>
+    async (c, next) => {
+      let repo: string | undefined
+      try {
+        repo = (c.req as unknown as { valid(target: 'json' | 'query'): { repo: string } }).valid(
+          target,
+        ).repo
+        const canonicalHome = includeHome ? await canonicalRepositoryHome(deps) : undefined
+        const scopedDeps = canonicalHome ? { ...deps, home: canonicalHome, leases } : deps
+        await withRepositoryLease(
+          scopedDeps,
+          repo,
+          mode,
+          (repoPath) => (canonicalHome ? [repoPath, canonicalHome] : [repoPath]),
+          async (repoPath) => {
+            leasedMemoryContexts.set(c, { repoPath, canonicalHome })
+            try {
+              await next()
+            } finally {
+              leasedMemoryContexts.delete(c)
+            }
+          },
+        )
+      } catch (error) {
+        const repoFailure = memoryRepositoryFailure(c, error, `memory ${mode} lease`)
+        if (repoFailure) return repoFailure
+        memoryLogger.error('memory lease failed', { err: error, mode, repo })
+        return c.json(
+          { ok: false, error: 'memory_lease_failed', message: 'memory operation failed' },
+          500,
+        )
+      }
+    }
+}
+
+function memoryRepoPath(c: Context): string {
+  const context = leasedMemoryContexts.get(c)
+  if (!context) throw new Error('Memory route requires an active repository lease')
+  return context.repoPath
+}
+
+function memoryCanonicalHome(c: Context): string {
+  const canonicalHome = leasedMemoryContexts.get(c)?.canonicalHome
+  if (!canonicalHome) throw new Error('Memory preview requires an active home lease')
+  return canonicalHome
+}
+
+function memoryRepositoryFailure(c: Context, error: unknown, operation: string): Response | null {
+  return repositoryErrorResponse(
+    c,
+    error,
+    memoryLogger,
+    `${operation} repository authorization failed`,
+  )
+}
+
+function memoryErrorResponse(
+  c: Context,
+  error: unknown,
+  logMessage: string,
+  fallback: { code: string; message: string },
+): Response {
+  return routeErrorResponse(
+    c,
+    error,
+    memoryLogger,
+    logMessage,
+    (cause) => {
+      if (cause instanceof RepoManifestError) {
+        return {
+          status: 422,
+          code: 'invalid_memory_config',
+          message: 'memory configuration is invalid',
+          diagnostics: cause.diagnostics,
+        }
+      }
+      if (cause instanceof MemoryRouteError) {
+        return { status: cause.status, code: cause.code, message: cause.message }
+      }
+      return null
+    },
+    { status: 500, ...fallback },
+  )
 }
 
 function memoryQueryError(issues: z.ZodIssue[]): string {

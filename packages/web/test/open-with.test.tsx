@@ -160,11 +160,21 @@ describe('OpenWith', () => {
   it('reports open failures to its consumer', async () => {
     const error = new Error('missing app')
     const onError = vi.fn()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     vi.mocked(api.openPath).mockRejectedValueOnce(error)
-    render(<OpenWith repo="default" path="docs" onError={onError} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '使用 VS Code 打开' }))
+    try {
+      render(<OpenWith repo="default" path="docs" onError={onError} />)
 
-    await waitFor(() => expect(onError).toHaveBeenCalledWith(error, 'vscode'))
+      fireEvent.click(await screen.findByRole('button', { name: '使用 VS Code 打开' }))
+
+      await waitFor(() => expect(onError).toHaveBeenCalledWith(error, 'vscode'))
+      expect(consoleError).toHaveBeenCalledWith(
+        { err: error, application: 'vscode', path: 'docs' },
+        'Failed to open path',
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })

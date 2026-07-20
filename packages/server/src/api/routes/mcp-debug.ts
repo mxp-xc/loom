@@ -1,5 +1,4 @@
-import { Hono } from 'hono'
-import { join } from 'node:path'
+import { Hono, type Context } from 'hono'
 import {
   AgentIdSchema,
   McpServerSchema,
@@ -17,10 +16,12 @@ import {
   type McpDebugSessionSnapshot,
 } from '../../mcp/debug-session.js'
 import { VarsApplication, VarsApplicationError } from '../../vars/application.js'
-import { readYaml } from '../repo-config.js'
-import { resolveRepoPath } from '../repo.js'
+import { readMcpManifest, RepoConfigError } from '../repo-config.js'
 import { jsonValidator, paramValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
+import { repositoryErrorResponse } from '../repository-route-error.js'
+import { canonicalRepositoryHome, withRepositoryLease } from '../repository-lease.js'
+import { resourceLeases } from '../../concurrency/resource-lease-coordinator.js'
 
 export interface McpDebugSessionManagerLike {
   createSession(input: {
@@ -67,16 +68,18 @@ class McpDebugRouteError extends Error {
   constructor(
     readonly code: string,
     message: string,
-    readonly status = 200,
+    readonly status: 400 | 404 | 409 | 422 | 500,
     readonly diagnostics?: VarsDiagnostic[],
+    options?: ErrorOptions,
   ) {
-    super(message)
+    super(message, options)
     this.name = 'McpDebugRouteError'
   }
 }
 
 export function createMcpDebugRoutes(deps: McpDebugRouteDeps): Hono {
   const app = new Hono()
+  const leases = resourceLeases(deps, deps.leases)
 
   app.post(
     '/mcp/debug/sessions',
@@ -87,16 +90,20 @@ export function createMcpDebugRoutes(deps: McpDebugRouteDeps): Hono {
     async (c) => {
       try {
         const body = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, body.repo)
-        const sourceServer =
-          body.source === 'saved'
-            ? await readSavedServer(deps, repoPath, body.serverId)
-            : body.draft
-        const server = await resolveMcpServerForDebug(
-          deps,
-          repoPath,
-          sourceServer,
-          body.previewAgent,
+        const canonicalHome = await canonicalRepositoryHome(deps)
+        const scopedDeps = { ...deps, home: canonicalHome, leases }
+        const server = await withRepositoryLease(
+          scopedDeps,
+          body.repo as string,
+          'read',
+          (repoPath) => [repoPath, canonicalHome],
+          async (repoPath) => {
+            const sourceServer =
+              body.source === 'saved'
+                ? await readSavedServer(scopedDeps, repoPath, body.serverId)
+                : body.draft
+            return resolveMcpServerForDebug(scopedDeps, repoPath, sourceServer, body.previewAgent)
+          },
         )
         const session = await deps.mcpDebug.createSession({
           source: body.source,
@@ -156,28 +163,27 @@ export function createDefaultMcpDebugManager(): McpDebugSessionManager {
   })
 }
 
-async function resolveRequestRepo(deps: RouteDeps, repo: unknown): Promise<string> {
-  try {
-    return await resolveRepoPath(deps.fs, repo as string, deps.home)
-  } catch (cause) {
-    throw new McpDebugRouteError('invalid_repo', String((cause as Error).message), 400)
-  }
-}
-
 async function readSavedServer(
   deps: RouteDeps,
   repoPath: string,
   serverId: string,
 ): Promise<McpServer> {
-  const parsed = (await readYaml(deps.fs, join(repoPath, 'mcp.yaml'))) ?? []
-  if (!Array.isArray(parsed))
-    throw new McpDebugRouteError('invalid_mcp_yaml', 'mcp.yaml 格式无效', 200)
+  let parsed: McpServer[]
+  try {
+    parsed = await readMcpManifest(deps.fs, repoPath)
+  } catch (error) {
+    if (error instanceof RepoConfigError)
+      throw new McpDebugRouteError('invalid_mcp_yaml', 'mcp.yaml 格式无效', 422, undefined, {
+        cause: error,
+      })
+    throw error
+  }
   const candidate = parsed.find(
     (item) => item && typeof item === 'object' && (item as { id?: unknown }).id === serverId,
   )
   const result = McpServerSchema.safeParse(candidate)
   if (!result.success) {
-    throw new McpDebugRouteError('not_found', `MCP server ${serverId} not found`, 200)
+    throw new McpDebugRouteError('not_found', `MCP server ${serverId} not found`, 404)
   }
   return result.data
 }
@@ -227,19 +233,18 @@ async function resolveMcpServerForDebug(
             headers: renderRecord(server.headers),
           }
     if (diagnostics.some((item) => item.severity === 'error')) {
-      throw new McpDebugRouteError('resolution_failed', '变量解析失败', 200, diagnostics)
+      throw new McpDebugRouteError('resolution_failed', '变量解析失败', 422, diagnostics)
     }
     return resolved
   } catch (err) {
     if (err instanceof McpDebugRouteError) throw err
     if (err instanceof VarsApplicationError)
-      throw new McpDebugRouteError(err.code, err.message, err.status, err.diagnostics)
-    mcpDebugLogger.error('MCP debug variable resolution failed', {
-      err,
-      serverId: server.id,
-      previewAgent,
+      throw new McpDebugRouteError(err.code, err.message, err.status, err.diagnostics, {
+        cause: err,
+      })
+    throw new McpDebugRouteError('resolution_failed', '变量解析失败', 500, undefined, {
+      cause: err,
     })
-    throw new McpDebugRouteError('resolution_failed', normalizeErrorMessage(err, '变量解析失败'))
   }
 }
 
@@ -271,28 +276,29 @@ function serverHasVariables(server: McpServer): boolean {
   ].some((value) => typeof value === 'string' && /(^|[^\\])\$\{[^}]+\}/.test(value))
 }
 
-function mcpDebugErrorResponse(
-  c: { json: (body: unknown, status?: number) => Response },
-  err: unknown,
-  logMessage: string,
-): Response {
+function mcpDebugErrorResponse(c: Context, err: unknown, logMessage: string): Response {
+  const repoFailure = repositoryErrorResponse(c, err, mcpDebugLogger, logMessage)
+  if (repoFailure) return repoFailure
   if (err instanceof McpDebugSessionError) {
+    const mapped = mcpDebugSessionError(err)
+    mcpDebugLogger.error(logMessage, { err })
     return c.json(
       {
         ok: false,
-        error: err.code,
-        message: err.message,
+        error: mapped.code,
+        message: mapped.message,
         ...(err.durationMs === undefined ? {} : { durationMs: err.durationMs }),
       },
-      err.status,
+      mapped.status,
     )
   }
   if (err instanceof McpDebugRouteError) {
+    mcpDebugLogger.error(logMessage, { err })
     return c.json(
       {
         ok: false,
         error: err.code,
-        message: err.message,
+        message: mcpDebugRouteMessage(err),
         ...(err.diagnostics ? { diagnostics: err.diagnostics } : {}),
       },
       err.status,
@@ -303,12 +309,41 @@ function mcpDebugErrorResponse(
     {
       ok: false,
       error: 'debug_failed',
-      message: normalizeErrorMessage(err, 'MCP debug 操作失败'),
+      message: 'MCP debug operation failed',
     },
     500,
   )
 }
 
-function normalizeErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message || fallback : String(error || fallback)
+function mcpDebugSessionError(error: McpDebugSessionError): {
+  status: 404 | 409 | 500
+  code: string
+  message: string
+} {
+  switch (error.code as string) {
+    case 'session_expired':
+      return { status: 404, code: error.code, message: 'MCP debug session not found' }
+    case 'too_many_sessions':
+      return { status: 409, code: error.code, message: 'MCP debug session capacity reached' }
+    case 'connect_failed':
+      return { status: 500, code: error.code, message: 'MCP connection failed' }
+    case 'list_tools_failed':
+      return { status: 500, code: error.code, message: 'Failed to list MCP tools' }
+    case 'tool_call_failed':
+      return { status: 500, code: error.code, message: 'MCP tool call failed' }
+    default:
+      return { status: 500, code: 'debug_failed', message: 'MCP debug operation failed' }
+  }
+}
+
+function mcpDebugRouteMessage(error: McpDebugRouteError): string {
+  if (error.code === 'not_found') return 'MCP server not found'
+  if (error.code === 'invalid_mcp_yaml') return 'MCP configuration is invalid'
+  if (error.code === 'resolution_failed' && error.status === 422)
+    return 'MCP variables could not be resolved'
+  if (error.status === 400) return 'Invalid MCP debug request'
+  if (error.status === 404) return 'MCP debug dependency not found'
+  if (error.status === 409) return 'MCP debug state conflict'
+  if (error.status === 422) return 'MCP debug configuration is invalid'
+  return 'MCP debug operation failed'
 }

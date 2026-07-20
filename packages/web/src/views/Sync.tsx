@@ -9,7 +9,7 @@ import {
   ShieldAlert,
   Upload,
 } from 'lucide-react'
-import { api, type GitConflictFile, type SyncPullResponse } from '@/lib/api'
+import { api, type GitConflictFile, type SyncPullResponse, type SyncPushResponse } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import Modal from '@/components/Modal'
 import { useToast } from '@/hooks/useToast'
@@ -27,13 +27,6 @@ interface FeedbackState {
   status: FeedbackStatus
   message: string
   detail: string
-}
-
-type SyncPushResponse = {
-  ok?: boolean
-  nonFastForward?: boolean
-  error?: string
-  message?: string
 }
 
 const feedbackCopy = {
@@ -91,7 +84,9 @@ function stoppedFeedback(action: FeedbackAction): FeedbackState {
   }
 }
 
-function pushFailureFeedback(result: SyncPushResponse): Pick<FeedbackState, 'message' | 'detail'> {
+function pushFailureFeedback(
+  result: Extract<SyncPushResponse, { ok: false }>,
+): Pick<FeedbackState, 'message' | 'detail'> {
   if (result.nonFastForward) {
     return {
       message: '远端有本地没有的更新，上传被 Git 拒绝。',
@@ -118,6 +113,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
   const [confirming, setConfirming] = useState<'force-pull' | 'force-push' | null>(null)
   const [feedback, setFeedback] = useState<FeedbackState | null>(null)
   const activeRequestRef = useRef<AbortController | null>(null)
+  const repoGenerationRef = useRef(0)
   const { error, setError } = useViewError({
     title: '同步操作失败',
     message: '请检查 remote 和网络状态后重试',
@@ -128,11 +124,30 @@ export default function Sync({ repoPath }: { repoPath: string }) {
     conflicts.length && totalConflictCount
       ? Math.max(1, totalConflictCount - conflicts.length + 1)
       : 0
-  const hasActiveSyncSession = conflicts.length > 0 || Boolean(pull?.sessionId)
+  const hasActiveSyncSession = conflicts.length > 0 || pull?.clean === false
 
   useEffect(() => {
+    const generation = ++repoGenerationRef.current
+    const isCurrent = () => repoGenerationRef.current === generation
+    activeRequestRef.current?.abort()
+    activeRequestRef.current = null
+    setRemote('')
+    setRemoteInput('')
+    setRemoteDraft('')
+    setRemoteFieldError(null)
+    setEditingRemote(false)
+    setLoaded(false)
+    setBusy(null)
+    setPull(null)
+    setConflicts([])
+    setPushResult(null)
+    setConfirming(null)
+    setFeedback(null)
+    setError(null)
+
     api.getSyncRemote(repoPath).then(
       (result) => {
+        if (!isCurrent()) return
         const value = result.remoteUrl ?? ''
         setRemote(value)
         setRemoteInput(value)
@@ -141,34 +156,39 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         setLoaded(true)
       },
       (err) => {
+        if (!isCurrent()) return
         console.error({ err }, 'Sync remote load failed')
         setError(err)
         setLoaded(true)
       },
     )
-  }, [repoPath, setError])
-
-  useEffect(() => {
-    let cancelled = false
     api.getSyncSession(repoPath).then(
       (result) => {
-        if (cancelled || !result.active) return
-        setPull(result)
-        setConflicts(result.conflicts ?? [])
+        if (!isCurrent()) return
+        if (result.active) {
+          setPull(result)
+          setConflicts(result.conflicts)
+        } else {
+          setPull(null)
+          setConflicts([])
+        }
       },
       (err) => {
-        if (!cancelled) {
-          console.error({ err }, 'Sync session load failed')
-          setError(err)
-        }
+        if (!isCurrent()) return
+        console.error({ err }, 'Sync session load failed')
+        setError(err)
       },
     )
     return () => {
-      cancelled = true
+      if (isCurrent()) repoGenerationRef.current += 1
+      activeRequestRef.current?.abort()
+      activeRequestRef.current = null
     }
   }, [repoPath, setError])
 
   const pullRemote = async () => {
+    const generation = repoGenerationRef.current
+    const isCurrent = () => repoGenerationRef.current === generation
     const controller = new AbortController()
     activeRequestRef.current = controller
     setFeedback(runningFeedback('pull'))
@@ -176,9 +196,9 @@ export default function Sync({ repoPath }: { repoPath: string }) {
     setError(null)
     try {
       const result = await api.syncPull(repoPath, { signal: controller.signal })
-      if (!result.ok) throw new Error(result.message ?? result.error ?? '拉取失败')
+      if (!isCurrent()) return
       setPull(result)
-      setConflicts(result.conflicts ?? [])
+      setConflicts(result.conflicts)
       if (result.clean) {
         setFeedback({
           action: 'pull',
@@ -186,7 +206,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
           message: 'Git 合并完成，无冲突',
           detail: '本地配置已按远端变更更新，可以继续上传或处理其他工作区内容。',
         })
-      } else if (result.conflicts?.length) {
+      } else if (result.conflicts.length) {
         setFeedback(null)
       } else {
         setFeedback({
@@ -197,6 +217,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         })
       }
     } catch (err) {
+      if (!isCurrent()) return
       if (isAbortError(err)) {
         setError(null)
         setFeedback(stoppedFeedback('pull'))
@@ -213,57 +234,68 @@ export default function Sync({ repoPath }: { repoPath: string }) {
       })
     } finally {
       if (activeRequestRef.current === controller) activeRequestRef.current = null
-      setBusy(null)
+      if (isCurrent()) setBusy(null)
     }
   }
 
   const saveConflict = async (path: string, result: string) => {
+    const generation = repoGenerationRef.current
+    const isCurrent = () => repoGenerationRef.current === generation
     setBusy('save')
     setError(null)
     try {
-      if (!pull?.sessionId) throw new Error('同步会话已失效，请重新拉取')
+      if (!pull || pull.clean) throw new Error('同步会话已失效，请重新拉取')
       const saved = await api.saveSyncConflict({ sessionId: pull.sessionId, path, result })
-      if (!saved.ok) throw new Error(saved.message ?? saved.error ?? '保存失败')
+      if (!isCurrent()) return
       setConflicts(saved.remaining)
       if (saved.clean) {
         setPull({ ok: true, clean: true, conflicts: [] })
         showToast('冲突已解决，Git 合并完成')
       }
     } catch (err) {
+      if (!isCurrent()) return
       console.error({ err }, 'Sync conflict save failed')
       setError(messageOf(err))
     } finally {
-      setBusy(null)
+      if (isCurrent()) setBusy(null)
     }
   }
 
   const abortMerge = async () => {
+    const generation = repoGenerationRef.current
+    const isCurrent = () => repoGenerationRef.current === generation
     setBusy('abort')
     setError(null)
     try {
-      if (!pull?.sessionId) throw new Error('同步会话已失效')
-      await api.abortSyncMerge(pull.sessionId)
+      if (!pull || pull.clean) throw new Error('同步会话已失效')
+      const aborted = await api.abortSyncMerge(pull.sessionId)
+      if (!isCurrent()) return
+      if (!aborted.ok) throw new Error(aborted.message ?? aborted.error ?? '放弃合并失败')
       setPull(null)
       setConflicts([])
       showToast('已放弃本次合并')
     } catch (err) {
+      if (!isCurrent()) return
       console.error({ err }, 'Sync merge abort failed')
       setError(messageOf(err))
     } finally {
-      setBusy(null)
+      if (isCurrent()) setBusy(null)
     }
   }
 
   const pushRemote = async () => {
+    const generation = repoGenerationRef.current
+    const isCurrent = () => repoGenerationRef.current === generation
     const controller = new AbortController()
     activeRequestRef.current = controller
     setFeedback(runningFeedback('push'))
     setBusy('push')
     setError(null)
     try {
-      const result = (await api.syncPush(repoPath, {
+      const result = await api.syncPush(repoPath, {
         signal: controller.signal,
-      })) as SyncPushResponse
+      })
+      if (!isCurrent()) return
       setPushResult(result)
       if (!result.ok) {
         const failure = pushFailureFeedback(result)
@@ -283,6 +315,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         detail: 'remote 已接收本地配置。其他设备拉取后会看到这次更新。',
       })
     } catch (err) {
+      if (!isCurrent()) return
       if (isAbortError(err)) {
         setError(null)
         setFeedback(stoppedFeedback('push'))
@@ -299,18 +332,20 @@ export default function Sync({ repoPath }: { repoPath: string }) {
       })
     } finally {
       if (activeRequestRef.current === controller) activeRequestRef.current = null
-      setBusy(null)
+      if (isCurrent()) setBusy(null)
     }
   }
 
   const forcePullRemote = async () => {
+    const generation = repoGenerationRef.current
+    const isCurrent = () => repoGenerationRef.current === generation
     setConfirming(null)
     setFeedback(runningFeedback('force-pull'))
     setBusy('force-pull')
     setError(null)
     try {
       const result = await api.syncForcePull(repoPath)
-      if (!result.ok) throw new Error(result.message ?? result.error ?? '强制拉取失败')
+      if (!isCurrent()) return
       setPull(result)
       setConflicts([])
       setPushResult(null)
@@ -321,6 +356,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         detail: '本地内容已对齐 remote。被覆盖或删除的本地内容无法由 Loom 自动恢复。',
       })
     } catch (err) {
+      if (!isCurrent()) return
       console.error({ err }, 'Sync force pull failed')
       const message = messageOf(err)
       setError(message)
@@ -331,21 +367,20 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         detail: message,
       })
     } finally {
-      setBusy(null)
+      if (isCurrent()) setBusy(null)
     }
   }
 
   const forcePushRemote = async () => {
+    const generation = repoGenerationRef.current
+    const isCurrent = () => repoGenerationRef.current === generation
     setConfirming(null)
     setFeedback(runningFeedback('force-push'))
     setBusy('force-push')
     setError(null)
     try {
-      const result = (await api.syncForcePush(repoPath)) as {
-        ok?: boolean
-        error?: string
-        message?: string
-      }
+      const result = await api.syncForcePush(repoPath)
+      if (!isCurrent()) return
       if (!result.ok) throw new Error(result.message ?? result.error ?? '强制推送失败')
       setPushResult(null)
       setFeedback({
@@ -355,6 +390,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         detail: 'remote 已被本地配置覆盖。其他设备需要拉取后才能获得当前状态。',
       })
     } catch (err) {
+      if (!isCurrent()) return
       console.error({ err }, 'Sync force push failed')
       const message = messageOf(err)
       setError(message)
@@ -365,11 +401,13 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         detail: message,
       })
     } finally {
-      setBusy(null)
+      if (isCurrent()) setBusy(null)
     }
   }
 
   const saveRemote = async (value: string) => {
+    const generation = repoGenerationRef.current
+    const isCurrent = () => repoGenerationRef.current === generation
     const nextRemote = value.trim()
     if (!nextRemote) {
       setRemoteFieldError('remote URL 不能为空')
@@ -386,6 +424,7 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         error?: string
         message?: string
       }
+      if (!isCurrent()) return
       if (result.ok === false) throw new Error(result.message ?? result.error ?? 'remote 保存失败')
       setRemote(nextRemote)
       setRemoteInput(nextRemote)
@@ -401,10 +440,11 @@ export default function Sync({ repoPath }: { repoPath: string }) {
         detail: `remote 已切换到 ${nextRemote}，不会自动拉取，也不会自动上传。需要同步时请手动点击拉取或上传。`,
       })
     } catch (err) {
+      if (!isCurrent()) return
       console.error({ err }, 'Sync remote save failed')
       setError(messageOf(err))
     } finally {
-      setBusy(null)
+      if (isCurrent()) setBusy(null)
     }
   }
 

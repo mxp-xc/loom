@@ -5,8 +5,23 @@ interface Position {
   column: number
 }
 
+interface Range {
+  startLineNumber: number
+  startColumn: number
+  endLineNumber: number
+  endColumn: number
+}
+
 interface Model {
-  getValueInRange: (range: unknown) => string
+  getValueInRange: (range: Range) => string
+}
+
+interface CompletionItem {
+  label: string
+  kind: unknown
+  filterText: string
+  insertText: string
+  range: Range
 }
 
 interface MonacoLike {
@@ -18,7 +33,10 @@ interface MonacoLike {
       language: string,
       provider: {
         triggerCharacters: string[]
-        provideCompletionItems: (model: Model, position: Position) => { suggestions: unknown[] }
+        provideCompletionItems: (
+          model: Model,
+          position: Position,
+        ) => { suggestions: CompletionItem[] }
       },
     ) => { dispose: () => void }
   }
@@ -27,7 +45,7 @@ interface MonacoLike {
     startColumn: number,
     endLineNumber: number,
     endColumn: number,
-  ) => unknown
+  ) => Range
 }
 
 export function varsCompletionSuggestions(
@@ -35,7 +53,7 @@ export function varsCompletionSuggestions(
   model: Model,
   position: Position,
   keys: string[],
-): { suggestions: unknown[] } {
+): { suggestions: CompletionItem[] } {
   const linePrefix = model.getValueInRange(
     new monaco.Range(position.lineNumber, 1, position.lineNumber, position.column),
   )

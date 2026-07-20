@@ -88,6 +88,7 @@
   visibility: visible;
 }
 .sdot2 {
+  padding: 0;
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -166,6 +167,9 @@
   padding: 2px;
 }
 .cfg-seg-opt {
+  border: 0;
+  background: transparent;
+  letter-spacing: 0;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   padding: 5px 14px;
@@ -183,6 +187,8 @@
   font-weight: 600;
 }
 .cfg-toggle {
+  border: 0;
+  padding: 0;
   width: 38px;
   height: 22px;
   border-radius: 11px;
@@ -223,6 +229,13 @@
   max-width: 420px;
   outline: none;
   transition: border-color var(--dur) var(--ease);
+  letter-spacing: 0;
+  text-align: left;
+}
+.cfg-field-error {
+  margin-left: 156px;
+  color: var(--error);
+  font-size: 11px;
 }
 .cfg-input:focus {
   border-color: var(--primary);

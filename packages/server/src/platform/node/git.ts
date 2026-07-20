@@ -1,5 +1,10 @@
 import { simpleGit, type SimpleGit } from 'simple-git'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import type { GitPushResult, GitTreeEntry, IGit } from '../../ports/git.js'
+import { GitUnbornHeadError, readGitHead } from './git-head.js'
+
+const execFileAsync = promisify(execFile)
 
 export class NodeGit implements IGit {
   private git(path?: string): SimpleGit {
@@ -16,33 +21,6 @@ export class NodeGit implements IGit {
     // Don't hardcode 'origin' — fetch without naming a remote uses the
     // configured default remote and still sets FETCH_HEAD.
     await this.git(repoPath).raw(['fetch', 'origin', '--tags'])
-  }
-
-  async merge(repoPath: string, ref: string): Promise<{ clean: boolean }> {
-    try {
-      await this.git(repoPath).merge([ref, '--no-edit'])
-      return { clean: true }
-    } catch (err) {
-      if ((await this.unmergedPaths(repoPath)).length > 0) return { clean: false }
-      throw err
-    }
-  }
-
-  async unmergedPaths(repoPath: string): Promise<string[]> {
-    const out = await this.git(repoPath).raw(['diff', '--name-only', '--diff-filter=U', '-z'])
-    return out.split('\0').filter(Boolean)
-  }
-
-  async showIndexStage(repoPath: string, stage: 1 | 2 | 3, path: string): Promise<string | null> {
-    try {
-      return (await this.git(repoPath).raw(['show', `:${stage}:${path}`])).replace(/\n$/, '')
-    } catch {
-      return null
-    }
-  }
-
-  async abortMerge(repoPath: string): Promise<void> {
-    await this.git(repoPath).raw(['merge', '--abort'])
   }
 
   async mergeBase(repoPath: string, a: string, b: string): Promise<string> {
@@ -113,11 +91,23 @@ export class NodeGit implements IGit {
   }
 
   async show(repoPath: string, ref: string, path: string): Promise<string> {
-    return (await this.git(repoPath).raw(['show', `${ref}:${path}`])).trimEnd()
+    return this.git(repoPath).raw(['show', `${ref}:${path}`])
+  }
+
+  async showBytes(repoPath: string, ref: string, path: string): Promise<Uint8Array> {
+    const { stdout } = await execFileAsync('git', ['-C', repoPath, 'show', `${ref}:${path}`], {
+      encoding: 'buffer',
+      maxBuffer: 16 * 1024 * 1024,
+    })
+    return stdout
   }
 
   async revParseHead(repoPath: string): Promise<string> {
-    return (await this.git(repoPath).raw(['rev-parse', 'HEAD'])).trim()
+    const head = await readGitHead(this.git(repoPath))
+    if (head.kind === 'unborn') {
+      throw new GitUnbornHeadError(head.ref, { cause: head.error })
+    }
+    return head.oid
   }
 
   async revParse(repoPath: string, ref: string): Promise<string> {
@@ -156,32 +146,6 @@ export class NodeGit implements IGit {
         }
       })
       .sort((a, b) => a.path.localeCompare(b.path, 'en'))
-  }
-
-  async commitTree(
-    repoPath: string,
-    tree: string,
-    parents: string[],
-    message: string,
-  ): Promise<string> {
-    const args = ['commit-tree', tree, '-m', message]
-    for (const p of parents) {
-      args.push('-p', p)
-    }
-    return (await this.git(repoPath).raw(args)).trim()
-  }
-
-  async updateRef(repoPath: string, ref: string, commit: string): Promise<void> {
-    await this.git(repoPath).raw(['update-ref', ref, commit])
-  }
-
-  async resetHard(repoPath: string, ref: string): Promise<void> {
-    await this.git(repoPath).raw(['reset', '--hard', ref])
-  }
-
-  async writeTree(repoPath: string): Promise<string> {
-    // write-tree reflects the staged index. syncPull stages merged files via add() first.
-    return (await this.git(repoPath).raw(['write-tree'])).trim()
   }
 
   async addOrUpdateRemote(repoPath: string, remoteUrl: string): Promise<void> {

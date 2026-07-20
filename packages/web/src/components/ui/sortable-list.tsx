@@ -100,6 +100,8 @@ export function SortableList<T extends { id: string }>({
     setSaving(true)
     try {
       await onReorder(arrayMove(items, from, to))
+    } catch (err) {
+      console.error({ err }, 'Failed to reorder sortable list')
     } finally {
       setSaving(false)
     }

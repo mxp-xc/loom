@@ -131,6 +131,7 @@ describe('VarsApplication', () => {
       [
         'API_KEY:',
         '  type: secret',
+        '  format: markdown',
         '  value: top-secret',
         'AUTH_HEADER:',
         '  type: string',
@@ -148,6 +149,7 @@ describe('VarsApplication', () => {
 
     expect(result.snapshot.base.API_KEY).toEqual({
       type: 'secret',
+      format: 'markdown',
       value: '••••••••',
       masked: true,
     })
@@ -181,7 +183,7 @@ describe('VarsApplication', () => {
     await app.setVariable(repoPath, {
       environment: 'dev',
       key: 'API_KEY',
-      entry: { type: 'secret', value: 'top-secret' },
+      entry: { type: 'secret', format: 'markdown', value: 'top-secret' },
     })
 
     await expect(app.listEnvironments(repoPath)).resolves.toEqual({
@@ -192,7 +194,12 @@ describe('VarsApplication', () => {
       name: 'dev',
       environment: {
         entries: {
-          API_KEY: { type: 'secret', value: '••••••••', masked: true },
+          API_KEY: {
+            type: 'secret',
+            format: 'markdown',
+            value: '••••••••',
+            masked: true,
+          },
         },
       },
     })

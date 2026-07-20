@@ -134,6 +134,8 @@ export default function Vars({ repoPath }: { repoPath: string }) {
                 key={agent}
                 agent={agent}
                 state={vars.viewScope === agent ? 'on' : 'off'}
+                disabled={Boolean(vars.matrixErrorsByAgent[agent])}
+                tooltip={vars.matrixErrorsByAgent[agent]}
                 onClick={() => {
                   vars.setActiveAgent(agent)
                   vars.setViewScope(agent)
@@ -212,8 +214,7 @@ export default function Vars({ repoPath }: { repoPath: string }) {
           viewScope={vars.viewScope}
           definitionMatrix={state.definitionMatrix}
           matricesByAgent={vars.matricesByAgent}
-          agents={vars.configuredAgents}
-          setPending={vars.setPending}
+          agents={vars.configuredAgents.filter((agent) => !vars.matrixErrorsByAgent[agent])}
           onClose={() => setModal(null)}
           onSaved={vars.reload}
           onError={(message) =>

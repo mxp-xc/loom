@@ -2,13 +2,14 @@ import { basename, join } from 'node:path'
 import {
   AgentIdSchema,
   createBuiltinVars,
+  extractVariableReferences,
   parseVarsBaseDefinitions,
   parseVarsOverrides,
   renderTextWithResolvedVars,
   resolveLayeredVars,
+  rewriteVariableKey,
   serializeVarsBaseDefinitions,
   serializeVarsOverrides,
-  supportsAgentCapability,
   VarsCodecError,
   type AgentId,
   type LayeredVarsResolution,
@@ -19,6 +20,7 @@ import {
 import type { IFileSystem } from '../ports/fs.js'
 import {
   agentConfigDir,
+  contextSupportsAgentCapability,
   agentMemoryFile,
   agentSkillsDir,
   runtimeAgentPathContext,
@@ -252,8 +254,10 @@ export function builtinForAgent(
   return createBuiltinVars({
     agent,
     configDir: agentConfigDir(agent, context),
-    skillsDir: supportsAgentCapability(agent, 'skills') ? agentSkillsDir(agent, context) : '',
-    agentFile: supportsAgentCapability(agent, 'memory')
+    skillsDir: contextSupportsAgentCapability(agent, 'skills', context)
+      ? agentSkillsDir(agent, context)
+      : '',
+    agentFile: contextSupportsAgentCapability(agent, 'memory', context)
       ? basename(agentMemoryFile(agent, context))
       : '',
   })
@@ -579,20 +583,12 @@ async function rewriteOverrideDocuments(
   }
 }
 
-function placeholderPattern(key: string): RegExp {
-  const escaped = key.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&')
-  return new RegExp('(^|[^\\\\])\\$\\{' + escaped + '\\}', 'g')
-}
-
 function referencesKey(value: string, key: string): boolean {
-  return placeholderPattern(key).test(value)
+  return extractVariableReferences(value).includes(key)
 }
 
 function rewriteRefs(value: string, oldKey: string, newKey: string): string {
-  return value.replace(
-    placeholderPattern(oldKey),
-    (_, prefix: string) => prefix + '\${' + newKey + '}',
-  )
+  return rewriteVariableKey(value, oldKey, newKey)
 }
 
 function rewriteDefinitionReferences(

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { appendFile, cp, mkdtemp, rm } from 'node:fs/promises'
+import { appendFile, cp, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { simpleGit, type SimpleGit } from 'simple-git'
@@ -22,9 +22,13 @@ export interface GitFixtureCommit {
 
 export async function createBareRepo(commits: GitFixtureCommit[]): Promise<string> {
   const bare = await mkdtemp(join(tmpdir(), 'loom-git-bare-'))
-  await testGit().raw(['init', '--bare', '-b', 'main', bare])
-  await gitFastImport(bare, buildLinearImport(commits))
-  return bare
+  try {
+    await testGit().raw(['init', '--bare', '-b', 'main', bare])
+    await gitFastImport(bare, buildLinearImport(commits))
+    return bare
+  } catch (err) {
+    return cleanupFailedFixture(bare, err)
+  }
 }
 
 export interface DivergedFile {
@@ -32,13 +36,15 @@ export interface DivergedFile {
   base?: string
   ours?: string
   theirs?: string
+  baseMode?: '100644' | '100755' | '120000'
+  oursMode?: '100644' | '100755' | '120000'
+  theirsMode?: '100644' | '100755' | '120000'
 }
 
 export interface DivergedRepo {
   root: string
   home: string
   repo: string
-  bare: string
 }
 
 interface DivergedTemplate {
@@ -51,16 +57,16 @@ const templates = new Map<string, Promise<DivergedTemplate>>()
 
 export async function createDivergedRepo(files: DivergedFile[]): Promise<DivergedRepo> {
   const template = await getDivergedTemplate(files)
-  const root = await mkdtemp(join(tmpdir(), 'loom-git-test-'))
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'loom-git-test-')))
   const home = join(root, 'home')
   const repo = join(root, 'repo')
-  const bare = join(root, 'remote.git')
 
-  await cp(template.repo, repo, { recursive: true })
-  await cp(template.bare, bare, { recursive: true })
-  await testGit(repo).raw(['remote', 'set-url', 'origin', bare])
-
-  return { root, home, repo, bare }
+  try {
+    await cp(template.repo, repo, { recursive: true })
+    return { root, home, repo }
+  } catch (err) {
+    return cleanupFailedFixture(root, err)
+  }
 }
 
 export async function cleanupGitTestTemplates(): Promise<void> {
@@ -81,6 +87,9 @@ function getDivergedTemplate(files: DivergedFile[]): Promise<DivergedTemplate> {
   if (!template) {
     template = buildDivergedTemplate(files)
     templates.set(key, template)
+    void template.catch(() => {
+      if (templates.get(key) === template) templates.delete(key)
+    })
   }
   return template
 }
@@ -89,18 +98,33 @@ async function buildDivergedTemplate(files: DivergedFile[]): Promise<DivergedTem
   const root = await mkdtemp(join(tmpdir(), 'loom-git-template-'))
   const repo = join(root, 'repo')
   const bare = join(root, 'remote.git')
-  await writeDivergedHistory(bare, files)
-  await testGit().clone(bare, repo)
+  try {
+    await writeDivergedHistory(bare, files)
+    await testGit().clone(bare, repo, [
+      '--config',
+      'remote.origin.pushurl=' + join(root, 'read-only-remote.git'),
+    ])
 
-  const git = testGit(repo)
-  await git.raw(['checkout', '-B', 'main', 'origin/local'])
-  await git.raw(['branch', '--set-upstream-to', 'origin/main', 'main'])
-  await appendFile(
-    join(repo, '.git', 'config'),
-    '\n[user]\n\tname = ' + TEST_GIT_NAME + '\n\temail = ' + TEST_GIT_EMAIL + '\n',
-  )
+    const git = testGit(repo)
+    await git.raw(['reset', '--hard', 'origin/local'])
+    await appendFile(
+      join(repo, '.git', 'config'),
+      '\n[user]\n\tname = ' + TEST_GIT_NAME + '\n\temail = ' + TEST_GIT_EMAIL + '\n',
+    )
 
-  return { root, repo, bare }
+    return { root, repo, bare }
+  } catch (err) {
+    return cleanupFailedFixture(root, err)
+  }
+}
+
+async function cleanupFailedFixture(root: string, error: unknown): Promise<never> {
+  try {
+    await rm(root, { recursive: true, force: true })
+  } catch (cleanupError) {
+    throw new AggregateError([error, cleanupError], 'Git fixture creation and cleanup failed')
+  }
+  throw error
 }
 
 // Build the three-commit test topology in one Git process:
@@ -122,17 +146,17 @@ function buildDivergedImport(files: DivergedFile[]): string {
   for (const file of files) {
     if (file.base !== undefined) {
       chunks.push(fastImportBlob(nextMark, file.base))
-      baseOps.push(fastImportModify(nextMark, file.path))
+      baseOps.push(fastImportModify(nextMark, file.path, file.baseMode))
       nextMark++
     }
     if (file.ours !== undefined) {
       chunks.push(fastImportBlob(nextMark, file.ours))
-      oursOps.push(fastImportModify(nextMark, file.path))
+      oursOps.push(fastImportModify(nextMark, file.path, file.oursMode))
       nextMark++
     }
     if (file.theirs !== undefined) {
       chunks.push(fastImportBlob(nextMark, file.theirs))
-      theirsOps.push(fastImportModify(nextMark, file.path))
+      theirsOps.push(fastImportModify(nextMark, file.path, file.theirsMode))
       nextMark++
     }
   }
@@ -195,8 +219,12 @@ function fastImportBlob(mark: number, content: string): string {
   )
 }
 
-function fastImportModify(mark: number, path: string): string {
-  return 'M 100644 :' + mark + ' ' + fastImportPath(path) + '\n'
+function fastImportModify(
+  mark: number,
+  path: string,
+  mode: '100644' | '100755' | '120000' = '100644',
+): string {
+  return 'M ' + mode + ' :' + mark + ' ' + fastImportPath(path) + '\n'
 }
 
 function fastImportCommit(
@@ -229,29 +257,42 @@ function fastImportCommit(
   )
 }
 
-function fastImportPath(path: string): string {
-  if (!/^[A-Za-z0-9._/-]+$/.test(path) || path.startsWith('/') || path.includes('..')) {
+export function fastImportPath(path: string): string {
+  const segments = path.split('/')
+  if (
+    !/^[A-Za-z0-9._/-]+$/.test(path) ||
+    path.startsWith('/') ||
+    segments.some((segment) => !segment || segment === '.' || segment === '..')
+  ) {
     throw new Error('Unsupported test fixture path for git fast-import: ' + path)
   }
   return path
 }
 
-function gitFastImport(repo: string, script: string): Promise<void> {
+export function gitFastImport(repo: string, script: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', ['--git-dir', repo, 'fast-import', '--quiet'], {
       stdio: ['pipe', 'ignore', 'pipe'],
     })
     let stderr = ''
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      if (error) reject(error)
+      else resolve()
+    }
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk) => {
       stderr += chunk
     })
-    child.on('error', reject)
+    child.on('error', (err) => finish(err))
+    child.stdin.on('error', (err) => finish(err))
     child.on('close', (code) => {
       if (code === 0) {
-        resolve()
+        finish()
       } else {
-        reject(new Error(stderr || 'git fast-import failed with exit code ' + code))
+        finish(new Error(stderr || 'git fast-import failed with exit code ' + code))
       }
     })
     child.stdin.end(script)

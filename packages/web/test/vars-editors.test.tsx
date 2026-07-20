@@ -6,7 +6,7 @@ import JsonValueEditor from '../src/views/vars/JsonValueEditor'
 import VarsMonacoValueEditor, {
   keysFromVarsResolution,
 } from '../src/views/vars/VarsMonacoValueEditor'
-import type { VarEntryInput, VarsResolution } from '../src/lib/vars'
+import type { VarEntry, VarEntryInput, VarsResolution } from '../src/lib/vars'
 import { ApiError } from '../src/lib/api'
 import { StrictMode } from 'react'
 import { createMonacoEditorMock } from './monaco-test-utils'
@@ -32,7 +32,7 @@ const resolution: VarsResolution = {
 }
 
 function editor(
-  entry: VarEntryInput = { type: 'string', value: '' },
+  entry: VarEntry = { type: 'string', value: '' },
   onSave = vi.fn<(...args: [string, VarEntryInput]) => Promise<void>>().mockResolvedValue(),
   validateDraft = vi.fn().mockResolvedValue({ ok: true, resolution }),
 ) {
@@ -88,6 +88,7 @@ describe('variable editors', () => {
       order.push(`save:${entry.type}`)
     })
     editor({ type: 'json', value: { enabled: true } }, onSave, validateDraft)
+    await screen.findByRole('textbox', { name: 'JSON 值' })
     fireEvent.click(screen.getByRole('button', { name: '保存变量' }))
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith('DEMO', { type: 'json', value: { enabled: true } }),
@@ -200,7 +201,9 @@ describe('variable editors', () => {
   })
 
   it('keeps secret values on password input without rendering Monaco', () => {
-    editor({ type: 'secret', value: 'top-secret' })
+    editor()
+    fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'secret' } })
+    fireEvent.change(screen.getByLabelText('值'), { target: { value: 'top-secret' } })
     const input = screen.getByLabelText('值') as HTMLInputElement
     expect(input.type).toBe('password')
     expect(screen.queryByRole('textbox', { name: '值' })).toBeNull()
@@ -432,7 +435,7 @@ describe('variable editors', () => {
     const onSave = vi.fn()
     editor({ type: 'string', value: '' }, onSave, validateDraft)
     fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'json' } })
-    const jsonInput = screen.getByRole('textbox', { name: 'JSON 值' })
+    const jsonInput = await screen.findByRole('textbox', { name: 'JSON 值' })
     fireEvent.change(jsonInput, { target: { value: '{broken' } })
     await waitFor(() => expect((jsonInput as HTMLTextAreaElement).value).toContain('{broken'))
     fireEvent.click(screen.getByRole('button', { name: '保存变量' }))

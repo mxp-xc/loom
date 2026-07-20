@@ -1,11 +1,19 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { getAgent, type AgentId, type AgentPathSpec } from '@loom/core'
+import {
+  getAgent,
+  supportsAgentCapability,
+  type AgentCapability,
+  type AgentDefinition,
+  type AgentId,
+  type AgentPathSpec,
+} from '@loom/core'
 
 export interface AgentPathContext {
   home: string
   env: Readonly<Record<string, string | undefined>>
   platform: NodeJS.Platform
+  resolveAgent?: (agent: AgentId) => AgentDefinition
 }
 
 export function runtimeAgentPathContext(home = homedir()): AgentPathContext {
@@ -13,7 +21,7 @@ export function runtimeAgentPathContext(home = homedir()): AgentPathContext {
 }
 
 export function resolveAgentConfigDir(agent: AgentId, context: AgentPathContext): string {
-  const definition = getAgent(agent)
+  const definition = resolveAgentDefinition(agent, context)
   const override = definition.configDir.overrideEnv
     ? context.env[definition.configDir.overrideEnv]
     : undefined
@@ -26,10 +34,22 @@ export function resolveAgentPath(
   capability: 'skills' | 'mcp' | 'memory',
   context: AgentPathContext,
 ): string {
-  const definition = getAgent(agent)
+  const definition = resolveAgentDefinition(agent, context)
   const agentCapability = definition[capability]
   if (!agentCapability) throw new Error(`Agent ${agent} does not support ${capability}`)
   return resolvePathSpec(agentCapability.path, context, resolveAgentConfigDir(agent, context))
+}
+
+export function resolveAgentDefinition(agent: AgentId, context: AgentPathContext): AgentDefinition {
+  return context.resolveAgent?.(agent) ?? getAgent(agent)
+}
+
+export function contextSupportsAgentCapability(
+  agent: AgentId,
+  capability: AgentCapability,
+  context: AgentPathContext,
+): boolean {
+  return supportsAgentCapability(resolveAgentDefinition(agent, context), capability)
 }
 
 function resolvePathSpec(

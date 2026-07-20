@@ -1,53 +1,56 @@
-import { Hono } from 'hono'
-import { AgentIdSchema } from '@loom/core'
+import { Hono, type Context } from 'hono'
+import { AgentIdSchema, LocalSkillIdSchema, LocalSkillSchema } from '@loom/core'
 import { z } from 'zod'
 import { SkillsApplication, SkillsApplicationError } from '../../skills/application.js'
 import { logger } from '../../lib/logger.js'
-import { resolveRepoPath } from '../repo.js'
 import { jsonValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
 import { projectRepository } from '../../projection/workflow.js'
+import { LocalSkillBoundaryError } from '../../skills/local-paths.js'
+import { repositoryErrorResponse } from '../repository-route-error.js'
+import { RepoConfigError } from '../repo-config.js'
+import { homeResourceKey, projectionResourceKeys } from '../../concurrency/resource-keys.js'
+import { withRepositoryLease } from '../repository-lease.js'
+import { resourceLeases } from '../../concurrency/resource-lease-coordinator.js'
 
 const skillsRouteLogger = logger.child('skills-route')
 const RepoField = z.unknown().optional()
 const NonEmptyString = z.string().min(1)
 
-const LocalSkillBody = z.object({
-  id: NonEmptyString,
-  path: z.string().optional(),
-  agents: z.array(AgentIdSchema).optional(),
-})
+const LocalSkillBody = LocalSkillSchema
 
-const LocalSkillImportItem = z.object({
-  name: NonEmptyString,
-  path: NonEmptyString,
-})
+const LocalSkillImportItem = z
+  .object({
+    name: LocalSkillIdSchema,
+    path: NonEmptyString,
+  })
+  .strict()
 
-const LocalSkillWriteItem = z.object({
-  name: NonEmptyString,
-  files: z.array(z.object({ path: z.string(), content: z.string() })).default([]),
-})
+const LocalSkillWriteItem = z
+  .object({
+    name: LocalSkillIdSchema,
+    files: z.array(z.object({ path: z.string(), content: z.string() }).strict()).default([]),
+  })
+  .strict()
 
 const ScanLocalSkillsBody = z.object({
   repo: RepoField,
   dir: NonEmptyString,
 })
 
-const AddLocalSkillBody = z.object({
-  repo: RepoField,
-  skill: LocalSkillBody,
-})
+const AddLocalSkillBody = z.object({ repo: RepoField, skill: LocalSkillBody }).strict()
 
-const ImportLocalSkillsBody = z.object({
-  repo: RepoField,
-  skills: z.array(LocalSkillImportItem),
-  mode: z.enum(['move', 'ref']).default('ref'),
-})
+const ImportLocalSkillsBody = z
+  .object({
+    repo: RepoField,
+    skills: z.array(LocalSkillImportItem),
+    mode: z.enum(['move', 'ref']).default('ref'),
+  })
+  .strict()
 
-const WriteLocalSkillsBody = z.object({
-  repo: RepoField,
-  skills: z.array(LocalSkillWriteItem),
-})
+const WriteLocalSkillsBody = z
+  .object({ repo: RepoField, skills: z.array(LocalSkillWriteItem) })
+  .strict()
 
 const SourceMemberBody = z.object({
   name: NonEmptyString,
@@ -93,10 +96,7 @@ const ReconcileSourceBody = UpdateSourceBody.extend({
   preserve: z.array(NonEmptyString).optional(),
 })
 
-const DeleteLocalSkillBody = z.object({
-  repo: RepoField,
-  id: NonEmptyString,
-})
+const DeleteLocalSkillBody = z.object({ repo: RepoField, id: LocalSkillIdSchema }).strict()
 
 const SetSkillAgentsBody = z.object({
   repo: RepoField,
@@ -127,16 +127,14 @@ const ReorderSkillGroupsBody = z.object({
 
 export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   const app = new Hono()
-  const skills = new SkillsApplication(
-    deps.fs,
-    deps.git,
-    deps.home,
-    undefined,
-    async (repoPath) => {
-      const projected = await projectRepository(deps, repoPath, { scope: 'skills' })
-      if (!projected.ok) throw projected.failure.originalError
-    },
-  )
+  const leases = resourceLeases(deps, deps.leases)
+  const leaseDeps = { ...deps, leases }
+  const skills = createSkillsApplication(deps)
+  const runRepo = <T>(
+    repo: unknown,
+    mode: 'read' | 'mutation',
+    operation: (repoPath: string) => Promise<T>,
+  ) => withRepositoryLease(leaseDeps, repo as string, mode, (repoPath) => [repoPath], operation)
 
   app.post(
     '/skills/local',
@@ -144,12 +142,14 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, skill } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.addLocalSkill(repoPath, skill)
+        await runRepo(repo, 'mutation', (repoPath) => skills.addLocalSkill(repoPath, skill))
         return c.json({ ok: true, skill })
       } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'write_failed', 'failed to add local skill'))
+        return skillsErrorResponse(c, e, {
+          code: 'write_failed',
+          message: 'Failed to add local skill',
+          logMessage: 'local skill add failed',
+        })
       }
     },
   )
@@ -160,11 +160,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { dir, repo } = c.req.valid('json')
-        const repoPath = repo ? await resolveRequestRepo(deps, repo) : undefined
-        return c.json({ ok: true, skills: await skills.scanLocalSkills({ dir, repoPath }) })
+        const scanned = repo
+          ? await runRepo(repo, 'read', (repoPath) => skills.scanLocalSkills({ dir, repoPath }))
+          : await skills.scanLocalSkills({ dir })
+        return c.json({ ok: true, skills: scanned })
       } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'scan_failed', 'failed to scan local skills'))
+        return skillsErrorResponse(c, e, {
+          code: 'scan_failed',
+          message: 'Failed to scan local skills',
+          logMessage: 'local skill scan failed',
+        })
       }
     },
   )
@@ -175,12 +180,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, skills: localSkills, mode } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        const result = await skills.importLocalSkills(repoPath, { skills: localSkills, mode })
+        const result = await runRepo(repo, 'mutation', (repoPath) =>
+          skills.importLocalSkills(repoPath, { skills: localSkills, mode }),
+        )
         return c.json({ ok: true, count: result.count })
       } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'import_failed', 'failed to import local skills'))
+        return skillsErrorResponse(c, e, {
+          code: 'import_failed',
+          message: 'Failed to import local skills',
+          logMessage: 'local skill import failed',
+        })
       }
     },
   )
@@ -191,12 +200,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, skills: localSkills } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        const result = await skills.writeLocalSkills(repoPath, { skills: localSkills })
+        const result = await runRepo(repo, 'mutation', (repoPath) =>
+          skills.writeLocalSkills(repoPath, { skills: localSkills }),
+        )
         return c.json({ ok: true, count: result.count })
       } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'import_failed', 'failed to write local skills'))
+        return skillsErrorResponse(c, e, {
+          code: 'write_failed',
+          message: 'Failed to write local skills',
+          logMessage: 'local skill write failed',
+        })
       }
     },
   )
@@ -204,33 +217,30 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   app.post('/sources', jsonValidator(AddSourceBody, { error: sourceError }), async (c) => {
     try {
       const { repo, name, url, ref, type, members, resources } = c.req.valid('json')
-      const repoPath = await resolveRequestRepo(deps, repo)
-      const result = await skills.addSource(repoPath, {
-        name,
-        url,
-        ref,
-        type,
-        members,
-        resources,
-      })
+      const result = await runRepo(repo, 'mutation', (repoPath) =>
+        skills.addSource(repoPath, { name, url, ref, type, members, resources }),
+      )
       return c.json({ ok: true, source: result.source })
     } catch (e) {
-      if (isInvalidRepo(e)) return invalidRepo(c, e)
-      if (e instanceof SkillsApplicationError)
-        return c.json(errorBody(e, 'write_failed', 'failed to add source'), e.status)
-      return c.json(errorBody(e, 'write_failed', 'failed to add source'))
+      return skillsErrorResponse(c, e, {
+        code: 'write_failed',
+        message: 'Failed to add source',
+        logMessage: 'source add failed',
+      })
     }
   })
 
   app.delete('/sources', jsonValidator(SourceUrlBody, { error: 'invalid_url' }), async (c) => {
     try {
       const { repo, url } = c.req.valid('json')
-      const repoPath = await resolveRequestRepo(deps, repo)
-      await skills.removeSource(repoPath, url)
+      await runRepo(repo, 'mutation', (repoPath) => skills.removeSource(repoPath, url))
       return c.json({ ok: true })
     } catch (e) {
-      if (isInvalidRepo(e)) return invalidRepo(c, e)
-      return c.json(errorBody(e, 'delete_failed', 'failed to remove source'))
+      return skillsErrorResponse(c, e, {
+        code: 'delete_failed',
+        message: 'Failed to remove source',
+        logMessage: 'source removal failed',
+      })
     }
   })
 
@@ -240,15 +250,23 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       const body = c.req.valid('json')
       try {
-        const repoPath = await resolveRequestRepo(deps, body.repo)
-        const result = await skills.reconcileSource(repoPath, body)
+        const home = await homeResourceKey(deps.fs, deps.home)
+        const scopedDeps = { ...deps, home, leases }
+        const result = await withRepositoryLease(
+          scopedDeps,
+          body.repo as string,
+          'mutation',
+          (repoPath) => projectionResourceKeys(home, repoPath, home, 'skills'),
+          (repoPath) => createSkillsApplication(scopedDeps).reconcileSource(repoPath, body),
+        )
         return c.json({ ok: true, ...result })
       } catch (e) {
-        skillsRouteLogger.error('source reconciliation failed', { err: e, url: body.url })
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        if (e instanceof SkillsApplicationError)
-          return c.json(errorBody(e, 'reconcile_failed', 'failed to reconcile source'), e.status)
-        return c.json(errorBody(e, 'reconcile_failed', 'failed to reconcile source'))
+        return skillsErrorResponse(c, e, {
+          code: 'reconcile_failed',
+          message: 'Failed to reconcile source',
+          logMessage: 'source reconciliation failed',
+          context: { url: body.url },
+        })
       }
     },
   )
@@ -259,12 +277,14 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, id } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.removeLocalSkill(repoPath, id)
+        await runRepo(repo, 'mutation', (repoPath) => skills.removeLocalSkill(repoPath, id))
         return c.json({ ok: true })
       } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'delete_failed', 'failed to remove local skill'))
+        return skillsErrorResponse(c, e, {
+          code: 'delete_failed',
+          message: 'Failed to remove local skill',
+          logMessage: 'local skill removal failed',
+        })
       }
     },
   )
@@ -275,12 +295,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, sourceUrl, memberEntry, agents } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.setSkillAgents(repoPath, { sourceUrl, memberEntry, agents })
+        await runRepo(repo, 'mutation', (repoPath) =>
+          skills.setSkillAgents(repoPath, { sourceUrl, memberEntry, agents }),
+        )
         return c.json({ ok: true })
       } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'update_failed', 'failed to update skill agents'))
+        return skillsErrorResponse(c, e, {
+          code: 'update_failed',
+          message: 'Failed to update skill agents',
+          logMessage: 'skill agent update failed',
+        })
       }
     },
   )
@@ -294,12 +318,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, sourceUrl, updates } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.setSourceMemberAgents(repoPath, sourceUrl, updates)
+        await runRepo(repo, 'mutation', (repoPath) =>
+          skills.setSourceMemberAgents(repoPath, sourceUrl, updates),
+        )
         return c.json({ ok: true })
       } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'update_failed', 'failed to update source member agents'))
+        return skillsErrorResponse(c, e, {
+          code: 'update_failed',
+          message: 'Failed to update source member agents',
+          logMessage: 'source member agent update failed',
+        })
       }
     },
   )
@@ -310,12 +338,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, id, agents } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        await skills.setLocalSkillAgents(repoPath, id, agents)
+        await runRepo(repo, 'mutation', (repoPath) =>
+          skills.setLocalSkillAgents(repoPath, id, agents),
+        )
         return c.json({ ok: true })
       } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        return c.json(errorBody(e, 'update_failed', 'failed to update local skill agents'))
+        return skillsErrorResponse(c, e, {
+          code: 'update_failed',
+          message: 'Failed to update local skill agents',
+          logMessage: 'local skill agent update failed',
+        })
       }
     },
   )
@@ -326,13 +358,16 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, ids } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        return c.json({ ok: true, ...(await skills.reorderGroups(repoPath, ids)) })
+        const result = await runRepo(repo, 'mutation', (repoPath) =>
+          skills.reorderGroups(repoPath, ids),
+        )
+        return c.json({ ok: true, ...result })
       } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        if (e instanceof SkillsApplicationError)
-          return c.json(errorBody(e, 'reorder_failed', 'failed to reorder skill groups'), e.status)
-        return c.json(errorBody(e, 'reorder_failed', 'failed to reorder skill groups'), 500)
+        return skillsErrorResponse(c, e, {
+          code: 'reorder_failed',
+          message: 'Failed to reorder skill groups',
+          logMessage: 'skill group reorder failed',
+        })
       }
     },
   )
@@ -340,30 +375,20 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   return app
 }
 
-async function resolveRequestRepo(deps: RouteDeps, repo: unknown): Promise<string> {
-  try {
-    return await resolveRepoPath(deps.fs, repo as string, deps.home)
-  } catch (cause) {
-    throw Object.assign(new Error(String((cause as Error).message), { cause }), {
-      code: 'invalid_repo',
-    })
-  }
+function createSkillsApplication(deps: RouteDeps): SkillsApplication {
+  return new SkillsApplication(deps.fs, deps.git, deps.home, undefined, async (repoPath) => {
+    const projected = await projectRepository(deps, repoPath, { scope: 'skills' })
+    if (!projected.ok) throw projected.failure.originalError
+  })
 }
 
-function isInvalidRepo(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && 'code' in error && error.code === 'invalid_repo'
-  )
-}
-
-function invalidRepo(
-  c: { json: (body: unknown, status?: 400) => Response },
+function skillsRepositoryFailure(
+  c: Context,
   error: unknown,
-): Response {
-  return c.json(
-    { ok: false, error: 'invalid_repo', message: String((error as Error).message) },
-    400,
-  )
+  logMessage: string,
+  context: Record<string, unknown>,
+): Response | null {
+  return repositoryErrorResponse(c, error, skillsRouteLogger, logMessage, context)
 }
 
 function sourceError(issues: z.ZodIssue[]): string {
@@ -391,18 +416,46 @@ function localSkillAgentsError(issues: z.ZodIssue[]): string {
   return issues[0]?.path[0] === 'id' ? 'invalid_id' : 'invalid_agents'
 }
 
-function errorBody(
+type SkillsErrorStatus = 400 | 404 | 409 | 422 | 500
+
+const SKILLS_ERROR_MESSAGES: Record<SkillsErrorStatus, string> = {
+  400: 'Invalid skills request',
+  404: 'Skill or source not found',
+  409: 'Skills state conflict',
+  422: 'Skills configuration is invalid',
+  500: 'Skills operation failed',
+}
+
+function skillsErrorResponse(
+  c: Context,
   error: unknown,
-  fallbackCode: string,
-  logMessage: string,
-): { ok: false; error: string; message: string } {
-  if (error instanceof SkillsApplicationError) {
-    return { ok: false, error: error.code, message: error.message }
+  options: {
+    code: string
+    message: string
+    logMessage: string
+    context?: Record<string, unknown>
+  },
+): Response {
+  const context = options.context ?? {}
+  const repoFailure = skillsRepositoryFailure(c, error, options.logMessage, context)
+  if (repoFailure) return repoFailure
+
+  skillsRouteLogger.error(options.logMessage, { err: error, ...context })
+  if (error instanceof SkillsApplicationError || error instanceof LocalSkillBoundaryError) {
+    return c.json(
+      { ok: false, error: error.code, message: SKILLS_ERROR_MESSAGES[error.status] },
+      error.status,
+    )
   }
-  skillsRouteLogger.error(logMessage, { err: error })
-  return {
-    ok: false,
-    error: fallbackCode,
-    message: String((error as Error)?.message ?? error),
+  if (error instanceof RepoConfigError) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_skills_manifest',
+        message: SKILLS_ERROR_MESSAGES[422],
+      },
+      422,
+    )
   }
+  return c.json({ ok: false, error: options.code, message: options.message }, 500)
 }

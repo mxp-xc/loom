@@ -8,17 +8,25 @@ Status: active
 Applies to: local skills
 
 Rule:
-assets/skills/<id> 是 local skills 的内置仓库扫描路径。从这里发现的 skill 应保存为 pathless local skill id，除非用户明确引用其他路径。
+`assets/skills/<id>` 是 local skills 的内置仓库扫描路径。Local skill id 是 lowercase alphanumeric words 以单个 hyphen 连接的 safe segment。从这里发现的真实 direct-child skill directory保存为 pathless local skill id；其他路径只能作为 manifest 明确登记的 external ref。
 
 Implications:
 
 - Built-in local skills 不应仅因为位于 assets/skills 下就显示为 external ref。
 - 当 manifest 中确实配置了 ref path 时，UI 仍可展示可用性和路径诊断。
+- Pathless identity、explicit external identity和 discovery 使用同一套 ID 与 duplicate policy。
+- External unregister只移除 manifest登记，不要求 external content 当前可访问，也不删除 external path。
+- Built-in root缺失时只可在canonical repository下逐级创建真实目录，并为root、staging、candidate和destination携带稳定filesystem identity。
 
 Safety:
 
 - 不把内置仓库 skills 转成不必要的 path refs。
 - 用户明确配置的 path refs 需要保留。
+- `assets`、`assets/skills`、built-in child 和 `SKILL.md` 必须是 identity稳定的真实 entry；root/child link、junction、special entry或 canonical escape fail closed。
+- External ref 只能解析 manifest 中精确登记的 raw path identity；不能因 ref missing而 fallback到同名 built-in。
+- Local directory mutation先完成整批ID、destination、normalized archive duplicate、file/ancestor与case collision preflight，随后只在built-in root同filesystem的owned staging中构造候选。
+- Live directory snapshot不跟随link/junction，只接受单link regular file和真实目录；destination通过no-replace promotion安装，`SKILL.md`最后写入staging。
+- Rollback只移动identity仍匹配的owned artifact；primary与rollback同时失败时必须保留两者并留下可诊断的recovery artifact。
 
 Examples:
 
@@ -28,7 +36,10 @@ Examples:
 Tests:
 
 - packages/server/test/api/routes-fixes.test.ts
-- packages/web/test/views.test.tsx
+- packages/server/test/skills/local-paths.test.ts
+- packages/server/test/skills/local-directory-transaction.test.ts
+- packages/server/test/skills/application.test.ts
+- packages/web/test/skills-view.test.tsx
 
 ## R-SKILLS-002 Source member 顺序与 SourceTree 保持一致且稳定
 
@@ -54,7 +65,7 @@ Examples:
 Tests:
 
 - packages/web/test/skill-member-order.test.ts
-- packages/web/test/views.test.tsx
+- packages/web/test/skills-view.test.tsx
 
 ## R-SKILLS-003 Source-level agent controls 只作用于 selected members
 
@@ -84,7 +95,7 @@ Examples:
 Tests:
 
 - packages/web/test/manifest-operations.test.tsx
-- packages/web/test/views.test.tsx
+- packages/web/test/skills-view.test.tsx
 
 ## R-SKILLS-004 Bulk scope 的 agent chip 是三态
 
@@ -111,7 +122,8 @@ Examples:
 
 Tests:
 
-- packages/web/test/views.test.tsx
+- packages/web/test/skills-view.test.tsx
+- packages/web/test/mcp-view.test.tsx
 
 ## R-SKILLS-005 Remote source scan 生成完整 SourceTree
 
@@ -149,7 +161,7 @@ Tests:
 - packages/server/test/remote/discover.test.ts
 - packages/server/test/api/routes-fixes.test.ts
 - packages/web/test/manifest-operations.test.tsx
-- packages/web/test/views.test.tsx
+- packages/web/test/skills-view.test.tsx
 
 ## R-SKILLS-006 Source name 是 projection namespace
 
@@ -185,7 +197,7 @@ Tests:
 - packages/server/test/skills/application.test.ts
 - packages/server/test/projection/executor.test.ts
 - packages/web/test/manifest-operations.test.tsx
-- packages/web/test/views.test.tsx
+- packages/web/test/skills-view.test.tsx
 
 ## R-SKILLS-007 Source member 缺失必须确认 reconcile
 
@@ -203,18 +215,23 @@ Implications:
 - 打开 Skills 页面和编辑现有 source 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。
 - Source cache 是否可用是当前机器的运行时状态，不是 manifest 配置有效性；单个 source 不可用时，其他 source、local skills 和非 Skills 功能保持可用。
 - Remote refs 只在用户首次打开 ref 选择或切换 branch/tag 时按需读取；同一编辑会话内复用结果。
+- 显式 branch 通过 remote HEAD 判断更新，即使存在同名 tag；合法 SemVer tag 只和其他合法 SemVer tag 比较 precedence；非 SemVer tag 只检查同名 tag 是否移动，不回退到 branch HEAD。
 - 远端 SourceTree 只在用户选择其他 ref 或主动刷新时读取。
 - 初始编辑和未主动扫描的同 ref/type 保存必须基于当前 pinned commit，不得隐式拉取远端或替换 live cache。
 - 用户主动刷新或选择其他 ref 后，保存必须绑定当前展示的 SourceTree commit；如果该 ref 在扫描后再次移动，保存明确失败并要求刷新，不能静默写入其他 commit。
 - 远端更新先在隔离 candidate 中扫描和生成 preview；用户确认 finalize 前不能改变 live cache。
 - Finalize 同时更新 cache、最新 commit、selection 和 projection；任一步失败必须恢复更新前状态。
 - 更新前 cache 缺失或损坏时，recovery 不得依赖该 cache 重新生成旧 projection，也不能因此阻塞重试。
+- Finalize journal记录candidate与existing cache的directory identity；cache切换使用同filesystem原子rename。`EXDEV`、destination collision或identity drift必须在移动对应source前失败。
+- 任何existing physical cache，包括损坏cache，都必须先进入durable journal与identity-bound backup；不能在journal前删除。
 - 最终选择保存后自动 reconcile skills projection。
 
 Safety:
 
 - 现有 local skill 目录或 manifest entry 不得被覆盖。
 - 用户确认前不得丢弃需要保留的旧 member 内容。
+- Preserve只从旧 `pinned_commit` 的 regular Git blobs构造，不读取 live checkout、untracked content或 link target。
+- Preserve先完成整批ID、duplicate和destination preflight，再通过owned staging/no-replace install；recovery只删除能证明属于当前session且identity未漂移的artifact。
 - 用户取消更新时丢弃隔离 candidate 和对应更新会话，不改变 live cache。
 - Manifest 保存和 projection 完成前不能报告整体更新成功。
 
@@ -228,9 +245,6 @@ Tests:
 - packages/server/test/remote/update.test.ts
 - packages/server/test/skills/reconciliation.test.ts
 - packages/server/test/skills/application.test.ts
-- packages/web/test/skill-reconciliation-dialog.test.tsx
-- packages/web/test/manifest-operations.test.tsx
-- packages/web/test/views.test.tsx
 
 ## R-SKILLS-008 顶层 group 顺序是仓库共享展示状态
 
@@ -259,7 +273,7 @@ Tests:
 
 - packages/core/test/order.test.ts
 - packages/server/test/skills/application.test.ts
-- packages/web/test/views.test.tsx
+- packages/web/test/skills-view.test.tsx
 
 ## R-SKILLS-009 Source URL 使用标准 Git remote URL
 
@@ -356,4 +370,40 @@ Examples:
 Tests:
 
 - packages/web/test/repository-links.test.ts
-- packages/web/test/views.test.tsx
+- packages/web/test/skills-view.test.tsx
+
+## R-SKILLS-012 Source update session 绑定当前 source 与 owned artifacts
+
+Status: active
+Applies to: remote source update, preserve, cancel, recovery
+
+Rule:
+Source update prepare从当前manifest中的唯一source identity建立versioned session，并记录可重验的source baseline。Finalize、cancel和recovery只操作由canonical repository、session id与source identity重新派生且ownership匹配的artifacts。
+
+Implications:
+
+- Caller不能用同一URL配合伪造members改变removed/preserved集合。
+- Finalize在mutation前重读session与当前source baseline；stale session返回可判别冲突。
+- Session state持久化成功后才替换内存状态。
+- 新session持久化machine ISO `createdAt`/`updatedAt`；transition只在durable replace成功后推进`updatedAt`。
+- Prepare在repo mutation lease内执行prune。Completed session优先重试cleanup；prepared session超过24小时或每repo容量8个时按持久化时间淘汰；finalize journal与无时间的legacy session不自动删除。
+
+Safety:
+
+- Persisted arbitrary path不能授权删除、移动或覆盖。
+- Malformed、unreadable或identity drift的session进入可见recovery failure，不伪装成not found。
+- Recovery遇到user-created replacement时保留内容并报告ownership mismatch。
+- Recovery journal只有在cache、manifest、preserved artifacts及必要projection全部恢复且无rollback failure后才能清除。
+- Primary、rollback与cleanup同时失败时必须通过同一error chain保留，并以完整`{ err }`记录；cleanup不能覆盖primary cause。
+
+Examples:
+
+- 服务重启后，只有marker owner token与journal记录一致且directory identity未漂移的preserved destination才能由rollback删除。
+
+Tests:
+
+- packages/server/test/skills/update-sessions.test.ts
+- packages/server/test/api/source-update-routes.test.ts
+- packages/web/test/skill-reconciliation-dialog.test.tsx
+- packages/web/test/manifest-operations.test.tsx
+- packages/web/test/skills-view.test.tsx

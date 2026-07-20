@@ -128,5 +128,6 @@ describe('McpApplication', () => {
       status: 422,
       code: 'invalid_mcp_manifest',
     })
+    expect(replace).not.toHaveBeenCalled()
   })
 })

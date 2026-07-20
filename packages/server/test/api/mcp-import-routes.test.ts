@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import yaml from 'js-yaml'
-import { registerRoutes } from '../../src/api/router'
+import { createMcpImportRoutes } from '../../src/api/routes/mcp-import.js'
+import type { McpImportScanResult } from '../../src/mcp/importer.js'
+import { responseJson } from '../helpers/http.js'
 
 const logFns = vi.hoisted(() => ({
   error: vi.fn(),
@@ -34,15 +36,25 @@ vi.mock('../../src/lib/logger.js', () => ({
   },
 }))
 
-vi.mock('../../src/api/repo.js', () => ({
-  resolveRepoPath: vi.fn(async (_fs: unknown, repo: string) => repo),
-  listRepos: vi.fn(async () => []),
-}))
+vi.mock('../../src/api/repo.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/api/repo.js')>()
+  return {
+    ...actual,
+    resolveRepoPath: vi.fn(async (_fs: unknown, repo: string) => repo),
+    authorizeRepository: vi.fn(async (_fs: unknown, repo: string) => ({
+      name: repo,
+      path: repo,
+      identity: `repo:${repo}`,
+    })),
+    revalidateRepositoryAuthorization: vi.fn(async () => undefined),
+    listRepos: vi.fn(async () => []),
+  }
+})
 
 function app() {
   return new Hono().route(
     '/api',
-    registerRoutes({
+    createMcpImportRoutes({
       fs: memFs as never,
       git: {} as never,
       proc: {} as never,
@@ -75,7 +87,7 @@ describe('MCP import routes', () => {
     })
 
     expect(res.status).toBe(200)
-    const body = await res.json()
+    const body = await responseJson<McpImportScanResult>(res)
     expect(body.sources.map((source: { agent: string }) => source.agent)).toEqual(['codex'])
     expect(body.items.map((item: { id: string }) => item.id)).toEqual(['browser'])
   })
@@ -105,7 +117,7 @@ describe('MCP import routes', () => {
     })
 
     expect(res.status).toBe(200)
-    const body = await res.json()
+    const body = await responseJson<McpImportScanResult>(res)
     expect(body.items).toHaveLength(1)
     expect(body.items[0]).toMatchObject({
       id: 'browser',
@@ -128,7 +140,7 @@ describe('MCP import routes', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ repo: '/repo', sources: ['claude-code'] }),
     })
-    const scan = await scanRes.json()
+    const scan = await responseJson<McpImportScanResult>(scanRes)
 
     const applyRes = await app().request('/api/mcp/import/apply', {
       method: 'POST',

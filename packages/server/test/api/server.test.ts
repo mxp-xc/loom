@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import { createApp, startApiServer } from '../../src/api/server'
 
+const routeDispose = vi.hoisted(() => vi.fn(async () => undefined))
+
 vi.mock('../../src/lib/logger.js', () => {
   const logger = {
     debug: () => {},
@@ -18,7 +20,13 @@ vi.mock('../../src/lib/logger.js', () => {
 })
 
 vi.mock('../../src/api/router.js', () => ({
-  registerRoutes: () => new Hono().get('/health', (c) => c.json({ ok: true })),
+  registerRoutes: () =>
+    Object.assign(
+      new Hono().get('/health', (c) => c.json({ ok: true })),
+      {
+        dispose: routeDispose,
+      },
+    ),
 }))
 
 let webuiDist: string
@@ -27,21 +35,27 @@ beforeEach(async () => {
   await writeFile(join(webuiDist, 'index.html'), '<html><body>SPA</body></html>')
   await mkdir(join(webuiDist, 'assets'), { recursive: true })
   await writeFile(join(webuiDist, 'assets', 'app.js'), 'console.log(1)')
-  process.env.LOOM_WEB_DIST = webuiDist
+  vi.stubEnv('LOOM_WEB_DIST', webuiDist)
 })
 afterEach(async () => {
-  delete process.env.LOOM_WEB_DIST
   await rm(webuiDist, { recursive: true, force: true }).catch(() => {})
 })
 
 describe('createApp', () => {
   it('binds the API server to loopback explicitly', async () => {
-    const serve = vi.fn(() => ({ close: vi.fn() }))
-    await startApiServer(4321, serve as never)
+    const close = vi.fn((callback: (error?: Error) => void) => callback())
+    const serve = vi.fn(() => ({ close }))
+    const server = await startApiServer(4321, serve as never)
     expect(serve).toHaveBeenCalledWith(
       expect.objectContaining({ port: 4321, hostname: '127.0.0.1' }),
       expect.any(Function),
     )
+    const first = server.dispose()
+    const second = server.dispose()
+    expect(second).toBe(first)
+    await first
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(routeDispose).toHaveBeenCalledTimes(1)
   })
   it('GET /api/health returns ok', async () => {
     const res = await createApp().request('/api/health')

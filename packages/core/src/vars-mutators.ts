@@ -125,15 +125,17 @@ export function setVariable(
     return {
       environments: snapshot(environments),
       changed: [],
-      diagnostics: additions.map(([, { location, referencedKey }]) =>
-        diagnostic(
+      diagnostics: additions.map(([, { location, referencedKey }]) => ({
+        ...diagnostic(
           'missing_reference',
           'error',
           `变量 ${location.key} 引用了不存在的变量 ${referencedKey}`,
           location.environment,
           location.key,
         ),
-      ),
+        referencedKey,
+        path: [location.key, referencedKey],
+      })),
     }
   }
   return { environments: next, changed: [environment], diagnostics: danglingDiagnostics(next) }

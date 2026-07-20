@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { AgentId, McpServer } from '@loom/core'
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 
 export type McpDebugSource = 'saved' | 'draft'
 export type McpDebugPreviewAgent = 'default' | AgentId
@@ -62,6 +63,7 @@ interface McpDebugSession {
   createdAt: number
   lastUsedAt: number
   hardExpiresAt: number
+  activeCalls: number
 }
 
 const DEFAULT_IDLE_MS = 5 * 60 * 1000
@@ -75,9 +77,10 @@ export class McpDebugSessionError extends Error {
       | 'list_tools_failed'
       | 'session_expired'
       | 'tool_call_failed'
-      | 'too_many_sessions',
+      | 'too_many_sessions'
+      | 'manager_disposed'
+      | 'session_id_collision',
     message: string,
-    readonly status = 200,
     readonly durationMs?: number,
   ) {
     super(message)
@@ -94,7 +97,11 @@ export class McpDebugSessionManager {
   private readonly hardMs: number
   private readonly maxSessions: number
   private readonly logger?: McpDebugLogger
+  private readonly pendingCreates = new Set<Promise<McpDebugSessionSnapshot>>()
+  private readonly pendingCleanup = new Set<Promise<void>>()
   private maintenanceTimer: ReturnType<typeof setInterval> | null = null
+  private state: 'running' | 'disposing' | 'disposed' = 'running'
+  private disposePromise: Promise<void> | null = null
 
   constructor(options: McpDebugSessionManagerOptions = {}) {
     this.connect = options.connect ?? connectMcpDebugClient
@@ -106,18 +113,37 @@ export class McpDebugSessionManager {
     this.logger = options.logger
   }
 
-  async createSession(input: {
+  createSession(input: {
     source: McpDebugSource
     server: McpServer
     previewAgent: McpDebugPreviewAgent
   }): Promise<McpDebugSessionSnapshot> {
-    this.sweepExpired()
-    if (this.sessions.size >= this.maxSessions)
-      throw new McpDebugSessionError(
-        'too_many_sessions',
-        'MCP debug session 数量已达上限，请断开已有连接后重试',
+    if (this.state !== 'running') {
+      return Promise.reject(
+        new McpDebugSessionError('manager_disposed', 'MCP debug session manager is disposed'),
       )
+    }
+    this.sweepExpired()
+    if (this.sessions.size + this.pendingCreates.size >= this.maxSessions) {
+      return Promise.reject(
+        new McpDebugSessionError(
+          'too_many_sessions',
+          'MCP debug session 数量已达上限，请断开已有连接后重试',
+        ),
+      )
+    }
 
+    const task = this.createSessionInternal(input)
+    this.pendingCreates.add(task)
+    void task.finally(() => this.pendingCreates.delete(task)).catch(() => undefined)
+    return task
+  }
+
+  private async createSessionInternal(input: {
+    source: McpDebugSource
+    server: McpServer
+    previewAgent: McpDebugPreviewAgent
+  }): Promise<McpDebugSessionSnapshot> {
     let client: McpDebugClient
     try {
       client = await this.connect(input.server)
@@ -146,8 +172,17 @@ export class McpDebugSessionManager {
       )
     }
 
+    if (this.state !== 'running') {
+      await this.closeClient(input.server.id, 'pending', client)
+      throw new McpDebugSessionError('manager_disposed', 'MCP debug session manager is disposed')
+    }
+
     const createdAt = this.now()
     const id = this.createId()
+    if (this.sessions.has(id)) {
+      await this.closeClient(input.server.id, id, client)
+      throw new McpDebugSessionError('session_id_collision', 'MCP debug session id collision')
+    }
     const session: McpDebugSession = {
       id,
       source: input.source,
@@ -159,6 +194,7 @@ export class McpDebugSessionManager {
       createdAt,
       lastUsedAt: createdAt,
       hardExpiresAt: createdAt + this.hardMs,
+      activeCalls: 0,
     }
     this.sessions.set(id, session)
     return this.snapshot(session)
@@ -171,6 +207,7 @@ export class McpDebugSessionManager {
     const session = this.activeSession(sessionId)
     const startedAt = this.now()
     session.lastUsedAt = startedAt
+    session.activeCalls += 1
     try {
       const result = await session.client.callTool({
         name: request.toolName,
@@ -200,9 +237,11 @@ export class McpDebugSessionManager {
       throw new McpDebugSessionError(
         'tool_call_failed',
         normalizeErrorMessage(err, 'MCP tool 调用失败'),
-        200,
         durationMs,
       )
+    } finally {
+      session.activeCalls -= 1
+      this.sweepExpired()
     }
   }
 
@@ -216,11 +255,12 @@ export class McpDebugSessionManager {
   sweepExpired(): void {
     const now = this.now()
     for (const session of [...this.sessions.values()]) {
-      const idleExpired = now - session.lastUsedAt > this.idleMs
-      const hardExpired = now > session.hardExpiresAt
+      if (session.activeCalls > 0) continue
+      const idleExpired = now - session.lastUsedAt >= this.idleMs
+      const hardExpired = now >= session.hardExpiresAt
       if (!idleExpired && !hardExpired) continue
       this.sessions.delete(session.id)
-      void this.closeClient(session.serverId, session.id, session.client)
+      this.trackCleanup(this.closeClient(session.serverId, session.id, session.client))
     }
   }
 
@@ -237,9 +277,18 @@ export class McpDebugSessionManager {
     this.maintenanceTimer = null
   }
 
-  async dispose(): Promise<void> {
+  dispose(): Promise<void> {
+    this.disposePromise ??= this.disposeInternal()
+    return this.disposePromise
+  }
+
+  private async disposeInternal(): Promise<void> {
+    this.state = 'disposing'
     this.stopMaintenance()
+    await Promise.allSettled([...this.pendingCreates])
     await Promise.all([...this.sessions.keys()].map((id) => this.disconnect(id)))
+    await Promise.all([...this.pendingCleanup])
+    this.state = 'disposed'
   }
 
   sessionCountForTest(): number {
@@ -278,13 +327,29 @@ export class McpDebugSessionManager {
       this.logger?.error('MCP debug session cleanup failed', { err, serverId, sessionId })
     }
   }
+
+  private trackCleanup(cleanup: Promise<void>): void {
+    this.pendingCleanup.add(cleanup)
+    void cleanup.finally(() => this.pendingCleanup.delete(cleanup))
+  }
 }
 
 export async function connectMcpDebugClient(server: McpServer): Promise<McpDebugClient> {
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
   const client = new Client({ name: 'loom-mcp-debug', version: '0.1.0' })
   const transport = await createTransport(server)
-  await client.connect(transport)
+  try {
+    await client.connect(transport)
+  } catch (error) {
+    try {
+      await client.close()
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'MCP connect and cleanup failed', {
+        cause: error,
+      })
+    }
+    throw error
+  }
   return {
     listTools: () => client.listTools() as Promise<{ tools: McpDebugTool[] }>,
     callTool: (request) => client.callTool(request),
@@ -292,7 +357,7 @@ export async function connectMcpDebugClient(server: McpServer): Promise<McpDebug
   }
 }
 
-async function createTransport(server: McpServer): Promise<unknown> {
+async function createTransport(server: McpServer): Promise<Transport> {
   if (server.type === 'stdio') {
     const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
     const env = {

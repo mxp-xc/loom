@@ -94,6 +94,21 @@ export function DataTable<TData>({
                   meta && (meta.size !== undefined || columnSizing[meta.id] !== undefined)
                     ? header.getSize()
                     : undefined
+                const minSize = meta?.minSize ?? 72
+                const maxSize = meta?.maxSize ?? Number.MAX_SAFE_INTEGER
+                const resizeWithKeyboard = (event: React.KeyboardEvent<HTMLSpanElement>) => {
+                  let nextSize: number | undefined
+                  if (event.key === 'ArrowLeft') nextSize = header.getSize() - 12
+                  if (event.key === 'ArrowRight') nextSize = header.getSize() + 12
+                  if (event.key === 'Home') nextSize = minSize
+                  if (event.key === 'End' && meta?.maxSize !== undefined) nextSize = maxSize
+                  if (nextSize === undefined) return
+                  event.preventDefault()
+                  setColumnSizing((current) => ({
+                    ...current,
+                    [header.column.id]: Math.min(maxSize, Math.max(minSize, nextSize)),
+                  }))
+                }
                 return (
                   <TableHead
                     key={header.id}
@@ -111,6 +126,9 @@ export function DataTable<TData>({
                         role="separator"
                         aria-label={'调整 ' + headerLabel + ' 列宽'}
                         aria-orientation="vertical"
+                        aria-valuemin={minSize}
+                        aria-valuemax={meta?.maxSize}
+                        aria-valuenow={header.getSize()}
                         tabIndex={0}
                         className={cn(
                           'data-table-resizer',
@@ -119,6 +137,7 @@ export function DataTable<TData>({
                         onMouseDown={header.getResizeHandler()}
                         onTouchStart={header.getResizeHandler()}
                         onDoubleClick={() => header.column.resetSize()}
+                        onKeyDown={resizeWithKeyboard}
                       />
                     )}
                   </TableHead>

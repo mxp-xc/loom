@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { forwardRef, useImperativeHandle } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import MemoryEditor from '../src/components/MemoryEditor'
 import { ApiError, api } from '../src/lib/api'
@@ -9,7 +8,6 @@ import { createMonacoEditorMock } from './monaco-test-utils'
 const monacoEditorMock = createMonacoEditorMock()
 
 const editorMocks = vi.hoisted(() => ({
-  richProps: [] as any[],
   monacoProviderDispose: vi.fn(),
 }))
 
@@ -24,62 +22,6 @@ function monacoLineModel(line: string) {
       line.slice(startColumn - 1, endColumn - 1),
   }
 }
-
-function renderedMarkdown(markdown: string) {
-  const heading = markdown.match(/^#\s+(.+)$/m)
-  const hasTable = /^\|.+\|\n\|[-:\s|]+\|/m.test(markdown)
-  return (
-    <>
-      {heading && <h1>{heading[1]}</h1>}
-      {hasTable && (
-        <table>
-          <tbody>
-            <tr>
-              <td>场景</td>
-              <td>规则</td>
-            </tr>
-          </tbody>
-        </table>
-      )}
-      {!heading && !hasTable && <p>{markdown}</p>}
-    </>
-  )
-}
-
-vi.mock('@mdxeditor/editor', () => {
-  const plugin = () => ({})
-  return {
-    MDXEditor: forwardRef((props: any, ref) => {
-      useImperativeHandle(ref, () => ({
-        focus: vi.fn(),
-        getMarkdown: () => props.markdown,
-        insertMarkdown: vi.fn(),
-        setMarkdown: vi.fn(),
-      }))
-      editorMocks.richProps.push(props)
-      return (
-        <section
-          data-testid="memory-rich-mdx-editor"
-          className={props.contentEditableClassName}
-          aria-label="Memory 内容"
-        >
-          {renderedMarkdown(props.markdown)}
-          <button type="button" onClick={() => props.onChange('# Edited directly\n\nBody copy')}>
-            mock rich change
-          </button>
-        </section>
-      )
-    }),
-    headingsPlugin: plugin,
-    listsPlugin: plugin,
-    quotePlugin: plugin,
-    thematicBreakPlugin: plugin,
-    tablePlugin: plugin,
-    markdownShortcutPlugin: plugin,
-    codeBlockPlugin: plugin,
-    codeMirrorPlugin: plugin,
-  }
-})
 
 vi.mock('@monaco-editor/react', async () => {
   const { createMonacoEditorMock } = await import('./monaco-test-utils')
@@ -140,7 +82,6 @@ vi.mock('../src/hooks/useToast', () => ({
 
 describe('MemoryEditor', () => {
   beforeEach(() => {
-    editorMocks.richProps = []
     monacoEditorMock.reset()
     document.documentElement.setAttribute('data-theme', 'light')
     vi.clearAllMocks()
@@ -184,7 +125,6 @@ describe('MemoryEditor', () => {
       '解析',
     ])
     expect(screen.getByRole('tab', { name: '所见' }).getAttribute('aria-selected')).toBe('true')
-    expect(screen.queryByTestId('memory-rich-mdx-editor')).toBeNull()
     expect(screen.getByRole('table')).toBeTruthy()
     expect(screen.queryByRole('listbox', { name: '变量引用建议' })).toBeNull()
     expect(screen.queryByRole('button', { name: '保存' })).toBeNull()
@@ -359,7 +299,6 @@ describe('MemoryEditor', () => {
       />,
     )
 
-    expect(screen.queryByTestId('memory-rich-mdx-editor')).toBeNull()
     expect(screen.getByRole('heading', { name: 'Preview first' })).toBeTruthy()
     expect(screen.queryByRole('listbox', { name: '变量引用建议' })).toBeNull()
     await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledWith('/repo', 'codex'))

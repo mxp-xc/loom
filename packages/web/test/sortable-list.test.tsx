@@ -90,7 +90,7 @@ describe('SortableList', () => {
     )
   })
 
-  it('starts mouse dragging from a native child button', async () => {
+  it('reorders with the mouse from a native child button', async () => {
     vi.stubGlobal(
       'matchMedia',
       vi.fn().mockReturnValue({
@@ -99,12 +99,13 @@ describe('SortableList', () => {
         removeEventListener: vi.fn(),
       }),
     )
+    const onReorder = vi.fn()
     render(
       <SortableList
         items={items}
         activator="child"
         label={(item) => item.label}
-        onReorder={vi.fn()}
+        onReorder={onReorder}
       >
         {(item, { activatorProps }) => (
           <button type="button" {...activatorProps}>
@@ -114,14 +115,61 @@ describe('SortableList', () => {
       </SortableList>,
     )
 
-    const handle = screen.getByRole('button', { name: '调整 Alpha 顺序' })
+    const handles = ['Alpha', 'Beta', 'Gamma'].map((label, index) => {
+      const handle = screen.getByRole('button', { name: `调整 ${label} 顺序` })
+      handle.getBoundingClientRect = () =>
+        DOMRect.fromRect({ x: 0, y: index * 40, width: 200, height: 32 })
+      handle.parentElement!.getBoundingClientRect = handle.getBoundingClientRect
+      return handle
+    })
+    const handle = handles[0]
     fireEvent.mouseDown(handle, { button: 0, clientX: 10, clientY: 10 })
     fireEvent.mouseMove(document, { buttons: 1, clientX: 10, clientY: 20 })
-
     await waitFor(() => expect(handle.getAttribute('aria-pressed')).toBe('true'))
-    fireEvent.mouseUp(document)
-    await waitFor(() => expect(handle.getAttribute('aria-pressed')).not.toBe('true'))
+    fireEvent.mouseMove(document, { buttons: 1, clientX: 10, clientY: 95 })
+    fireEvent.mouseUp(document, { clientX: 10, clientY: 95 })
+    await waitFor(() =>
+      expect(onReorder).toHaveBeenCalledWith([
+        { id: 'b', label: 'Beta' },
+        { id: 'c', label: 'Gamma' },
+        { id: 'a', label: 'Alpha' },
+      ]),
+    )
     vi.unstubAllGlobals()
+  })
+
+  it('logs reorder rejection and re-enables sorting', async () => {
+    const err = new Error('save failed')
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    render(
+      <SortableList
+        items={items}
+        label={(item) => item.label}
+        onReorder={() => Promise.reject(err)}
+      >
+        {(item) => <div>{item.label}</div>}
+      </SortableList>,
+    )
+
+    const sortableItems = ['Alpha', 'Beta', 'Gamma'].map((label, index) => {
+      const element = screen.getByLabelText(`调整 ${label} 顺序`)
+      element.getBoundingClientRect = () =>
+        DOMRect.fromRect({ x: 0, y: index * 40, width: 200, height: 32 })
+      return element
+    })
+    const first = sortableItems[0]
+    first.focus()
+    fireEvent.keyDown(first, { key: ' ', code: 'Space' })
+    await waitFor(() => expect(first.getAttribute('aria-pressed')).toBe('true'))
+    fireEvent.keyDown(document, { key: 'ArrowDown', code: 'ArrowDown' })
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('b'))
+    fireEvent.keyDown(document, { key: ' ', code: 'Space' })
+
+    await waitFor(() =>
+      expect(consoleError).toHaveBeenCalledWith({ err }, 'Failed to reorder sortable list'),
+    )
+    await waitFor(() => expect(first.getAttribute('aria-disabled')).not.toBe('true'))
+    consoleError.mockRestore()
   })
 
   it('does not start item dragging from an interactive descendant', () => {

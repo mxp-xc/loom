@@ -16,15 +16,28 @@ describe('applyUndo restoreMemory', () => {
 
   it('restoreMemory with backup writes backup back', async () => {
     const f = join(dir, 'CLAUDE.md')
-    await fs.writeFile(f, 'original')
-    await applyUndo({ kind: 'restoreMemory', path: f, backup: 'original' }, fs)
+    await fs.writeFile(f, 'projected')
+    const installed = await fs.inspectEntry(f)
+    await applyUndo(
+      {
+        kind: 'restoreMemory',
+        path: f,
+        backup: 'original',
+        installedIdentity: installed!.identity,
+      },
+      fs,
+    )
     expect(readFileSync(f, 'utf8')).toBe('original')
   })
 
   it('restoreMemory with null backup deletes newly created file', async () => {
     const f = join(dir, 'AGENTS.md')
     await fs.writeFile(f, 'projected')
-    await applyUndo({ kind: 'restoreMemory', path: f, backup: null }, fs)
+    const installed = await fs.inspectEntry(f)
+    await applyUndo(
+      { kind: 'restoreMemory', path: f, backup: null, installedIdentity: installed!.identity },
+      fs,
+    )
     expect(existsSync(f)).toBe(false)
   })
 })

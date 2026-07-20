@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createLogger, cleanupOldLogs } from '../../src/lib/logger.js'
+import { parseVarsEnvironment, VarsCodecError } from '@loom/core'
 import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -73,7 +74,34 @@ describe('logger', () => {
       const file = files.find((f) => f.endsWith('.log'))!
       const content = await readFile(join(dir, file), 'utf8')
       expect(content).toContain('tags=[1,2,3]')
-      expect(content).toContain('tags=[1,2,3]')
+    })
+
+    it('logs a malformed vars error without exposing its YAML payload', async () => {
+      const secret = 'top-secret-yaml-log-payload'
+      let error: unknown
+      try {
+        parseVarsEnvironment(`API_KEY: [${secret}`)
+      } catch (caught) {
+        error = caught
+      }
+      expect(error).toBeInstanceOf(VarsCodecError)
+      expect((error as VarsCodecError).cause).toBeInstanceOf(Error)
+
+      const log = createLogger({ logDir: dir, level: 'ERROR', console: false })
+      log.error('vars parse failed', { err: error })
+      await log.flush()
+
+      const files = await readdir(dir)
+      const content = await readFile(
+        join(
+          dir,
+          files.find((file) => file.endsWith('.log'))!,
+        ),
+        'utf8',
+      )
+      expect(content).toContain('vars parse failed')
+      expect(content).toContain('invalid vars YAML')
+      expect(content).not.toContain(secret)
     })
   })
 

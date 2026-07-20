@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NodeGit } from '../../src/platform/node/git'
 import { NodeFileSystem } from '../../src/platform/node/fs'
-import { installSkill } from '../../src/remote/install'
+import { installSkill, isValidGitRepo } from '../../src/remote/install'
 import { createBareRepo } from '../helpers/git'
 
 describe.concurrent('installSkill', () => {
@@ -23,7 +23,7 @@ describe.concurrent('installSkill', () => {
   })
 
   it('clones + checks out ref + returns pinned_commit (HEAD hash)', async () => {
-    const repoPath = await mkdtemp(join(tmpdir(), 'instrepo-'))
+    const repoPath = await realpath(await mkdtemp(join(tmpdir(), 'instrepo-')))
     const res = await installSkill(
       new NodeGit(),
       new NodeFileSystem(),
@@ -37,12 +37,25 @@ describe.concurrent('installSkill', () => {
     await rm(repoPath, { recursive: true, force: true })
   })
   it('failure (bad ref) cleans up remote-cache half-product', async () => {
-    const repoPath = await mkdtemp(join(tmpdir(), 'instrepo2-'))
+    const repoPath = await realpath(await mkdtemp(join(tmpdir(), 'instrepo2-')))
     const fs = new NodeFileSystem()
     await expect(
       installSkill(new NodeGit(), fs, bare, 'nonexistent-ref', repoPath, 'superpowers'),
     ).rejects.toThrow()
     expect(await fs.exists(join(repoPath, 'remote-cache', 'superpowers'))).toBe(false)
     await rm(repoPath, { recursive: true, force: true })
+  })
+})
+
+describe('isValidGitRepo', () => {
+  it('propagates operational filesystem failures', async () => {
+    const base = new NodeFileSystem()
+    const fs = Object.assign(Object.create(base), base, {
+      inspectEntry: async () => {
+        throw Object.assign(new Error('denied'), { code: 'EACCES' })
+      },
+    }) as NodeFileSystem
+
+    await expect(isValidGitRepo(fs, '/unreadable-cache')).rejects.toMatchObject({ code: 'EACCES' })
   })
 })

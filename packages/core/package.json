@@ -9,15 +9,19 @@
     }
   },
   "scripts": {
-    "test": "bun vitest run"
+    "test": "bun vitest run",
+    "typecheck": "bun --bun tsc --noEmit -p tsconfig.json",
+    "typecheck:test": "bun --bun tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",
+    "semver": "^7.7.4",
     "smol-toml": "^1.7.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
+    "@types/semver": "^7.7.1",
     "vitest": "^2.1.0"
   }
 }

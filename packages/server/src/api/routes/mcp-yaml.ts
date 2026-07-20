@@ -1,11 +1,13 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { AgentIdSchema, McpServerSchema } from '@loom/core'
 import { z } from 'zod'
 import { logger } from '../../lib/logger.js'
 import { McpApplication, McpApplicationError } from '../../mcp/application.js'
-import { resolveRepoPath } from '../repo.js'
 import { jsonValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
+import { repositoryErrorResponse } from '../repository-route-error.js'
+import { RepoConfigError } from '../repo-config.js'
+import { withRepositoryLease } from '../repository-lease.js'
 
 const mcpRouteLogger = logger.child('mcp-route')
 const RepoField = z.unknown().optional()
@@ -45,24 +47,40 @@ export function createMcpYamlRoutes(deps: RouteDeps): Hono {
   app.post('/mcp', jsonValidator(AddMcpServerBody, { error: 'invalid_server' }), async (c) => {
     try {
       const { repo, server } = c.req.valid('json')
-      const repoPath = await resolveRequestRepo(deps, repo)
-      await mcp.addServer(repoPath, server)
+      await withRepositoryLease(
+        deps,
+        repo as string,
+        'mutation',
+        (repoPath) => [repoPath],
+        (repoPath) => mcp.addServer(repoPath, server),
+      )
       return c.json({ ok: true, server })
     } catch (e) {
-      if (isInvalidRepo(e)) return invalidRepo(c, e)
-      return c.json(errorBody(e, 'write_failed', 'failed to add MCP server'))
+      return mcpErrorResponse(c, e, {
+        code: 'write_failed',
+        message: 'Failed to add MCP server',
+        logMessage: 'MCP server add failed',
+      })
     }
   })
 
   app.delete('/mcp', jsonValidator(DeleteMcpServerBody, { error: 'invalid_id' }), async (c) => {
     try {
       const { repo, id } = c.req.valid('json')
-      const repoPath = await resolveRequestRepo(deps, repo)
-      await mcp.removeServer(repoPath, id)
+      await withRepositoryLease(
+        deps,
+        repo as string,
+        'mutation',
+        (repoPath) => [repoPath],
+        (repoPath) => mcp.removeServer(repoPath, id),
+      )
       return c.json({ ok: true })
     } catch (e) {
-      if (isInvalidRepo(e)) return invalidRepo(c, e)
-      return c.json(errorBody(e, 'delete_failed', 'failed to remove MCP server'))
+      return mcpErrorResponse(c, e, {
+        code: 'delete_failed',
+        message: 'Failed to remove MCP server',
+        logMessage: 'MCP server removal failed',
+      })
     }
   })
 
@@ -75,18 +93,20 @@ export function createMcpYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, id, server } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        const result = await mcp.updateServer(repoPath, id, server)
+        const result = await withRepositoryLease(
+          deps,
+          repo as string,
+          'mutation',
+          (repoPath) => [repoPath],
+          (repoPath) => mcp.updateServer(repoPath, id, server),
+        )
         return c.json({ ok: true, server: result.server })
       } catch (e) {
-        if (e instanceof McpApplicationError) {
-          return c.json({ ok: false, error: e.code, message: e.message }, e.status)
-        }
-        logger.error('MCP server update failed', { err: e })
-        return c.json(
-          { ok: false, error: 'update_failed', message: String((e as Error)?.message ?? e) },
-          500,
-        )
+        return mcpErrorResponse(c, e, {
+          code: 'update_failed',
+          message: 'Failed to update MCP server',
+          logMessage: 'MCP server update failed',
+        })
       }
     },
   )
@@ -94,12 +114,20 @@ export function createMcpYamlRoutes(deps: RouteDeps): Hono {
   app.post('/mcp/agents', jsonValidator(SetMcpAgentsBody, { error: mcpAgentsError }), async (c) => {
     try {
       const { repo, id, agents } = c.req.valid('json')
-      const repoPath = await resolveRequestRepo(deps, repo)
-      await mcp.setAgents(repoPath, id, agents)
+      await withRepositoryLease(
+        deps,
+        repo as string,
+        'mutation',
+        (repoPath) => [repoPath],
+        (repoPath) => mcp.setAgents(repoPath, id, agents),
+      )
       return c.json({ ok: true })
     } catch (e) {
-      if (isInvalidRepo(e)) return invalidRepo(c, e)
-      return c.json(errorBody(e, 'update_failed', 'failed to update MCP agents'))
+      return mcpErrorResponse(c, e, {
+        code: 'update_failed',
+        message: 'Failed to update MCP agents',
+        logMessage: 'MCP agent update failed',
+      })
     }
   })
 
@@ -109,17 +137,20 @@ export function createMcpYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, ids } = c.req.valid('json')
-        const repoPath = await resolveRequestRepo(deps, repo)
-        return c.json({ ok: true, ...(await mcp.reorderServers(repoPath, ids)) })
-      } catch (e) {
-        if (isInvalidRepo(e)) return invalidRepo(c, e)
-        if (e instanceof McpApplicationError)
-          return c.json({ ok: false, error: e.code, message: e.message }, e.status)
-        mcpRouteLogger.error('failed to reorder MCP servers', { err: e })
-        return c.json(
-          { ok: false, error: 'reorder_failed', message: 'failed to reorder MCP servers' },
-          500,
+        const result = await withRepositoryLease(
+          deps,
+          repo as string,
+          'mutation',
+          (repoPath) => [repoPath],
+          (repoPath) => mcp.reorderServers(repoPath, ids),
         )
+        return c.json({ ok: true, ...result })
+      } catch (e) {
+        return mcpErrorResponse(c, e, {
+          code: 'reorder_failed',
+          message: 'Failed to reorder MCP servers',
+          logMessage: 'MCP server reorder failed',
+        })
       }
     },
   )
@@ -127,48 +158,43 @@ export function createMcpYamlRoutes(deps: RouteDeps): Hono {
   return app
 }
 
-async function resolveRequestRepo(deps: RouteDeps, repo: unknown): Promise<string> {
-  try {
-    return await resolveRepoPath(deps.fs, repo as string, deps.home)
-  } catch (cause) {
-    throw Object.assign(new Error(String((cause as Error).message), { cause }), {
-      code: 'invalid_repo',
-    })
-  }
-}
-
-function isInvalidRepo(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && 'code' in error && error.code === 'invalid_repo'
-  )
-}
-
-function invalidRepo(
-  c: { json: (body: unknown, status?: 400) => Response },
-  error: unknown,
-): Response {
-  return c.json(
-    { ok: false, error: 'invalid_repo', message: String((error as Error).message) },
-    400,
-  )
+function mcpRepositoryFailure(c: Context, error: unknown, logMessage: string): Response | null {
+  return repositoryErrorResponse(c, error, mcpRouteLogger, logMessage)
 }
 
 function mcpAgentsError(issues: z.ZodIssue[]): string {
   return issues[0]?.path[0] === 'id' ? 'invalid_id' : 'invalid_agents'
 }
 
-function errorBody(
+type McpErrorStatus = 400 | 404 | 409 | 422
+
+const MCP_ERROR_MESSAGES: Record<McpErrorStatus, string> = {
+  400: 'Invalid MCP request',
+  404: 'MCP server not found',
+  409: 'MCP state conflict',
+  422: 'MCP configuration is invalid',
+}
+
+function mcpErrorResponse(
+  c: Context,
   error: unknown,
-  fallbackCode: string,
-  logMessage: string,
-): { ok: false; error: string; message: string } {
+  options: { code: string; message: string; logMessage: string },
+): Response {
+  const repoFailure = mcpRepositoryFailure(c, error, options.logMessage)
+  if (repoFailure) return repoFailure
+
+  mcpRouteLogger.error(options.logMessage, { err: error })
   if (error instanceof McpApplicationError) {
-    return { ok: false, error: error.code, message: error.message }
+    return c.json(
+      { ok: false, error: error.code, message: MCP_ERROR_MESSAGES[error.status] },
+      error.status,
+    )
   }
-  mcpRouteLogger.error(logMessage, { err: error })
-  return {
-    ok: false,
-    error: fallbackCode,
-    message: String((error as Error)?.message ?? error),
+  if (error instanceof RepoConfigError) {
+    return c.json(
+      { ok: false, error: 'invalid_mcp_manifest', message: MCP_ERROR_MESSAGES[422] },
+      422,
+    )
   }
+  return c.json({ ok: false, error: options.code, message: options.message }, 500)
 }

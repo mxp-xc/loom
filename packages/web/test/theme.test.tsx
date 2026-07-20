@@ -87,7 +87,7 @@ describe('ThemeProvider', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe(appliedTheme)
   })
 
-  it('auto theme switches at the next day boundary', () => {
+  it('auto theme switches at the next light/dark boundary', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 6, 19, 17, 59, 59, 900))
 
@@ -101,6 +101,73 @@ describe('ThemeProvider', () => {
     act(() => vi.advanceTimersByTime(100))
 
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
+  })
+
+  it('reacts to system theme changes and removes its listener on unmount', () => {
+    let matches = false
+    const listeners = new Set<() => void>()
+    const addEventListener = vi.fn((_event: string, listener: () => void) =>
+      listeners.add(listener),
+    )
+    const removeEventListener = vi.fn((_event: string, listener: () => void) =>
+      listeners.delete(listener),
+    )
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      get matches() {
+        return matches
+      },
+      media: query,
+      onchange: null,
+      addEventListener,
+      removeEventListener,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia
+
+    const view = render(
+      <ThemeProvider defaultTheme="system">
+        <Probe />
+      </ThemeProvider>,
+    )
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light')
+
+    matches = true
+    act(() => listeners.forEach((listener) => listener()))
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
+
+    view.unmount()
+    expect(removeEventListener).toHaveBeenCalledTimes(1)
+    expect(listeners.size).toBe(0)
+  })
+
+  it('resyncs auto theme when the page becomes visible and cleans up the listener', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 19, 17))
+    const removeEventListener = vi.spyOn(document, 'removeEventListener')
+    let visibilityState: DocumentVisibilityState = 'hidden'
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibilityState,
+    })
+
+    const view = render(
+      <ThemeProvider defaultTheme="auto">
+        <Probe />
+      </ThemeProvider>,
+    )
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light')
+
+    vi.setSystemTime(new Date(2026, 6, 19, 20))
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light')
+    visibilityState = 'visible'
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
+
+    view.unmount()
+    expect(removeEventListener).toHaveBeenCalledWith('visibilitychange', expect.any(Function))
+    removeEventListener.mockRestore()
   })
 
   it('ignores an invalid persisted theme', () => {

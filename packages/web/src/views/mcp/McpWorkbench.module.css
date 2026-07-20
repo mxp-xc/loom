@@ -2005,8 +2005,7 @@
   background: rgb(2 6 23 / 48%);
 }
 
-.variablePanel,
-.confirmPanel {
+.variablePanel {
   max-height: min(640px, calc(100dvh - 48px));
   overflow: hidden;
   border: 1px solid var(--border);
@@ -2030,17 +2029,10 @@
   border-bottom: 1px solid var(--border);
 }
 
-.variableHead h3,
-.confirmPanel h3 {
+.variableHead h3 {
   margin: 0;
   color: var(--bright);
   font-size: 16px;
-}
-
-.confirmPanel p {
-  margin: 5px 0 0;
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .variableBody {
@@ -2198,7 +2190,7 @@
   color: var(--muted);
 }
 
-.confirmPanel > div {
+.confirmActions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -2209,12 +2201,15 @@
   justify-content: flex-end;
 }
 
-.confirmPanel {
+.confirmBody {
   display: grid;
-  width: min(380px, calc(100vw - 48px));
   gap: 12px;
-  max-width: 380px;
-  padding: 34px 20px;
+}
+
+.confirmBody p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .emptyState {
@@ -2222,22 +2217,6 @@
   min-height: 240px;
   place-items: center;
   color: var(--muted);
-}
-
-.copyToast {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 1200;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  color: var(--success);
-  border: 1px solid color-mix(in srgb, var(--success) 42%, var(--border));
-  border-radius: 7px;
-  background: var(--popover);
-  box-shadow: var(--shadow-popover);
 }
 
 @media (max-width: 1040px) {
@@ -2479,8 +2458,7 @@
     padding: 16px;
   }
 
-  .variablePanel,
-  .confirmPanel {
+  .variablePanel {
     width: 100%;
     max-width: none;
     max-height: calc(100dvh - 32px);

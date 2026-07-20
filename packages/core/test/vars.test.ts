@@ -252,6 +252,52 @@ describe('resolveVarsChain', () => {
     })
   })
 
+  it('preserves string and secret formats while resolving references and literals', () => {
+    const result = resolveVarsChain(
+      {
+        base: typed({
+          ROOT: { type: 'string', format: 'path', value: '/repo' },
+          FILE: { type: 'string', format: 'path', value: '${ROOT}/AGENTS.md' },
+          TOKEN: { type: 'secret', format: 'markdown', value: 'Bearer ${ROOT}' },
+        }),
+      },
+      ['base'],
+    )
+
+    expect(result).toMatchObject({
+      ok: true,
+      values: {
+        ROOT: { type: 'string', format: 'path', value: '/repo' },
+        FILE: { type: 'string', format: 'path', value: '/repo/AGENTS.md' },
+        TOKEN: { type: 'secret', format: 'markdown', value: 'Bearer /repo' },
+      },
+    })
+  })
+
+  it('uses even backslashes for active tokens and odd backslashes for literals', () => {
+    const value = [0, 1, 2, 3, 4].map((count) => '\\'.repeat(count) + '${TARGET}').join('|')
+    const result = resolveVarsChain(
+      {
+        base: typed({
+          TARGET: { type: 'string', value: 'resolved' },
+          VALUE: { type: 'string', value },
+        }),
+      },
+      ['base'],
+    )
+    const expected = [0, 1, 2, 3, 4]
+      .map(
+        (count) =>
+          '\\'.repeat(Math.floor(count / 2)) + (count % 2 === 0 ? 'resolved' : '${TARGET}'),
+      )
+      .join('|')
+    expect(result).toMatchObject({
+      ok: true,
+      values: { VALUE: { type: 'string', value: expected } },
+      dependencies: { VALUE: ['TARGET'] },
+    })
+  })
+
   it('supports empty defaults and defaults containing multiple colons', () => {
     const result = resolveVarsChain(
       {
@@ -337,6 +383,60 @@ describe('resolveLayeredVars', () => {
     expect(result.values).not.toHaveProperty('LOOM_AGENT')
   })
 
+  it.each([
+    [
+      'reserved base key',
+      { base: { LOOM_CUSTOM: { type: 'string', value: 'x' } } },
+      { code: 'RESERVED_BUILTIN_KEY', key: 'LOOM_CUSTOM' },
+    ],
+    [
+      'unknown override key',
+      { base: {}, local: { missing: { value: 'x' } } },
+      { code: 'UNKNOWN_OVERRIDE_KEY', key: 'missing' },
+    ],
+    [
+      'override type mismatch',
+      { base: { count: { type: 'number', value: 1 } }, local: { count: { value: 'two' } } },
+      { code: 'OVERRIDE_TYPE_MISMATCH', key: 'count' },
+    ],
+    [
+      'reference cycle',
+      {
+        base: {
+          a: { type: 'string', value: '${b}' },
+          b: { type: 'string', value: '${a}' },
+        },
+      },
+      { code: 'REFERENCE_CYCLE', key: 'a', path: ['a', 'b', 'a'] },
+    ],
+  ] as const)('reports %s', (_label, input, diagnostic) => {
+    expect(resolveLayeredVars(input)).toMatchObject({ ok: false, diagnostics: [diagnostic] })
+  })
+
+  it('accepts number, boolean, and JSON overrides with matching definitions', () => {
+    const result = resolveLayeredVars({
+      base: {
+        count: { type: 'number', value: 1 },
+        enabled: { type: 'boolean', value: false },
+        config: { type: 'json', value: { model: 'old' } },
+      },
+      local: {
+        count: { value: 2 },
+        enabled: { value: true },
+        config: { value: { model: 'new' } },
+      },
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      values: {
+        count: { type: 'number', value: 2 },
+        enabled: { type: 'boolean', value: true },
+        config: { type: 'json', value: { model: 'new' } },
+      },
+    })
+  })
+
   it('rejects unsupported defaults and json text interpolation', () => {
     const defaulted = resolveLayeredVars({
       agent: 'codex',
@@ -379,6 +479,15 @@ describe('resolveLayeredVars', () => {
       ok: false,
       diagnostics: [{ code: 'MISSING_REFERENCE', path: ['missing'] }],
     })
+    for (const count of [0, 1, 2, 3, 4]) {
+      const input = '\\'.repeat(count) + '${name}'
+      const expected = '\\'.repeat(Math.floor(count / 2)) + (count % 2 === 0 ? 'Codex' : '${name}')
+      expect(renderTextWithResolvedVars(input, resolution)).toEqual({
+        ok: true,
+        text: expected,
+        diagnostics: [],
+      })
+    }
   })
 })
 
@@ -431,6 +540,40 @@ describe('vars lifecycle', () => {
           message: '变量 DRAFT 引用了不存在的变量 MISSING',
         },
       ],
+    })
+  })
+
+  it('preserves format through draft validation and persistence preparation', () => {
+    const draft = validateVarDraft(
+      { dev: typed({ ROOT: { type: 'string', format: 'path', value: '/repo' } }) },
+      {
+        environment: 'dev',
+        key: 'FILE',
+        entry: { type: 'string', format: 'path', value: '${ROOT}/AGENTS.md' },
+        chain: ['dev'],
+      },
+    )
+    expect(draft).toMatchObject({
+      ok: true,
+      resolution: {
+        values: { FILE: { type: 'string', format: 'path', value: '/repo/AGENTS.md' } },
+      },
+    })
+
+    const prepared = prepareVarsMutationPersistence({
+      environments: {
+        dev: typed({ FILE: { type: 'string', format: 'path', value: '${ROOT}/AGENTS.md' } }),
+      },
+      changed: ['dev'],
+      diagnostics: [],
+    })
+    expect(prepared).toMatchObject({
+      ok: true,
+      environments: {
+        dev: {
+          entries: { FILE: { type: 'string', format: 'path', value: '${ROOT}/AGENTS.md' } },
+        },
+      },
     })
   })
 
@@ -526,13 +669,5 @@ describe('resolveVars compatibility wrapper', () => {
   })
   it('throws on an undefined variable', () => {
     expect(() => resolveVars('${NOPE}', ctx)).toThrow(/NOPE/)
-  })
-  it('accepts a context that omits deprecated env', () => {
-    expect(
-      resolveVars('${TOKEN}', {
-        activeProfile: { TOKEN: 'active-tok' },
-        defaultProfile: {},
-      }),
-    ).toBe('active-tok')
   })
 })

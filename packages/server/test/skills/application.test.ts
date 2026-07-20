@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import yaml from 'js-yaml'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
+import { realpath } from 'node:fs/promises'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 import type { GitTreeEntry, IGit } from '../../src/ports/git.js'
 import { SkillsApplication } from '../../src/skills/application.js'
@@ -54,25 +55,41 @@ describe('SkillsApplication', () => {
       { name: 'cached-skill', path: join(home, '.agents', 'skills', '.cache', 'cached-skill') },
     ])
     await expect(app.scanLocalSkills({ dir: 'assets/skills', repoPath })).resolves.toEqual([
-      { name: 'repo-skill', path: join(repoPath, 'assets', 'skills', 'repo-skill') },
+      {
+        name: 'repo-skill',
+        path: await realpath(join(repoPath, 'assets', 'skills', 'repo-skill')),
+      },
     ])
     await expect(app.scanLocalSkills({ dir: 'missing', repoPath })).resolves.toEqual([])
   })
 
   it('imports repo asset refs as pathless local skills', async () => {
     await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    const skillDir = join(repoPath, 'assets', 'skills', 'test-qa-skill')
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, 'SKILL.md'), '# Test QA')
 
     await expect(
       app.importLocalSkills(repoPath, {
         mode: 'ref',
-        skills: [
-          { name: 'test-qa-skill', path: join(repoPath, 'assets', 'skills', 'test-qa-skill') },
-        ],
+        skills: [{ name: 'test-qa-skill', path: skillDir }],
       }),
     ).resolves.toEqual({ count: 1 })
 
     const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
     expect(parsed.skills).toEqual([{ id: 'test-qa-skill' }])
+  })
+
+  it('rejects an invalid skills container before mutation', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'scalar\n')
+    const replace = vi.spyOn(fs, 'replaceFile')
+
+    await expect(app.setLocalSkillAgents(repoPath, 'test-skill', ['codex'])).rejects.toMatchObject({
+      status: 422,
+      code: 'invalid_skills_manifest',
+    })
+    expect(replace).not.toHaveBeenCalled()
+    await expect(readFile(join(repoPath, 'skills.yaml'), 'utf8')).resolves.toBe('scalar\n')
   })
 
   it('writes local skill files safely and rejects existing destinations', async () => {
@@ -86,7 +103,6 @@ describe('SkillsApplication', () => {
             files: [
               { path: 'SKILL.md', content: '# New skill' },
               { path: 'docs/usage.md', content: 'usage' },
-              { path: '../escape.md', content: 'bad' },
             ],
           },
         ],
@@ -101,11 +117,219 @@ describe('SkillsApplication', () => {
     ).resolves.toBe('usage')
     expect(existsSync(join(repoPath, 'assets', 'skills', 'escape.md'))).toBe(false)
 
+    const manifestBeforeInvalidBatch = await readFile(join(repoPath, 'skills.yaml'), 'utf8')
+    await expect(
+      app.writeLocalSkills(repoPath, {
+        skills: [
+          { name: 'valid-before-invalid', files: [{ path: 'SKILL.md', content: 'valid' }] },
+          {
+            name: 'invalid-archive',
+            files: [
+              { path: 'SKILL.md', content: 'invalid' },
+              { path: '../escape.md', content: 'bad' },
+            ],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_skill_file_path' })
+    expect(existsSync(join(repoPath, 'assets', 'skills', 'valid-before-invalid'))).toBe(false)
+    expect(existsSync(join(repoPath, 'assets', 'skills', 'invalid-archive'))).toBe(false)
+    await expect(readFile(join(repoPath, 'skills.yaml'), 'utf8')).resolves.toBe(
+      manifestBeforeInvalidBatch,
+    )
+
     await expect(
       app.writeLocalSkills(repoPath, {
         skills: [{ name: 'new-skill', files: [{ path: 'SKILL.md', content: 'again' }] }],
       }),
     ).rejects.toMatchObject({ status: 409, code: 'already_exists' })
+  })
+
+  it('rejects archive duplicate, ancestor, and case collisions before any filesystem write', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    const mkdirSpy = vi.spyOn(fs, 'mkdir')
+    const writeSpy = vi.spyOn(fs, 'writeFile')
+    const moveSpy = vi.spyOn(fs, 'moveNoReplace')
+    const replaceSpy = vi.spyOn(fs, 'replaceFile')
+
+    for (const files of [
+      [
+        { path: 'SKILL.md', content: 'skill' },
+        { path: 'docs/Readme.md', content: 'one' },
+        { path: 'docs/readme.md', content: 'two' },
+      ],
+      [
+        { path: 'SKILL.md', content: 'skill' },
+        { path: 'docs', content: 'file' },
+        { path: 'docs/usage.md', content: 'nested' },
+      ],
+      [
+        { path: 'SKILL.md', content: 'one' },
+        { path: 'SKILL.md', content: 'two' },
+      ],
+    ]) {
+      await expect(
+        app.writeLocalSkills(repoPath, { skills: [{ name: 'collision', files }] }),
+      ).rejects.toMatchObject({ status: 409, code: 'local_skill_archive_collision' })
+    }
+
+    expect(mkdirSpy).not.toHaveBeenCalled()
+    expect(writeSpy).not.toHaveBeenCalled()
+    expect(moveSpy).not.toHaveBeenCalled()
+    expect(replaceSpy).not.toHaveBeenCalled()
+    expect(existsSync(join(repoPath, 'assets'))).toBe(false)
+  })
+
+  it('moves a validated external skill through owned staging and registers it pathlessly', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    const source = join(home, 'move-source')
+    await mkdir(join(source, 'docs'), { recursive: true })
+    await writeFile(join(source, 'SKILL.md'), '# moved')
+    await writeFile(join(source, 'docs', 'usage.md'), 'usage')
+
+    await expect(
+      app.importLocalSkills(repoPath, {
+        mode: 'move',
+        skills: [{ name: 'moved-skill', path: source }],
+      }),
+    ).resolves.toEqual({ count: 1 })
+
+    expect(existsSync(source)).toBe(false)
+    await expect(
+      readFile(join(repoPath, 'assets', 'skills', 'moved-skill', 'SKILL.md'), 'utf8'),
+    ).resolves.toBe('# moved')
+    await expect(
+      readFile(join(repoPath, 'assets', 'skills', 'moved-skill', 'docs', 'usage.md'), 'utf8'),
+    ).resolves.toBe('usage')
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.skills).toEqual([{ id: 'moved-skill' }])
+  })
+
+  it('restores a moved import source when manifest persistence fails', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    const source = join(home, 'rollback-move-source')
+    await mkdir(source)
+    await writeFile(join(source, 'SKILL.md'), '# source')
+    const failure = new Error('manifest replacement failed')
+    vi.spyOn(fs, 'replaceFile').mockRejectedValueOnce(failure)
+
+    await expect(
+      app.importLocalSkills(repoPath, {
+        mode: 'move',
+        skills: [{ name: 'rollback-move', path: source }],
+      }),
+    ).rejects.toBe(failure)
+
+    await expect(readFile(join(source, 'SKILL.md'), 'utf8')).resolves.toBe('# source')
+    expect(existsSync(join(repoPath, 'assets', 'skills', 'rollback-move'))).toBe(false)
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.skills).toEqual([])
+  })
+
+  it('rolls back an installed local directory when the manifest replacement fails', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    const failure = new Error('manifest replacement failed')
+    vi.spyOn(fs, 'replaceFile').mockRejectedValueOnce(failure)
+
+    await expect(
+      app.writeLocalSkills(repoPath, {
+        skills: [{ name: 'rolled-back', files: [{ path: 'SKILL.md', content: '# skill' }] }],
+      }),
+    ).rejects.toBe(failure)
+
+    expect(existsSync(join(repoPath, 'assets', 'skills', 'rolled-back'))).toBe(false)
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.skills).toEqual([])
+  })
+
+  it('cleans owned staging when archive construction fails', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    const failure = new Error('staging write failed')
+    const write = fs.writeFileExclusive.bind(fs)
+    vi.spyOn(fs, 'writeFileExclusive').mockImplementation(async (path, content, mode) => {
+      if (path.includes('.loom-transaction-')) throw failure
+      return write(path, content, mode)
+    })
+
+    await expect(
+      app.writeLocalSkills(repoPath, {
+        skills: [{ name: 'stage-failure', files: [{ path: 'SKILL.md', content: '# skill' }] }],
+      }),
+    ).rejects.toBe(failure)
+
+    const skillsRoot = join(repoPath, 'assets', 'skills')
+    expect(existsSync(join(skillsRoot, 'stage-failure'))).toBe(false)
+    expect(
+      (await fs.readDir(await fs.realPath(skillsRoot))).filter((name) => name.startsWith('.loom-')),
+    ).toEqual([])
+    expect(log.error).toHaveBeenCalledWith('local skill transaction failed', { err: failure })
+  })
+
+  it('restores a moved source when no-follow snapshot copying fails', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    const source = join(home, 'copy-failure-source')
+    await mkdir(source)
+    await writeFile(join(source, 'SKILL.md'), '# source')
+    const failure = new Error('snapshot copy failed')
+    vi.spyOn(fs, 'copyFileNoFollow').mockRejectedValueOnce(failure)
+
+    await expect(
+      app.importLocalSkills(repoPath, {
+        mode: 'move',
+        skills: [{ name: 'copy-failure', path: source }],
+      }),
+    ).rejects.toBe(failure)
+
+    await expect(readFile(join(source, 'SKILL.md'), 'utf8')).resolves.toBe('# source')
+    expect(existsSync(join(repoPath, 'assets', 'skills', 'copy-failure'))).toBe(false)
+  })
+
+  it('rolls back manifest and destination when owned staging cleanup fails once', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    const failure = new Error('staging cleanup failed')
+    const removeEntryIfIdentity = fs.removeEntryIfIdentity.bind(fs)
+    let failed = false
+    vi.spyOn(fs, 'removeEntryIfIdentity').mockImplementation(async (path, identity) => {
+      if (!failed && basename(path).startsWith('.loom-transaction-')) {
+        failed = true
+        throw failure
+      }
+      await removeEntryIfIdentity(path, identity)
+    })
+
+    await expect(
+      app.writeLocalSkills(repoPath, {
+        skills: [{ name: 'cleanup-failure', files: [{ path: 'SKILL.md', content: '# skill' }] }],
+      }),
+    ).rejects.toBe(failure)
+
+    expect(existsSync(join(repoPath, 'assets', 'skills', 'cleanup-failure'))).toBe(false)
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.skills).toEqual([])
+  })
+
+  it('preserves primary and identity-bound rollback failures in AggregateError', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    const primary = new Error('manifest replacement failed')
+    const rollback = new Error('rollback promotion failed')
+    const destination = join(repoPath, 'assets', 'skills', 'recovery-required')
+    const moveNoReplace = fs.moveNoReplace.bind(fs)
+    vi.spyOn(fs, 'replaceFile').mockRejectedValueOnce(primary)
+    vi.spyOn(fs, 'moveNoReplace').mockImplementation(async (source, target, expectedIdentity) => {
+      if (source.endsWith(join('assets', 'skills', 'recovery-required'))) throw rollback
+      return moveNoReplace(source, target, expectedIdentity)
+    })
+
+    const failure = await app
+      .writeLocalSkills(repoPath, {
+        skills: [{ name: 'recovery-required', files: [{ path: 'SKILL.md', content: '# skill' }] }],
+      })
+      .catch((error) => error)
+
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect(failure.cause).toBe(primary)
+    expect(failure.errors).toEqual([primary, rollback])
+    await expect(readFile(join(destination, 'SKILL.md'), 'utf8')).resolves.toBe('# skill')
   })
 
   it('removes pathless local skill files but keeps external refs', async () => {
@@ -114,6 +338,14 @@ describe('SkillsApplication', () => {
     await mkdir(externalDir, { recursive: true })
     await writeFile(join(repoPath, 'assets', 'skills', 'pathless', 'SKILL.md'), 'x')
     await writeFile(join(externalDir, 'SKILL.md'), 'x')
+    const outsideTemp = join(home, 'outside-temp')
+    await mkdir(outsideTemp)
+    await writeFile(join(outsideTemp, 'sentinel'), 'keep')
+    await symlink(
+      outsideTemp,
+      join(repoPath, 'temp'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
     await writeFile(
       join(repoPath, 'skills.yaml'),
       [
@@ -127,12 +359,39 @@ describe('SkillsApplication', () => {
     )
 
     await app.removeLocalSkill(repoPath, 'pathless')
+    const inspectEntry = fs.inspectEntry.bind(fs)
+    const inspectSpy = vi.spyOn(fs, 'inspectEntry').mockImplementation(async (path) => {
+      if (path === externalDir || path.startsWith(`${externalDir}/`)) {
+        throw new Error('external path must not be accessed during unregister')
+      }
+      return inspectEntry(path)
+    })
     await app.removeLocalSkill(repoPath, 'external')
 
     const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
     expect(parsed.skills).toEqual([])
     expect(existsSync(join(repoPath, 'assets', 'skills', 'pathless'))).toBe(false)
     expect(existsSync(externalDir)).toBe(true)
+    await expect(readFile(join(outsideTemp, 'sentinel'), 'utf8')).resolves.toBe('keep')
+    expect(inspectSpy).not.toHaveBeenCalledWith(externalDir)
+  })
+
+  it('restores a staged built-in delete when manifest persistence fails', async () => {
+    const directory = join(repoPath, 'assets', 'skills', 'keep-on-failure')
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'SKILL.md'), '# keep')
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      'sources: []\nskills:\n  - id: keep-on-failure\n',
+    )
+    const failure = new Error('manifest replacement failed')
+    vi.spyOn(fs, 'replaceFile').mockRejectedValueOnce(failure)
+
+    await expect(app.removeLocalSkill(repoPath, 'keep-on-failure')).rejects.toBe(failure)
+
+    await expect(readFile(join(directory, 'SKILL.md'), 'utf8')).resolves.toBe('# keep')
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.skills).toEqual([{ id: 'keep-on-failure' }])
   })
 
   it('updates multiple source member agents with one yaml write', async () => {
@@ -190,6 +449,38 @@ describe('SkillsApplication', () => {
       err,
       url: 'https://github.com/mattpocock/skills',
       ref: 'v1.0.1',
+    })
+  })
+
+  it('preserves source preparation and candidate cleanup failures together', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    const primary = new Error('clone failed')
+    const cleanup = new Error('candidate cleanup failed')
+    vi.mocked(git.clone).mockRejectedValueOnce(primary)
+    class CandidateCleanupFailureFileSystem extends NodeFileSystem {
+      override async removeDir(path: string): Promise<void> {
+        if (path.includes(join('temp', 'source-edits'))) throw cleanup
+        return super.removeDir(path)
+      }
+    }
+    const failingApp = new SkillsApplication(
+      new CandidateCleanupFailureFileSystem(),
+      git,
+      home,
+      log,
+    )
+
+    const failure = await failingApp
+      .addSource(repoPath, {
+        url: 'https://github.com/mattpocock/skills',
+        ref: 'main',
+      })
+      .catch((error) => error)
+
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect(failure).toMatchObject({ cause: primary, errors: [primary, cleanup] })
+    expect(yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8'))).toMatchObject({
+      sources: [],
     })
   })
 
@@ -268,6 +559,7 @@ describe('SkillsApplication', () => {
         '  - name: old-name',
         '    url: https://example.test/skills.git',
         '    ref: main',
+        '    pinned_commit: abc1234',
         '    members:',
         '      - name: alpha',
         '        entry: alpha/SKILL.md',
@@ -361,7 +653,11 @@ describe('SkillsApplication', () => {
     await mkdir(join(repoPath, 'remote-cache', 'skills', 'nested', 'removed'), { recursive: true })
     await writeFile(
       join(repoPath, 'remote-cache', 'skills', 'nested', 'removed', 'SKILL.md'),
-      '# Removed',
+      '# Live checkout drift',
+    )
+    await writeFile(
+      join(repoPath, 'remote-cache', 'skills', 'nested', 'removed', 'untracked.md'),
+      'do not preserve',
     )
     await writeFile(
       join(repoPath, 'skills.yaml'),
@@ -370,6 +666,7 @@ describe('SkillsApplication', () => {
         '  - name: skills',
         '    url: https://example.test/skills.git',
         '    ref: main',
+        '    pinned_commit: abc1234',
         '    members:',
         '      - name: keep',
         '        entry: keep/SKILL.md',
@@ -390,10 +687,18 @@ describe('SkillsApplication', () => {
         { name: 'added', entry: 'added/SKILL.md' },
       ],
     }
-    mockRemoteSource({
-      'keep/SKILL.md': '# Keep',
-      'added/SKILL.md': '# Added',
-    })
+    mockRemoteSource(
+      {
+        'keep/SKILL.md': '# Keep',
+        'added/SKILL.md': '# Added',
+      },
+      'abc123',
+      {
+        'keep/SKILL.md': '# Keep',
+        'added/SKILL.md': '# Added',
+        'nested/removed/SKILL.md': '# Removed',
+      },
+    )
 
     await expect(app.reconcileSource(repoPath, command)).resolves.toMatchObject({
       finalized: false,
@@ -410,6 +715,29 @@ describe('SkillsApplication', () => {
     await expect(
       readFile(join(repoPath, 'assets', 'skills', 'removed', 'SKILL.md'), 'utf8'),
     ).resolves.toBe('# Removed')
+    expect(existsSync(join(repoPath, 'assets', 'skills', 'removed', 'untracked.md'))).toBe(false)
+  })
+
+  it('rejects invalid preserve identities before creating owned roots or staging', async () => {
+    await mkdir(join(repoPath, 'remote-cache', 'skills', 'removed'), { recursive: true })
+    await writeFile(join(repoPath, 'remote-cache', 'skills', 'removed', 'SKILL.md'), '# live')
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      'sources:\n  - url: https://example.test/skills.git\n    ref: main\n    pinned_commit: abc1234\n    members:\n      - name: removed\n        entry: removed/SKILL.md\nskills: []\n',
+    )
+    mockRemoteSource({}, 'abc123', { 'removed/SKILL.md': '# pinned' })
+    const mkdirSpy = vi.spyOn(fs, 'mkdir')
+
+    await expect(
+      app.reconcileSource(repoPath, {
+        url: 'https://example.test/skills.git',
+        members: [],
+        preserve: ['../escape'],
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_skill_id' })
+
+    expect(mkdirSpy).not.toHaveBeenCalled()
+    expect(existsSync(join(repoPath, 'assets'))).toBe(false)
   })
 
   it('classifies a same-name member at a different scanned path as updated', async () => {
@@ -443,9 +771,9 @@ describe('SkillsApplication', () => {
     await mkdir(join(repoPath, 'remote-cache', 'skills', 'removed'), { recursive: true })
     await writeFile(join(repoPath, 'remote-cache', 'skills', 'removed', 'SKILL.md'), '# Removed')
     const original =
-      'sources:\n  - url: https://example.test/skills.git\n    ref: main\n    members:\n      - name: removed\n        entry: removed/SKILL.md\n        agents: [codex]\nskills: []\n'
+      'sources:\n  - url: https://example.test/skills.git\n    ref: main\n    pinned_commit: abc1234\n    members:\n      - name: removed\n        entry: removed/SKILL.md\n        agents: [codex]\nskills: []\n'
     await writeFile(join(repoPath, 'skills.yaml'), original)
-    mockRemoteSource({})
+    mockRemoteSource({}, 'abc123', { 'removed/SKILL.md': '# Removed' })
 
     await expect(
       app.reconcileSource(repoPath, {
@@ -734,9 +1062,9 @@ describe('SkillsApplication', () => {
     await writeFile(join(cacheDir, 'prompt.md'), 'prompt')
     await writeFile(
       join(repoPath, 'skills.yaml'),
-      'sources:\n  - name: root-skill\n    url: https://example.test/root-skill.git\n    ref: main\n    members:\n      - name: root-skill\n        entry: SKILL.md\nskills: []\n',
+      'sources:\n  - name: root-skill\n    url: https://example.test/root-skill.git\n    ref: main\n    pinned_commit: abc1234\n    members:\n      - name: root-skill\n        entry: SKILL.md\nskills: []\n',
     )
-    mockRemoteSource({})
+    mockRemoteSource({}, 'abc123', { 'SKILL.md': '# Root', 'prompt.md': 'prompt' })
 
     await app.reconcileSource(repoPath, {
       url: 'https://example.test/root-skill.git',
@@ -812,7 +1140,34 @@ describe('SkillsApplication', () => {
     })
   })
 
-  function mockRemoteSource(files: Record<string, string>, commit = 'abc123'): void {
+  function mockRemoteSource(
+    files: Record<string, string>,
+    commit = 'abc123',
+    pinnedFiles?: Record<string, string>,
+  ): void {
+    const entriesFor = (sourceFiles: Record<string, string>): GitTreeEntry[] => {
+      const directories = new Set<string>()
+      for (const path of Object.keys(sourceFiles)) {
+        const parts = path.split('/')
+        for (let index = 1; index < parts.length; index += 1) {
+          directories.add(parts.slice(0, index).join('/'))
+        }
+      }
+      return [
+        ...[...directories].map((path) => ({
+          mode: '040000',
+          type: 'tree' as const,
+          oid: `tree:${path}`,
+          path,
+        })),
+        ...Object.keys(sourceFiles).map((path) => ({
+          mode: '100644',
+          type: 'blob' as const,
+          oid: `blob:${path}`,
+          path,
+        })),
+      ]
+    }
     const directories = new Set<string>()
     for (const path of Object.keys(files)) {
       const parts = path.split('/')
@@ -843,7 +1198,11 @@ describe('SkillsApplication', () => {
       }
     })
     git.revParse = vi.fn(async (_path, ref) => (ref.endsWith('^{tree}') ? 'root-tree' : commit))
-    git.readTree = vi.fn(async () => entries)
-    git.show = vi.fn(async (_path, _ref, path) => files[path] ?? '')
+    git.readTree = vi.fn(async (_path, ref) =>
+      ref === 'abc1234' && pinnedFiles ? entriesFor(pinnedFiles) : entries,
+    )
+    git.show = vi.fn(async (_path, ref, path) =>
+      ref === 'abc1234' && pinnedFiles ? (pinnedFiles[path] ?? '') : (files[path] ?? ''),
+    )
   }
 })

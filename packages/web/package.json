@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "bun --bun vite",
-    "test": "bun vitest run"
+    "test": "bun vitest run",
+    "typecheck": "bun --bun tsc --noEmit -p tsconfig.json",
+    "typecheck:test": "bun --bun tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@dnd-kit/core": "6.3.1",

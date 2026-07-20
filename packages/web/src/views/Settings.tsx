@@ -63,8 +63,11 @@ export default function Settings({ repoPath }: { repoPath: string }) {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(LS_LEVEL) : null
     return saved === 'effective' || saved === 'repo' || saved === 'local' ? saved : 'effective'
   })
-  const [catTab, setCatTab] = useState<string>(() => {
-    return (typeof localStorage !== 'undefined' ? localStorage.getItem(LS_CAT) : null) || 'general'
+  const [catTab, setCatTab] = useState<(typeof CATEGORY_TABS)[number]['id']>(() => {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(LS_CAT) : null
+    return CATEGORY_TABS.some((tab) => tab.id === saved)
+      ? (saved as (typeof CATEGORY_TABS)[number]['id'])
+      : 'general'
   })
   const [drafts, setDrafts] = useState<Record<string, string>>({})
 
@@ -77,7 +80,10 @@ export default function Settings({ repoPath }: { repoPath: string }) {
         if (!cancelled) setCfg(c as ConfigResponse)
       })
       .catch((e) => {
-        if (!cancelled) setError(e)
+        if (!cancelled) {
+          console.error({ err: e, repoPath }, 'Failed to load settings')
+          setError(e)
+        }
       })
     return () => {
       cancelled = true
@@ -89,7 +95,10 @@ export default function Settings({ repoPath }: { repoPath: string }) {
     return api
       .getConfig(repoPath)
       .then((c) => setCfg(c as ConfigResponse))
-      .catch((e) => setError(e))
+      .catch((e) => {
+        console.error({ err: e, repoPath }, 'Failed to reload settings')
+        setError(e)
+      })
   }
 
   const commitField = async (field: string, value: unknown) => {
@@ -114,7 +123,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
     setDrafts({})
   }
 
-  const handleSetCatTab = (t: string) => {
+  const handleSetCatTab = (t: (typeof CATEGORY_TABS)[number]['id']) => {
     setCatTab(t)
     localStorage.setItem(LS_CAT, t)
     setDrafts({})
@@ -131,9 +140,14 @@ export default function Settings({ repoPath }: { repoPath: string }) {
       />
     )
   }
-  if (!cfg) return <div className="p-4">加载中…</div>
+  if (!cfg)
+    return (
+      <div className="p-4" role="status">
+        加载中…
+      </div>
+    )
 
-  const activeCat = CATEGORY_TABS.find((t) => t.id === catTab)!
+  const activeCat = CATEGORY_TABS.find((t) => t.id === catTab) ?? CATEGORY_TABS[0]
   const fieldsInTab = FIELD_SCHEMA.filter((f) =>
     (activeCat.groups as readonly string[]).includes(f.group),
   )
@@ -154,24 +168,29 @@ export default function Settings({ repoPath }: { repoPath: string }) {
       </div>
 
       {/* Category tabs */}
-      <div className={styles['cfg-cat-tabs']}>
+      <div className={styles['cfg-cat-tabs']} role="tablist" aria-label="Settings category">
         {CATEGORY_TABS.map((tab) => (
-          <div
+          <button
+            type="button"
+            role="tab"
+            aria-selected={catTab === tab.id}
             key={tab.id}
             className={cn(styles['cfg-cat-tab'], catTab === tab.id && styles.on)}
             onClick={() => handleSetCatTab(tab.id)}
           >
             {tab.label}
-          </div>
+          </button>
         ))}
       </div>
 
       {/* Level switch */}
       <div className={styles['cfg-lvl-bar']}>
         <span className={styles['cfg-lvl-label']}>view</span>
-        <div className={styles['cfg-lvl-sw']}>
+        <div className={styles['cfg-lvl-sw']} role="group" aria-label="配置级别">
           {(['effective', 'repo', 'local'] as ConfigLevel[]).map((l) => (
-            <div
+            <button
+              type="button"
+              aria-pressed={level === l}
               key={l}
               className={cn(styles['cfg-lvl-opt'], level === l && styles.on)}
               data-l={l === 'effective' ? 'merged' : l}
@@ -179,7 +198,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
             >
               <span className={styles.dotc} />
               {l === 'effective' ? '最终结果' : l === 'repo' ? '仓库级' : '本地级'}
-            </div>
+            </button>
           ))}
         </div>
         <span className={styles['cfg-lvl-hint']}>{LEVEL_HINTS[level]}</span>
@@ -206,6 +225,7 @@ export default function Settings({ repoPath }: { repoPath: string }) {
                     effectiveValue={getPath(cfg.effective, field.key)}
                     inRepo={hasPath(cfg.repo, field.key)}
                     inLocal={hasPath(cfg.local, field.key)}
+                    options={field.key === 'profile' ? cfg.profiles : undefined}
                     onCommit={commitField}
                     draft={drafts[field.key]}
                     onDraftChange={handleDraftChange}

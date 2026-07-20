@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { scanLocalSkills } from '../../src/projection/scan.js'
@@ -10,6 +10,7 @@ import {
 } from '../../src/projection/workflow.js'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 import type { IGit } from '../../src/ports/git.js'
+import type { ProjectionWorkflowDeps } from '../../src/projection/workflow.js'
 
 vi.mock('../../src/lib/logger.js', () => {
   const logger = {
@@ -26,7 +27,7 @@ vi.mock('../../src/lib/logger.js', () => {
 let root: string
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'scan-'))
+  root = await realpath(await mkdtemp(join(tmpdir(), 'scan-')))
 })
 
 afterEach(async () => {
@@ -50,9 +51,84 @@ describe('scanLocalSkills', () => {
       { name: 'tdd', path: join(root, 'engineering', 'tdd') },
     ])
   })
+
+  it('does not follow directory links while scanning external skill roots', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'scan-outside-'))
+    try {
+      await mkdir(join(outside, 'linked-skill'), { recursive: true })
+      await writeFile(join(outside, 'linked-skill', 'SKILL.md'), 'outside')
+      await symlink(outside, join(root, 'linked-root'), 'dir')
+
+      await expect(scanLocalSkills(root)).resolves.toEqual([])
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('loadProjectionManifest', () => {
+  it('reports an unsafe URL-derived cache identity before any Git operation', async () => {
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - url: https://example.test/..',
+        '    ref: main',
+        '    members: []',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    const git = sourceTreeGit([])
+
+    await expect(loadProjectionManifest(deps(git), root)).resolves.toMatchObject({
+      errors: ['source[0].url: invalid repository URL'],
+    })
+
+    expect(git.revParse).not.toHaveBeenCalled()
+    expect(git.revParseHead).not.toHaveBeenCalled()
+    expect(git.checkout).not.toHaveBeenCalled()
+    expect(git.readTree).not.toHaveBeenCalled()
+  })
+
+  it.each(['parent', 'entry'] as const)(
+    'rejects a linked remote-cache %s before any Git operation',
+    async (linkedPath) => {
+      const outside = await mkdtemp(join(tmpdir(), 'projection-cache-outside-'))
+      try {
+        await writeFile(
+          join(root, 'skills.yaml'),
+          [
+            'sources:',
+            '  - url: https://example.test/skills.git',
+            '    ref: main',
+            '    members: []',
+            'skills: []',
+            '',
+          ].join('\n'),
+        )
+        if (linkedPath === 'parent') {
+          await symlink(outside, join(root, 'remote-cache'), 'dir')
+        } else {
+          await mkdir(join(root, 'remote-cache'), { recursive: true })
+          await symlink(outside, join(root, 'remote-cache', 'skills'), 'dir')
+        }
+        const git = sourceTreeGit([])
+
+        await expect(loadProjectionManifest(deps(git), root)).rejects.toThrow(
+          /not a real directory/,
+        )
+
+        expect(git.revParse).not.toHaveBeenCalled()
+        expect(git.revParseHead).not.toHaveBeenCalled()
+        expect(git.checkout).not.toHaveBeenCalled()
+        expect(git.readTree).not.toHaveBeenCalled()
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    },
+  )
+
   it('attaches a runtime SourceTree and enriches only configured member entries', async () => {
     await writeFile(
       join(root, 'skills.yaml'),
@@ -70,6 +146,7 @@ describe('loadProjectionManifest', () => {
       ].join('\n'),
     )
     await mkdir(join(root, 'remote-cache', 'skills'), { recursive: true })
+    const canonicalCache = await new NodeFileSystem().realPath(join(root, 'remote-cache', 'skills'))
     const git = sourceTreeGit([
       treeEntry('skills/selected/SKILL.md', 'selected-skill'),
       treeEntry('skills/unselected/SKILL.md', 'unselected-skill'),
@@ -89,8 +166,8 @@ describe('loadProjectionManifest', () => {
       },
     ])
     expect(source.members).not.toContainEqual(expect.objectContaining({ name: 'unselected' }))
-    expect(git.revParseHead).toHaveBeenCalledWith(join(root, 'remote-cache', 'skills'))
-    expect(git.checkout).toHaveBeenCalledWith(join(root, 'remote-cache', 'skills'), 'commit-1')
+    expect(git.revParseHead).toHaveBeenCalledWith(canonicalCache)
+    expect(git.checkout).toHaveBeenCalledWith(canonicalCache, 'commit-1')
     expect(git.clone).not.toHaveBeenCalled()
   })
 
@@ -135,6 +212,28 @@ describe('loadProjectionManifest', () => {
 })
 
 describe('projectRepository', () => {
+  it.each([
+    ['skills.yaml', 'invalid\n'],
+    ['mcp.yaml', 'servers: []\n'],
+    ['config.yaml', 'invalid\n'],
+  ])('fails before process, Git, or projection writes for malformed %s', async (file, source) => {
+    await writeFile(join(root, file), source)
+    const git = sourceTreeGit([])
+    const projectDeps = deps(git)
+
+    const result = await projectRepository(projectDeps, root, { scope: 'all' })
+
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { failedStep: 'manifest-invalid', rollbackReport: { undone: 0 } },
+    })
+    expect(projectDeps.proc.isCommandInstalled).not.toHaveBeenCalled()
+    expect(git.clone).not.toHaveBeenCalled()
+    expect(git.checkout).not.toHaveBeenCalled()
+    expect(git.readTree).not.toHaveBeenCalled()
+    expect(await projectDeps.fs.exists(join(root, '.codex'))).toBe(false)
+  })
+
   it('projects available local skills while preserving an unavailable remote source', async () => {
     await writeFile(join(root, 'config.yaml'), 'agents: [codex]\n')
     await writeFile(
@@ -186,6 +285,83 @@ describe('projectRepository', () => {
     expect(git.clone).not.toHaveBeenCalled()
   })
 
+  it('projects an explicit local skill path from its authorized manifest entry', async () => {
+    await writeFile(join(root, 'config.yaml'), 'agents: [codex]\n')
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources: []',
+        'skills:',
+        '  - id: external-skill',
+        '    path: ./external',
+        '    agents: [codex]',
+        '',
+      ].join('\n'),
+    )
+    await mkdir(join(root, 'external'), { recursive: true })
+    await writeFile(join(root, 'external', 'SKILL.md'), '# External skill\n')
+    const projectDeps = deps(sourceTreeGit([]))
+    projectDeps.proc.isCommandInstalled = vi.fn(async () => true)
+
+    const result = await projectRepository(projectDeps, root, {
+      scope: 'skills',
+      installedAgents: ['codex'],
+    })
+
+    expect(result).toEqual({ ok: true })
+    await expect(
+      projectDeps.fs.readFile(join(root, '.codex', 'skills', 'external-skill', 'SKILL.md')),
+    ).resolves.toBe('# External skill\n')
+  })
+
+  it('rejects a local projection plan whose path differs from the authorized manifest entry', async () => {
+    await writeFile(join(root, 'config.yaml'), 'agents: [codex]\n')
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources: []',
+        'skills:',
+        '  - id: external-skill',
+        '    path: ./external',
+        '    agents: [codex]',
+        '',
+      ].join('\n'),
+    )
+    await mkdir(join(root, 'external'), { recursive: true })
+    await writeFile(join(root, 'external', 'SKILL.md'), '# External skill\n')
+    const projectDeps = deps(sourceTreeGit([]))
+
+    const result = await projectRepository(projectDeps, root, {
+      scope: 'skills',
+      installedAgents: ['codex'],
+      plan: {
+        links: [
+          {
+            skillId: 'external-skill',
+            localPath: './other',
+            source: 'local',
+            agents: ['codex'],
+          },
+        ],
+        sourcePlans: [],
+        preservedSourceNamespaces: [],
+        mcpEntries: [],
+        memoryPlan: { active: null, content: null, agents: [] },
+        skippedAgents: [],
+        strategy: 'link',
+      },
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      failure: {
+        failedStep: 'projection',
+        rollbackReport: { undone: 0, rollbackFailures: [] },
+      },
+    })
+    expect(await projectDeps.fs.exists(join(root, '.codex'))).toBe(false)
+  })
+
   it.each(['mcp', 'memory'] as const)(
     'does not read or install skill source trees for %s-only projection',
     async (scope) => {
@@ -217,6 +393,15 @@ describe('projectRepository', () => {
 })
 
 describe('loadDisplayManifest', () => {
+  it('returns stable diagnostics instead of throwing for malformed containers', async () => {
+    await writeFile(join(root, 'skills.yaml'), 'invalid\n')
+
+    const manifest = await loadDisplayManifest(deps(sourceTreeGit([])), root)
+
+    expect(manifest.skills).toEqual({ sources: [], skills: [], group_order: [] })
+    expect(manifest.errors).toEqual([expect.stringContaining('skills.yaml')])
+  })
+
   it('validates the pinned local tree without scanning it and enriches configured members', async () => {
     await writeFile(
       join(root, 'skills.yaml'),
@@ -293,11 +478,11 @@ describe('loadDisplayManifest', () => {
   })
 })
 
-function deps(git: IGit) {
+function deps(git: IGit): ProjectionWorkflowDeps {
   return {
     fs: new NodeFileSystem(),
     git,
-    proc: { isCommandInstalled: async () => false },
+    proc: { isCommandInstalled: vi.fn(async () => false) },
     home: root,
   }
 }

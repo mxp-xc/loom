@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { configuredAgents as resolveConfiguredAgents, type AgentId } from '@loom/core'
 import { api } from '../../lib/api'
 import type { VarsMatrixResponse } from '../../lib/vars'
@@ -13,36 +13,70 @@ export function useProfileVars(repoPath: string) {
   const [matricesByAgent, setMatricesByAgent] = useState<
     Partial<Record<AgentId, VarsMatrixResponse>>
   >({})
+  const [matrixErrorsByAgent, setMatrixErrorsByAgent] = useState<Partial<Record<AgentId, string>>>(
+    {},
+  )
   const [loading, setLoading] = useState(true)
-  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const mountedRef = useRef(false)
+  const requestSequence = useRef(0)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      requestSequence.current += 1
+    }
+  }, [])
 
   const reload = useCallback(async () => {
+    const sequence = ++requestSequence.current
+    const isCurrent = () => mountedRef.current && requestSequence.current === sequence
     setLoading(true)
     setError(null)
     try {
-      const manifest = (await api.getManifest(repoPath)) as { config?: { agents?: unknown[] } }
+      const manifest = await api.getManifest(repoPath)
+      if (!isCurrent()) return
       const agents = resolveConfiguredAgents(manifest.config?.agents)
-      const [nextDefaultMatrix, entries] = await Promise.all([
+      const [nextDefaultMatrix, agentResults] = await Promise.all([
         api.vars.getMatrix(repoPath, 'default'),
-        Promise.all(
+        Promise.allSettled(
           agents.map(async (agent) => [agent, await api.vars.getMatrix(repoPath, agent)] as const),
         ),
       ])
+      if (!isCurrent()) return
+      const entries: Array<readonly [AgentId, VarsMatrixResponse]> = []
+      const agentErrors: Partial<Record<AgentId, string>> = {}
+      agentResults.forEach((result, index) => {
+        const agent = agents[index]!
+        if (result.status === 'fulfilled') entries.push(result.value)
+        else {
+          console.error({ err: result.reason, repoPath, agent }, 'Failed to load agent vars')
+          agentErrors[agent] =
+            result.reason instanceof Error ? result.reason.message : 'Agent 变量加载失败'
+        }
+      })
+      const availableAgents = entries.map(([agent]) => agent)
       setConfiguredAgents(agents)
       setDefaultMatrix(nextDefaultMatrix)
       setMatricesByAgent(Object.fromEntries(entries))
+      setMatrixErrorsByAgent(agentErrors)
       setActiveAgent((currentAgent) =>
-        currentAgent && agents.includes(currentAgent) ? currentAgent : (agents[0] ?? null),
+        currentAgent && availableAgents.includes(currentAgent)
+          ? currentAgent
+          : (availableAgents[0] ?? null),
       )
       setViewScope((currentScope) =>
-        currentScope === 'default' || agents.includes(currentScope) ? currentScope : 'default',
+        currentScope === 'default' || availableAgents.includes(currentScope)
+          ? currentScope
+          : 'default',
       )
     } catch (cause) {
-      console.error('Failed to load profile vars', cause)
+      if (!isCurrent()) return
+      console.error({ err: cause, repoPath }, 'Failed to load profile vars')
       setError(cause instanceof Error ? cause.message : '变量加载失败')
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [repoPath])
 
@@ -76,9 +110,8 @@ export function useProfileVars(repoPath: string) {
     state,
     defaultMatrix,
     matricesByAgent,
+    matrixErrorsByAgent,
     loading,
-    pending,
-    setPending,
     error,
     reload,
   }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { StrictMode, useState, type ReactNode } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
@@ -11,9 +11,6 @@ import SkillSourceList from '../src/views/skills/SkillSourceList'
 import SkillDetailEditor from '../src/views/skills/SkillDetailEditor'
 import AddSkillModal from '../src/views/skills/AddSkillModal'
 import EditSourceModal from '../src/views/skills/EditSourceModal'
-import Sync from '../src/views/Sync'
-import Mcp from '../src/views/Mcp'
-import Memory from '../src/views/Memory'
 import { useManifestOperations } from '../src/hooks/useManifestOperations'
 import { createMonacoEditorMock } from './monaco-test-utils'
 import { agentIds } from '../src/lib/agents'
@@ -35,29 +32,14 @@ function TestRouter({ children }: { children: ReactNode }) {
   return <MemoryRouter future={routerFuture}>{children}</MemoryRouter>
 }
 
-function fakeMonacoModel(line: string) {
-  return {
-    getValueInRange(range: {
-      startColumn: number
-      endColumn: number
-      startLineNumber: number
-      endLineNumber: number
-    }) {
-      expect(range.startLineNumber).toBe(range.endLineNumber)
-      return line.slice(range.startColumn - 1, range.endColumn - 1)
-    },
-  }
-}
-
 beforeEach(() => {
+  vi.clearAllMocks()
   monacoEditorMock.reset()
   window.history.replaceState({}, '', '/mcp')
 })
 
 vi.mock('../src/lib/api', () => ({
   api: {
-    init: vi.fn(async () => ({ ok: true, active_repo: 'default', repoPath: '/tmp/r' })),
-    status: vi.fn(async () => ({ active_repo: 'default', repoPath: '/tmp/r' })),
     project: vi.fn(async () => ({ ok: true })),
     update: vi.fn(async () => ({ updates: [] })),
     prepareSourceUpdate: vi.fn(async () => ({
@@ -69,19 +51,6 @@ vi.mock('../src/lib/api', () => ({
     })),
     finalizeSourceUpdate: vi.fn(async () => ({ ok: true, pinned_commit: 'bbb' })),
     cancelSourceUpdate: vi.fn(async () => ({ ok: true })),
-    syncPull: vi.fn(async () => ({ clean: true, files: [], textConflicts: [] })),
-    getSyncSession: vi.fn(async () => ({ ok: true, active: false })),
-    syncPush: vi.fn(async () => ({ ok: true })),
-    saveSyncConflict: vi.fn(async () => ({ ok: true, clean: true, remaining: [] })),
-    abortSyncMerge: vi.fn(async () => ({ ok: true })),
-    getSyncRemote: vi.fn(async () => ({ remoteUrl: null })),
-    setSyncRemote: vi.fn(async () => ({ ok: true })),
-    getConfig: vi.fn(async () => ({ effective: {}, repo: {}, local: {} })),
-    putConfig: vi.fn(async () => ({ ok: true })),
-    getOpenPathPreference: vi.fn(() => new Promise(() => {})),
-    setOpenPathPreference: vi.fn(async () => ({ ok: true })),
-    resolvePath: vi.fn(async () => ({ ok: true, path: '/repo/path' })),
-    openPath: vi.fn(async () => ({ ok: true })),
     scanLocalSkills: vi.fn(async () => ({ ok: true, skills: [] })),
     importLocalSkills: vi.fn(async () => ({ ok: true, count: 1 })),
     writeLocalSkills: vi.fn(async () => ({ ok: true, count: 1 })),
@@ -111,43 +80,7 @@ vi.mock('../src/lib/api', () => ({
     deleteSource: vi.fn(async () => ({ ok: true })),
     deleteLocalSkill: vi.fn(async () => ({ ok: true })),
     saveSkillContent: vi.fn(async () => ({ ok: true })),
-    addMcpServer: vi.fn(async () => ({ ok: true })),
-    updateMcpServer: vi.fn(async () => ({ ok: true })),
-    updateMcpAgents: vi.fn(async () => ({ ok: true })),
-    deleteMcpServer: vi.fn(async () => ({ ok: true })),
-    reorderMcpServers: vi.fn(async ({ ids }: { ids: string[] }) => ({ ok: true, ids })),
-    getMemory: vi.fn(async () => ({
-      memories: [],
-      assignments: {},
-      active: null,
-      activeContent: '',
-    })),
-    getMemoryContent: vi.fn(async (_repo: string, name: string) => ({ content: `# ${name}` })),
-    updateMemoryAgent: vi.fn(async () => ({ ok: true, assignments: {} })),
-    setMemoryActive: vi.fn(async () => ({ ok: true })),
-    createMemory: vi.fn(async () => ({ ok: true })),
-    renameMemory: vi.fn(async () => ({ ok: true })),
-    deleteMemory: vi.fn(async () => ({ ok: true })),
-    saveMemoryContent: vi.fn(async () => ({ ok: true })),
-    reorderMemories: vi.fn(async ({ names }: { names: string[] }) => ({ ok: true, names })),
     reorderSkillGroups: vi.fn(async ({ ids }: { ids: string[] }) => ({ ok: true, ids })),
-    vars: {
-      getMatrix: vi.fn(async () => ({
-        ok: true,
-        agent: 'codex',
-        builtinKeys: [],
-        userKeys: [],
-        snapshot: { base: {}, baseAgent: {}, local: {}, localAgent: {} },
-        resolution: {
-          ok: true,
-          values: {},
-          sources: {},
-          overrideChains: {},
-          dependencies: {},
-          diagnostics: [],
-        },
-      })),
-    },
     getManifest: vi.fn(async (repoPath: string) =>
       repoPath === '/tmp/mcp-layout'
         ? {
@@ -223,10 +156,6 @@ vi.mock('../src/lib/api', () => ({
     ),
   },
 }))
-
-const defaultGetManifest = vi.mocked(api.getManifest).getMockImplementation()!
-const defaultGetMemory = vi.mocked(api.getMemory).getMockImplementation()!
-const defaultGetMemoryContent = vi.mocked(api.getMemoryContent).getMockImplementation()!
 
 function SkillSourceListHarness({
   repoPath,
@@ -333,691 +262,7 @@ function sourceTreeResponse(names: string[], commit = 'abc123456789') {
   }
 }
 
-describe('MCP view', () => {
-  it('renders the workbench and embedded create editor', async () => {
-    render(<Mcp repoPath="/tmp/mcp-layout" />)
-
-    const workbench = await screen.findByRole('region', { name: 'MCP workbench' })
-    expect(within(workbench).getByRole('complementary', { name: 'MCP inventory' })).toBeDefined()
-    expect(screen.queryByRole('heading', { name: 'MCP Servers' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Project changes' })).toBeDefined()
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'Add server' }).at(-1)!)
-    expect(screen.queryByRole('dialog', { name: /MCP Server/ })).toBeNull()
-    expect(screen.getByRole('heading', { name: '新增 MCP server' })).toBeDefined()
-    expect(screen.getByLabelText('env key 1')).toBeDefined()
-    expect(screen.getByRole('tab', { name: 'JSON' })).toBeDefined()
-    const envModes = screen.getByRole('tablist', { name: 'env 编辑方式' })
-    expect(within(envModes).getByRole('tab', { name: '切换 env 为 key value 编辑' })).toBeDefined()
-    expect(within(envModes).getByRole('tab', { name: '切换 env 为 env file 编辑' })).toBeDefined()
-    expect(screen.getByText('KEY')).toBeDefined()
-    expect(screen.getByText('VALUE')).toBeDefined()
-    expect(screen.getByRole('button', { name: '新增 env 行' }).textContent).toContain(
-      '添加环境变量',
-    )
-    expect(screen.getByLabelText('server id').parentElement?.querySelector('svg')).not.toBeNull()
-    expect(screen.getByLabelText('command').parentElement?.querySelector('svg')).not.toBeNull()
-    expect(screen.getByText('小写字母、数字与连字符。')).toBeDefined()
-  })
-
-  it('loads MCP vars and suggests variables inside env files', async () => {
-    vi.mocked(api.vars.getMatrix).mockResolvedValue({
-      ok: true,
-      agent: 'codex',
-      builtinKeys: ['API_URL'],
-      userKeys: ['API_TOKEN'],
-      snapshot: { base: {}, baseAgent: {}, local: {}, localAgent: {} },
-      resolution: {
-        ok: true,
-        values: {},
-        sources: {},
-        overrideChains: {},
-        dependencies: {},
-        diagnostics: [],
-      },
-    } as never)
-
-    render(<Mcp repoPath="/tmp/mcp-layout" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑 test-mcp' }))
-    expect(await screen.findByRole('heading', { name: '编辑 MCP server' })).toBeDefined()
-
-    await waitFor(() => expect(api.vars.getMatrix).toHaveBeenCalledWith('/tmp/mcp-layout', 'codex'))
-    fireEvent.click(screen.getByRole('tab', { name: 'JSON' }))
-    await waitFor(() => expect(monacoEditorMock.providers.length).toBeGreaterThan(0))
-
-    const provider = monacoEditorMock.providers[0] as {
-      provideCompletionItems: (model: unknown, position: unknown) => { suggestions: unknown[] }
-    }
-    const suggestions = provider.provideCompletionItems(fakeMonacoModel('${AP'), {
-      lineNumber: 1,
-      column: 5,
-    }).suggestions
-    expect(suggestions).toContainEqual(expect.objectContaining({ label: 'API_URL' }))
-  })
-
-  it('edits a server in the embedded Monaco file editor', async () => {
-    render(<Mcp repoPath="/tmp/mcp-layout" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑 test-mcp' }))
-    expect(await screen.findByRole('heading', { name: '编辑 MCP server' })).toBeDefined()
-
-    const idInput = screen.getByLabelText('server id') as HTMLInputElement
-    expect(idInput.value).toBe('test-mcp')
-    expect(idInput.disabled).toBe(true)
-    expect(screen.getByText('ID 已锁定，保存后不可修改')).toBeDefined()
-
-    fireEvent.change(screen.getByLabelText('command'), { target: { value: 'node' } })
-    expect(screen.queryByText('agents')).toBeNull()
-
-    fireEvent.change(screen.getByLabelText('env value 1'), { target: { value: 'baz' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-
-    await waitFor(() =>
-      expect(api.updateMcpServer).toHaveBeenCalledWith({
-        repo: '/tmp/mcp-layout',
-        id: 'test-mcp',
-        server: expect.objectContaining({
-          id: 'test-mcp',
-          type: 'stdio',
-          command: 'node',
-          args: ['hello'],
-          env: { FOO: 'baz' },
-          agents: ['codex'],
-        }),
-      }),
-    )
-  })
-
-  it('edits remote MCP headers through the embedded Monaco file editor', async () => {
-    render(<Mcp repoPath="/tmp/mcp-layout" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '选择 remote-mcp' }))
-    fireEvent.click(await screen.findByRole('button', { name: '编辑 remote-mcp' }))
-    expect(await screen.findByRole('heading', { name: '编辑 MCP server' })).toBeDefined()
-
-    fireEvent.change(screen.getByLabelText('headers value 1'), {
-      target: { value: 'Bearer ${API_TOKEN}' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-
-    await waitFor(() =>
-      expect(api.updateMcpServer).toHaveBeenCalledWith({
-        repo: '/tmp/mcp-layout',
-        id: 'remote-mcp',
-        server: expect.objectContaining({
-          id: 'remote-mcp',
-          type: 'http',
-          url: 'https://example.test/mcp',
-          headers: { Authorization: 'Bearer ${API_TOKEN}' },
-        }),
-      }),
-    )
-  })
-
-  it('supports MCP env key value rows with add and delete controls', async () => {
-    render(<Mcp repoPath="/tmp/mcp-layout" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑 test-mcp' }))
-    expect(await screen.findByRole('heading', { name: '编辑 MCP server' })).toBeDefined()
-
-    fireEvent.change(screen.getByLabelText('env key 1'), { target: { value: 'FOO' } })
-    fireEvent.change(screen.getByLabelText('env value 1'), { target: { value: 'baz' } })
-    fireEvent.click(screen.getByRole('button', { name: '新增 env 行' }))
-    fireEvent.change(screen.getByLabelText('env key 2'), { target: { value: 'TOKEN' } })
-    fireEvent.change(screen.getByLabelText('env value 2'), { target: { value: 'abc 123' } })
-    fireEvent.click(screen.getByRole('button', { name: '删除 env 行 1' }))
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-
-    await waitFor(() =>
-      expect(api.updateMcpServer).toHaveBeenCalledWith({
-        repo: '/tmp/mcp-layout',
-        id: 'test-mcp',
-        server: expect.objectContaining({
-          env: { TOKEN: 'abc 123' },
-          agents: ['codex'],
-        }),
-      }),
-    )
-  })
-
-  it('validates the embedded create editor locally', async () => {
-    const callsBefore = vi.mocked(api.addMcpServer).mock.calls.length
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    try {
-      render(<Mcp repoPath="/tmp/mcp-layout" />)
-
-      await screen.findByRole('region', { name: 'MCP workbench' })
-      fireEvent.click(screen.getAllByRole('button', { name: 'Add server' }).at(-1)!)
-      fireEvent.click(screen.getByRole('button', { name: '保存' }))
-
-      expect(await screen.findByText('id 不能为空')).toBeDefined()
-      expect(api.addMcpServer).toHaveBeenCalledTimes(callsBefore)
-      expect(consoleError).toHaveBeenCalledWith(
-        expect.objectContaining({ err: expect.any(Error) }),
-        'Failed to submit MCP server',
-      )
-    } finally {
-      consoleError.mockRestore()
-    }
-  })
-
-  it('bulk toggles MCP server agents without projecting', async () => {
-    render(<Mcp repoPath="/tmp/mcp-layout" />)
-
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: '全部 MCP servers 应用到 Codex：部分已应用',
-      }),
-    )
-
-    await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalledTimes(2))
-    expect(api.project).not.toHaveBeenCalled()
-    expect(api.updateMcpAgents).toHaveBeenCalledWith({
-      repo: '/tmp/mcp-layout',
-      id: 'test-mcp',
-      agents: ['codex'],
-    })
-    expect(api.updateMcpAgents).toHaveBeenCalledWith({
-      repo: '/tmp/mcp-layout',
-      id: 'remote-mcp',
-      agents: ['codex'],
-    })
-  })
-
-  it('updates MCP bulk agents one server at a time', async () => {
-    let releaseFirst!: () => void
-    const callsBefore = vi.mocked(api.updateMcpAgents).mock.calls.length
-    vi.mocked(api.updateMcpAgents).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          releaseFirst = () => resolve({ ok: true })
-        }) as never,
-    )
-
-    render(<Mcp repoPath="/tmp/mcp-layout" />)
-
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: '全部 MCP servers 应用到 Codex：部分已应用',
-      }),
-    )
-
-    await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalledTimes(callsBefore + 1))
-    releaseFirst()
-    await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalledTimes(callsBefore + 2))
-    vi.mocked(api.updateMcpAgents).mockResolvedValue({ ok: true } as never)
-  })
-
-  it('keeps selection while reordering to the end and disables sorting while searching', async () => {
-    render(<Mcp repoPath="/tmp/mcp-layout" />)
-
-    const first = await screen.findByLabelText('调整 test-mcp 顺序')
-    const second = screen.getByLabelText('调整 remote-mcp 顺序')
-    ;[first, second].forEach((element, index) => {
-      element.getBoundingClientRect = () =>
-        DOMRect.fromRect({ x: 0, y: index * 100, width: 320, height: 92 })
-      const sortableItem = element.parentElement?.parentElement?.parentElement
-      if (sortableItem) {
-        sortableItem.getBoundingClientRect = () =>
-          DOMRect.fromRect({ x: 0, y: index * 100, width: 700, height: 92 })
-      }
-    })
-    fireEvent.click(screen.getAllByRole('button', { name: '选择 remote-mcp' })[0])
-    expect(await screen.findByRole('heading', { name: 'remote-mcp' })).toBeDefined()
-
-    first.focus()
-    fireEvent.keyDown(first, { key: ' ', code: 'Space' })
-    await waitFor(() => expect(first.getAttribute('aria-pressed')).toBe('true'))
-    fireEvent.keyDown(document, { key: 'ArrowDown', code: 'ArrowDown' })
-    fireEvent.keyDown(document, { key: ' ', code: 'Space' })
-
-    await waitFor(() =>
-      expect(api.reorderMcpServers).toHaveBeenCalledWith({
-        repo: '/tmp/mcp-layout',
-        ids: ['remote-mcp', 'test-mcp'],
-      }),
-    )
-    expect(await screen.findByRole('heading', { name: 'remote-mcp' })).toBeDefined()
-
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'remote' } })
-    expect(screen.getByLabelText('调整 remote-mcp 顺序').getAttribute('aria-disabled')).toBe('true')
-  })
-})
-
-describe('Skill detail modal', () => {
-  it('keeps location metadata without projected links when agents are empty', async () => {
-    vi.mocked(api.getSkillContent).mockResolvedValueOnce({
-      ok: true,
-      content: '# Source skill',
-    } as never)
-
-    render(
-      <SkillDetailEditor
-        repoPath="/tmp/skills-empty-agents"
-        agents={[]}
-        detail={{
-          skillId: 'source-skill',
-          source: 'https://example.test/skills.git',
-          path: 'source-skill/SKILL.md',
-          agents: ['codex'],
-        }}
-        showToast={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    )
-
-    const dialog = await screen.findByRole('dialog', { name: 'source-skill' })
-    expect(within(dialog).getByText('Location')).toBeDefined()
-    expect(within(dialog).getByText('https://example.test/skills.git')).toBeDefined()
-    expect(within(dialog).getByText('source-skill/SKILL.md')).toBeDefined()
-    expect(within(dialog).queryByText('Projected links')).toBeNull()
-  })
-
-  it('matches the approved Edit Skill workbench structure', async () => {
-    vi.mocked(api.getSkillContent).mockResolvedValueOnce({
-      ok: true,
-      content: '# Production skill',
-    } as never)
-
-    render(
-      <SkillDetailEditor
-        repoPath="/tmp/skills-workbench"
-        agents={agentIds}
-        detail={{
-          skillId: 'production-skill',
-          path: '/skills/production-skill/SKILL.md',
-          agents: ['codex'],
-        }}
-        showToast={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    )
-
-    const dialog = await screen.findByRole('dialog', { name: 'production-skill' })
-    expect(within(dialog).getByText('Local skill')).toBeDefined()
-    expect(
-      within(dialog).getByRole('heading', { level: 1, name: 'production-skill' }),
-    ).toBeDefined()
-    expect(within(dialog).getByTestId('skill-metadata-pane')).toBeDefined()
-    expect(within(dialog).getByTestId('skill-document-pane')).toBeDefined()
-    expect(within(dialog).getByTestId('skills-workbench')).toBeDefined()
-    expect(within(dialog).getByRole('tab', { name: 'Details' })).toBeDefined()
-    expect(within(dialog).getByRole('tab', { name: 'SKILL.md' })).toBeDefined()
-    expect(within(dialog).getByText('Location')).toBeDefined()
-    expect(within(dialog).getByText('Projected links')).toBeDefined()
-    expect(within(dialog).getByText('1 of 3')).toBeDefined()
-    expect(within(dialog).getByText('Claude Code')).toBeDefined()
-    expect(within(dialog).getByText('Codex')).toBeDefined()
-    expect(within(dialog).getByText('OpenCode')).toBeDefined()
-    expect(within(dialog).getByRole('tab', { name: 'Preview' })).toBeDefined()
-    expect(within(dialog).getByRole('tab', { name: 'Source' })).toBeDefined()
-    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeDefined()
-    expect(
-      within(dialog).getByRole('button', { name: 'Save SKILL.md' }).hasAttribute('disabled'),
-    ).toBe(true)
-  })
-
-  it('reserves the SKILL.md content frame while content is loading', async () => {
-    let resolveContent!: (value: { ok: true; content: string }) => void
-    vi.mocked(api.getSkillContent).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveContent = resolve
-        }) as never,
-    )
-
-    render(
-      <SkillDetailEditor
-        repoPath="/tmp/skills-layout"
-        agents={agentIds}
-        detail={{
-          skillId: 'superpowers/receiving-code-review',
-          source: 'https://github.com/obra/superpowers.git',
-          agents: ['codex'],
-        }}
-        showToast={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    )
-
-    const dialog = await screen.findByRole('dialog', {
-      name: 'superpowers/receiving-code-review',
-    })
-    expect(dialog.getAttribute('style')).toContain('1180px')
-    const contentFrame = within(dialog).getByTestId('skill-detail-content-frame')
-    expect(contentFrame).toBeDefined()
-    expect(within(dialog).getByText('Loading SKILL.md')).toBeDefined()
-
-    await act(async () => {
-      resolveContent({ ok: true, content: '# Loaded skill' })
-    })
-
-    const loadedHeading = await within(dialog).findByText('Loaded skill')
-    const previewPanel = loadedHeading.closest('.md-preview') as HTMLElement
-    expect(contentFrame.contains(previewPanel)).toBe(true)
-    const copyButton = within(dialog).getByRole('button', { name: '复制 SKILL.md' })
-    expect(within(dialog).getByTestId('skill-document-pane').contains(copyButton)).toBe(true)
-    expect(within(dialog).queryByRole('button', { name: 'Save SKILL.md' })).toBeNull()
-  })
-
-  it('keeps source skills read-only in the Source pane', async () => {
-    vi.mocked(api.getSkillContent).mockResolvedValueOnce({
-      ok: true,
-      content: '# Managed by source',
-    } as never)
-
-    render(
-      <SkillDetailEditor
-        repoPath="/tmp/source-skill"
-        agents={agentIds}
-        detail={{
-          skillId: 'source-skill',
-          source: 'https://github.com/example/skills.git',
-          path: 'skills/source-skill/SKILL.md',
-          agents: ['codex', 'opencode'],
-        }}
-        showToast={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    )
-
-    const dialog = await screen.findByRole('dialog', { name: 'source-skill' })
-    expect(within(dialog).getByText('Read only')).toBeDefined()
-    expect(within(dialog).getByText('2 of 3')).toBeDefined()
-    fireEvent.click(within(dialog).getByRole('tab', { name: 'Source' }))
-    expect(within(dialog).getByText('# Managed by source')).toBeDefined()
-    expect(within(dialog).queryByRole('textbox', { name: 'SKILL.md 内容' })).toBeNull()
-    expect(within(dialog).queryByRole('button', { name: 'Save SKILL.md' })).toBeNull()
-  })
-
-  it('opens an empty local skill directly into the source editor', async () => {
-    vi.mocked(api.getSkillContent).mockResolvedValueOnce({ ok: true, content: '' } as never)
-
-    render(
-      <SkillDetailEditor
-        repoPath="/tmp/empty-local-skill"
-        agents={agentIds}
-        detail={{ skillId: 'empty-local-skill', path: './skills/empty', agents: [] }}
-        showToast={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    )
-
-    const dialog = await screen.findByRole('dialog', { name: 'empty-local-skill' })
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Start editing' }))
-    expect(within(dialog).getByRole('textbox', { name: 'SKILL.md 内容' })).toBeDefined()
-  })
-})
-
-describe('Memory view', () => {
-  afterEach(() => {
-    vi.mocked(api.getManifest).mockReset().mockImplementation(defaultGetManifest)
-    vi.mocked(api.getMemory).mockReset().mockImplementation(defaultGetMemory)
-    vi.mocked(api.getMemoryContent).mockReset().mockImplementation(defaultGetMemoryContent)
-  })
-
-  it('uses the approved dropdown manager and preview-first workbench layout', async () => {
-    vi.mocked(api.getManifest).mockResolvedValueOnce({
-      skills: { sources: [], skills: [] },
-      mcp: [],
-      vars: { default: {}, active: {} },
-      config: { agents: ['codex', 'opencode'] },
-      errors: [],
-    } as never)
-    vi.mocked(api.getMemory).mockResolvedValueOnce({
-      memories: [
-        { name: 'v1', agents: ['codex'] },
-        { name: 'review-rules', agents: ['opencode'] },
-      ],
-      assignments: { codex: 'v1', opencode: 'review-rules' },
-      active: null,
-      activeContent: '',
-    } as never)
-    vi.mocked(api.getMemoryContent).mockResolvedValueOnce({ content: '# Active memory' })
-
-    render(<Memory repoPath="/tmp/memory-layout-approved" />)
-
-    const layout = await screen.findByTestId('memory-layout')
-    expect(layout).toBeDefined()
-    expect(screen.getByRole('tab', { name: '所见' }).getAttribute('aria-selected')).toBe('true')
-    expect(screen.getByRole('heading', { name: 'v1', level: 1 })).toBeDefined()
-    expect(screen.getByLabelText('Memory 状态').textContent).toContain('1 个 Agent')
-    expect(screen.getByRole('article').textContent).toContain('Active memory')
-    expect(screen.getByRole('button', { name: '管理 Memory' })).toBeDefined()
-
-    fireEvent.click(screen.getByRole('button', { name: /Memory.*v1/ }))
-    const menu = screen.getByRole('menu', { name: 'Memory 列表' })
-    expect(within(menu).getByRole('menuitem', { name: '新建 Memory' })).toBeDefined()
-    expect(within(menu).getByRole('button', { name: '删除 v1' })).toBeDefined()
-    expect(within(menu).getByRole('button', { name: '删除 review-rules' })).toBeDefined()
-    expect(within(menu).getByRole('button', { name: 'v1 已投影到 Codex' })).toBeDefined()
-  })
-
-  it('closes the Memory selector with Escape and restores trigger focus', async () => {
-    vi.mocked(api.getManifest).mockResolvedValueOnce({
-      skills: { sources: [], skills: [] },
-      mcp: [],
-      vars: { default: {}, active: {} },
-      config: { agents: ['codex'] },
-      errors: [],
-    } as never)
-    vi.mocked(api.getMemory).mockResolvedValueOnce({
-      memories: [{ name: 'v1', agents: ['codex'] }],
-      assignments: { codex: 'v1' },
-      active: null,
-      activeContent: '',
-    } as never)
-    vi.mocked(api.getMemoryContent).mockResolvedValueOnce({ content: '# v1' })
-    render(<Memory repoPath="/tmp/memory-menu-escape" />)
-
-    const trigger = await screen.findByRole('button', { name: /Memory.*v1/ })
-    fireEvent.click(trigger)
-    expect(screen.getByRole('menu', { name: 'Memory 列表' })).toBeDefined()
-    fireEvent.keyDown(window, { key: 'Escape' })
-
-    expect(screen.queryByRole('menu', { name: 'Memory 列表' })).toBeNull()
-    expect(document.activeElement).toBe(trigger)
-  })
-
-  it('hides preserved assignments for agents outside the configured scope', async () => {
-    vi.mocked(api.getManifest).mockResolvedValueOnce({
-      skills: { sources: [], skills: [] },
-      mcp: [],
-      vars: { default: {}, active: {} },
-      config: { agents: ['codex'] },
-      errors: [],
-    } as never)
-    vi.mocked(api.getMemory).mockResolvedValueOnce({
-      memories: [{ name: 'v1', agents: ['codex', 'opencode'] }],
-      assignments: { codex: 'v1', opencode: 'v1' },
-      active: null,
-      activeContent: '',
-    } as never)
-    vi.mocked(api.getMemoryContent).mockResolvedValueOnce({ content: '# Scoped memory' })
-
-    render(<Memory repoPath="/tmp/memory-configured-scope" />)
-
-    expect(await screen.findByRole('heading', { name: 'v1', level: 1 })).toBeDefined()
-    expect(screen.getByLabelText('Memory 状态').textContent).toContain('1 个 Agent')
-    expect(document.querySelector('[data-agent="codex"]')).not.toBeNull()
-    expect(document.querySelector('[data-agent="opencode"]')).toBeNull()
-  })
-
-  it('ignores stale content when memory selections resolve out of order', async () => {
-    let resolveV2!: (value: { content: string }) => void
-    vi.mocked(api.getMemory).mockResolvedValue({
-      memories: [
-        { name: 'v1', agents: ['codex'] },
-        { name: 'v2', agents: [] },
-        { name: 'v3', agents: [] },
-      ],
-      assignments: { codex: 'v1' },
-      active: null,
-      activeContent: '',
-    } as never)
-    vi.mocked(api.getMemoryContent).mockImplementation(async (_repo, name) => {
-      if (name === 'v2') return new Promise((resolve) => (resolveV2 = resolve))
-      return { content: `# ${name}` }
-    })
-
-    render(<Memory repoPath="/tmp/memory-selection-race" />)
-    await screen.findByRole('button', { name: /Memory.*v1/ })
-
-    fireEvent.click(screen.getByRole('button', { name: /Memory.*v1/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'v2' }))
-    fireEvent.click(screen.getByRole('button', { name: /Memory.*v1/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'v3' }))
-    await screen.findByRole('heading', { name: 'v3' })
-
-    await act(async () => {
-      resolveV2({ content: '# stale v2' })
-      await Promise.resolve()
-    })
-    expect(screen.getByRole('button', { name: /Memory.*v3/ })).toBeDefined()
-    expect(screen.queryByRole('heading', { name: 'stale v2' })).toBeNull()
-  })
-
-  it('asks before discarding an unsaved draft when switching memories', async () => {
-    vi.mocked(api.getMemory).mockResolvedValue({
-      memories: [
-        { name: 'v1', agents: ['codex'] },
-        { name: 'v2', agents: [] },
-      ],
-      assignments: { codex: 'v1' },
-      active: null,
-      activeContent: '',
-    } as never)
-    vi.mocked(api.getMemoryContent).mockImplementation(async (_repo, name) => ({
-      content: `# ${name}`,
-    }))
-
-    render(<Memory repoPath="/tmp/memory-unsaved-switch" />)
-    await screen.findByRole('button', { name: /Memory.*v1/ })
-    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
-    const source = screen.getByRole('textbox', { name: 'Memory 内容' })
-    fireEvent.change(source, { target: { value: '# Edited draft' } })
-    await screen.findByRole('button', { name: '保存' })
-
-    fireEvent.click(screen.getByRole('button', { name: /Memory.*v1/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'v2' }))
-    const dialog = await screen.findByRole('dialog', { name: '放弃未保存更改' })
-    expect((source as HTMLTextAreaElement).value).toBe('# Edited draft')
-    fireEvent.click(within(dialog).getByRole('button', { name: '继续编辑' }))
-    expect(screen.getByRole('button', { name: /Memory.*v1/ })).toBeDefined()
-
-    fireEvent.click(screen.getByRole('button', { name: /Memory.*v1/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'v2' }))
-    fireEvent.click(
-      within(await screen.findByRole('dialog', { name: '放弃未保存更改' })).getByRole('button', {
-        name: '放弃并切换',
-      }),
-    )
-    await waitFor(() => expect(screen.getByRole('button', { name: /Memory.*v2/ })).toBeDefined())
-    expect(
-      (screen.getByRole('textbox', { name: 'Memory 内容' }) as HTMLTextAreaElement).value,
-    ).toBe('# v2')
-  })
-
-  it('assigns an unoccupied agent and reconciles projection immediately', async () => {
-    vi.mocked(api.getManifest).mockResolvedValue({
-      skills: { sources: [], skills: [] },
-      mcp: [],
-      vars: { default: {}, active: {} },
-      config: { agents: ['codex', 'opencode'] },
-      errors: [],
-    } as never)
-    vi.mocked(api.getMemory)
-      .mockResolvedValueOnce({
-        memories: [{ name: 'v1', agents: ['codex'] }],
-        assignments: { codex: 'v1' },
-        active: null,
-        activeContent: '',
-      } as never)
-      .mockResolvedValueOnce({
-        memories: [{ name: 'v1', agents: ['codex', 'opencode'] }],
-        assignments: { codex: 'v1', opencode: 'v1' },
-        active: null,
-        activeContent: '',
-      } as never)
-    vi.mocked(api.getMemoryContent).mockResolvedValue({ content: '# v1' })
-
-    render(<Memory repoPath="/tmp/memory-agents" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'v1 投影到 OpenCode' }))
-
-    await waitFor(() =>
-      expect(api.updateMemoryAgent).toHaveBeenCalledWith({
-        repo: '/tmp/memory-agents',
-        agent: 'opencode',
-        name: 'v1',
-      }),
-    )
-    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/memory-agents', scope: 'memory' })
-  })
-
-  it('confirms before moving an occupied agent to another memory', async () => {
-    vi.mocked(api.updateMemoryAgent).mockClear()
-    vi.mocked(api.getManifest).mockResolvedValue({
-      skills: { sources: [], skills: [] },
-      mcp: [],
-      vars: { default: {}, active: {} },
-      config: { agents: ['codex', 'opencode'] },
-      errors: [],
-    } as never)
-    vi.mocked(api.getMemory).mockResolvedValue({
-      memories: [
-        { name: 'v1', agents: ['codex'] },
-        { name: 'v2', agents: ['opencode'] },
-      ],
-      assignments: { codex: 'v1', opencode: 'v2' },
-      active: null,
-      activeContent: '',
-    } as never)
-    vi.mocked(api.getMemoryContent).mockResolvedValue({ content: '# memory' })
-
-    render(<Memory repoPath="/tmp/memory-conflict" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'v1 投影到 OpenCode' }))
-    const dialog = await screen.findByRole('dialog', { name: '切换 OpenCode 的 Memory' })
-    expect(dialog.textContent).toContain('v2')
-    expect(dialog.textContent).toContain('v1')
-    expect(api.updateMemoryAgent).not.toHaveBeenCalled()
-    fireEvent.click(within(dialog).getByRole('button', { name: '确认切换' }))
-
-    await waitFor(() =>
-      expect(api.updateMemoryAgent).toHaveBeenCalledWith({
-        repo: '/tmp/memory-conflict',
-        agent: 'opencode',
-        name: 'v1',
-      }),
-    )
-  })
-
-  it('deletes a specific memory from the dropdown', async () => {
-    vi.mocked(api.getMemory).mockResolvedValue({
-      memories: [
-        { name: 'v1', agents: ['codex'] },
-        { name: 'v2', agents: [] },
-      ],
-      assignments: { codex: 'v1' },
-      active: null,
-      activeContent: '',
-    } as never)
-    vi.mocked(api.getMemoryContent).mockResolvedValue({ content: '# memory' })
-
-    render(<Memory repoPath="/tmp/memory-actions" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: /Memory.*v1/ }))
-    fireEvent.click(screen.getByRole('button', { name: '删除 v2' }))
-    const dialog = await screen.findByRole('dialog', { name: '删除 Memory' })
-    fireEvent.click(within(dialog).getByRole('button', { name: '删除' }))
-    await waitFor(() => expect(api.deleteMemory).toHaveBeenCalledWith('/tmp/memory-actions', 'v2'))
-  })
-})
-
-describe('Skills view', () => {
+describe('Skills page', () => {
   it('shows machine-local source unavailability as a non-blocking warning', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
       skills: {
@@ -1054,21 +299,6 @@ describe('Skills view', () => {
     expect(screen.queryByText('部分 Skills 配置无法读取')).toBeNull()
   })
 
-  it('renders unambiguous page actions without the legacy footer guidance', async () => {
-    render(
-      <TestRouter>
-        <Skills repoPath="/tmp/r" />
-      </TestRouter>,
-    )
-    const projectButton = await screen.findByRole('button', { name: '投影' })
-    expect(projectButton.querySelector('.lucide-send')).not.toBeNull()
-    const addButton = screen.getByRole('button', { name: '添加 Skill 或 Source' })
-    expect(addButton.textContent).toContain('添加')
-    expect(addButton.querySelector('.lucide-plus')).not.toBeNull()
-    expect(screen.queryByRole('button', { name: 'Add skill' })).toBeNull()
-    expect(screen.queryByText(/source 级操作/)).toBeNull()
-  })
-
   it('keeps content and source management without agent controls when agents are empty', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
       skills: {
@@ -1096,8 +326,6 @@ describe('Skills view', () => {
 
   it('clears stale project errors after a successful project mutation refreshes manifest', async () => {
     const repoPath = '/tmp/skills-project-error-clear'
-    const getManifestCallsBefore = vi.mocked(api.getManifest).mock.calls.length
-    const projectCallsBefore = vi.mocked(api.project).mock.calls.length
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.mocked(api.project).mockResolvedValueOnce({
       ok: false,
@@ -1113,20 +341,20 @@ describe('Skills view', () => {
       )
 
       await screen.findByText('还没有配置任何 Skill')
-      await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(getManifestCallsBefore + 1))
+      await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(1))
 
       fireEvent.click(screen.getByRole('button', { name: '投影' }))
 
       expect(await screen.findByText('Skills 操作失败')).toBeDefined()
       expect(screen.getByText('投影失败: stale yaml')).toBeDefined()
-      await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 1))
+      await waitFor(() => expect(api.project).toHaveBeenCalledTimes(1))
 
       fireEvent.click(screen.getByRole('button', { name: '关闭“Skills 操作失败”' }))
 
       fireEvent.click(screen.getByRole('button', { name: '投影' }))
 
-      await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 2))
-      await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(getManifestCallsBefore + 2))
+      await waitFor(() => expect(api.project).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(2))
       await waitFor(() => expect(screen.queryByText('Skills 操作失败')).toBeNull())
     } finally {
       consoleError.mockRestore()
@@ -1221,7 +449,6 @@ describe('Skills view', () => {
   })
 
   it('projects skills after an individual agent chip is toggled', async () => {
-    const projectCallsBefore = vi.mocked(api.project).mock.calls.length
     render(
       <TestRouter>
         <Skills repoPath="/tmp/skills-layout" />
@@ -1239,14 +466,11 @@ describe('Skills view', () => {
         agents: ['codex'],
       }),
     )
-    await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 1))
+    await waitFor(() => expect(api.project).toHaveBeenCalledTimes(1))
     expect(api.project).toHaveBeenLastCalledWith({ repo: '/tmp/skills-layout', scope: 'skills' })
   })
 
   it('supports source-level bulk projection chips in the source header', async () => {
-    const projectCallsBefore = vi.mocked(api.project).mock.calls.length
-    const updateCallsBefore = vi.mocked(api.updateSkillAgents).mock.calls.length
-    const sourceUpdateCallsBefore = vi.mocked(api.updateSourceSkillAgents).mock.calls.length
     const manifest = {
       skills: {
         sources: [
@@ -1290,9 +514,7 @@ describe('Skills view', () => {
     expect(sourceBulkCodex).toBeDefined()
     fireEvent.click(sourceBulkCodex)
 
-    await waitFor(() =>
-      expect(api.updateSourceSkillAgents).toHaveBeenCalledTimes(sourceUpdateCallsBefore + 1),
-    )
+    await waitFor(() => expect(api.updateSourceSkillAgents).toHaveBeenCalledTimes(1))
     expect(api.updateSourceSkillAgents).toHaveBeenLastCalledWith({
       repo: '/tmp/skills-layout',
       sourceUrl: 'https://github.com/obra/superpowers.git',
@@ -1302,18 +524,16 @@ describe('Skills view', () => {
         { memberEntry: 'disabled-skill/SKILL.md', agents: ['codex'] },
       ],
     })
-    expect(api.updateSkillAgents).toHaveBeenCalledTimes(updateCallsBefore)
+    expect(api.updateSkillAgents).not.toHaveBeenCalled()
     expect(api.updateLocalSkillAgents).not.toHaveBeenCalledWith(
       expect.objectContaining({ id: 'local-only' }),
     )
-    await waitFor(() => expect(api.project).toHaveBeenCalledTimes(projectCallsBefore + 1))
+    await waitFor(() => expect(api.project).toHaveBeenCalledTimes(1))
     expect(api.project).toHaveBeenLastCalledWith({ repo: '/tmp/skills-layout', scope: 'skills' })
   })
 
   it('updates skill bulk agents one item at a time', async () => {
     let releaseFirst!: () => void
-    const sourceCallsBefore = vi.mocked(api.updateSkillAgents).mock.calls.length
-    const localCallsBefore = vi.mocked(api.updateLocalSkillAgents).mock.calls.length
     vi.mocked(api.updateSkillAgents).mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -1329,13 +549,11 @@ describe('Skills view', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Codex：部分已选择' }))
 
-    await waitFor(() => expect(api.updateSkillAgents).toHaveBeenCalledTimes(sourceCallsBefore + 1))
-    expect(api.updateLocalSkillAgents).toHaveBeenCalledTimes(localCallsBefore)
+    await waitFor(() => expect(api.updateSkillAgents).toHaveBeenCalledTimes(1))
+    expect(api.updateLocalSkillAgents).not.toHaveBeenCalled()
 
     releaseFirst()
-    await waitFor(() =>
-      expect(api.updateLocalSkillAgents).toHaveBeenCalledTimes(localCallsBefore + 2),
-    )
+    await waitFor(() => expect(api.updateLocalSkillAgents).toHaveBeenCalledTimes(2))
     vi.mocked(api.updateSkillAgents).mockResolvedValue({ ok: true } as never)
   })
 })
@@ -1429,7 +647,6 @@ describe('Add Skill modal', () => {
           }) as never,
       )
       .mockResolvedValueOnce({ ok: true, branches: ['main'], tags: [] } as never)
-    const refsCallCount = vi.mocked(api.getSourceRefs).mock.calls.length
     const onClose = vi.fn()
     const rendered = render(
       <AddSkillModal open repoPath="/tmp/add-refs-reopen" onClose={onClose} />,
@@ -1440,7 +657,7 @@ describe('Add Skill modal', () => {
       target: { value: 'https://example.test/pending.git' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Repository ref' }))
-    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 1))
+    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(1))
 
     rendered.rerender(
       <AddSkillModal open={false} repoPath="/tmp/add-refs-reopen" onClose={onClose} />,
@@ -1456,12 +673,11 @@ describe('Add Skill modal', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Repository ref' }))
 
-    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 2))
+    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(2))
     expect(await screen.findByRole('option', { name: 'main' })).toBeDefined()
   })
 
   it('does not load refs when the Add Source URL loses focus', async () => {
-    const refsCallCount = vi.mocked(api.getSourceRefs).mock.calls.length
     render(<AddSkillModal open repoPath="/tmp/add-refs-lazy" onClose={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Source' }))
@@ -1471,7 +687,7 @@ describe('Add Skill modal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'branch' }))
     await act(async () => await Promise.resolve())
 
-    expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount)
+    expect(api.getSourceRefs).not.toHaveBeenCalled()
     expect((screen.getByLabelText('source name') as HTMLInputElement).value).toBe('lazy')
   })
 
@@ -1588,6 +804,7 @@ describe('Add Skill modal', () => {
   })
 
   it('clears an Add Source scan error when the repository configuration changes', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     vi.mocked(api.scanSource).mockResolvedValueOnce({
       ok: false,
       message: 'repository tree unavailable',
@@ -1610,6 +827,14 @@ describe('Add Skill modal', () => {
     })
 
     expect(screen.queryByText('repository tree unavailable')).toBeNull()
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({ ok: false }),
+        message: 'repository tree unavailable',
+      }),
+      'Manifest operation returned ok:false',
+    )
+    consoleError.mockRestore()
   })
 
   it('scans a source after switching ref type and atomically adds the tree selection', async () => {
@@ -1791,7 +1016,6 @@ describe('Add Skill modal', () => {
   it('keeps the source modal open when the atomic source write fails', async () => {
     const onClose = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const getManifestCallsBefore = vi.mocked(api.getManifest).mock.calls.length
     vi.mocked(api.scanSource).mockResolvedValueOnce({
       ok: true,
       tree: {
@@ -1828,7 +1052,7 @@ describe('Add Skill modal', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: '添加 Source' }))
 
       expect((await within(dialog).findAllByText(/source write failed/)).length).toBeGreaterThan(0)
-      expect(api.getManifest).toHaveBeenCalledTimes(getManifestCallsBefore)
+      expect(api.getManifest).not.toHaveBeenCalled()
       expect(onClose).not.toHaveBeenCalled()
       expect(screen.getByRole('dialog', { name: 'Add Skill or Source' })).toBeDefined()
       expect(consoleError).toHaveBeenCalledWith(
@@ -2012,7 +1236,6 @@ describe('Skill source updates', () => {
       expect(api.saveSkillContent).toHaveBeenCalledWith({
         repo: '/tmp/skill-save-refresh',
         skillId: 'frontend-design',
-        localPath: './assets/skills/frontend-design',
         content: updated,
       }),
     )
@@ -2600,8 +1823,6 @@ describe('Skill source updates', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '删除 source' })).toBeNull())
   })
   it('loads Edit Source into the shared SourceTree selector', async () => {
-    const refsCallCount = vi.mocked(api.getSourceRefs).mock.calls.length
-    const scanCallCount = vi.mocked(api.scanSource).mock.calls.length
     vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(
       sourceTreeResponse(['brainstorming', 'systematic-debugging']) as never,
     )
@@ -2631,8 +1852,8 @@ describe('Skill source updates', () => {
       url: 'https://github.com/obra/superpowers.git',
       pinned_commit: 'abc123456789',
     })
-    expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount)
-    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount)
+    expect(api.getSourceRefs).not.toHaveBeenCalled()
+    expect(api.scanSource).not.toHaveBeenCalled()
   })
 
   it('previews an Edit Source bundle without losing its selection', async () => {
@@ -2665,12 +1886,11 @@ describe('Skill source updates', () => {
       await within(dialog).findByRole('region', { name: 'Preview brainstorming' }),
     ).toBeDefined()
     expect(await within(dialog).findByRole('heading', { name: 'Preview skill' })).toBeDefined()
-    expect(api.getSkillContent).toHaveBeenCalledWith(
-      '/tmp/skills-layout',
-      'superpowers-brainstorming',
-      'https://github.com/obra/superpowers.git',
-      'brainstorming/SKILL.md',
-    )
+    expect(api.getSkillContent).toHaveBeenCalledWith('/tmp/skills-layout', {
+      kind: 'source',
+      sourceUrl: 'https://github.com/obra/superpowers.git',
+      memberEntry: 'brainstorming/SKILL.md',
+    })
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Back' }))
     expect(
@@ -2734,8 +1954,6 @@ describe('Skill source updates', () => {
   })
 
   it('loads Edit Source refs on first dropdown open and scans only after another ref is selected', async () => {
-    const refsCallCount = vi.mocked(api.getSourceRefs).mock.calls.length
-    const scanCallCount = vi.mocked(api.scanSource).mock.calls.length
     vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
     vi.mocked(api.getSourceRefs).mockResolvedValueOnce({
       ok: true,
@@ -2749,18 +1967,18 @@ describe('Skill source updates', () => {
     const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
     await within(dialog).findByRole('checkbox', { name: 'Select alpha' })
 
-    expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount)
-    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount)
+    expect(api.getSourceRefs).not.toHaveBeenCalled()
+    expect(api.scanSource).not.toHaveBeenCalled()
     fireEvent.click(within(dialog).getByRole('button', { name: 'branch' }))
-    expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount)
+    expect(api.getSourceRefs).not.toHaveBeenCalled()
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Repository ref' }))
     await within(dialog).findByRole('option', { name: 'release' })
-    expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 1)
-    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount)
+    expect(api.getSourceRefs).toHaveBeenCalledTimes(1)
+    expect(api.scanSource).not.toHaveBeenCalled()
 
     fireEvent.click(within(dialog).getByRole('option', { name: 'main' }))
-    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount)
+    expect(api.scanSource).not.toHaveBeenCalled()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Repository ref' }))
     const release = await within(dialog).findByRole('option', { name: 'release' })
 
@@ -2899,6 +2117,7 @@ describe('Skill source updates', () => {
   })
 
   it('shows an Edit Source scan error only in the results pane', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     vi.mocked(api.getCachedSourceTree).mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
     vi.mocked(api.scanSource).mockResolvedValueOnce({
       ok: false,
@@ -2913,6 +2132,14 @@ describe('Skill source updates', () => {
 
     expect(await within(dialog).findAllByText('repository tree unavailable')).toHaveLength(1)
     expect(within(dialog).getByRole('alert')).toBeDefined()
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({ ok: false }),
+        message: 'repository tree unavailable',
+      }),
+      'Manifest operation returned ok:false',
+    )
+    consoleError.mockRestore()
   })
 
   it('Edit Source saves member entries and resources without a scan pattern', async () => {
@@ -3137,15 +2364,13 @@ describe('Skill source updates', () => {
           }) as never,
       )
       .mockResolvedValueOnce(sourceTreeResponse(['alpha']) as never)
-    const treeCallCount = vi.mocked(api.getCachedSourceTree).mock.calls.length
-    const scanCallCount = vi.mocked(api.scanSource).mock.calls.length
 
     render(<EditSourceSwitchHarness />)
 
     fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
     const firstDialog = await screen.findByRole('dialog', { name: /Edit Source/ })
-    expect(api.getCachedSourceTree).toHaveBeenCalledTimes(treeCallCount + 1)
-    expect(api.scanSource).toHaveBeenCalledTimes(scanCallCount)
+    expect(api.getCachedSourceTree).toHaveBeenCalledTimes(1)
+    expect(api.scanSource).not.toHaveBeenCalled()
 
     fireEvent.click(within(firstDialog).getByRole('button', { name: '关闭' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /Edit Source/ })).toBeNull())
@@ -3153,7 +2378,7 @@ describe('Skill source updates', () => {
     fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
     const secondDialog = await screen.findByRole('dialog', { name: /Edit Source/ })
 
-    await waitFor(() => expect(api.getCachedSourceTree).toHaveBeenCalledTimes(treeCallCount + 2))
+    await waitFor(() => expect(api.getCachedSourceTree).toHaveBeenCalledTimes(2))
     await within(secondDialog).findByRole('checkbox', { name: 'Select alpha' })
     expect(within(secondDialog).queryByText('扫描失败')).toBeNull()
 
@@ -3173,7 +2398,6 @@ describe('Skill source updates', () => {
           resolveTree = resolve as typeof resolveTree
         }) as never,
     )
-    const treeCallCount = vi.mocked(api.getCachedSourceTree).mock.calls.length
 
     render(
       <StrictMode>
@@ -3183,14 +2407,14 @@ describe('Skill source updates', () => {
     fireEvent.click(screen.getByRole('button', { name: 'open alpha' }))
     const dialog = await screen.findByRole('dialog', { name: /Edit Source/ })
 
-    await waitFor(() => expect(api.getCachedSourceTree).toHaveBeenCalledTimes(treeCallCount + 1))
+    await waitFor(() => expect(api.getCachedSourceTree).toHaveBeenCalledTimes(1))
     await act(async () => {
       resolveTree(sourceTreeResponse(['alpha']))
       await Promise.resolve()
     })
 
     expect(await within(dialog).findByRole('checkbox', { name: 'Select alpha' })).toBeDefined()
-    expect(api.getCachedSourceTree).toHaveBeenCalledTimes(treeCallCount + 1)
+    expect(api.getCachedSourceTree).toHaveBeenCalledTimes(1)
   })
 
   it('loads refs again when Edit Source is reopened while refs are pending', async () => {
@@ -3207,7 +2431,6 @@ describe('Skill source updates', () => {
         branches: ['main'],
         tags: ['v1.0.0'],
       } as never)
-    const refsCallCount = vi.mocked(api.getSourceRefs).mock.calls.length
 
     render(<EditSourceSwitchHarness />)
 
@@ -3215,7 +2438,7 @@ describe('Skill source updates', () => {
     const firstDialog = await screen.findByRole('dialog', { name: /Edit Source/ })
     await within(firstDialog).findByRole('checkbox', { name: 'Select alpha' })
     fireEvent.click(within(firstDialog).getByRole('button', { name: 'Repository ref' }))
-    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 1))
+    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(1))
 
     fireEvent.click(within(firstDialog).getByRole('button', { name: '关闭' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /Edit Source/ })).toBeNull())
@@ -3224,289 +2447,7 @@ describe('Skill source updates', () => {
     await within(secondDialog).findByRole('checkbox', { name: 'Select alpha' })
     fireEvent.click(within(secondDialog).getByRole('button', { name: 'Repository ref' }))
 
-    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(refsCallCount + 2))
+    await waitFor(() => expect(api.getSourceRefs).toHaveBeenCalledTimes(2))
     expect(await within(secondDialog).findByRole('option', { name: 'main' })).toBeDefined()
-  })
-})
-
-describe('Sync view', () => {
-  it('renders pull and push buttons', async () => {
-    render(
-      <TestRouter>
-        <Sync repoPath="/tmp/r" />
-      </TestRouter>,
-    )
-    expect(screen.getByRole('button', { name: '拉取' })).toBeDefined()
-    expect(screen.getByRole('button', { name: '上传' })).toBeDefined()
-    await waitFor(() => expect(api.getSyncRemote).toHaveBeenCalledWith('/tmp/r'))
-  })
-
-  it('restores an isolated conflict session after page reload', async () => {
-    vi.mocked(api.getSyncSession).mockResolvedValueOnce({
-      ok: true,
-      active: true,
-      clean: false,
-      sessionId: 'restored-session',
-      conflicts: [
-        {
-          path: 'skills.yaml',
-          base: 'value: base\n',
-          ours: 'value: local\n',
-          theirs: 'value: remote\n',
-          result: '<<<<<<< HEAD\nvalue: local\n=======\nvalue: remote\n>>>>>>> remote\n',
-          binary: false,
-        },
-      ],
-    })
-
-    render(
-      <TestRouter>
-        <Sync repoPath="/tmp/restored" />
-      </TestRouter>,
-    )
-
-    expect(await screen.findByText('skills.yaml')).toBeDefined()
-    expect(api.getSyncSession).toHaveBeenCalledWith('/tmp/restored')
-  })
-
-  it('renders native Git conflicts and aborts the merge', async () => {
-    vi.mocked(api.getSyncRemote).mockResolvedValueOnce({
-      remoteUrl: 'https://example.test/repo.git',
-    })
-    vi.mocked(api.syncPull).mockResolvedValueOnce({
-      ok: true,
-      clean: false,
-      sessionId: 'session-1',
-      conflicts: [
-        {
-          path: 'skills.yaml',
-          base: 'value: base\n',
-          ours: 'value: local\n',
-          theirs: 'value: remote\n',
-          result: '<<<<<<< HEAD\nvalue: local\n=======\nvalue: remote\n>>>>>>> FETCH_HEAD\n',
-          binary: false,
-        },
-      ],
-    })
-
-    render(
-      <TestRouter>
-        <Sync repoPath="/tmp/r" />
-      </TestRouter>,
-    )
-    fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
-
-    expect(await screen.findByText('skills.yaml')).toBeDefined()
-    expect(screen.getAllByText('LOCAL').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('REMOTE').length).toBeGreaterThan(0)
-    expect(screen.queryByText('[object Object]')).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: '放弃合并' }))
-    await waitFor(() => expect(api.abortSyncMerge).toHaveBeenCalledWith('session-1'))
-  })
-
-  it('surfaces Monaco decoration failures while keeping the conflict open', async () => {
-    const err = new Error('decorations failed')
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    monacoEditorMock.deltaDecorations.mockImplementation(() => {
-      throw err
-    })
-    vi.mocked(api.getSyncRemote).mockResolvedValueOnce({
-      remoteUrl: 'https://example.test/repo.git',
-    })
-    vi.mocked(api.syncPull).mockResolvedValueOnce({
-      ok: true,
-      clean: false,
-      sessionId: 'session-decoration-error',
-      conflicts: [
-        {
-          path: 'skills.yaml',
-          base: 'value: base\n',
-          ours: 'value: local\n',
-          theirs: 'value: remote\n',
-          result: '<<<<<<< HEAD\nvalue: local\n=======\nvalue: remote\n>>>>>>> FETCH_HEAD\n',
-          binary: false,
-        },
-      ],
-    })
-
-    try {
-      render(
-        <TestRouter>
-          <Sync repoPath="/tmp/r" />
-        </TestRouter>,
-      )
-      fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
-
-      expect((await screen.findByRole('alert')).textContent).toContain('冲突高亮加载失败')
-      expect(screen.getByText('skills.yaml')).toBeDefined()
-      expect(consoleError).toHaveBeenCalledWith(
-        { err },
-        'Failed to update Monaco conflict decorations',
-      )
-    } finally {
-      consoleError.mockRestore()
-    }
-  })
-
-  it('refines conflicts and applies or ignores each side change', async () => {
-    vi.mocked(api.getSyncRemote).mockResolvedValueOnce({
-      remoteUrl: 'https://example.test/repo.git',
-    })
-    vi.mocked(api.syncPull).mockResolvedValueOnce({
-      ok: true,
-      clean: false,
-      sessionId: 'session-2',
-      conflicts: [
-        {
-          path: 'config.yaml',
-          base: 'profile: local\nagents:\n  - claude-code\nprojection:\n  strategy: link\n',
-          ours: 'profile: local\nagents:\n  - claude-code\n  - codex\n  - opencode\nprojection:\n  strategy: link\n',
-          theirs:
-            'profile: local\nagents: []\nprojection:\n  strategy: link\nproxy:\n  http: http://127.0.0.1:7890\n  https: http://127.0.0.1:7890\n',
-          result: 'unused Git marker result',
-          binary: false,
-        },
-      ],
-    })
-
-    render(
-      <TestRouter>
-        <Sync repoPath="/tmp/r" />
-      </TestRouter>,
-    )
-    fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
-
-    expect(await screen.findByText('config.yaml')).toBeDefined()
-    expect(screen.getAllByText('LOCAL').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('RESULT').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('REMOTE').length).toBeGreaterThan(0)
-    const localPane = screen.getByRole('textbox', { name: 'Sync LOCAL' }) as HTMLTextAreaElement
-    const resultPane = screen.getByRole('textbox', { name: 'Sync RESULT' }) as HTMLTextAreaElement
-    const remotePane = screen.getByRole('textbox', { name: 'Sync REMOTE' }) as HTMLTextAreaElement
-    expect(localPane.value).toContain('opencode')
-    expect(resultPane.value).toContain('proxy:')
-    expect(remotePane.value).toContain('proxy:')
-    expect(screen.getByText('1 个待处理冲突')).toBeDefined()
-    expect(document.querySelectorAll('.merge-block-action[aria-label$="应用到结果"]')).toHaveLength(
-      2,
-    )
-    expect(document.querySelectorAll('.merge-block-action[aria-label$="忽略变更"]')).toHaveLength(2)
-    expect(screen.getByRole('button', { name: '保留两者' })).toBeDefined()
-    expect(screen.getByRole('button', { name: '保留本地' })).toBeDefined()
-    expect(screen.getByRole('button', { name: '保留远程' })).toBeDefined()
-
-    const localApply = document.querySelector(
-      '.merge-block-action[aria-label="本地变更 1：应用到结果"]',
-    ) as HTMLButtonElement
-    expect(localApply).not.toBeNull()
-    expect(localApply.closest('.merge-action-rail')).not.toBeNull()
-    const localActionCellText = localApply.closest('.merge-block-actions')?.textContent ?? ''
-    expect(localActionCellText).toContain('→')
-    expect(localActionCellText).toContain('×')
-    expect(localActionCellText.indexOf('×')).toBeLessThan(localActionCellText.indexOf('→'))
-    expect(localActionCellText).not.toMatch(/\d/)
-
-    const remoteApply = document.querySelector(
-      '.merge-block-action[aria-label="远程变更 1：应用到结果"]',
-    ) as HTMLButtonElement
-    expect(remoteApply).not.toBeNull()
-    expect(remoteApply.closest('.merge-action-rail')).not.toBeNull()
-    const remoteActionCellText = remoteApply.closest('.merge-block-actions')?.textContent ?? ''
-    expect(remoteActionCellText).toContain('←')
-    expect(remoteActionCellText).toContain('×')
-    expect(remoteActionCellText).not.toMatch(/\d/)
-
-    fireEvent.change(resultPane, {
-      target: { value: `# manually edited\n${resultPane.value.replace('profile: local\n', '')}` },
-    })
-    expect(resultPane.value).toMatch(/^# manually edited\nagents:/)
-
-    fireEvent.click(localApply)
-    expect(resultPane.value).toMatch(
-      /^# manually edited\nagents:\n  - claude-code\n  - codex\n  - opencode\nprojection:/,
-    )
-    expect(resultPane.value).toContain('opencode')
-    expect(screen.getByText('1 个待处理冲突')).toBeDefined()
-
-    const undoLocalApply = document.querySelector(
-      '.merge-block-action[aria-label="本地变更 1：撤回应用"]',
-    ) as HTMLButtonElement
-    expect(undoLocalApply).not.toBeNull()
-    expect(undoLocalApply.disabled).toBe(false)
-    fireEvent.click(undoLocalApply)
-    expect(resultPane.value).not.toContain('opencode')
-    expect(screen.getByText('1 个待处理冲突')).toBeDefined()
-
-    fireEvent.click(screen.getByRole('button', { name: '保留远程' }))
-    expect(screen.getByText('0 个待处理冲突')).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: '保留两者' }))
-    expect(screen.getByText('1 个待处理冲突')).toBeDefined()
-    expect(resultPane.value).toContain('proxy:')
-
-    fireEvent.click(
-      document.querySelector(
-        '.merge-block-action[aria-label="本地变更 1：应用到结果"]',
-      ) as HTMLButtonElement,
-    )
-    fireEvent.click(
-      document.querySelector(
-        '.merge-block-action[aria-label="远程变更 1：忽略变更"]',
-      ) as HTMLButtonElement,
-    )
-    fireEvent.click(screen.getByRole('button', { name: '保存并完成合并' }))
-
-    await waitFor(() =>
-      expect(api.saveSyncConflict).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sessionId: 'session-2',
-          path: 'config.yaml',
-          result: expect.stringMatching(/agents:[\s\S]*opencode[\s\S]*proxy:/),
-        }),
-      ),
-    )
-  })
-
-  it('explains that multiple conflict files are resolved one at a time', async () => {
-    vi.mocked(api.getSyncRemote).mockResolvedValueOnce({
-      remoteUrl: 'https://example.test/repo.git',
-    })
-    vi.mocked(api.syncPull).mockResolvedValueOnce({
-      ok: true,
-      clean: false,
-      sessionId: 'session-3',
-      conflicts: [
-        {
-          path: 'config.yaml',
-          base: 'value: base\n',
-          ours: 'value: local\n',
-          theirs: 'value: remote\n',
-          result: null,
-          binary: false,
-        },
-        {
-          path: 'agents.yaml',
-          base: 'enabled: false\n',
-          ours: 'enabled: local\n',
-          theirs: 'enabled: remote\n',
-          result: null,
-          binary: false,
-        },
-      ],
-    })
-
-    render(
-      <TestRouter>
-        <Sync repoPath="/tmp/r" />
-      </TestRouter>,
-    )
-    fireEvent.click(await screen.findByRole('button', { name: '拉取' }))
-
-    expect(
-      await screen.findByText('Git 检测到 2 个冲突文件，当前显示第 1/2 个，保存后继续下一个'),
-    ).toBeDefined()
-    expect(screen.getByText('文件 1/2')).toBeDefined()
-    expect(screen.getByText('config.yaml')).toBeDefined()
-    expect(screen.queryByText('agents.yaml')).toBeNull()
   })
 })

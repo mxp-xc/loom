@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import yaml from 'js-yaml'
-import { registerRoutes } from '../../src/api/router'
-import type { McpDebugSessionManagerLike } from '../../src/api/routes/mcp-debug.js'
+import {
+  createMcpDebugRoutes,
+  type McpDebugSessionManagerLike,
+} from '../../src/api/routes/mcp-debug.js'
 
 const files: Record<string, string> = {}
 
@@ -29,10 +31,10 @@ const memFs = {
   removeLink: vi.fn(async () => undefined),
 }
 
-const debugManager = {
-  createSession: vi.fn(async (input: { previewAgent: 'default' | 'codex' }) => ({
+const debugManager: McpDebugSessionManagerLike = {
+  createSession: vi.fn<McpDebugSessionManagerLike['createSession']>(async (input) => ({
     sessionId: 'debug-1',
-    source: 'saved',
+    source: input.source,
     serverFingerprint: 'abc123',
     previewAgent: input.previewAgent,
     tools: [{ name: 'capture_live_filter', inputSchema: { type: 'object' } }],
@@ -40,15 +42,15 @@ const debugManager = {
     idleExpiresAt: '2026-07-13T00:05:00.000Z',
     hardExpiresAt: '2026-07-13T00:30:00.000Z',
   })),
-  callTool: vi.fn(async () => ({
+  callTool: vi.fn<McpDebugSessionManagerLike['callTool']>(async () => ({
     ok: true,
     result: { content: [{ type: 'text', text: 'ok' }] },
     durationMs: 12,
     calledAt: '2026-07-13T00:00:01.000Z',
     idleExpiresAt: '2026-07-13T00:05:01.000Z',
   })),
-  disconnect: vi.fn(async () => undefined),
-} satisfies McpDebugSessionManagerLike
+  disconnect: vi.fn<McpDebugSessionManagerLike['disconnect']>(async () => undefined),
+}
 
 vi.mock('../../src/lib/logger.js', () => {
   const logger = {
@@ -61,15 +63,25 @@ vi.mock('../../src/lib/logger.js', () => {
   return { logger }
 })
 
-vi.mock('../../src/api/repo.js', () => ({
-  resolveRepoPath: vi.fn(async (_fs: unknown, repo: string) => repo),
-  listRepos: vi.fn(async () => []),
-}))
+vi.mock('../../src/api/repo.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/api/repo.js')>()
+  return {
+    ...actual,
+    resolveRepoPath: vi.fn(async (_fs: unknown, repo: string) => repo),
+    authorizeRepository: vi.fn(async (_fs: unknown, repo: string) => ({
+      name: repo,
+      path: repo,
+      identity: `repo:${repo}`,
+    })),
+    revalidateRepositoryAuthorization: vi.fn(async () => undefined),
+    listRepos: vi.fn(async () => []),
+  }
+})
 
 function app() {
   return new Hono().route(
     '/api',
-    registerRoutes({
+    createMcpDebugRoutes({
       fs: memFs as never,
       git: {} as never,
       proc: {} as never,

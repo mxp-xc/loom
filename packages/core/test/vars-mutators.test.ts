@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { deleteVariable, renameVariable, setVariable, type VarsEnvironment } from '../src/index.js'
+import {
+  deleteVariable,
+  renameVariable,
+  setVariable,
+  type JsonValue,
+  type VarsEnvironment,
+} from '../src/index.js'
 
 const typed = (entries: VarsEnvironment['entries']): VarsEnvironment => ({
   format: 'typed',
@@ -26,6 +32,61 @@ describe('vars mutators', () => {
     })
     expect(result.environments.prod.entries.new).toEqual({ type: 'secret', value: 'prod' })
     expect(input.base.entries.old).toEqual({ type: 'string', value: 'base' })
+  })
+
+  it('preserves string and secret formats through unrelated edits, rename, and delete', () => {
+    const input = {
+      base: typed({
+        path: { type: 'string', format: 'path', value: '/repo' },
+        secret: { type: 'secret', format: 'markdown', value: 'hidden' },
+        other: { type: 'boolean', value: true },
+      }),
+    }
+
+    const edited = setVariable(input, 'base', 'added', { type: 'string', value: 'value' })
+    expect(edited.environments.base.entries.path).toEqual({
+      type: 'string',
+      format: 'path',
+      value: '/repo',
+    })
+    expect(edited.environments.base.entries.secret).toEqual({
+      type: 'secret',
+      format: 'markdown',
+      value: 'hidden',
+    })
+
+    const renamed = renameVariable(edited.environments, 'base', 'path', 'repo_path')
+    expect(renamed.environments.base.entries.repo_path).toEqual({
+      type: 'string',
+      format: 'path',
+      value: '/repo',
+    })
+
+    const deleted = deleteVariable(renamed.environments, 'base', 'other', { confirmed: false })
+    expect(deleted.environments.base.entries.secret).toEqual({
+      type: 'secret',
+      format: 'markdown',
+      value: 'hidden',
+    })
+  })
+
+  it('renames only active tokens without changing their backslash spelling', () => {
+    const value = [0, 1, 2, 3, 4].map((count) => '\\'.repeat(count) + '${old}').join('|')
+    const result = renameVariable(
+      {
+        base: typed({
+          old: { type: 'string', value: 'value' },
+          use: { type: 'string', value },
+        }),
+      },
+      'base',
+      'old',
+      'next',
+    )
+    const expected = [0, 1, 2, 3, 4]
+      .map((count) => '\\'.repeat(count) + (count % 2 === 0 ? '${next}' : '${old}'))
+      .join('|')
+    expect(result.environments.base.entries.use).toEqual({ type: 'string', value: expected })
   })
 
   it('rejects rename conflicts without mutation', () => {
@@ -58,6 +119,23 @@ describe('vars mutators', () => {
     expect(deleted.changed).toEqual(['base'])
     expect(deleted.diagnostics.map((item) => item.code)).toEqual(['dangling_reference'])
     expect(deleted.environments.base.entries.host).toBeUndefined()
+  })
+
+  it('requires an impact token after a referenced delete is confirmed', () => {
+    const input = {
+      base: typed({
+        host: { type: 'string', value: 'x' },
+        url: { type: 'string', value: '${host}' },
+      }),
+    }
+
+    const result = deleteVariable(input, 'base', 'host', { confirmed: true })
+
+    expect(result.changed).toEqual([])
+    expect(result.diagnostics).toMatchObject([
+      { code: 'delete_confirmation_required', key: 'host' },
+    ])
+    expect(result.deleteImpact?.impactToken).toEqual(expect.any(String))
   })
 
   it('rejects a stale delete impact token and accepts a fresh inspection', () => {
@@ -116,7 +194,15 @@ describe('vars mutators', () => {
       type: 'string',
       value: '${new-missing}',
     })
-    expect(expanded.diagnostics.some((item) => item.code === 'missing_reference')).toBe(true)
+    expect(expanded.diagnostics).toMatchObject([
+      {
+        code: 'missing_reference',
+        environment: 'base',
+        key: 'new-use',
+        referencedKey: 'new-missing',
+        path: ['new-use', 'new-missing'],
+      },
+    ])
     expect(expanded.changed).toEqual([])
     const fixed = setVariable(input, 'base', 'use', { type: 'string', value: 'fixed' })
     expect(fixed.diagnostics).toEqual([])
@@ -148,7 +234,7 @@ describe('vars mutators', () => {
   })
 
   it('deeply isolates nested JSON snapshots including arrays and __proto__', () => {
-    const object = Object.create(null) as Record<string, unknown>
+    const object = Object.create(null) as Record<string, JsonValue>
     Object.defineProperty(object, '__proto__', { value: { nested: ['input'] }, enumerable: true })
     const input = {
       base: typed({ config: { type: 'json', value: object } }),

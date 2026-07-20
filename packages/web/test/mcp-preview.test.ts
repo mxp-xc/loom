@@ -1,5 +1,7 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vitest'
-import type { McpServer } from '@loom/core'
+import { renderTextWithResolvedVars, type McpServer } from '@loom/core'
 import {
   buildMcpSettingsPreview,
   buildResolvedMcpServer,
@@ -9,7 +11,10 @@ import {
 import type { AgentId } from '../src/lib/agents'
 import type { VarsMatrixResponse } from '../src/lib/vars'
 
-function matrix(agent: AgentId, overrides: Partial<VarsMatrixResponse['resolution']> = {}) {
+function matrix(
+  agent: AgentId,
+  overrides: Partial<Extract<VarsMatrixResponse['resolution'], { ok: true }>> = {},
+): VarsMatrixResponse {
   return {
     ok: true,
     agent,
@@ -101,6 +106,51 @@ describe('MCP preview model', () => {
       'JSON_TEXT_INTERPOLATION',
     ])
     expect(preview.text).toContain('${missing}')
+  })
+
+  it.each([
+    ['${workspace}', '/repo/codex'],
+    ['\\${workspace}', '${workspace}'],
+    ['\\\\${workspace}', '\\/repo/codex'],
+    ['before ${workspace} after', 'before /repo/codex after'],
+  ])('matches the Core renderer for %s', (source, expected) => {
+    const vars = matrix('codex')
+    const core = renderTextWithResolvedVars(source, {
+      values: { workspace: { type: 'string', value: '/repo/codex' } },
+    })
+    const preview = buildResolvedMcpServer(
+      { id: 'parity', type: 'stdio', command: 'node', args: [source] },
+      'codex',
+      vars,
+    )
+
+    expect(core).toEqual({ ok: true, text: expected, diagnostics: [] })
+    expect(preview.server.args).toEqual([expected])
+  })
+
+  it('deduplicates the same resolution diagnostic repeated across fields', () => {
+    const diagnostic = {
+      code: 'VARS_INVALID',
+      severity: 'error' as const,
+      message: '变量配置无效',
+      path: ['vars.yaml'],
+    }
+    const vars = matrix('codex')
+    vars.resolution = { ok: false, diagnostics: [diagnostic] }
+
+    const preview = buildResolvedMcpServer(
+      {
+        id: 'broken-resolution',
+        type: 'stdio',
+        command: '${workspace}',
+        args: ['${workspace}'],
+        env: { WORKSPACE: '${workspace}' },
+      },
+      'codex',
+      vars,
+    )
+
+    expect(preview.diagnostics).toEqual([diagnostic])
   })
 
   it('keeps stdio headers out of preview and renders remote env/header as separate records', () => {

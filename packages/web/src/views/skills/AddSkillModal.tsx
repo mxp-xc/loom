@@ -14,9 +14,20 @@ import { Segmented } from './Segmented'
 import type { LocalScanResult } from './types'
 import { useManifestOperations } from '@/hooks/useManifestOperations'
 import styles from './AddSkillModal.module.css'
+
+function sourceNameFromUrl(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed) return ''
+  try {
+    return deriveRepoId(trimmed)
+  } catch {
+    return ''
+  }
+}
 import SkillWorkbench, { SkillWorkbenchTitle } from './SkillWorkbench'
 import SkillSelectionList, { type SkillSelectionItem } from './SkillSelectionList'
 import SourceTreeSelection, { type SourceTreeSelectionValue } from './SourceTreeSelection'
+import { PickedSkillFileReadError, readPickedSkillDirectory } from './picked-skill-files'
 
 interface Props {
   open: boolean
@@ -122,52 +133,25 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
   // <repo>/assets/skills through /skills/local/write.
   const handleBrowsePick = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return
-    // Group files by the SKILL.md's parent directory name — same shape the
-    // server-side scan produces (name = basename(dirname(SKILL.md))).
-    const bySkill = new Map<string, Array<{ path: string; content: string }>>()
-    const readText = async (f: File) => {
-      try {
-        return await f.text()
-      } catch {
-        return null
-      }
+    try {
+      const picked = await readPickedSkillDirectory(Array.from(files))
+      setLocalSkills(picked.skills)
+      setLocalSelected(new Set(picked.skills.map((skill) => skill.name)))
+      setPickedFiles(picked.filesBySkill)
+      setPickedExternal(true)
+      setLocalPath('(外部目录)')
+      setAddErr(null)
+    } catch (err) {
+      console.error(
+        { err, path: err instanceof PickedSkillFileReadError ? err.path : undefined },
+        'Failed to read picked skill directory',
+      )
+      setLocalSkills([])
+      setLocalSelected(new Set())
+      setPickedFiles(new Map())
+      setPickedExternal(false)
+      setAddErr(err instanceof Error ? err.message : '读取外部 skill 目录失败')
     }
-    for (const f of Array.from(files)) {
-      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? f.name
-      const parts = rel.split('/')
-      // parts[0] is the chosen root dir name; drop it so the stored path is
-      // relative to the skill folder itself.
-      const inSkill = parts.slice(1).join('/')
-      if (!inSkill || !inSkill.endsWith('SKILL.md')) continue
-      const skillName = parts.length > 2 ? parts[parts.length - 2] : parts[0]
-      const content = await readText(f)
-      if (content === null) continue
-      bySkill.set(skillName, [{ path: 'SKILL.md', content }])
-    }
-    // Also collect sibling files next to each discovered SKILL.md so a
-    // multi-file skill (references, assets) survives the import.
-    for (const f of Array.from(files)) {
-      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? f.name
-      const parts = rel.split('/')
-      const inSkill = parts.slice(1).join('/')
-      if (!inSkill || inSkill.endsWith('SKILL.md')) continue
-      const skillName = parts.length > 2 ? parts[1] : parts[0]
-      if (!bySkill.has(skillName)) continue
-      const content = await readText(f)
-      if (content === null) continue
-      const arr = bySkill.get(skillName)!
-      const skillRel = parts.slice(2).join('/')
-      arr.push({ path: skillRel || inSkill, content })
-    }
-    const skills: LocalScanResult[] = Array.from(bySkill.keys())
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name, path: name }))
-    setLocalSkills(skills)
-    setLocalSelected(new Set(skills.map((s) => s.name)))
-    setPickedFiles(bySkill)
-    setPickedExternal(true)
-    setLocalPath('(外部目录)')
-    setAddErr(null)
   }, [])
 
   // Reset every field and kick off the initial local scan each time the
@@ -445,7 +429,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
                 onChange={(e) => {
                   const nextUrl = e.target.value
                   setSrcUrl(nextUrl)
-                  if (!srcNameTouched) setSrcName(deriveRepoId(nextUrl.trim()))
+                  if (!srcNameTouched) setSrcName(sourceNameFromUrl(nextUrl))
                   srcRefsGeneration.current++
                   srcScanGeneration.current++
                   setSrcBranches([])
@@ -473,7 +457,10 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
                 setSrcName(nextName)
                 setSrcNameTouched(true)
                 setSrcTree((current) =>
-                  renameRootBundle(current, nextName.trim() || deriveRepoId(srcUrl.trim())),
+                  renameRootBundle(
+                    current,
+                    nextName.trim() || sourceNameFromUrl(srcUrl) || 'source',
+                  ),
                 )
               }}
               placeholder="openai-skills"
@@ -547,9 +534,9 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
       <SourceTreeSelection
         nodes={srcTree?.nodes ?? []}
         diagnostics={srcTree?.diagnostics}
-        sourceName={srcName.trim() || deriveRepoId(srcUrl) || 'source'}
         sourceUrl={srcUrl}
         sourceRef={srcRef}
+        sourceName={srcName.trim() || sourceNameFromUrl(srcUrl) || 'source'}
         value={srcSelection}
         onChange={setSrcSelection}
         loading={srcScanning || (srcRefsLoading && srcScanAfterRefsRef.current)}
@@ -579,7 +566,9 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
           icon={addTab === 'local' ? <FolderOpen size={17} /> : <GitFork size={17} />}
           eyebrow={addTab === 'local' ? 'Add' : 'Remote source'}
           title={
-            addTab === 'local' ? 'Skills' : srcName.trim() || deriveRepoId(srcUrl) || 'New source'
+            addTab === 'local'
+              ? 'Skills'
+              : srcName.trim() || sourceNameFromUrl(srcUrl) || 'New source'
           }
         />
       }

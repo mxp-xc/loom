@@ -8,7 +8,11 @@
     "dev:api": "bun --cwd packages/server dev",
     "start": "bun --cwd packages/server start",
     "test": "vitest run",
+    "test:config": "bun scripts/check-vitest-workspace.mjs",
     "test:watch": "bun vitest",
+    "typecheck": "bun run typecheck:source && bun run typecheck:tests",
+    "typecheck:source": "bun --cwd packages/core typecheck && bun --cwd packages/server typecheck && bun --cwd packages/web typecheck",
+    "typecheck:tests": "bun --cwd packages/core typecheck:test && bun --cwd packages/server typecheck:test && bun --cwd packages/web typecheck:test",
     "format": "bun --bun prettier --write . --ignore-unknown --ignore-path .gitignore --log-level warn",
     "format:check": "bun --bun prettier --check . --ignore-unknown --ignore-path .gitignore",
     "prepare": "bun --bun husky"

@@ -1,9 +1,11 @@
 import type { Manifest, AgentId, Config, Memory, SkillSource, SourceTreeNode } from './types.js'
 import { applicableAgents, supportsAgentCapability } from './agents.js'
 import { normalizeSourceResources, projectionBase, resourceSelectionState } from './source-tree.js'
+import { assertLocalSkillId } from './skill-id.js'
 
 export interface LinkPlan {
   skillId: string
+  localPath?: string
   source: 'local' | { repoId: string; cacheId?: string; memberName: string; path?: string }
   agents: AgentId[]
 }
@@ -109,9 +111,11 @@ export function planProjection(
 
   const links: LinkPlan[] = []
   for (const s of manifest.skills.skills) {
+    assertLocalSkillId(s.id)
     links.push({
       skillId: s.id,
       source: 'local',
+      ...(s.path ? { localPath: s.path } : {}),
       agents: activeAgents(s.agents ?? [], 'skills'),
     })
   }
@@ -375,11 +379,31 @@ function isSameOrDescendant(path: string, ancestor: string): boolean {
 }
 
 export function deriveRepoId(url: string): string {
-  const parts = url.split(':')
-  return parts[parts.length - 1]
+  const input = url.trim()
+  if (!input) throw new Error('Repository URL must not be empty')
+
+  let pathname: string
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(input)) {
+    const authorityAndPath = input.replace(/^[a-z][a-z\d+.-]*:\/\//i, '')
+    if (!authorityAndPath || /\s/.test(authorityAndPath)) {
+      throw new Error('Invalid repository URL')
+    }
+    const pathStart = authorityAndPath.indexOf('/')
+    pathname = pathStart === -1 ? '' : authorityAndPath.slice(pathStart)
+  } else {
+    const scpMatch = input.match(/^(?:[^/@:\s]+@)?[^/:\s]+:(.*)$/)
+    pathname = scpMatch ? scpMatch[1] : input
+  }
+
+  const normalized = pathname.split(/[?#]/, 1)[0].replace(/\/+$/, '')
+  const repoId = normalized
     .split('/')
-    .pop()!
-    .replace(/\.git$/, '')
+    .at(-1)
+    ?.replace(/\.git$/, '')
+  if (!repoId || repoId === '.' || repoId === '..') {
+    throw new Error('Repository URL has no repository name')
+  }
+  return repoId
 }
 
 function sourceRepoId(source: SourceIdentityInput): string {

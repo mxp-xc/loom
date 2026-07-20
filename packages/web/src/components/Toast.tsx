@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, X } from 'lucide-react'
 import type { ToastItem } from '@/hooks/useToast'
 import { ErrorDetails } from './ErrorFeedback'
@@ -8,11 +8,30 @@ import { IconButton } from './ui/IconButton'
 export default function Toast({ toast, onClose }: { toast: ToastItem; onClose: () => void }) {
   const [hovered, setHovered] = useState(false)
   const [pending, setPending] = useState(false)
+  const remainingDurationRef = useRef(toast.duration)
+  const timerStartedAtRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    remainingDurationRef.current = toast.duration
+  }, [toast.duration, toast.id])
 
   useEffect(() => {
     if (hovered || toast.duration === undefined) return
-    const timer = window.setTimeout(onClose, toast.duration)
-    return () => window.clearTimeout(timer)
+    const duration = remainingDurationRef.current ?? toast.duration
+    timerStartedAtRef.current = Date.now()
+    const timer = window.setTimeout(() => {
+      timerStartedAtRef.current = null
+      onClose()
+    }, duration)
+    return () => {
+      window.clearTimeout(timer)
+      if (timerStartedAtRef.current === null) return
+      remainingDurationRef.current = Math.max(
+        0,
+        duration - (Date.now() - timerStartedAtRef.current),
+      )
+      timerStartedAtRef.current = null
+    }
   }, [hovered, onClose, toast.duration])
 
   const runAction = async () => {

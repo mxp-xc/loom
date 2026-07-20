@@ -207,10 +207,10 @@ function routePage(variant: PageLayoutVariant, children: ReactNode) {
   return <PageLayout variant={variant}>{children}</PageLayout>
 }
 
-// Rendered once init resolves and repoPath is known, so useManifest can be
+// Rendered once init resolves and the repository name is known, so useManifest can be
 // called unconditionally and share its cache with the active view.
-function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string }) {
-  const { manifest } = useManifest(repoPath)
+function Shell({ repo }: { repo: string }) {
+  const { manifest } = useManifest(repo)
   const profile = manifest?.config?.profile ?? ''
   const isNarrowSidebarViewport = useNarrowSidebarViewport()
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth)
@@ -294,7 +294,7 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
     <>
       <div className="statusline">
         <span className="brand">◆ loom</span>
-        <span className="v">{activeRepo}</span>
+        <span className="v">{repo}</span>
         <span>·</span>
         <span className="v">{profile || 'default'}</span>
         <span className="sync">
@@ -393,19 +393,14 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
         <main className="main">
           <Routes>
             <Route index element={<Navigate to={readLastSidebarPath()} replace />} />
-            <Route path="skills" element={routePage('workbench', <Skills repoPath={repoPath} />)} />
-            <Route path="mcp" element={routePage('workbench', <Mcp repoPath={repoPath} />)} />
-            <Route
-              path="memory"
-              element={routePage('fullHeight', <Memory repoPath={repoPath} />)}
-            />
-            <Route path="vars" element={routePage('fullHeight', <Vars repoPath={repoPath} />)} />
+            <Route path="skills" element={routePage('workbench', <Skills repoPath={repo} />)} />
+            <Route path="mcp" element={routePage('workbench', <Mcp repoPath={repo} />)} />
+            <Route path="memory" element={routePage('fullHeight', <Memory repoPath={repo} />)} />
+            <Route path="vars" element={routePage('fullHeight', <Vars repoPath={repo} />)} />
             <Route path="vars-lab" element={routePage('fullHeight', <VarsProfileDemo />)} />
-            <Route path="sync" element={routePage('content', <Sync repoPath={repoPath} />)} />
-            <Route
-              path="settings"
-              element={routePage('content', <Settings repoPath={repoPath} />)}
-            />
+            <Route path="sync" element={routePage('content', <Sync repoPath={repo} />)} />
+            <Route path="settings" element={routePage('content', <Settings repoPath={repo} />)} />
+            <Route path="*" element={<Navigate to="/skills" replace />} />
           </Routes>
         </main>
       </div>
@@ -414,9 +409,8 @@ function Shell({ repoPath, activeRepo }: { repoPath: string; activeRepo: string 
 }
 
 export default function App() {
-  const initStarted = useRef(false)
-  const [repoPath, setRepoPath] = useState<string | null>(null)
-  const [activeRepo, setActiveRepo] = useState<string>('')
+  const initRequest = useRef<ReturnType<typeof api.init> | null>(null)
+  const [activeRepo, setActiveRepo] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const { error, setError } = useViewError({
     title: 'Loom 初始化失败',
@@ -425,25 +419,32 @@ export default function App() {
   })
 
   useEffect(() => {
-    if (initStarted.current) return
-    initStarted.current = true
-    api
-      .init()
+    let mounted = true
+    initRequest.current ??= api.init()
+    initRequest.current
       .then((res) => {
-        setRepoPath(res.active_repo)
+        if (!mounted) return
+        if (!res.repoPath?.trim() || !res.active_repo?.trim()) {
+          throw new Error('初始化响应缺少有效的 repository')
+        }
         setActiveRepo(res.active_repo)
         setLoading(false)
       })
       .catch((e) => {
-        console.error('Failed to initialize Loom', e)
+        if (!mounted) return
+        console.error({ err: e }, 'Failed to initialize Loom')
         setError(e)
         setLoading(false)
       })
+    return () => {
+      mounted = false
+    }
   }, [])
 
   if (loading)
     return (
       <div
+        role="status"
         style={{
           display: 'flex',
           height: '100vh',
@@ -459,11 +460,12 @@ export default function App() {
       </div>
     )
   if (error) return <ErrorState {...error} fullscreen />
-  if (!repoPath) return null
+  if (!activeRepo)
+    return <ErrorState title="Loom 初始化失败" message="初始化未返回可用的 repository" fullscreen />
 
   return (
     <>
-      <Shell repoPath={repoPath} activeRepo={activeRepo} />
+      <Shell repo={activeRepo} />
       <ToastHost />
     </>
   )

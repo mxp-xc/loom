@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { dirname, isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join, normalize, resolve } from 'node:path'
 import {
   addLocalSkill as addLocalSkillMutation,
   addSource as addSourceMutation,
@@ -10,6 +10,8 @@ import {
   sameOrder,
   removeLocalSkill as removeLocalSkillMutation,
   removeSource as removeSourceMutation,
+  LocalSkillIdSchema,
+  LocalSkillSchema,
   SOURCE_NAME_REGEX,
   setLocalSkillAgents as setLocalSkillAgentsMutation,
   setSkillAgents as setSkillAgentsMutation,
@@ -33,10 +35,30 @@ import {
   scanLocalSkills as scanLocalSkillDirs,
 } from '../projection/scan.js'
 import type { ScannedLocalSkill } from '../projection/scan.js'
-import { readYaml, writeYaml } from '../api/repo-config.js'
+import { readSkillsManifest, RepoManifestError, writeYaml } from '../api/repo-config.js'
 import { classifySkillMemberChanges } from './reconciliation.js'
 import { cacheDirFor } from '../remote/cache.js'
 import { scanSourceTree } from '../remote/source-tree.js'
+import {
+  assertLocalSkillIdentifier,
+  discoverBuiltInLocalSkills,
+  indexRegisteredLocalSkills,
+  LocalSkillBoundaryError,
+  preflightBuiltInLocalSkill,
+  prepareBuiltInLocalSkill,
+  requireAvailableLocalSkill,
+  resolveEffectiveLocalSkill,
+  resolveLocalSkillRepositoryRoot,
+  resolveRegisteredLocalSkill,
+} from './local-paths.js'
+import {
+  combineLocalTransactionFailure,
+  inspectLocalDirectorySnapshot,
+  LocalDirectoryTransaction,
+  normalizeLocalArchiveFiles,
+  readPinnedLocalArchive,
+  type LocalArchiveFile,
+} from './local-directory-transaction.js'
 
 const skillsLogger = logger.child('skills-application')
 
@@ -103,42 +125,162 @@ export class SkillsApplication {
     let resolvedDir = command.dir.replace(/^~/, this.home)
     if (!isAbsolute(resolvedDir) && command.repoPath)
       resolvedDir = join(command.repoPath, resolvedDir)
+    if (command.repoPath) {
+      const canonicalRepo = await this.fs.realPath(command.repoPath)
+      const builtInRoot = join(canonicalRepo, 'assets', 'skills')
+      const requested = normalize(resolve(resolvedDir))
+      const lexicalBuiltInRoot = normalize(resolve(command.repoPath, 'assets', 'skills'))
+      if (requested === builtInRoot || requested === lexicalBuiltInRoot) {
+        return (await discoverBuiltInLocalSkills(this.fs, command.repoPath)).map((skill) => ({
+          name: skill.id,
+          path: skill.directory,
+        }))
+      }
+    }
     if (!(await this.fs.exists(resolvedDir))) return []
-    return scanLocalSkillDirs(resolvedDir, { dot: true, ignore: LOCAL_SKILL_SCAN_IGNORE })
+    return (
+      await scanLocalSkillDirs(resolvedDir, { dot: true, ignore: LOCAL_SKILL_SCAN_IGNORE })
+    ).filter((skill) => LocalSkillIdSchema.safeParse(skill.name).success)
   }
 
   async addLocalSkill(repoPath: string, skill: LocalSkill): Promise<{ skill: LocalSkill }> {
-    await this.updateManifest(repoPath, (manifest) => addLocalSkillMutation(manifest, skill))
-    return { skill }
+    const parsed = LocalSkillSchema.safeParse(skill)
+    if (!parsed.success) {
+      throw new LocalSkillBoundaryError(400, 'invalid_skill', 'Invalid local skill', {
+        cause: parsed.error,
+      })
+    }
+    const manifest = await this.readManifest(repoPath)
+    if (indexRegisteredLocalSkills(manifest).has(parsed.data.id))
+      throw alreadyExists(parsed.data.id)
+    let candidate = parsed.data
+    const resolved = await resolveRegisteredLocalSkill(
+      this.fs,
+      repoPath,
+      { ...manifest, skills: [...manifest.skills, candidate] },
+      candidate.id,
+    )
+    const available = requireAvailableLocalSkill(resolved, candidate.id)
+    if (candidate.path) {
+      const discovered = await resolveEffectiveLocalSkill(this.fs, repoPath, manifest, candidate.id)
+      if (
+        discovered?.provenance === 'discovered-built-in' &&
+        discovered.available &&
+        discovered.directory === available.directory
+      ) {
+        candidate = {
+          id: candidate.id,
+          ...(candidate.agents ? { agents: candidate.agents } : {}),
+        }
+      }
+    }
+    await this.writeManifest(repoPath, addLocalSkillMutation(manifest, candidate).data)
+    return { skill: candidate }
   }
 
   async importLocalSkills(
     repoPath: string,
     command: { skills: LocalSkillImport[]; mode: 'move' | 'ref' },
   ): Promise<{ count: number }> {
-    const assetsDir = this.assetsSkillsDir(repoPath)
-    const assetsPrefix = normalizedPath(assetsDir)
     const manifest = await this.readManifest(repoPath)
+    const registered = indexRegisteredLocalSkills(manifest)
+    const names = command.skills.map((skill) => skill.name)
+    assertUniqueLocalSkillNames(names)
+    const resolved = [] as Array<{
+      name: string
+      source: ReturnType<typeof requireAvailableLocalSkill>
+      manifestEntry: LocalSkill
+    }>
     for (const skill of command.skills) {
-      const skillPath = normalizedPath(String(skill.path ?? ''))
-      const isRepoAssetSkill =
-        skillPath === assetsPrefix + '/' + skill.name ||
-        skillPath.startsWith(assetsPrefix + '/' + skill.name + '/')
-      if (command.mode === 'move') {
-        const dest = join(assetsDir, skill.name)
-        if (await this.fs.exists(dest)) throw alreadyExists(skill.name)
-        await this.fs.mkdir(assetsDir, true)
-        await this.fs.move(skill.path, dest)
-        Object.assign(manifest, addLocalSkillMutation(manifest, { id: skill.name }).data)
-      } else {
-        const localSkill = isRepoAssetSkill
-          ? { id: skill.name }
-          : { id: skill.name, path: skill.path }
-        Object.assign(manifest, addLocalSkillMutation(manifest, localSkill).data)
+      if (registered.has(skill.name)) throw alreadyExists(skill.name)
+      const externalEntry = { id: skill.name, path: skill.path }
+      const source = requireAvailableLocalSkill(
+        await resolveRegisteredLocalSkill(
+          this.fs,
+          repoPath,
+          { ...manifest, skills: [...manifest.skills, externalEntry] },
+          skill.name,
+        ),
+        skill.name,
+      )
+      let manifestEntry: LocalSkill = { id: skill.name }
+      if (command.mode === 'ref') {
+        const discovered = await resolveEffectiveLocalSkill(this.fs, repoPath, manifest, skill.name)
+        const isBuiltIn =
+          discovered?.provenance === 'discovered-built-in' &&
+          discovered.available &&
+          discovered.directory === source.directory
+        manifestEntry = isBuiltIn ? { id: skill.name } : { id: skill.name, path: source.directory }
       }
+      resolved.push({ name: skill.name, source, manifestEntry })
     }
 
-    await this.writeManifest(repoPath, manifest)
+    const nextManifest = resolved.reduce(
+      (current, skill) => addLocalSkillMutation(current, skill.manifestEntry).data,
+      manifest,
+    )
+    if (command.mode === 'ref' || resolved.length === 0) {
+      if (resolved.length > 0) await this.writeManifest(repoPath, nextManifest)
+      return { count: command.skills.length }
+    }
+
+    const sources = [] as Array<{
+      skill: (typeof resolved)[number]
+      snapshot: Awaited<ReturnType<typeof inspectLocalDirectorySnapshot>>
+    }>
+    const sourceIdentities = new Set<string>()
+    for (const skill of resolved) {
+      if (!skill.source.directoryIdentity) {
+        throw new LocalSkillBoundaryError(
+          422,
+          'invalid_local_skill_source',
+          'Local skill source identity is unavailable',
+        )
+      }
+      const sourceKey = `${skill.source.directoryIdentity}\0${skill.source.directory}`
+      if (sourceIdentities.has(sourceKey)) {
+        throw new LocalSkillBoundaryError(
+          409,
+          'local_skill_source_collision',
+          'Local skill import contains the same source more than once',
+        )
+      }
+      sourceIdentities.add(sourceKey)
+      sources.push({
+        skill,
+        snapshot: await inspectLocalDirectorySnapshot(this.fs, {
+          path: skill.source.directory,
+          identity: skill.source.directoryIdentity,
+        }),
+      })
+      await preflightBuiltInLocalSkill(this.fs, repoPath, skill.name)
+    }
+    const destinations = new Map(
+      await Promise.all(
+        resolved.map(
+          async (skill) =>
+            [skill.name, await prepareBuiltInLocalSkill(this.fs, repoPath, skill.name)] as const,
+        ),
+      ),
+    )
+    const root = destinations.values().next().value!.root
+    const transaction = await LocalDirectoryTransaction.open(this.fs, root, this.log)
+    let manifestAttempted = false
+    try {
+      for (const { skill, snapshot } of sources) {
+        await transaction.stageMovedDirectory(destinations.get(skill.name)!, snapshot)
+      }
+      await transaction.apply()
+      manifestAttempted = true
+      await this.writeManifest(repoPath, nextManifest)
+      await transaction.complete()
+    } catch (err) {
+      await this.failLocalTransaction(
+        transaction,
+        err,
+        manifestAttempted ? () => this.writeManifest(repoPath, manifest) : undefined,
+      )
+    }
     return { count: command.skills.length }
   }
 
@@ -146,24 +288,53 @@ export class SkillsApplication {
     repoPath: string,
     command: { skills: LocalSkillWrite[] },
   ): Promise<{ count: number }> {
-    const assetsDir = this.assetsSkillsDir(repoPath)
     const manifest = await this.readManifest(repoPath)
-
+    const registered = indexRegisteredLocalSkills(manifest)
+    const names = command.skills.map((skill) => skill.name)
+    assertUniqueLocalSkillNames(names)
+    const archives = [] as Array<{
+      name: string
+      files: LocalArchiveFile[]
+    }>
     for (const skill of command.skills) {
-      const dest = join(assetsDir, skill.name)
-      if (await this.fs.exists(dest)) throw alreadyExists(skill.name)
-      await this.fs.mkdir(dest, true)
-      for (const file of Array.isArray(skill.files) ? skill.files : []) {
-        const rel = String(file.path).replace(/^[/\\]+/, '')
-        if (!rel || rel.includes('..')) continue
-        const target = join(dest, rel)
-        await this.fs.mkdir(dirname(target), true)
-        await this.fs.writeFile(target, String(file.content ?? ''))
-      }
-      Object.assign(manifest, addLocalSkillMutation(manifest, { id: skill.name }).data)
+      if (registered.has(skill.name)) throw alreadyExists(skill.name)
+      archives.push({
+        name: skill.name,
+        files: normalizeLocalArchiveFiles(Array.isArray(skill.files) ? skill.files : []),
+      })
+      await preflightBuiltInLocalSkill(this.fs, repoPath, skill.name)
     }
-
-    await this.writeManifest(repoPath, manifest)
+    if (archives.length === 0) return { count: 0 }
+    const nextManifest = archives.reduce(
+      (current, skill) => addLocalSkillMutation(current, { id: skill.name }).data,
+      manifest,
+    )
+    const destinations = new Map(
+      await Promise.all(
+        archives.map(
+          async (skill) =>
+            [skill.name, await prepareBuiltInLocalSkill(this.fs, repoPath, skill.name)] as const,
+        ),
+      ),
+    )
+    const root = destinations.values().next().value!.root
+    const transaction = await LocalDirectoryTransaction.open(this.fs, root, this.log)
+    let manifestAttempted = false
+    try {
+      for (const skill of archives) {
+        await transaction.stageArchive(destinations.get(skill.name)!, skill.files)
+      }
+      await transaction.apply()
+      manifestAttempted = true
+      await this.writeManifest(repoPath, nextManifest)
+      await transaction.complete()
+    } catch (err) {
+      await this.failLocalTransaction(
+        transaction,
+        err,
+        manifestAttempted ? () => this.writeManifest(repoPath, manifest) : undefined,
+      )
+    }
     return { count: command.skills.length }
   }
 
@@ -187,6 +358,7 @@ export class SkillsApplication {
     let cacheBackedUp = false
     let cacheSwapped = false
     let retainCandidateRoot = false
+    let candidateCleanupHandled = false
     try {
       validateSourceSelection(candidate.sourceTree, command.members ?? [], resources)
       if (await this.fs.exists(cacheDir)) {
@@ -211,11 +383,13 @@ export class SkillsApplication {
       return { source: result.data.sources[result.data.sources.length - 1]! }
     } catch (err) {
       this.log.error('source installation or manifest write failed', { err, url: command.url })
+      const rollbackFailures: unknown[] = []
       if (cacheSwapped) {
         try {
           await this.fs.removeDir(cacheDir)
         } catch (cleanupError) {
           retainCandidateRoot = true
+          rollbackFailures.push(cleanupError)
           this.log.error('failed to remove candidate cache after add failure', {
             err: cleanupError,
             url: command.url,
@@ -228,6 +402,7 @@ export class SkillsApplication {
           await this.fs.move(backupDir, cacheDir)
         } catch (restoreError) {
           retainCandidateRoot = true
+          rollbackFailures.push(restoreError)
           this.log.error('failed to restore source cache after add failure', {
             err: restoreError,
             url: command.url,
@@ -235,9 +410,16 @@ export class SkillsApplication {
           })
         }
       }
-      throw err
+      if (!retainCandidateRoot) {
+        const cleanupError = await this.removeCandidateRoot(candidate.rootDir, command.url)
+        candidateCleanupHandled = true
+        if (cleanupError) rollbackFailures.push(cleanupError)
+      }
+      throw combineLocalTransactionFailure(err, rollbackFailures)
     } finally {
-      if (!retainCandidateRoot) await this.removeCandidateRoot(candidate.rootDir, command.url)
+      if (!retainCandidateRoot && !candidateCleanupHandled) {
+        await this.removeCandidateRoot(candidate.rootDir, command.url)
+      }
     }
   }
 
@@ -306,7 +488,7 @@ export class SkillsApplication {
       )
     }
     const backupDir = candidate.rootDir ? join(candidate.rootDir, 'previous-cache') : ''
-    const copied: string[] = []
+    let localTransaction: LocalDirectoryTransaction | undefined
     let manifestWritten = false
     let cacheBackedUp = false
     let cacheSwapped = false
@@ -337,6 +519,7 @@ export class SkillsApplication {
         return { finalized: false, changes }
       }
       const preserve = command.preserve ?? []
+      assertUniqueLocalSkillNames(preserve)
       if (preserve.some((name) => !changes.removed.some((member) => member.name === name))) {
         throw new SkillsApplicationError(400, 'invalid_preserve_members', '保留列表包含无效 skill')
       }
@@ -344,40 +527,56 @@ export class SkillsApplication {
       const currentSource = currentManifest.sources.find((item) => item.url === command.url)
       if (!currentSource) throw sourceNotFound(command.url)
       originalManifest = structuredClone(currentManifest)
+      const preservedArchives: Array<{
+        name: string
+        agents?: AgentId[]
+        files: LocalArchiveFile[]
+      }> = []
+      const repository = await resolveLocalSkillRepositoryRoot(this.fs, repoPath)
       for (const name of preserve) {
-        const dest = join(this.assetsSkillsDir(repoPath), name)
-        if (
-          currentManifest.skills.some((skill) => skill.id === name) ||
-          (await this.fs.exists(dest))
-        ) {
-          throw alreadyExists(name)
-        }
-      }
-      for (const name of preserve) {
+        if (currentManifest.skills.some((skill) => skill.id === name)) throw alreadyExists(name)
         const previous = currentSource.members?.find((member) => member.name === name)
         const skillFile = previous?.entry
         if (!skillFile) throw new SkillsApplicationError(400, 'invalid_member_entry', name)
-        const normalized = skillFile.replace(/\\/g, '/')
-        if (isAbsolute(skillFile) || normalized.split('/').includes('..')) {
-          throw new SkillsApplicationError(
-            400,
-            'invalid_member_path',
-            `Invalid skill path: ${skillFile}`,
-          )
-        }
-        const sourceDir = join(
-          repoPath,
-          'remote-cache',
-          deriveRepoId(source.url),
-          dirname(normalized),
+        await preflightBuiltInLocalSkill(this.fs, repoPath, name)
+        preservedArchives.push({
+          name,
+          ...(previous.agents ? { agents: previous.agents } : {}),
+          files: await readPinnedLocalArchive(
+            this.fs,
+            this.git,
+            repository,
+            currentSource,
+            skillFile,
+          ),
+        })
+      }
+      if (preservedArchives.length > 0) {
+        const destinations = new Map(
+          await Promise.all(
+            preservedArchives.map(
+              async (skill) =>
+                [
+                  skill.name,
+                  await prepareBuiltInLocalSkill(this.fs, repoPath, skill.name),
+                ] as const,
+            ),
+          ),
         )
-        const dest = join(this.assetsSkillsDir(repoPath), name)
-        if (dirname(normalized) === '.') await this.copyRootBundle(sourceDir, dest)
-        else await this.fs.copyDir(sourceDir, dest)
-        copied.push(dest)
+        localTransaction = await LocalDirectoryTransaction.open(
+          this.fs,
+          destinations.values().next().value!.root,
+          this.log,
+        )
+        for (const skill of preservedArchives) {
+          await localTransaction.stageArchive(destinations.get(skill.name)!, skill.files)
+        }
+        await localTransaction.apply()
+      }
+      for (const skill of preservedArchives) {
         currentManifest.skills.push({
-          id: name,
-          ...(previous?.agents ? { agents: previous.agents } : {}),
+          id: skill.name,
+          ...(skill.agents ? { agents: skill.agents } : {}),
         })
       }
       const liveCacheMatchesCandidate =
@@ -406,21 +605,17 @@ export class SkillsApplication {
       await this.writeManifest(repoPath, next)
       manifestWritten = true
       await this.projectSkills?.(repoPath)
+      await localTransaction?.complete()
       return { finalized: true, changes, preserved: preserve }
     } catch (err) {
       this.log.error('source reconciliation failed', { err, url: command.url })
-      for (const path of copied) {
-        try {
-          await this.fs.removeDir(path)
-        } catch (cleanupError) {
-          this.log.error('source reconciliation cleanup failed', { err: cleanupError, path })
-        }
-      }
+      const rollbackFailures: unknown[] = []
       if (cacheSwapped) {
         try {
           await this.fs.removeDir(cacheDir)
         } catch (cleanupError) {
           retainCandidateRoot = true
+          rollbackFailures.push(cleanupError)
           this.log.error('source reconciliation candidate cleanup failed', {
             err: cleanupError,
             url: command.url,
@@ -433,6 +628,7 @@ export class SkillsApplication {
           await this.fs.move(backupDir, cacheDir)
         } catch (restoreError) {
           retainCandidateRoot = true
+          rollbackFailures.push(restoreError)
           this.log.error('source reconciliation cache rollback failed', {
             err: restoreError,
             url: command.url,
@@ -444,6 +640,7 @@ export class SkillsApplication {
         try {
           await this.writeManifest(repoPath, originalManifest)
         } catch (rollbackError) {
+          rollbackFailures.push(rollbackError)
           this.log.error('source reconciliation manifest rollback failed', {
             err: rollbackError,
             url: command.url,
@@ -452,13 +649,15 @@ export class SkillsApplication {
         try {
           await this.projectSkills?.(repoPath)
         } catch (rollbackError) {
+          rollbackFailures.push(rollbackError)
           this.log.error('source reconciliation projection rollback failed', {
             err: rollbackError,
             url: command.url,
           })
         }
       }
-      throw err
+      if (localTransaction) rollbackFailures.push(...(await localTransaction.rollback()))
+      throw combineLocalTransactionFailure(err, rollbackFailures)
     } finally {
       if (candidate.rootDir && !retainCandidateRoot) {
         await this.removeCandidateRoot(candidate.rootDir, command.url)
@@ -467,13 +666,45 @@ export class SkillsApplication {
   }
 
   async removeLocalSkill(repoPath: string, id: string): Promise<void> {
+    assertLocalSkillIdentifier(id)
     const manifest = await this.readManifest(repoPath)
-    const existing = manifest.skills.find((skill) => skill.id === id)
+    const existing = indexRegisteredLocalSkills(manifest).get(id)
+    if (!existing) throw localSkillNotFound(id)
     const result = removeLocalSkillMutation(manifest, id)
-    if (result.changed) await this.writeManifest(repoPath, result.data)
-    if (!existing?.path) {
-      const dir = join(this.assetsSkillsDir(repoPath), id)
-      if (await this.fs.exists(dir)) await this.fs.removeDir(dir)
+    if (existing.path) {
+      await this.writeManifest(repoPath, result.data)
+      return
+    }
+    const resolved = await resolveRegisteredLocalSkill(this.fs, repoPath, manifest, id)
+    if (!resolved?.available) {
+      await this.writeManifest(repoPath, result.data)
+      return
+    }
+    if (!resolved.builtInRoot) {
+      throw new LocalSkillBoundaryError(
+        422,
+        'invalid_local_skill_path',
+        'Built-in local skill ownership is unavailable',
+      )
+    }
+    const transaction = await LocalDirectoryTransaction.open(
+      this.fs,
+      resolved.builtInRoot,
+      this.log,
+    )
+    let manifestAttempted = false
+    try {
+      await transaction.stageRemoval(resolved)
+      await transaction.apply()
+      manifestAttempted = true
+      await this.writeManifest(repoPath, result.data)
+      await transaction.complete()
+    } catch (err) {
+      await this.failLocalTransaction(
+        transaction,
+        err,
+        manifestAttempted ? () => this.writeManifest(repoPath, manifest) : undefined,
+      )
     }
   }
 
@@ -500,9 +731,20 @@ export class SkillsApplication {
   }
 
   async setLocalSkillAgents(repoPath: string, id: string, agents: AgentId[]): Promise<void> {
-    await this.updateManifest(repoPath, (manifest) =>
-      setLocalSkillAgentsMutation(manifest, id, agents),
-    )
+    assertLocalSkillIdentifier(id)
+    const manifest = await this.readManifest(repoPath)
+    const registered = indexRegisteredLocalSkills(manifest).get(id)
+    const result = registered
+      ? setLocalSkillAgentsMutation(manifest, id, agents)
+      : addLocalSkillMutation(manifest, {
+          id: requireAvailableLocalSkill(
+            await resolveEffectiveLocalSkill(this.fs, repoPath, manifest, id),
+            id,
+          ).id,
+          agents,
+        })
+    if (!result.changed) throw localSkillNotFound(id)
+    await this.writeManifest(repoPath, result.data)
   }
 
   async reorderGroups(repoPath: string, ids: string[]): Promise<{ ids: string[] }> {
@@ -517,18 +759,14 @@ export class SkillsApplication {
   }
 
   private async readManifest(repoPath: string): Promise<SkillsManifest> {
-    return (await readYaml(this.fs, this.skillsYamlPath(repoPath))) ?? { sources: [], skills: [] }
-  }
-
-  private async copyRootBundle(source: string, destination: string): Promise<void> {
-    await this.fs.mkdir(destination, true)
-    for (const name of await this.fs.readDir(source)) {
-      if (name === '.git') continue
-      const childSource = join(source, name)
-      const childDestination = join(destination, name)
-      if (await this.fs.isDirectory(childSource))
-        await this.fs.copyDir(childSource, childDestination)
-      else await this.fs.copyFile(childSource, childDestination)
+    try {
+      const manifest = await readSkillsManifest(this.fs, repoPath)
+      indexRegisteredLocalSkills(manifest)
+      return manifest
+    } catch (error) {
+      if (error instanceof RepoManifestError)
+        throw new SkillsApplicationError(422, 'invalid_skills_manifest', error.message)
+      throw error
     }
   }
 
@@ -550,16 +788,18 @@ export class SkillsApplication {
       return { rootDir, candidateDir, sourceTree }
     } catch (err) {
       this.log.error('source candidate preparation failed', { err, url, ref })
-      await this.removeCandidateRoot(rootDir, url)
-      throw err
+      const cleanupError = await this.removeCandidateRoot(rootDir, url)
+      throw combineLocalTransactionFailure(err, cleanupError ? [cleanupError] : [])
     }
   }
 
-  private async removeCandidateRoot(rootDir: string, url: string): Promise<void> {
+  private async removeCandidateRoot(rootDir: string, url: string): Promise<unknown | undefined> {
     try {
       await this.fs.removeDir(rootDir)
+      return undefined
     } catch (err) {
       this.log.error('failed to clean source candidate', { err, url, rootDir })
+      return err
     }
   }
 
@@ -583,8 +823,23 @@ export class SkillsApplication {
     return join(repoPath, 'skills.yaml')
   }
 
-  private assetsSkillsDir(repoPath: string): string {
-    return join(repoPath, 'assets', 'skills')
+  private async failLocalTransaction(
+    transaction: LocalDirectoryTransaction,
+    primary: unknown,
+    rollbackState?: () => Promise<void>,
+  ): Promise<never> {
+    this.log.error('local skill transaction failed', { err: primary })
+    const rollbackFailures: unknown[] = []
+    if (rollbackState) {
+      try {
+        await rollbackState()
+      } catch (err) {
+        rollbackFailures.push(err)
+        this.log.error('failed to roll back local skill manifest', { err })
+      }
+    }
+    rollbackFailures.push(...(await transaction.rollback()))
+    throw combineLocalTransactionFailure(primary, rollbackFailures)
   }
 }
 
@@ -677,8 +932,13 @@ function collectSelectableNodes(
   return { hasResource, unsafeDirectory }
 }
 
-function normalizedPath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/, '')
+function assertUniqueLocalSkillNames(names: string[]): void {
+  const seen = new Set<string>()
+  for (const name of names) {
+    assertLocalSkillIdentifier(name)
+    if (seen.has(name)) throw alreadyExists(name)
+    seen.add(name)
+  }
 }
 
 function alreadyExists(skillName: string): SkillsApplicationError {
@@ -691,6 +951,10 @@ function alreadyExists(skillName: string): SkillsApplicationError {
 
 function sourceNotFound(url: string): SkillsApplicationError {
   return new SkillsApplicationError(404, 'not_found', `Source ${url} not found`)
+}
+
+function localSkillNotFound(id: string): SkillsApplicationError {
+  return new SkillsApplicationError(404, 'local_skill_not_found', `Local skill ${id} not found`)
 }
 
 function sourceCommitChanged(expectedCommit: string, actualCommit: string): SkillsApplicationError {

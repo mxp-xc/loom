@@ -1,22 +1,48 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import {
+  existsSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Hono } from 'hono'
-import { registerRoutes } from '../../src/api/router.js'
 import { createMemoryRoutes } from '../../src/api/routes/memory.js'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
+import { responseJson, validationError } from '../helpers/http.js'
+
+interface MemoryListBody {
+  memories: Array<{ name: string }>
+  active: string | null
+  activeContent: string
+}
+
+interface MemoryPreviewBody {
+  rendered: string
+  resolution: { sources: Record<string, unknown> }
+}
+
+function createTestApp(home: string, fs = new NodeFileSystem()): Hono {
+  return new Hono().route(
+    '/api',
+    createMemoryRoutes({ fs, git: {} as never, proc: {} as never, home }),
+  )
+}
 
 describe('memory routes', () => {
   let home: string
   let app: Hono
 
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'loom-mem-'))
+    home = realpathSync(mkdtempSync(join(tmpdir(), 'loom-mem-')))
     mkdirSync(join(home, '.loom', 'repos', 'default', 'memories'), { recursive: true })
     writeFileSync(join(home, '.loom', 'repos', 'default', 'config.yaml'), '')
-    process.env.HOME = home
-    app = new Hono().route('/api', registerRoutes())
+    vi.stubEnv('HOME', home)
+    app = createTestApp(home)
   })
   afterEach(() => {
     rmSync(home, { recursive: true, force: true })
@@ -37,8 +63,8 @@ describe('memory routes', () => {
     )
     writeFileSync(join(home, '.loom', 'repos', 'default', 'config.yaml'), 'active_memory: v2\n')
     const res = await req('GET', '/api/memory?repo=default')
-    const j = await res.json()
-    expect(j.memories.map((m: any) => m.name).sort()).toEqual(['v1', 'v2'])
+    const j = await responseJson<MemoryListBody>(res)
+    expect(j.memories.map((memory) => memory.name).sort()).toEqual(['v1', 'v2'])
     expect(j.active).toBe('v2')
     expect(j.activeContent).toContain('${LOOM_AGENT}')
   })
@@ -49,7 +75,7 @@ describe('memory routes', () => {
       '# raw ${LOOM_AGENT}',
     )
     const res = await req('GET', '/api/memory?repo=default&name=v1')
-    const j = await res.json()
+    const j = await responseJson<{ content: string }>(res)
     expect(j.content).toBe('# raw ${LOOM_AGENT}')
   })
 
@@ -69,7 +95,7 @@ describe('memory routes', () => {
 
   it('POST /memory creates new memory', async () => {
     const res = await req('POST', '/api/memory', { repo: 'default', name: 'v3' })
-    const j = await res.json()
+    const j = await responseJson<{ ok: boolean }>(res)
     expect(j.ok).toBe(true)
     expect(readFileSync(join(home, '.loom', 'repos', 'default', 'memories', 'v3.md'), 'utf8')).toBe(
       '',
@@ -93,7 +119,7 @@ describe('memory routes', () => {
       const res = await req('POST', '/api/memory', { repo: 'default', name })
 
       expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ ok: false, error: 'invalid_name' })
+      expect(await res.json()).toEqual(validationError('invalid_name'))
     },
   )
 
@@ -217,7 +243,7 @@ describe('memory routes', () => {
     const res = await req('DELETE', '/api/memory?repo=default')
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ ok: false, error: 'invalid_name' })
+    expect(await res.json()).toEqual(validationError('invalid_name'))
   })
 
   it('POST /memory/rename renames + syncs active', async () => {
@@ -311,7 +337,9 @@ describe('memory routes', () => {
     await req('DELETE', '/api/memory?repo=default&name=a')
 
     const listed = await req('GET', '/api/memory?repo=default')
-    expect((await listed.json()).memories.map((memory: any) => memory.name)).toEqual(['team', 'c'])
+    expect(
+      (await responseJson<MemoryListBody>(listed)).memories.map((memory) => memory.name),
+    ).toEqual(['team', 'c'])
     expect(readFileSync(join(repo, 'config.yaml'), 'utf8')).toContain(
       'memory_order:\n  - team\n  - c',
     )
@@ -344,6 +372,19 @@ describe('memory routes', () => {
       names: [],
     })
     expect(malformedConfig.status).toBe(422)
+    expect(await malformedConfig.json()).toMatchObject({
+      ok: false,
+      error: 'invalid_memory_config',
+      message: 'memory configuration is invalid',
+    })
+
+    const malformedList = await req('GET', '/api/memory?repo=default')
+    expect(malformedList.status).toBe(422)
+    expect(await malformedList.json()).toMatchObject({
+      ok: false,
+      error: 'invalid_memory_config',
+      message: 'memory configuration is invalid',
+    })
   })
 
   it('rolls back memory file mutations when the config replace fails', async () => {
@@ -353,10 +394,7 @@ describe('memory routes', () => {
         throw new Error('config replace failed')
       }
     }
-    const rollbackApp = new Hono().route(
-      '/api',
-      createMemoryRoutes({ fs: new FailingConfigFileSystem(), home } as any),
-    )
+    const rollbackApp = createTestApp(home, new FailingConfigFileSystem())
     const rollbackReq = (method: string, path: string, body?: unknown) =>
       rollbackApp.request(`http://localhost${path}`, {
         method,
@@ -368,7 +406,7 @@ describe('memory routes', () => {
       repo: 'default',
       name: 'created',
     })
-    expect(createResponse.status).toBe(400)
+    expect(createResponse.status).toBe(500)
     expect(existsSync(join(repo, 'memories', 'created.md'))).toBe(false)
 
     writeFileSync(join(repo, 'memories', 'original.md'), 'original content')
@@ -377,7 +415,7 @@ describe('memory routes', () => {
       'active_memory: original\nmemory_order:\n  - original\n',
     )
     const deleteResponse = await rollbackReq('DELETE', '/api/memory?repo=default&name=original')
-    expect(deleteResponse.status).toBe(400)
+    expect(deleteResponse.status).toBe(500)
     expect(readFileSync(join(repo, 'memories', 'original.md'), 'utf8')).toBe('original content')
 
     const renameResponse = await rollbackReq('POST', '/api/memory/rename', {
@@ -385,7 +423,7 @@ describe('memory routes', () => {
       name: 'original',
       newName: 'renamed',
     })
-    expect(renameResponse.status).toBe(400)
+    expect(renameResponse.status).toBe(500)
     expect(existsSync(join(repo, 'memories', 'original.md'))).toBe(true)
     expect(existsSync(join(repo, 'memories', 'renamed.md'))).toBe(false)
     expect(readFileSync(join(repo, 'config.yaml'), 'utf8')).toBe(
@@ -394,15 +432,14 @@ describe('memory routes', () => {
   })
 
   it('POST /memory/preview renders ${VAR} for agent', async () => {
-    process.env.CLAUDE_CONFIG_DIR = join(home, 'claude')
+    vi.stubEnv('CLAUDE_CONFIG_DIR', join(home, 'claude'))
     const res = await req('POST', '/api/memory/preview', {
       repo: 'default',
       content: 'agent=${LOOM_AGENT} file=${LOOM_AGENT_FILE}',
       agent: 'claude-code',
     })
-    const j = await res.json()
+    const j = await responseJson<MemoryPreviewBody>(res)
     expect(j.rendered).toBe('agent=claude-code file=CLAUDE.md')
-    delete process.env.CLAUDE_CONFIG_DIR
   })
 
   it('POST /memory/preview renders agent-aware repo and local vars', async () => {
@@ -428,17 +465,16 @@ describe('memory routes', () => {
       join(home, '.loom', 'local', 'repos', 'default', 'vars', 'local.yaml'),
       'agent_name:\n  value: Local Codex\n',
     )
-    process.env.CODEX_HOME = join(home, 'codex')
+    vi.stubEnv('CODEX_HOME', join(home, 'codex'))
 
     const res = await req('POST', '/api/memory/preview', {
       repo: 'default',
       content: '# ${agent_name}\\n@${rtk}',
       agent: 'codex',
     })
-    const j = await res.json()
+    const j = await responseJson<MemoryPreviewBody>(res)
     expect(res.status).toBe(200)
     expect(j.rendered).toBe('# Local Codex\\n@' + join(home, 'codex') + '/RTK.md')
     expect(j.resolution.sources.agent_name).toEqual({ locality: 'local', layer: 'local' })
-    delete process.env.CODEX_HOME
   })
 })

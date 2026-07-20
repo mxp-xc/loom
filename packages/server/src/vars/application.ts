@@ -13,6 +13,7 @@ import {
   type VarDefinition,
   type VarEntry,
   type VarOverride,
+  type StringFormat,
   type VarsDiagnostic,
   type VarsEnvironment,
   type VarsLifecycleResolution,
@@ -62,7 +63,8 @@ export interface VarsMatrix {
   resolution: PresentedLayeredVarsResolution | Extract<LayeredVarsResolution, { ok: false }>
 }
 
-export type MaskedVarEntry = VarEntry | { type: 'secret'; value: string; masked: true }
+export type MaskedVarEntry =
+  VarEntry | { type: 'secret'; value: string; format?: StringFormat; masked: true }
 export type PresentedVarOverride = VarOverride | { value: string; masked: true }
 export interface PresentedAgentAwareVarsSnapshot {
   base: Record<string, MaskedVarEntry>
@@ -447,7 +449,7 @@ async function loadAll(store: VarsStore): Promise<Record<string, VarsEnvironment
 }
 
 function maskEntry(entry: VarEntry): MaskedVarEntry {
-  return entry.type === 'secret' ? ({ type: 'secret', value: MASK, masked: true } as const) : entry
+  return entry.type === 'secret' ? ({ ...entry, value: MASK, masked: true } as const) : entry
 }
 
 function maskEnvironment(

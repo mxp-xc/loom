@@ -1,5 +1,6 @@
 import type { VarsFile } from './types.js'
 import type { VarEntry, VarsDiagnostic, VarsEnvironment } from './vars-types.js'
+import { replaceVariableTokens } from './vars-template.js'
 
 export interface VarsContext {
   /** Caller-supplied runtime tokens for text rendering; never read from process.env here. */
@@ -8,8 +9,6 @@ export interface VarsContext {
   defaultProfile: VarsFile
 }
 export class ResolveError extends Error {}
-
-const REF = /\$\{([A-Za-z_][A-Za-z0-9_.-]*)(?::([^}]*))?\}/g
 
 export type VarsResolutionResult =
   | {
@@ -116,9 +115,9 @@ export function resolveVarsChain(
     stack.push(key)
     dependencies[key] = []
     try {
-      const resolvedValue = entry.value.replace(
-        REF,
-        (_full, referencedKey: string, defaultValue: string | undefined) => {
+      const resolvedValue = replaceVariableTokens(
+        entry.value,
+        ({ key: referencedKey, defaultValue }) => {
           if (!dependencies[key].includes(referencedKey)) dependencies[key].push(referencedKey)
           if (!Object.prototype.hasOwnProperty.call(merged, referencedKey)) {
             if (defaultValue !== undefined) return defaultValue
@@ -133,7 +132,7 @@ export function resolveVarsChain(
           return stringifyEntry(resolveEntry(referencedKey))
         },
       )
-      const resolved: VarEntry = { type: entry.type, value: resolvedValue }
+      const resolved: VarEntry = { ...entry, value: resolvedValue }
       values[key] = resolved
       return resolved
     } finally {
@@ -157,7 +156,7 @@ export function resolveVarsChain(
 /** @deprecated Use resolveVarsChain for typed environment resolution. */
 export function resolveVars(value: string, ctx: VarsContext): string {
   if (!value.includes('${')) return value
-  return value.replace(REF, (_full, name: string, def: string | undefined) => {
+  return replaceVariableTokens(value, ({ key: name, defaultValue: def }) => {
     if (Object.prototype.hasOwnProperty.call(ctx.activeProfile, name))
       return ctx.activeProfile[name]
     if (Object.prototype.hasOwnProperty.call(ctx.defaultProfile, name))
@@ -169,7 +168,7 @@ export function resolveVars(value: string, ctx: VarsContext): string {
 
 function resolveRenderVars(value: string, ctx: VarsContext): string {
   if (!value.includes('${')) return value
-  return value.replace(REF, (_full, name: string, def: string | undefined) => {
+  return replaceVariableTokens(value, ({ key: name, defaultValue: def }) => {
     if (ctx.env && Object.prototype.hasOwnProperty.call(ctx.env, name)) return ctx.env[name]
     if (Object.prototype.hasOwnProperty.call(ctx.activeProfile, name))
       return ctx.activeProfile[name]
@@ -180,11 +179,6 @@ function resolveRenderVars(value: string, ctx: VarsContext): string {
   })
 }
 
-// NUL 字节 (\0) 在正常 markdown 文本与变量值中不会出现,确保 round-trip 不冲突。
-const ESC = '\0DOLLAR_BRACE\0'
-
 export function renderText(text: string, ctx: VarsContext): string {
-  let s = text.replaceAll('\\${', ESC) // 1. 保护转义 \${ → 占位符
-  s = resolveRenderVars(s, ctx) // 2. 解析调用方显式提供的 runtime tokens 与 vars
-  return s.replaceAll(ESC, '${') // 3. 还原占位符为字面 ${
+  return resolveRenderVars(text, ctx)
 }

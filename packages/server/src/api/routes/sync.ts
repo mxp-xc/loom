@@ -1,12 +1,15 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import { syncForcePush, syncPush } from '../../sync/push.js'
 import { SyncSessionError } from '../../sync/session-manager.js'
-import { resolveRepoPath } from '../repo.js'
+import { authorizeRepository, revalidateRepositoryAuthorization } from '../repo.js'
 import { logger } from '../../lib/logger.js'
 import type { SyncRouteDeps } from '../router.js'
 import { classifySyncGitError, syncErrorMessage } from '../../sync/errors.js'
 import { jsonValidator, queryValidator } from '../request-validation.js'
+import { repositoryErrorResponse } from '../repository-route-error.js'
+import { resourceLeases } from '../../concurrency/resource-lease-coordinator.js'
+import { withRepositoryLease } from '../repository-lease.js'
 
 const syncLogger = logger.child('sync')
 const NonEmptyString = z.string().min(1)
@@ -22,14 +25,19 @@ const RemoteBody = RepoBody.extend({ remoteUrl: NonEmptyString })
 
 export function createSyncRoutes(deps: SyncRouteDeps): Hono {
   const app = new Hono()
+  const leases = resourceLeases(deps, deps.leases)
+  const leaseDeps = { ...deps, leases }
 
   app.post('/sync/pull', jsonValidator(RepoBody, { error: 'invalid_repo' }), async (c) => {
     let repoPath: string | undefined
     try {
       const { repo } = c.req.valid('json')
-      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      const authorization = await authorizeRepository(deps.fs, repo, deps.home)
+      repoPath = authorization.path
       syncLogger.info('isolated pull started', { repoPath })
-      const result = await deps.sync.pull(repoPath)
+      const result = await deps.sync.pull(repoPath, (lockedRepoPath) =>
+        revalidateRepositoryAuthorization(deps.fs, deps.home, authorization, lockedRepoPath),
+      )
       syncLogger.info('isolated pull completed', { repoPath, clean: result.clean })
       return c.json({ ok: true, ...result })
     } catch (err) {
@@ -41,8 +49,16 @@ export function createSyncRoutes(deps: SyncRouteDeps): Hono {
     let repoPath: string | undefined
     try {
       const { repo } = c.req.valid('query')
-      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      const result = await deps.sync.getSession(repoPath)
+      const result = await withRepositoryLease(
+        leaseDeps,
+        repo,
+        'read',
+        (authorizedRepoPath) => [authorizedRepoPath],
+        async (authorizedRepoPath) => {
+          repoPath = authorizedRepoPath
+          return deps.sync.getSession(authorizedRepoPath)
+        },
+      )
       return c.json(result ? { ok: true, active: true, ...result } : { ok: true, active: false })
     } catch (err) {
       return syncError(c, err, { repoPath, operation: 'session restore' })
@@ -81,8 +97,17 @@ export function createSyncRoutes(deps: SyncRouteDeps): Hono {
     let repoPath: string | undefined
     try {
       const { repo } = c.req.valid('json')
-      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      return c.json(await syncPush(repoPath, deps.git, syncLogger))
+      const result = await withRepositoryLease(
+        leaseDeps,
+        repo,
+        'mutation',
+        (authorizedRepoPath) => [authorizedRepoPath],
+        async (authorizedRepoPath) => {
+          repoPath = authorizedRepoPath
+          return syncPush(authorizedRepoPath, deps.git, syncLogger)
+        },
+      )
+      return c.json(result)
     } catch (err) {
       return syncError(c, err, { repoPath, operation: 'push' })
     }
@@ -92,8 +117,17 @@ export function createSyncRoutes(deps: SyncRouteDeps): Hono {
     let repoPath: string | undefined
     try {
       const { repo } = c.req.valid('json')
-      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      return c.json(await syncForcePush(repoPath, deps.git, syncLogger))
+      const result = await withRepositoryLease(
+        leaseDeps,
+        repo,
+        'mutation',
+        (authorizedRepoPath) => [authorizedRepoPath],
+        async (authorizedRepoPath) => {
+          repoPath = authorizedRepoPath
+          return syncForcePush(authorizedRepoPath, deps.git, syncLogger)
+        },
+      )
+      return c.json(result)
     } catch (err) {
       return syncError(c, err, { repoPath, operation: 'force push' })
     }
@@ -103,9 +137,12 @@ export function createSyncRoutes(deps: SyncRouteDeps): Hono {
     let repoPath: string | undefined
     try {
       const { repo } = c.req.valid('json')
-      repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
+      const authorization = await authorizeRepository(deps.fs, repo, deps.home)
+      repoPath = authorization.path
       syncLogger.info('force pull requested', { repoPath })
-      const result = await deps.sync.forcePull(repoPath)
+      const result = await deps.sync.forcePull(repoPath, (lockedRepoPath) =>
+        revalidateRepositoryAuthorization(deps.fs, deps.home, authorization, lockedRepoPath),
+      )
       syncLogger.info('force pull completed', { repoPath, clean: result.clean })
       return c.json({ ok: true, ...result })
     } catch (err) {
@@ -116,29 +153,65 @@ export function createSyncRoutes(deps: SyncRouteDeps): Hono {
   app.post('/sync/remote', jsonValidator(RemoteBody, { error: syncRemoteError }), async (c) => {
     try {
       const { repo, remoteUrl } = c.req.valid('json')
-      const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      await deps.git.addOrUpdateRemote(repoPath, remoteUrl)
+      await withRepositoryLease(
+        leaseDeps,
+        repo,
+        'mutation',
+        (repoPath) => [repoPath],
+        async (repoPath) => {
+          if (await deps.sync.getSession(repoPath)) {
+            throw new SyncSessionError('active_session_exists', '请先解决或放弃当前同步会话')
+          }
+          await deps.git.addOrUpdateRemote(repoPath, remoteUrl)
+        },
+      )
       return c.json({ ok: true, remoteUrl })
     } catch (err) {
+      const repoFailure = repositoryErrorResponse(
+        c,
+        err,
+        syncLogger,
+        'sync remote update repository authorization failed',
+      )
+      if (repoFailure) return repoFailure
+      if (err instanceof SyncSessionError) {
+        syncLogger.error('remote update blocked by sync session', { err })
+        return c.json(
+          { ok: false, error: err.code, message: err.message },
+          err.code === 'manager_disposed' ? 503 : 409,
+        )
+      }
       syncLogger.error('remote update failed', { err })
-      return c.json({
-        ok: false,
-        error: 'remote_failed',
-        message: String((err as Error)?.message ?? err),
-      })
+      return c.json(
+        { ok: false, error: 'remote_failed', message: 'failed to update sync remote' },
+        500,
+      )
     }
   })
 
   app.get('/sync/remote', queryValidator(RepoQuery, { error: 'invalid_repo' }), async (c) => {
     try {
       const { repo } = c.req.valid('query')
-      const repoPath = await resolveRepoPath(deps.fs, repo, deps.home)
-      return c.json({ remoteUrl: await deps.git.getRemoteUrl(repoPath) })
+      const remoteUrl = await withRepositoryLease(
+        leaseDeps,
+        repo,
+        'read',
+        (repoPath) => [repoPath],
+        (repoPath) => deps.git.getRemoteUrl(repoPath),
+      )
+      return c.json({ remoteUrl })
     } catch (err) {
+      const repoFailure = repositoryErrorResponse(
+        c,
+        err,
+        syncLogger,
+        'sync remote lookup repository authorization failed',
+      )
+      if (repoFailure) return repoFailure
       syncLogger.error('remote lookup failed', { err })
       return c.json(
-        { ok: false, error: 'invalid_repo', message: String((err as Error).message) },
-        400,
+        { ok: false, error: 'remote_failed', message: 'failed to read sync remote' },
+        500,
       )
     }
   })
@@ -146,16 +219,33 @@ export function createSyncRoutes(deps: SyncRouteDeps): Hono {
   return app
 }
 
-function syncError(c: any, err: unknown, context: Record<string, unknown>) {
+function syncError(c: Context, err: unknown, context: Record<string, unknown>) {
+  const repoFailure = repositoryErrorResponse(
+    c,
+    err,
+    syncLogger,
+    `${String(context.operation)} repository authorization failed`,
+    context,
+  )
+  if (repoFailure) return repoFailure
+
   syncLogger.error(`${String(context.operation)} failed`, { err, ...context })
+  if (err instanceof SyncSessionError) {
+    const status =
+      err.code === 'session_not_found'
+        ? 404
+        : err.code === 'storage_quota_exceeded'
+          ? 413
+          : err.code === 'manager_disposed'
+            ? 503
+            : 409
+    return c.json({ ok: false, error: err.code, message: err.message }, status)
+  }
   const message = syncErrorMessage(err)
-  const error =
-    err instanceof SyncSessionError
-      ? err.code
-      : message.includes('未解决的冲突标记')
-        ? 'unresolved_markers'
-        : classifySyncGitError(message)
-  return c.json({ ok: false, error, message }, error === 'invalid_repo' ? 400 : 200)
+  const error = message.includes('未解决的冲突标记')
+    ? 'unresolved_markers'
+    : classifySyncGitError(message)
+  return c.json({ ok: false, error, message: 'sync operation failed' }, 500)
 }
 
 function syncConflictSaveError(issues: z.ZodIssue[]): string {
