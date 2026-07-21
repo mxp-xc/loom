@@ -8,7 +8,7 @@
     "dev:api": "bun --watch --no-clear-screen packages/server/src/index.ts",
     "start": "bun --cwd packages/server start",
     "test": "vitest run",
-    "test:rtk": "bash -o pipefail -c 'bun run test \"$@\" --reporter=json 2>&1 | rtk pipe --filter vitest' --",
+    "test:rtk": "bun scripts/test-rtk.mjs",
     "test:config": "bun scripts/check-vitest-workspace.mjs",
     "test:watch": "bun vitest",
     "typecheck": "bun run typecheck:source && bun run typecheck:tests",
