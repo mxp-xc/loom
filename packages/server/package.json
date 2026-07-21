@@ -9,7 +9,7 @@
     }
   },
   "scripts": {
-    "dev": "bun --watch --no-clear-screen src/index.ts",
+    "dev": "bun run --cwd ../.. dev:api",
     "start": "bun src/index.ts",
     "test": "bun vitest run",
     "typecheck": "bun --bun tsc --noEmit -p tsconfig.json",

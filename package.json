@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun scripts/dev.mjs",
-    "dev:api": "bun --cwd packages/server dev",
+    "dev:api": "bun --watch --no-clear-screen packages/server/src/index.ts",
     "start": "bun --cwd packages/server start",
     "test": "vitest run",
     "test:rtk": "bash -o pipefail -c 'bun run test \"$@\" --reporter=json 2>&1 | rtk pipe --filter vitest' --",

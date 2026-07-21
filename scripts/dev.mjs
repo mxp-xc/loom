@@ -85,7 +85,7 @@ async function main() {
 
   // Bun runs TypeScript natively — no tsx, no node, no pnpm in the chain.
   const children = [
-    tagged('api', '34', ['bun', '--cwd', `${__root}/packages/server`, 'dev']),
+    tagged('api', '34', ['bun', 'dev:api'], __root),
     tagged('web', '32', [
       'bun',
       '--cwd',
