@@ -57,7 +57,11 @@ describe('scanLocalSkills', () => {
     try {
       await mkdir(join(outside, 'linked-skill'), { recursive: true })
       await writeFile(join(outside, 'linked-skill', 'SKILL.md'), 'outside')
-      await symlink(outside, join(root, 'linked-root'), 'dir')
+      await symlink(
+        outside,
+        join(root, 'linked-root'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      )
 
       await expect(scanLocalSkills(root)).resolves.toEqual([])
     } finally {
@@ -108,10 +112,18 @@ describe('loadProjectionManifest', () => {
           ].join('\n'),
         )
         if (linkedPath === 'parent') {
-          await symlink(outside, join(root, 'remote-cache'), 'dir')
+          await symlink(
+            outside,
+            join(root, 'remote-cache'),
+            process.platform === 'win32' ? 'junction' : 'dir',
+          )
         } else {
           await mkdir(join(root, 'remote-cache'), { recursive: true })
-          await symlink(outside, join(root, 'remote-cache', 'skills'), 'dir')
+          await symlink(
+            outside,
+            join(root, 'remote-cache', 'skills'),
+            process.platform === 'win32' ? 'junction' : 'dir',
+          )
         }
         const git = sourceTreeGit([])
 

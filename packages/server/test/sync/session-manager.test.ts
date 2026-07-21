@@ -582,7 +582,7 @@ describe.concurrent('SyncSessionManager', () => {
     ).rejects.toMatchObject({ code: 'unsupported_conflict_type' })
   })
 
-  it('rejects a regular conflict replaced by a symlink before save', async () => {
+  it('rejects a regular conflict replaced by a leaf link before save', async () => {
     const { root, home, repo } = await setupRepo(
       'value: base\n',
       'value: local\n',
@@ -593,15 +593,19 @@ describe.concurrent('SyncSessionManager', () => {
     const cacheRoot = join(home, '.loom', 'cache', 'sync-worktrees')
     const [repoHash] = await readdir(cacheRoot)
     const conflictPath = join(cacheRoot, repoHash!, pulled.sessionId!, 'skills.yaml')
-    const sentinel = join(root, 'sentinel.txt')
-    await writeFile(sentinel, 'outside')
+    const sentinel = join(root, process.platform === 'win32' ? 'sentinel' : 'sentinel.txt')
+    const sentinelFile = process.platform === 'win32' ? join(sentinel, 'outside.txt') : sentinel
+    if (process.platform === 'win32') await mkdir(sentinel)
+    await writeFile(sentinelFile, 'outside')
     await rm(conflictPath)
-    await symlink(sentinel, conflictPath)
+    await symlink(sentinel, conflictPath, process.platform === 'win32' ? 'junction' : 'file')
+    expect((await lstat(conflictPath)).isSymbolicLink()).toBe(true)
 
     await expect(
       manager.saveConflict(pulled.sessionId!, 'skills.yaml', 'replacement'),
     ).rejects.toMatchObject({ code: 'unsupported_conflict_type' })
-    expect(await readFile(sentinel, 'utf8')).toBe('outside')
+    expect(await readFile(sentinelFile, 'utf8')).toBe('outside')
+    await new NodeFileSystem().removeLink(conflictPath)
     await manager.abort(pulled.sessionId!)
   })
 
@@ -646,7 +650,7 @@ describe.concurrent('SyncSessionManager', () => {
     await mkdir(external)
     await writeFile(join(external, 'config.yaml'), 'outside\n')
     await rename(parent, `${parent}.backup`)
-    await symlink(external, parent, 'dir')
+    await symlink(external, parent, process.platform === 'win32' ? 'junction' : 'dir')
 
     await expect(
       manager.saveConflict(pulled.sessionId!, 'nested/config.yaml', 'replacement'),
@@ -693,7 +697,7 @@ describe.concurrent('SyncSessionManager', () => {
     },
   )
 
-  it('preserves executable mode when saving a regular conflict', async () => {
+  it('preserves executable Git mode when saving a regular conflict', async () => {
     const { root, home, repo } = await createDivergedRepo([
       {
         path: 'script.sh',
@@ -711,7 +715,9 @@ describe.concurrent('SyncSessionManager', () => {
 
     await manager.saveConflict(pulled.sessionId!, 'script.sh', 'echo chosen\n')
 
-    expect((await lstat(join(repo, 'script.sh'))).mode & 0o111).toBe(0o111)
+    const indexEntry = await simpleGit(repo).raw(['ls-files', '--stage', '--', 'script.sh'])
+    const [indexMode] = indexEntry.trim().split(/\s+/)
+    expect(indexMode).toBe('100755')
   })
 
   it('does not follow a worktree directory symlink while enforcing quota', async () => {
@@ -721,7 +727,11 @@ describe.concurrent('SyncSessionManager', () => {
     const cacheRoot = join(home, '.loom', 'cache', 'sync-worktrees')
     const [repoHash] = await readdir(cacheRoot)
     const worktree = join(cacheRoot, repoHash!, pulled.sessionId!)
-    await symlink(worktree, join(worktree, 'loop'), 'dir')
+    await symlink(
+      worktree,
+      join(worktree, 'loop'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
 
     const saved = await manager.saveConflict(pulled.sessionId!, 'skills.yaml', 'value: chosen\n')
 
@@ -1126,7 +1136,11 @@ describe.concurrent('SyncSessionManager', () => {
       await mkdir(join(home, '.loom'), { recursive: true })
       await mkdir(external)
       await writeFile(join(external, 'sentinel'), 'outside\n')
-      await symlink(external, join(home, '.loom', managedRoot), 'dir')
+      await symlink(
+        external,
+        join(home, '.loom', managedRoot),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      )
 
       await expect(new SyncSessionManager({ home }).pull(repo)).rejects.toMatchObject({
         code: 'cleanup_pending',

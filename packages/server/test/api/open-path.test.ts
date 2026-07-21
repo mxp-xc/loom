@@ -137,11 +137,20 @@ describe('open path routes', () => {
   })
 
   it('rejects a symlink outside the repository when resolving a path', async () => {
-    const outside = join(home, 'outside-copy.txt')
-    writeFileSync(outside, 'outside')
-    symlinkSync(outside, join(repoPath, 'docs', 'outside-copy-link'))
+    const outside = join(home, process.platform === 'win32' ? 'outside-copy' : 'outside-copy.txt')
+    const link = join(repoPath, 'docs', 'outside-copy-link')
+    let requestPath = 'docs/outside-copy-link'
+    if (process.platform === 'win32') {
+      mkdirSync(outside)
+      writeFileSync(join(outside, 'outside.txt'), 'outside')
+      symlinkSync(outside, link, 'junction')
+      requestPath += '/outside.txt'
+    } else {
+      writeFileSync(outside, 'outside')
+      symlinkSync(outside, link, 'file')
+    }
 
-    const response = await resolveRequest({ repo: 'default', path: 'docs/outside-copy-link' })
+    const response = await resolveRequest({ repo: 'default', path: requestPath })
 
     expect(response.status).toBe(400)
     expect(await response.json()).toMatchObject({ error: 'invalid_path' })
@@ -178,13 +187,22 @@ describe('open path routes', () => {
   })
 
   it('rejects a symlink whose real target is outside the repository', async () => {
-    const outside = join(home, 'outside.txt')
-    writeFileSync(outside, 'outside')
-    symlinkSync(outside, join(repoPath, 'docs', 'outside-link'))
+    const outside = join(home, process.platform === 'win32' ? 'outside' : 'outside.txt')
+    const link = join(repoPath, 'docs', 'outside-link')
+    let requestPath = 'docs/outside-link'
+    if (process.platform === 'win32') {
+      mkdirSync(outside)
+      writeFileSync(join(outside, 'outside.txt'), 'outside')
+      symlinkSync(outside, link, 'junction')
+      requestPath += '/outside.txt'
+    } else {
+      writeFileSync(outside, 'outside')
+      symlinkSync(outside, link, 'file')
+    }
 
     const response = await request({
       repo: 'default',
-      path: 'docs/outside-link',
+      path: requestPath,
       application: 'vscode',
     })
 

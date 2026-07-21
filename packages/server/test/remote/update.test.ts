@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { NodeGit } from '../../src/platform/node/git'
@@ -206,9 +206,11 @@ describe('source update workspace ownership', () => {
       override async writeFileExclusive(path: string, content: string, mode?: number) {
         if (path.endsWith('.loom-source-update-owner.json')) {
           const sessionRoot = dirname(path)
+          const replacementRoot = `${sessionRoot}-replacement`
+          await mkdir(replacementRoot)
+          await writeFile(join(replacementRoot, 'replacement.txt'), 'keep')
           await rm(sessionRoot, { recursive: true, force: true })
-          await mkdir(sessionRoot)
-          await writeFile(join(sessionRoot, 'replacement.txt'), 'keep')
+          await rename(replacementRoot, sessionRoot)
           throw primary
         }
         return super.writeFileExclusive(path, content, mode)

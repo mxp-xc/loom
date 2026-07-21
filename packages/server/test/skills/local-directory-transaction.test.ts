@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { link, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import {
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
@@ -74,8 +84,15 @@ describe('LocalDirectoryTransaction', () => {
     await mkdir(source)
     await writeFile(join(source, 'SKILL.md'), '# source')
     const linkedTarget = join(root, 'linked-target')
-    await writeFile(linkedTarget, 'outside')
-    await symlink(linkedTarget, join(source, 'linked.md'), 'file')
+    const linkedPath = join(source, process.platform === 'win32' ? 'linked' : 'linked.md')
+    if (process.platform === 'win32') {
+      await mkdir(linkedTarget)
+      await writeFile(join(linkedTarget, 'outside.md'), 'outside')
+      await symlink(linkedTarget, linkedPath, 'junction')
+    } else {
+      await writeFile(linkedTarget, 'outside')
+      await symlink(linkedTarget, linkedPath, 'file')
+    }
     const sourceEntry = await fs.inspectEntry(source)
 
     await expect(
@@ -85,7 +102,7 @@ describe('LocalDirectoryTransaction', () => {
       }),
     ).rejects.toMatchObject({ code: 'invalid_local_skill_tree' })
 
-    await rm(join(source, 'linked.md'))
+    await rm(linkedPath, { recursive: process.platform === 'win32' })
     await link(join(source, 'SKILL.md'), join(source, 'hardlink.md'))
     await expect(
       inspectLocalDirectorySnapshot(fs, {
@@ -301,7 +318,7 @@ describe('LocalDirectoryTransaction', () => {
     class ReplacementFaultFileSystem extends NodeFileSystem {
       override async moveNoReplace(source: string, destination: string, expectedIdentity?: string) {
         if (destination.endsWith(`${join('assets', 'skills', 'beta')}`)) {
-          await rm(alphaDestination, { recursive: true, force: true })
+          await rename(alphaDestination, join(root, 'displaced-alpha'))
           await mkdir(alphaDestination)
           await writeFile(join(alphaDestination, 'replacement.txt'), 'keep')
           throw primaryFailure

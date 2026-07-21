@@ -174,13 +174,15 @@ describe('NodeFileSystem', () => {
     await writeFile(join(source, 'content.txt'), 'content')
     const base = new NodeFileSystem()
     const sourceIdentity = (await base.inspectEntry(source))!.identity
+    const failCrossDeviceMove = async (from: string, to: string) => {
+      if (from === source && to === destination) {
+        throw Object.assign(new Error('cross-device move'), { code: 'EXDEV' })
+      }
+      await rename(from, to)
+    }
     const fs = new NodeFileSystem({
-      renameNoReplace: async (from, to) => {
-        if (from === source && to === destination) {
-          throw Object.assign(new Error('cross-device move'), { code: 'EXDEV' })
-        }
-        await rename(from, to)
-      },
+      rename: failCrossDeviceMove,
+      renameNoReplace: failCrossDeviceMove,
     })
 
     await expect(fs.moveDirectoryAtomic(source, destination, sourceIdentity)).rejects.toMatchObject(
@@ -424,16 +426,22 @@ describe('NodeFileSystem', () => {
     const source = join(root, 'source-link')
     const destination = join(root, 'destination-link')
     const displaced = join(root, 'displaced-link')
-    await writeFile(originalTarget, 'original')
-    await writeFile(replacementTarget, 'replacement')
-    await symlink(originalTarget, source)
+    const linkType = platform() === 'win32' ? 'junction' : 'file'
+    if (platform() === 'win32') {
+      await mkdir(originalTarget)
+      await mkdir(replacementTarget)
+    } else {
+      await writeFile(originalTarget, 'original')
+      await writeFile(replacementTarget, 'replacement')
+    }
+    await symlink(originalTarget, source, linkType)
     let injected = false
     const fs = new NodeFileSystem({
       rename: async (from, to) => {
         if (!injected && from === source && to.includes('.loom-remove-')) {
           injected = true
           await rename(source, displaced)
-          await symlink(replacementTarget, source)
+          await symlink(replacementTarget, source, linkType)
         }
         await rename(from, to)
       },
@@ -441,6 +449,7 @@ describe('NodeFileSystem', () => {
 
     await expect(fs.moveNoReplace(source, destination)).rejects.toThrow()
     await expect(readlink(source)).resolves.toBe(replacementTarget)
+    await expect(fs.inspectEntry(destination)).resolves.toBeNull()
   })
 
   it('restores an isolated directory when physical removal fails', async () => {

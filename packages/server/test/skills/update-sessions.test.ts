@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 import {
   SOURCE_UPDATE_PRESERVED_MARKER,
@@ -278,8 +278,8 @@ describe('SourceUpdateSessionStore', () => {
       moveNoReplace: async (source: string, destination: string, identity?: string) => {
         if (
           failManifestRestore &&
-          source.endsWith('/manifest.previous.yaml') &&
-          destination.endsWith('/skills.yaml')
+          basename(source) === 'manifest.previous.yaml' &&
+          basename(destination) === 'skills.yaml'
         ) {
           throw new Error('manifest restore interrupted')
         }
@@ -470,7 +470,7 @@ describe('SourceUpdateSessionStore', () => {
     let failStateReplace = false
     const fs = Object.assign(Object.create(base), base, {
       replaceFile: async (temporary: string, target: string) => {
-        if (failStateReplace && target.endsWith('/session.json')) throw new Error('save failed')
+        if (failStateReplace && basename(target) === 'session.json') throw new Error('save failed')
         return base.replaceFile(temporary, target)
       },
     }) as NodeFileSystem
@@ -496,7 +496,7 @@ describe('SourceUpdateSessionStore', () => {
     let failStateReplace = false
     const fs = Object.assign(Object.create(base), base, {
       replaceFile: async (temporary: string, target: string) => {
-        if (failStateReplace && target.endsWith('/session.json')) throw new Error('save failed')
+        if (failStateReplace && basename(target) === 'session.json') throw new Error('save failed')
         return base.replaceFile(temporary, target)
       },
     }) as NodeFileSystem

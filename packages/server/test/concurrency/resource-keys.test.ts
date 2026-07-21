@@ -1,4 +1,4 @@
-import { resolve } from 'node:path'
+import { resolve, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   mcpImportResourceKeys,
@@ -13,11 +13,12 @@ describe('resource keys', () => {
     const first = new Set(projectionResourceKeys(home, firstRepo, home, 'all'))
     const second = new Set(projectionResourceKeys(home, secondRepo, home, 'all'))
     const shared = [...first].filter((key) => second.has(key))
+    const statePrefix = `${resolve(home, '.loom', 'state')}${sep}`
 
     expect(first).toContain(firstRepo)
     expect(second).toContain(secondRepo)
     expect(shared.length).toBeGreaterThan(0)
-    expect(shared.every((key) => !key.includes(`${resolve(home, '.loom', 'state')}/`))).toBe(true)
+    expect(shared.every((key) => !key.startsWith(statePrefix))).toBe(true)
   })
 
   it('locks every native MCP source used by import together with repo and local config', () => {
@@ -26,11 +27,12 @@ describe('resource keys', () => {
     const canonicalHome = resolve('/canonical/home/tester')
     const importKeys = new Set(mcpImportResourceKeys(home, repo, canonicalHome))
     const projectionKeys = projectionResourceKeys(home, repo, canonicalHome, 'mcp')
+    const statePrefix = `${resolve(home, '.loom', 'state')}${sep}`
 
     expect(importKeys).toContain(repo)
     expect(importKeys).toContain(canonicalHome)
     for (const key of projectionKeys) {
-      if (key !== repo && !key.includes(`${resolve(home, '.loom', 'state')}/`)) {
+      if (key !== repo && !key.startsWith(statePrefix)) {
         expect(importKeys).toContain(key)
       }
     }
@@ -51,7 +53,7 @@ describe('resource keys', () => {
     const home = resolve('/home/tester')
     const first = projectionResourceKeys(home, '/work/repos/default', home, 'mcp')
     const second = projectionResourceKeys(home, '/other/repos/default', home, 'mcp')
-    const stateRoot = `${resolve(home, '.loom', 'state')}/`
+    const stateRoot = `${resolve(home, '.loom', 'state')}${sep}`
     const firstState = first.filter((key) => key.includes(stateRoot))
     const secondState = second.filter((key) => key.includes(stateRoot))
 

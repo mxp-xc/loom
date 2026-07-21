@@ -78,7 +78,7 @@ function deps(
 
 describe('projection filesystem boundary', () => {
   it('rejects an OpenCode .config ancestor link without writing through it', async () => {
-    await symlink(outside, join(home, '.config'), 'dir')
+    await symlink(outside, join(home, '.config'), process.platform === 'win32' ? 'junction' : 'dir')
     const context = pathContext()
 
     const result = await executeProjection(
@@ -98,9 +98,19 @@ describe('projection filesystem boundary', () => {
   it.each(['copy', 'link'] as const)(
     'rejects a nested local source link before agent writes for %s strategy',
     async (strategy) => {
-      const secret = join(outside, 'secret.txt')
-      await writeFile(secret, 'outside secret')
-      await symlink(secret, join(sourceRoot, 'skill', 'secret.txt'))
+      const linkedSource = join(outside, 'linked-source')
+      const secret = join(
+        outside,
+        process.platform === 'win32' ? 'linked-source/secret.txt' : 'secret.txt',
+      )
+      if (process.platform === 'win32') {
+        await mkdir(linkedSource)
+        await writeFile(secret, 'outside secret')
+        await symlink(linkedSource, join(sourceRoot, 'skill', 'linked-source'), 'junction')
+      } else {
+        await writeFile(secret, 'outside secret')
+        await symlink(secret, join(sourceRoot, 'skill', 'secret.txt'), 'file')
+      }
       const context = pathContext({ CODEX_HOME: join(home, 'codex') })
 
       const result = await executeProjection(
@@ -188,7 +198,7 @@ describe('projection filesystem boundary', () => {
       override async mkdir(path: string, recursive?: boolean): Promise<void> {
         if (!this.raced && path === codexHome) {
           this.raced = true
-          await symlink(outside, path, 'dir')
+          await symlink(outside, path, process.platform === 'win32' ? 'junction' : 'dir')
         }
         await super.mkdir(path, recursive)
       }

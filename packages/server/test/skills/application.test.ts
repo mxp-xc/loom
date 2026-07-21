@@ -3,7 +3,7 @@ import yaml from 'js-yaml'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, join, sep } from 'node:path'
 import { realpath } from 'node:fs/promises'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 import type { GitTreeEntry, IGit } from '../../src/ports/git.js'
@@ -361,7 +361,7 @@ describe('SkillsApplication', () => {
     await app.removeLocalSkill(repoPath, 'pathless')
     const inspectEntry = fs.inspectEntry.bind(fs)
     const inspectSpy = vi.spyOn(fs, 'inspectEntry').mockImplementation(async (path) => {
-      if (path === externalDir || path.startsWith(`${externalDir}/`)) {
+      if (path === externalDir || path.startsWith(`${externalDir}${sep}`)) {
         throw new Error('external path must not be accessed during unregister')
       }
       return inspectEntry(path)

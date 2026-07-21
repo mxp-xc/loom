@@ -227,7 +227,11 @@ describe('executeProjection', () => {
     const fs = new NodeFileSystem()
     const outside = await mkdtemp(join(tmpdir(), 'projection-outside-'))
     try {
-      await symlink(outside, join(home, '.claude'), 'dir')
+      await symlink(
+        outside,
+        join(home, '.claude'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      )
 
       const result = await executeProjection(
         { ...plan, mcpEntries: [] },

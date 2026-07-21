@@ -1,6 +1,7 @@
 import { afterAll, describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
 import * as yaml from 'js-yaml'
+import { join } from 'node:path'
 import { registerRoutes } from '../../src/api/router'
 import { deriveRepoId } from '@loom/core'
 import type { ProjectionResult } from '../../src/projection/executor.js'
@@ -962,12 +963,12 @@ describe('source updates', () => {
       { id: 'old-skill', agents: ['codex'] },
     ])
     expect(memFs.mkdir).toHaveBeenCalledWith(
-      `${repo}/temp/source-updates/${sessionId}/preserve-transaction`,
+      join(repo, 'temp', 'source-updates', sessionId, 'preserve-transaction'),
       false,
     )
     expect(memFs.copyDir).not.toHaveBeenCalledWith(
-      expect.stringContaining('/temp/source-updates/'),
-      `${repo}/assets/skills/old-skill`,
+      expect.stringContaining(join('temp', 'source-updates')),
+      join(repo, 'assets', 'skills', 'old-skill'),
     )
   })
 

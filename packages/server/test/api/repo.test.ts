@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  mkdtempSync,
+  mkdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
@@ -51,9 +59,10 @@ describe('repo resolution', () => {
 
   it('rejects a repository whose physical identity changes after authorization', async () => {
     const repository = join(home, '.loom', 'repos', 'default')
+    const retainedRepository = join(home, '.loom', 'repos', '.authorized-default')
     mkdirSync(repository, { recursive: true })
     const authorization = await authorizeRepository(fs, 'default', home)
-    rmSync(repository, { recursive: true })
+    renameSync(repository, retainedRepository)
     mkdirSync(repository)
 
     await expect(revalidateRepositoryAuthorization(fs, home, authorization)).rejects.toMatchObject({

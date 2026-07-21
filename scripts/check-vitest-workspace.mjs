@@ -66,7 +66,7 @@ try {
   for (const [name, contract] of Object.entries(expected)) {
     const project = projects.get(name)
     assert(project, `missing Vitest project: ${name}`)
-    assert.equal(project.config.root, contract.root, `${name} root`)
+    assert.equal(resolve(project.config.root), contract.root, `${name} root`)
     assert.equal(project.config.environment, contract.environment, `${name} environment`)
     assert.equal(project.config.setupFiles.length, contract.setupFiles, `${name} setupFiles`)
     assert(
@@ -80,7 +80,7 @@ try {
     for (const testFile of testFiles) {
       const path = relative(contract.root, testFile)
       assert(!path.startsWith(`..${sep}`) && path !== '..', `${name} collected ${testFile}`)
-      assert(!testFile.split(sep).includes('temp'), `${name} collected temp file ${testFile}`)
+      assert(!path.split(sep).includes('temp'), `${name} collected temp file ${testFile}`)
     }
     const expectedFiles = await conventionTestFiles(contract.root, contract.suffixes)
     const actualSet = new Set(actualFiles)

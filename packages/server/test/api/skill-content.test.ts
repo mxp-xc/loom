@@ -101,7 +101,11 @@ describe('skill content identity boundary', () => {
     await mkdir(external, { recursive: true })
     await mkdir(builtInRoot, { recursive: true })
     await writeFile(join(external, 'SKILL.md'), '# Linked')
-    await symlink(external, join(builtInRoot, 'linked'), 'dir')
+    await symlink(
+      external,
+      join(builtInRoot, 'linked'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
 
     const linked = await app.request(localContentUrl('linked'))
     expect(linked.status).toBe(422)

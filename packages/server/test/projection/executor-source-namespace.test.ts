@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { AgentId, Manifest, ProjectionPlan, SourceProjectionPlan } from '@loom/core'
 import { executeProjection, type ProjectionDeps } from '../../src/projection/executor.js'
@@ -73,6 +73,27 @@ function deps(resolveSourceRoot: ProjectionDeps['resolveSourceRoot']): Projectio
   }
 }
 
+class RecordingFileLinkFileSystem extends NodeFileSystem {
+  readonly fileLinkFallbacks = new Map<string, 'copy' | null>()
+
+  override async createFileLink(targetFile: string, linkPath: string) {
+    const result = await super.createFileLink(targetFile, linkPath)
+    this.fileLinkFallbacks.set(targetFile, result.fallback)
+    return result
+  }
+}
+
+async function expectFileLinkOrFallbackCopy(
+  fs: RecordingFileLinkFileSystem,
+  source: string,
+  destination: string,
+): Promise<void> {
+  expect(fs.fileLinkFallbacks.has(source)).toBe(true)
+  const fallback = fs.fileLinkFallbacks.get(source)
+  if (process.platform !== 'win32') expect(fallback).toBeNull()
+  expect(await fs.isLink(destination)).toBe(fallback === null)
+}
+
 async function listSourceFiles(root: string, relative = ''): Promise<string[]> {
   const files: string[] = []
   for (const entry of await readdir(join(root, relative), { withFileTypes: true })) {
@@ -100,11 +121,17 @@ describe('source namespace projection', () => {
   it('does not follow a replacement link at the staging marker path', async () => {
     await mkdir(join(cacheRoot, 'skill'), { recursive: true })
     await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
-    const external = join(home, 'external.txt')
-    await writeFile(external, 'keep')
+    const external = join(home, process.platform === 'win32' ? 'external' : 'external.txt')
+    const sentinel = process.platform === 'win32' ? join(external, 'sentinel.txt') : external
+    if (process.platform === 'win32') await mkdir(external)
+    await writeFile(sentinel, 'keep')
+    let collisionInjected = false
     class MarkerCollisionFileSystem extends NodeFileSystem {
       override async writeFileExclusive(path: string, content: string) {
-        if (path.endsWith('/.loom-projection.json')) await symlink(external, path)
+        if (basename(path) === '.loom-projection.json') {
+          await symlink(external, path, process.platform === 'win32' ? 'junction' : 'file')
+          collisionInjected = true
+        }
         return super.writeFileExclusive(path, content)
       }
     }
@@ -126,7 +153,8 @@ describe('source namespace projection', () => {
     )
 
     expect(result.ok).toBe(false)
-    await expect(readFile(external, 'utf8')).resolves.toBe('keep')
+    expect(collisionInjected).toBe(true)
+    await expect(readFile(sentinel, 'utf8')).resolves.toBe('keep')
   })
 
   it('builds source transactions outside the agent skills discovery root', async () => {
@@ -178,6 +206,7 @@ describe('source namespace projection', () => {
       await writeFile(join(cacheRoot, 'SKILL.md'), 'root bundle')
       await writeFile(join(cacheRoot, 'references', 'guide.md'), 'guide')
 
+      const fs = new RecordingFileLinkFileSystem()
       const result = await executeProjection(
         projectionPlan(
           [
@@ -189,7 +218,7 @@ describe('source namespace projection', () => {
         ),
         manifest,
         { env: {}, activeProfile: {}, defaultProfile: {} },
-        deps(() => cacheRoot),
+        { ...deps(() => cacheRoot), fs },
         'skills',
       )
 
@@ -197,10 +226,16 @@ describe('source namespace projection', () => {
       expect(result).toEqual({ ok: true })
       expect(await readFile(join(namespace, 'SKILL.md'), 'utf8')).toBe('root bundle')
       expect(await readFile(join(namespace, 'references', 'guide.md'), 'utf8')).toBe('guide')
-      expect(await new NodeFileSystem().isLink(namespace)).toBe(false)
-      expect(await new NodeFileSystem().isLink(join(namespace, 'SKILL.md'))).toBe(
-        strategy === 'link',
-      )
+      expect(await fs.isLink(namespace)).toBe(false)
+      if (strategy === 'link') {
+        await expectFileLinkOrFallbackCopy(
+          fs,
+          join(cacheRoot, 'SKILL.md'),
+          join(namespace, 'SKILL.md'),
+        )
+      } else {
+        expect(await fs.isLink(join(namespace, 'SKILL.md'))).toBe(false)
+      }
       await expect(readFile(join(namespace, '.git', 'config'), 'utf8')).rejects.toMatchObject({
         code: 'ENOENT',
       })
@@ -311,14 +346,14 @@ describe('source namespace projection', () => {
     },
   )
 
-  it('links complete bundle and resource directories when link strategy is selected', async () => {
+  it('links complete directories and attempts file links when link strategy is selected', async () => {
     await mkdir(join(cacheRoot, 'skill', 'references'), { recursive: true })
     await mkdir(join(cacheRoot, 'shared'), { recursive: true })
     await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
     await writeFile(join(cacheRoot, 'skill', 'references', 'guide.md'), 'guide')
     await writeFile(join(cacheRoot, 'shared', 'workflow.md'), 'shared workflow')
     await writeFile(join(cacheRoot, 'workflow.md'), 'workflow')
-    const fs = new NodeFileSystem()
+    const fs = new RecordingFileLinkFileSystem()
     const result = await executeProjection(
       projectionPlan(
         [
@@ -346,7 +381,11 @@ describe('source namespace projection', () => {
     const namespace = join(home, '.claude', 'skills', 'workflow-source')
     expect(await fs.isLink(join(namespace, 'engineering', 'skill'))).toBe(true)
     expect(await fs.isLink(join(namespace, 'shared'))).toBe(true)
-    expect(await fs.isLink(join(namespace, 'workflow.md'))).toBe(true)
+    await expectFileLinkOrFallbackCopy(
+      fs,
+      join(cacheRoot, 'workflow.md'),
+      join(namespace, 'workflow.md'),
+    )
     expect(await readFile(join(namespace, 'engineering', 'skill', 'SKILL.md'), 'utf8')).toBe(
       'skill',
     )

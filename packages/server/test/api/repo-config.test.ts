@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   readLocalConfig,
   readMcpManifest,
@@ -13,12 +13,77 @@ import {
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 
 const repoConfigLogger = vi.hoisted(() => ({ error: vi.fn() }))
+const fixtureRepoPath = resolve('repo')
+const fixtureHomePath = resolve('home')
 
 vi.mock('../../src/lib/logger.js', () => ({
   logger: { child: () => repoConfigLogger },
 }))
 
 afterEach(() => vi.restoreAllMocks())
+
+class LeafLinkContractFileSystem extends NodeFileSystem {
+  readonly inspectLinkedFile = vi.fn()
+  readonly readLinkedFile = vi.fn()
+
+  constructor(private readonly linkedPath: string) {
+    super()
+  }
+
+  override async inspectEntry(path: string) {
+    if (path === this.linkedPath) {
+      this.inspectLinkedFile()
+      return { kind: 'link' as const, identity: `contract-link:${path}`, linkCount: 1 }
+    }
+    return super.inspectEntry(path)
+  }
+
+  override async readFile(path: string): Promise<string> {
+    if (path === this.linkedPath) this.readLinkedFile()
+    return super.readFile(path)
+  }
+}
+
+async function expectRepositoryLinkRejected(
+  relativePath: string,
+  kind: 'directory' | 'file' | 'nested-file',
+): Promise<void> {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'loom-repo-config-')))
+  try {
+    const repo = join(root, 'repo')
+    const external = join(root, 'external')
+    await mkdir(repo)
+    await mkdir(external)
+    const target = join(external, kind === 'directory' ? 'directory' : 'file')
+    if (kind === 'directory') await mkdir(target)
+    else await writeFile(target, 'outside\n')
+    const link = join(repo, relativePath)
+    await mkdir(join(link, '..'), { recursive: true })
+    let fs: NodeFileSystem
+    if (kind === 'directory') {
+      await symlink(target, link, process.platform === 'win32' ? 'junction' : 'dir')
+      fs = new NodeFileSystem()
+    } else if (process.platform === 'win32') {
+      // Keep directory enumeration real while exercising the leaf-link IFileSystem contract.
+      await writeFile(link, 'file link contract placeholder\n')
+      fs = new LeafLinkContractFileSystem(link)
+    } else {
+      await symlink(target, link, 'file')
+      fs = new NodeFileSystem()
+    }
+
+    await expect(readRepoFiles(fs, repo)).rejects.toMatchObject({
+      code: 'repository_boundary_invalid',
+      cause: expect.objectContaining({ message: 'unexpected repository entry kind: link' }),
+    })
+    if (fs instanceof LeafLinkContractFileSystem) {
+      expect(fs.inspectLinkedFile).toHaveBeenCalledTimes(1)
+      expect(fs.readLinkedFile).not.toHaveBeenCalled()
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}
 
 describe('repo config read errors', () => {
   it('logs unexpected config and local config read failures with full errors', async () => {
@@ -31,26 +96,26 @@ describe('repo config read errors', () => {
       exists: vi.fn(async () => true),
       realPath: vi.fn(async (path: string) => path),
       inspectEntry: vi.fn(async (path: string) =>
-        path === '/repo'
+        path === fixtureRepoPath
           ? { kind: 'directory' as const, identity: 'repo', linkCount: 2 }
           : { kind: 'file' as const, identity: path, linkCount: 1 },
       ),
     }
 
-    const repositoryError = await readRepoFiles(fs, '/repo').catch((error) => error)
+    const repositoryError = await readRepoFiles(fs, fixtureRepoPath).catch((error) => error)
     expect(repositoryError).toMatchObject({
       code: 'repository_boundary_invalid',
       cause: denied,
     })
-    await expect(readYaml(fs, '/repo/config.yaml')).rejects.toBe(denied)
-    await expect(readLocalConfig(fs, '/home')).rejects.toBe(denied)
+    await expect(readYaml(fs, join(fixtureRepoPath, 'config.yaml'))).rejects.toBe(denied)
+    await expect(readLocalConfig(fs, fixtureHomePath)).rejects.toBe(denied)
     expect(repoConfigLogger.error).toHaveBeenCalledWith('failed to read repository file', {
       err: repositoryError,
-      path: '/repo/config.yaml',
+      path: join(fixtureRepoPath, 'config.yaml'),
     })
     expect(repoConfigLogger.error).toHaveBeenCalledWith('failed to read local config', {
       err: denied,
-      path: '/home/.loom/config.yaml',
+      path: join(fixtureHomePath, '.loom', 'config.yaml'),
     })
   })
 
@@ -60,22 +125,22 @@ describe('repo config read errors', () => {
       readFile: vi.fn(async () => `active_repo: [${secret}`),
       exists: vi.fn(async () => true),
     }
-    const error = await readYaml(fs, '/repo/config.yaml').catch((caught) => caught)
+    const error = await readYaml(fs, join(fixtureRepoPath, 'config.yaml')).catch((caught) => caught)
     expect(error).toMatchObject({ code: 'yaml_invalid', cause: expect.any(Error) })
     expect(String(error)).not.toContain(secret)
     expect(error.stack).not.toContain(secret)
 
-    const localError = await readLocalConfig(fs, '/home').catch((caught) => caught)
+    const localError = await readLocalConfig(fs, fixtureHomePath).catch((caught) => caught)
     expect(localError).toMatchObject({ code: 'yaml_invalid', cause: expect.any(Error) })
     expect(String(localError)).not.toContain(secret)
     expect(localError.stack).not.toContain(secret)
     expect(repoConfigLogger.error).toHaveBeenCalledWith('failed to parse YAML config', {
       err: error,
-      path: '/repo/config.yaml',
+      path: join(fixtureRepoPath, 'config.yaml'),
     })
     expect(repoConfigLogger.error).toHaveBeenCalledWith('failed to parse local config', {
       err: localError,
-      path: '/home/.loom/config.yaml',
+      path: join(fixtureHomePath, '.loom', 'config.yaml'),
     })
   })
 
@@ -89,41 +154,27 @@ describe('repo config read errors', () => {
       exists: vi.fn(async () => false),
       realPath: vi.fn(async (path: string) => path),
       inspectEntry: vi.fn(async (path: string) =>
-        path === '/repo' ? { kind: 'directory' as const, identity: 'repo', linkCount: 2 } : null,
+        path === fixtureRepoPath
+          ? { kind: 'directory' as const, identity: 'repo', linkCount: 2 }
+          : null,
       ),
     }
-    await readRepoFiles(fs, '/repo')
-    await readLocalConfig(fs, '/home')
+    await readRepoFiles(fs, fixtureRepoPath)
+    await readLocalConfig(fs, fixtureHomePath)
     expect(repoConfigLogger.error).not.toHaveBeenCalled()
   })
 
+  it.each(['vars', 'memories'] as const)('rejects repository links at %s', (relativePath) =>
+    expectRepositoryLinkRejected(relativePath, 'directory'),
+  )
+
   it.each([
     ['config.yaml', 'file'],
-    ['vars', 'directory'],
-    ['memories', 'directory'],
     ['vars/linked.yaml', 'nested-file'],
     ['memories/linked.md', 'nested-file'],
-  ] as const)('rejects repository links at %s', async (relativePath, kind) => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), 'loom-repo-config-')))
-    const repo = join(root, 'repo')
-    const external = join(root, 'external')
-    await mkdir(repo)
-    await mkdir(external)
-    const target = join(external, kind === 'directory' ? 'directory' : 'file')
-    if (kind === 'directory') await mkdir(target)
-    else await writeFile(target, 'outside\n')
-    const link = join(repo, relativePath)
-    await mkdir(join(link, '..'), { recursive: true })
-    await symlink(target, link, kind === 'directory' ? 'dir' : 'file')
-
-    try {
-      await expect(readRepoFiles(new NodeFileSystem(), repo)).rejects.toMatchObject({
-        code: 'repository_boundary_invalid',
-      })
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
-  })
+  ] as const)('rejects repository links at %s', (relativePath, kind) =>
+    expectRepositoryLinkRejected(relativePath, kind),
+  )
 
   it.each(['null\n', 'scalar\n', '- list\n'])(
     'rejects a non-object local config container: %s',
@@ -133,14 +184,14 @@ describe('repo config read errors', () => {
         exists: vi.fn(async () => true),
       }
 
-      const error = await readLocalConfig(fs, '/home').catch((caught) => caught)
+      const error = await readLocalConfig(fs, fixtureHomePath).catch((caught) => caught)
       expect(error).toMatchObject({
         code: 'config_container_invalid',
         cause: expect.any(TypeError),
       })
       expect(repoConfigLogger.error).toHaveBeenCalledWith('failed to parse local config', {
         err: error,
-        path: '/home/.loom/config.yaml',
+        path: join(fixtureHomePath, '.loom', 'config.yaml'),
       })
     },
   )
@@ -150,7 +201,7 @@ describe('repo config read errors', () => {
       readFile: vi.fn(async () => ''),
       exists: vi.fn(async () => true),
     }
-    const result = await readLocalConfig(fs, '/home')
+    const result = await readLocalConfig(fs, fixtureHomePath)
     expect(result).toEqual({})
     expect(Object.getPrototypeOf(result)).toBeNull()
   })
@@ -169,7 +220,7 @@ describe('repo config read errors', () => {
         }),
       }
 
-      await expect(read(fs, '/repo')).rejects.toMatchObject({
+      await expect(read(fs, fixtureRepoPath)).rejects.toMatchObject({
         code: 'manifest_container_invalid',
         file,
         diagnostics: [expect.objectContaining({ file, code: 'manifest_container_invalid' })],
@@ -178,7 +229,7 @@ describe('repo config read errors', () => {
         'failed to parse repository manifest document',
         {
           err: expect.objectContaining({ code: 'manifest_container_invalid' }),
-          path: `/repo/${file}`,
+          path: join(fixtureRepoPath, file),
         },
       )
     },
@@ -187,13 +238,13 @@ describe('repo config read errors', () => {
   it('uses safe defaults for missing manifest documents and accepts an empty repo config', async () => {
     const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
     const missingFs = { readFile: vi.fn(async () => Promise.reject(missing)) }
-    await expect(readSkillsManifest(missingFs, '/repo')).resolves.toEqual({
+    await expect(readSkillsManifest(missingFs, fixtureRepoPath)).resolves.toEqual({
       sources: [],
       skills: [],
     })
-    await expect(readMcpManifest(missingFs, '/repo')).resolves.toEqual([])
+    await expect(readMcpManifest(missingFs, fixtureRepoPath)).resolves.toEqual([])
 
-    const emptyConfig = await readRepoConfig({ readFile: vi.fn(async () => '') }, '/repo')
+    const emptyConfig = await readRepoConfig({ readFile: vi.fn(async () => '') }, fixtureRepoPath)
     expect(emptyConfig).toEqual({})
     expect(Object.getPrototypeOf(emptyConfig)).toBeNull()
   })
