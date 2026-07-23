@@ -72,6 +72,7 @@ Rule:
 Implications:
 
 - 单个 agent toggle 保存 manifest 后，会投影相关 scope。
+- Skills agent toggle 和按 agent 的批量操作只 reconcile 该 agent，不能被其他 agent 的 destination conflict 阻断；手动投影和非 agent-specific mutation 仍 reconcile 全部 applicable agents。
 - Memory 页面修改某个 agent 的 Memory assignment 后，会自动运行 memory projection。
 - 批量 agent 更新在所有 manifest 更新成功后投影。
 - 保存 source members/resources selection 后，会投影 skills。
@@ -95,6 +96,7 @@ Tests:
 - packages/web/test/skills-view.test.tsx
 - packages/web/test/mcp-view.test.tsx
 - packages/web/test/memory-view.test.tsx
+- packages/server/test/api/routes.test.ts
 
 ## R-CROSS-003 批量控制必须有明确 scope
 

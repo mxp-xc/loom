@@ -467,7 +467,11 @@ describe('Skills page', () => {
       }),
     )
     await waitFor(() => expect(api.project).toHaveBeenCalledTimes(1))
-    expect(api.project).toHaveBeenLastCalledWith({ repo: '/tmp/skills-layout', scope: 'skills' })
+    expect(api.project).toHaveBeenLastCalledWith({
+      repo: '/tmp/skills-layout',
+      scope: 'skills',
+      agent: 'codex',
+    })
   })
 
   it('supports source-level bulk projection chips in the source header', async () => {
@@ -529,7 +533,11 @@ describe('Skills page', () => {
       expect.objectContaining({ id: 'local-only' }),
     )
     await waitFor(() => expect(api.project).toHaveBeenCalledTimes(1))
-    expect(api.project).toHaveBeenLastCalledWith({ repo: '/tmp/skills-layout', scope: 'skills' })
+    expect(api.project).toHaveBeenLastCalledWith({
+      repo: '/tmp/skills-layout',
+      scope: 'skills',
+      agent: 'codex',
+    })
   })
 
   it('updates skill bulk agents one item at a time', async () => {

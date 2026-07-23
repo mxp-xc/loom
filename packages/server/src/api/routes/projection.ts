@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono'
-import { LocalSkillIdSchema, SkillMemberOverrideSchema } from '@loom/core'
+import { AgentIdSchema, LocalSkillIdSchema, SkillMemberOverrideSchema } from '@loom/core'
 import { z } from 'zod'
 import { loadDisplayManifest, projectRepository } from '../../projection/workflow.js'
 import {
@@ -24,6 +24,7 @@ const ProjectBody = z
   .object({
     repo: NonEmptyString,
     scope: z.enum(['skills', 'mcp', 'memory', 'all']).optional(),
+    agent: AgentIdSchema.optional(),
   })
   .strict()
 const RepoQuery = z.object({ repo: NonEmptyString })
@@ -71,15 +72,16 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
       )
     }
     const scope = (body.scope ?? 'all') as 'skills' | 'mcp' | 'memory' | 'all'
+    const agent = body.agent
     try {
       return await withRepositoryLease(
         { ...deps, home, leases },
         repo,
         'mutation',
-        (repoPath) => projectionResourceKeys(home, repoPath, home, scope),
+        (repoPath) => projectionResourceKeys(home, repoPath, home, scope, agent),
         async (repoPath) => {
           apiLogger.info('projection started', { repoPath })
-          const result = await projectRepository({ ...deps, home }, repoPath, { scope })
+          const result = await projectRepository({ ...deps, home }, repoPath, { scope, agent })
           if (result.ok) {
             apiLogger.info('projection completed', { repoPath })
             if (result.warnings?.length) {
@@ -95,7 +97,9 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
               err: result.failure.originalError,
             })
           }
-          return c.json(result)
+          return c.json(
+            result.ok ? result : { ...result, message: projectionFailureMessage(result.failure) },
+          )
         },
       )
     } catch (err) {
@@ -222,9 +226,21 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
   return app
 }
 
+function projectionFailureMessage(failure: { failedStep: string; originalError: unknown }): string {
+  if (failure.failedStep === 'manifest-invalid') return '投影失败：项目配置无效'
+  const message = failure.originalError instanceof Error ? failure.originalError.message : ''
+  if (/user-owned (?:skill destination|source namespace)/.test(message)) {
+    return '投影失败：目标位置存在非 Loom 管理的内容'
+  }
+  if (/source unavailable/i.test(message)) return '投影失败：Skill source 当前不可用'
+  return failure.failedStep === 'cleanup' ? '投影已完成，但清理失败' : '投影失败'
+}
+
 function projectError(issues: z.ZodIssue[]): string {
   if (issues[0]?.code === 'unrecognized_keys') return 'invalid_project_request'
-  return issues[0]?.path[0] === 'scope' ? 'invalid_scope' : 'invalid_repo'
+  if (issues[0]?.path[0] === 'scope') return 'invalid_scope'
+  if (issues[0]?.path[0] === 'agent') return 'invalid_agent'
+  return 'invalid_repo'
 }
 
 function skillContentQueryError(issues: z.ZodIssue[]): string {

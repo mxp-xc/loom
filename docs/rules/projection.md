@@ -15,6 +15,7 @@ Implications:
 - 没有 agents 的 item 不应该继续保持 projected。
 - manifest 中选择了 agent 且源内容可用时，应投影到该 agent。
 - Scoped projection 只准备和写入所选领域；MCP 或 memory projection 不读取、安装或更新 skill sources。
+- Agent-scoped projection 只准备、锁定和写入所选 agent，并保留其他 agent 的 managed state。
 - Projection error 必须暴露，不能静默假装 reconciliation 已完成。
 - Skills 只删除 marker 或 namespace ownership 能证明为 managed 的 artifacts；MCP 只删除 managed id state 证明的 entries。
 - Memory 不因 agent 从配置移除而删除既有原生文件，直到存在独立 ownership 设计。

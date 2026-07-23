@@ -305,15 +305,44 @@ describe('API routes', () => {
     const res = await app.request('/api/project', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repo: '/tmp/r', scope: 'skills' }),
+      body: JSON.stringify({ repo: '/tmp/r', scope: 'skills', agent: 'opencode' }),
     })
     expect(res.status).toBe(200)
     expect((await responseJson<{ ok: boolean }>(res)).ok).toBe(true)
     expect(projectRepository).toHaveBeenCalledWith(
       expect.objectContaining({ fs: expect.any(Object), git: expect.any(Object) }),
       '/tmp/r',
-      { scope: 'skills' },
+      { scope: 'skills', agent: 'opencode' },
     )
+  })
+  it('POST /api/project serializes a safe projection failure message', async () => {
+    vi.mocked(projectRepository).mockResolvedValueOnce({
+      ok: false,
+      failure: {
+        failedStep: 'projection',
+        originalError: new Error(
+          'refuse to overwrite user-owned source namespace: /private/agent/skills/source',
+        ),
+        rollbackReport: { undone: 0, rollbackFailures: [] },
+      },
+    })
+
+    const res = await app.request('/api/project', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/tmp/r', scope: 'skills', agent: 'opencode' }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      ok: false,
+      message: '投影失败：目标位置存在非 Loom 管理的内容',
+      failure: {
+        failedStep: 'projection',
+        originalError: {},
+        rollbackReport: { undone: 0, rollbackFailures: [] },
+      },
+    })
   })
   it.each(['manifest', 'plan', 'varsCtx', 'installedAgents'])(
     'POST /api/project rejects caller-controlled %s input',
@@ -331,6 +360,19 @@ describe('API routes', () => {
       expect(projectRepository).not.toHaveBeenCalled()
     },
   )
+  it('POST /api/project rejects an unknown target agent', async () => {
+    vi.mocked(projectRepository).mockClear()
+
+    const res = await app.request('/api/project', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/tmp/r', scope: 'skills', agent: 'unknown' }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual(validationError('invalid_agent'))
+    expect(projectRepository).not.toHaveBeenCalled()
+  })
   it('POST /api/project rejects a missing repo before projection starts', async () => {
     vi.mocked(projectRepository).mockClear()
 

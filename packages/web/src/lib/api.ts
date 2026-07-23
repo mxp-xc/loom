@@ -281,7 +281,7 @@ export const api = {
     post('/init', {}).then(json) as Promise<{ ok: boolean; active_repo: string; repoPath: string }>,
   status: () =>
     fetch(`${base}/status`).then(json) as Promise<{ active_repo: string; repoPath: string }>,
-  project: (body: { repo: string; scope?: 'skills' | 'mcp' | 'memory' | 'all' }) =>
+  project: (body: { repo: string; scope?: 'skills' | 'mcp' | 'memory' | 'all'; agent?: AgentId }) =>
     post('/project', body).then(json),
   getOpenPathPreference: () =>
     fetch(`${base}/open-path/preference`).then(json) as Promise<{

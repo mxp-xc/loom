@@ -61,4 +61,13 @@ describe('resource keys', () => {
     expect(secondState).toHaveLength(2)
     expect(firstState.filter((key) => secondState.includes(key))).toHaveLength(1)
   })
+
+  it('locks only the selected agent destination for agent-scoped skills projection', () => {
+    const home = resolve('/home/tester')
+    const keys = projectionResourceKeys(home, '/work/repos/default', home, 'skills', 'opencode')
+
+    expect(keys).toContain(resolve(home, '.config/opencode/skills'))
+    expect(keys).not.toContain(resolve(home, '.codex/skills'))
+    expect(keys).not.toContain(resolve(home, '.claude/skills'))
+  })
 })

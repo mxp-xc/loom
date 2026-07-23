@@ -663,7 +663,11 @@ describe('useManifestOperations', () => {
     await waitFor(() => expect(api.updateSkillAgents).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(api.updateLocalSkillAgents).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(result?.ok).toBe(true))
-    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/r', scope: 'skills' })
+    expect(api.project).toHaveBeenCalledWith({
+      repo: '/tmp/r',
+      scope: 'skills',
+      agent: 'codex',
+    })
   })
 
   it('projects skills after source bulk agent update succeeds', async () => {
@@ -703,7 +707,11 @@ describe('useManifestOperations', () => {
     expect(api.updateSkillAgents).not.toHaveBeenCalled()
     expect(api.updateLocalSkillAgents).not.toHaveBeenCalled()
     await waitFor(() => expect(result?.ok).toBe(true))
-    expect(api.project).toHaveBeenCalledWith({ repo: '/tmp/r', scope: 'skills' })
+    expect(api.project).toHaveBeenCalledWith({
+      repo: '/tmp/r',
+      scope: 'skills',
+      agent: 'codex',
+    })
   })
 
   it('returns failure and refreshes when MCP bulk agent update fails after an earlier update', async () => {

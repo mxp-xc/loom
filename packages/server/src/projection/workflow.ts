@@ -55,6 +55,7 @@ export interface ProjectRepositoryInput {
   varsCtx?: VarsContext
   installedAgents?: AgentId[]
   scope?: ProjectionScope
+  agent?: AgentId
 }
 
 export async function projectRepository(
@@ -70,11 +71,14 @@ export async function projectRepository(
       ? await captureAvailableSourceCaches(deps.fs, repoPath, manifest.skills.sources ?? [])
       : new Map<string, AuthorizedSourceCache>()
   const installed = await resolveInstalledAgents(deps.proc, input.installedAgents)
+  const projectionAgents = input.agent
+    ? new Set([...installed].filter((agent) => agent === input.agent))
+    : installed
   const planningManifest =
     scope === 'mcp' || scope === 'memory'
       ? { ...manifest, skills: { ...manifest.skills, sources: [] } }
       : manifest
-  const plan = input.plan ?? planProjection(planningManifest, manifest.config, installed)
+  const plan = input.plan ?? planProjection(planningManifest, manifest.config, projectionAgents)
   const localSkills =
     scope === 'skills' || scope === 'all'
       ? await resolveRegisteredLocalSkills(deps.fs, repoPath, manifest.skills)
@@ -94,7 +98,7 @@ export async function projectRepository(
   const projectionDeps = createProjectionDeps(
     { fs: deps.fs, git: deps.git, proc: deps.proc },
     repoPath,
-    installed,
+    projectionAgents,
     deps.home,
     localSkills,
     localSourceEntries,

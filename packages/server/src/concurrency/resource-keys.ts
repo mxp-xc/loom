@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { join, resolve } from 'node:path'
-import { agentsSupporting } from '@loom/core'
+import { agentsSupporting, type AgentId } from '@loom/core'
 import {
   agentMcpFile,
   agentMemoryFile,
@@ -19,25 +19,29 @@ export function projectionResourceKeys(
   repoPath: string,
   canonicalHomeKey: string,
   scope: ProjectionScope = 'all',
+  agent?: AgentId,
 ): string[] {
   const context = runtimeAgentPathContext(home)
   const keys = [resolve(repoPath), canonicalHomeKey]
 
   if (scope === 'skills' || scope === 'all') {
+    const agents = agent ? [agent] : agentsSupporting('skills')
     keys.push(
       join(home, '.loom', 'state', repoIdentity(repoPath), 'projected-skills.json'),
-      ...agentsSupporting('skills').map((agent) => agentSkillsDir(agent, context)),
+      ...agents.map((agent) => agentSkillsDir(agent, context)),
     )
   }
   if (scope === 'mcp' || scope === 'all') {
+    const agents = agent ? [agent] : agentsSupporting('mcp')
     keys.push(
       join(home, '.loom', 'state', repoIdentity(repoPath), 'projected-mcp.json'),
       join(home, '.loom', 'state', repoBasename(repoPath), 'projected-mcp.json'),
-      ...agentsSupporting('mcp').map((agent) => agentMcpFile(agent, context)),
+      ...agents.map((agent) => agentMcpFile(agent, context)),
     )
   }
   if (scope === 'memory' || scope === 'all') {
-    keys.push(...agentsSupporting('memory').map((agent) => agentMemoryFile(agent, context)))
+    const agents = agent ? [agent] : agentsSupporting('memory')
+    keys.push(...agents.map((agent) => agentMemoryFile(agent, context)))
   }
 
   return keys.map((key) => resolve(key))

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { scanLocalSkills } from '../../src/projection/scan.js'
@@ -324,6 +324,38 @@ describe('projectRepository', () => {
     await expect(
       projectDeps.fs.readFile(join(root, '.codex', 'skills', 'external-skill', 'SKILL.md')),
     ).resolves.toBe('# External skill\n')
+  })
+
+  it('agent-scoped projection ignores another agent user-owned destination', async () => {
+    await writeFile(join(root, 'config.yaml'), 'agents: [codex, opencode]\n')
+    await writeFile(
+      join(root, 'skills.yaml'),
+      ['sources: []', 'skills:', '  - id: local-skill', '    agents: [codex, opencode]', ''].join(
+        '\n',
+      ),
+    )
+    const localSkill = join(root, 'assets', 'skills', 'local-skill')
+    await mkdir(localSkill, { recursive: true })
+    await writeFile(join(localSkill, 'SKILL.md'), '# Local skill\n')
+    const codexDestination = join(root, '.codex', 'skills', 'local-skill')
+    await mkdir(codexDestination, { recursive: true })
+    await writeFile(join(codexDestination, 'SKILL.md'), '# User owned\n')
+
+    const projectDeps = deps(sourceTreeGit([]))
+    projectDeps.proc.isCommandInstalled = vi.fn(async () => true)
+    const result = await projectRepository(projectDeps, root, {
+      scope: 'skills',
+      agent: 'opencode',
+      installedAgents: ['codex', 'opencode'],
+    })
+
+    expect(result).toEqual({ ok: true })
+    await expect(readFile(join(codexDestination, 'SKILL.md'), 'utf8')).resolves.toBe(
+      '# User owned\n',
+    )
+    await expect(
+      readFile(join(root, '.config', 'opencode', 'skills', 'local-skill', 'SKILL.md'), 'utf8'),
+    ).resolves.toBe('# Local skill\n')
   })
 
   it('rejects a local projection plan whose path differs from the authorized manifest entry', async () => {

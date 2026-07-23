@@ -547,10 +547,15 @@ export function useManifestOperations(
     async (
       saveManifest: () => Promise<MaybeOkResponse>,
       failureMessage: string,
+      agent: AgentId,
     ): Promise<MaybeOkResponse> => {
       const saved = await saveManifest()
       if (responseFailureMessage(saved, failureMessage)) return saved
-      const projected = (await api.project({ repo: repoPath, scope: 'skills' })) as MaybeOkResponse
+      const projected = (await api.project({
+        repo: repoPath,
+        scope: 'skills',
+        agent,
+      })) as MaybeOkResponse
       const projectError = responseFailureMessage(projected, '投影失败')
       return projectError ? { ok: false, message: projectError } : projected
     },
@@ -679,6 +684,7 @@ export function useManifestOperations(
                 agents: toggleAgent(currentAgents, agent),
               }) as Promise<MaybeOkResponse>,
             '保存 agents 失败',
+            agent,
           ),
         { failureMessage: '保存 agents 失败' },
       ),
@@ -698,6 +704,7 @@ export function useManifestOperations(
                 agents: toggleAgent(currentAgents, agent),
               }) as Promise<MaybeOkResponse>,
             '保存 agents 失败',
+            agent,
           ),
         { failureMessage: '保存 agents 失败' },
       ),
@@ -750,6 +757,7 @@ export function useManifestOperations(
           const projected = (await api.project({
             repo: repoPath,
             scope: 'skills',
+            agent,
           })) as MaybeOkResponse
           const projectError = responseFailureMessage(projected, '投影失败')
           return projectError ? { ok: false, message: projectError } : projected
@@ -786,6 +794,7 @@ export function useManifestOperations(
           const projected = (await api.project({
             repo: repoPath,
             scope: 'skills',
+            agent,
           })) as MaybeOkResponse
           const projectError = responseFailureMessage(projected, '投影失败')
           return projectError ? { ok: false, message: projectError } : projected
