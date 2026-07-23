@@ -76,9 +76,9 @@ function tagged(name, color, cmd, cwd) {
 }
 
 async function main() {
-  const port = await resolvePort('LOOM_PORT', 3000)
+  const port = await resolvePort('LOOM_PORT', 4310)
   process.env.LOOM_PORT = port
-  const webPort = await resolvePort('LOOM_WEB_PORT', 5173)
+  const webPort = await resolvePort('LOOM_WEB_PORT', 4180)
   process.env.LOOM_WEB_PORT = webPort
   console.log(`\x1b[35m[dev]\x1b[0m API server port: ${port}`)
   console.log(`\x1b[35m[dev]\x1b[0m Web server port: ${webPort}  →  http://127.0.0.1:${webPort}`)

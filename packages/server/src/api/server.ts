@@ -37,7 +37,7 @@ export function createApp(): RouteApp {
 }
 
 export function startApiServer(
-  port = Number(process.env.LOOM_PORT ?? 3000),
+  port = Number(process.env.LOOM_PORT ?? 4310),
   serveOverride?: typeof import('@hono/node-server').serve,
 ) {
   const app = createApp()
