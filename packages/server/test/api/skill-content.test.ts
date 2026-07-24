@@ -34,9 +34,21 @@ describe('skill content identity boundary', () => {
         oid: 'b'.repeat(40),
         path: 'skills/selected/SKILL.md',
       },
+      {
+        mode: '100644',
+        type: 'blob' as const,
+        oid: 'c'.repeat(40),
+        path: 'skills/unselected/SKILL.md',
+      },
     ])
     show = vi.fn(async () => '# Pinned source skill\n')
-    git = { readTree, show } as unknown as IGit
+    git = {
+      readTree,
+      show,
+      revParse: vi.fn(async (_repoPath, ref) =>
+        ref.endsWith('^{tree}') ? 'd'.repeat(40) : PINNED_COMMIT,
+      ),
+    } as unknown as IGit
     app = new Hono().route('/api', createProjectionRoutes({ fs, git, proc: {} as IProcess, home }))
     await writeSkillsManifest({ sources: [], skills: [] })
   })
@@ -148,13 +160,26 @@ describe('skill content identity boundary', () => {
     expect(show).toHaveBeenCalledWith(canonicalCacheDir, PINNED_COMMIT, 'skills/selected/SKILL.md')
   })
 
-  it.each([
-    ['unselected member', SOURCE_URL, 'skills/unselected/SKILL.md'],
-    ['different source', 'https://example.test/other.git', 'skills/selected/SKILL.md'],
-  ])('rejects a %s before reading Git', async (_label, sourceUrl, memberEntry) => {
+  it('reads an unselected bundle discovered in the pinned source tree', async () => {
     await prepareSource()
 
-    const response = await app.request(sourceContentUrl(sourceUrl, memberEntry))
+    const response = await app.request(sourceContentUrl(SOURCE_URL, 'skills/unselected/SKILL.md'))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ ok: true, content: '# Pinned source skill\n' })
+    expect(show).toHaveBeenLastCalledWith(
+      expect.any(String),
+      PINNED_COMMIT,
+      'skills/unselected/SKILL.md',
+    )
+  })
+
+  it('rejects a bundle from a different source before reading Git', async () => {
+    await prepareSource()
+
+    const response = await app.request(
+      sourceContentUrl('https://example.test/other.git', 'skills/selected/SKILL.md'),
+    )
 
     expect(response.status).toBe(404)
     expect(await response.json()).toMatchObject({ ok: false, error: 'source_skill_not_found' })
@@ -162,7 +187,7 @@ describe('skill content identity boundary', () => {
     expect(show).not.toHaveBeenCalled()
   })
 
-  it('rejects non-regular Git entries before reading their content', async () => {
+  it('rejects non-regular Git entries after source tree validation', async () => {
     await prepareSource()
     readTree = vi.fn(async () => [
       {
@@ -172,14 +197,20 @@ describe('skill content identity boundary', () => {
         path: 'skills/selected/SKILL.md',
       },
     ])
-    git = { readTree, show } as unknown as IGit
+    git = {
+      readTree,
+      show,
+      revParse: vi.fn(async (_repoPath, ref) =>
+        ref.endsWith('^{tree}') ? 'd'.repeat(40) : PINNED_COMMIT,
+      ),
+    } as unknown as IGit
     app = new Hono().route('/api', createProjectionRoutes({ fs, git, proc: {} as IProcess, home }))
 
     const response = await app.request(sourceContentUrl(SOURCE_URL, 'skills/selected/SKILL.md'))
 
-    expect(response.status).toBe(422)
-    expect(await response.json()).toMatchObject({ ok: false, error: 'source_skill_unavailable' })
-    expect(show).not.toHaveBeenCalled()
+    expect(response.status).toBe(404)
+    expect(await response.json()).toMatchObject({ ok: false, error: 'source_skill_not_found' })
+    expect(show).toHaveBeenCalledOnce()
   })
 
   async function prepareSource(): Promise<string> {

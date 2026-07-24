@@ -1851,6 +1851,7 @@ async function inspectManagedSourceNamespace(
   const sourceKey = typeof value.sourceKey === 'string' ? value.sourceKey : undefined
   const sourceName = typeof value.sourceName === 'string' ? value.sourceName : undefined
   const actualNamespace = typeof value.namespace === 'string' ? value.namespace : undefined
+  const markerNamespace = actualNamespace ?? sourceName
   const valid =
     value.version === 1 &&
     value.managedBy === 'loom' &&
@@ -1858,8 +1859,8 @@ async function inspectManagedSourceNamespace(
     Boolean(ownerRepo) &&
     /^[a-f0-9]{64}$/.test(sourceKey ?? '') &&
     Boolean(sourceName && isSafeNamespaceSegment(sourceName)) &&
-    Boolean(actualNamespace && isSafeNamespaceSegment(actualNamespace)) &&
-    actualNamespace === basename(namespace) &&
+    Boolean(markerNamespace && isSafeNamespaceSegment(markerNamespace)) &&
+    markerNamespace === basename(namespace) &&
     (!expected.ownerRepo || ownerRepo === expected.ownerRepo) &&
     (!expected.sourceKey || sourceKey === expected.sourceKey) &&
     (!expected.sourceName || sourceName === expected.sourceName)

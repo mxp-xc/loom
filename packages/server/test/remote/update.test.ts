@@ -50,6 +50,7 @@ describe.concurrent('prepareSourceUpdate', () => {
         files: {
           'skills/brainstorming/SKILL.md': '---\nname: brainstorming\n---\nv1\n',
           'skills/brainstorming/reference.md': 'old resource',
+          'skills/unselected/SKILL.md': '---\nname: unselected\n---\nstable\n',
         },
         tags: ['v1.0.0'],
       },

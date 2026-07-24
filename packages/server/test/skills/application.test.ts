@@ -978,6 +978,30 @@ describe('SkillsApplication', () => {
     expect(existsSync(join(repoPath, 'assets', 'skills', 'removed', 'untracked.md'))).toBe(false)
   })
 
+  it('finalizes deletions without initializing local skill storage', async () => {
+    await mkdir(join(repoPath, 'remote-cache', 'skills', 'removed'), { recursive: true })
+    await writeFile(join(repoPath, 'remote-cache', 'skills', 'removed', 'SKILL.md'), '# Removed')
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      'sources:\n  - url: https://example.test/skills.git\n    ref: main\n    pinned_commit: abc1234\n    members:\n      - name: removed\n        entry: removed/SKILL.md\nskills: []\n',
+    )
+    mockRemoteSource({}, 'abc123', { 'removed/SKILL.md': '# Removed' })
+    const realPath = vi.spyOn(fs, 'realPath')
+
+    await expect(
+      app.reconcileSource(repoPath, {
+        url: 'https://example.test/skills.git',
+        members: [],
+        preserve: [],
+      }),
+    ).resolves.toMatchObject({ finalized: true, preserved: [] })
+
+    expect(realPath).not.toHaveBeenCalled()
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.sources[0].members).toEqual([])
+    expect(existsSync(join(repoPath, 'assets'))).toBe(false)
+  })
+
   it('rejects invalid preserve identities before creating owned roots or staging', async () => {
     await mkdir(join(repoPath, 'remote-cache', 'skills', 'removed'), { recursive: true })
     await writeFile(join(repoPath, 'remote-cache', 'skills', 'removed', 'SKILL.md'), '# live')

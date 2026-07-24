@@ -506,6 +506,7 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
         state={reconciliation}
         busy={saving}
         error={error}
+        defaultPreserveRemoved={false}
         onClose={() => {
           if (!saving) setReconciliation(null)
         }}

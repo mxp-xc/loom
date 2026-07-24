@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import type { PreparedSkillReconciliation } from '@/hooks/useManifestOperations'
+import { Check, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import styles from './SkillReconciliationDialog.module.css'
 
 interface Props {
   state: PreparedSkillReconciliation | null
   busy: boolean
   error?: string | null
+  defaultPreserveRemoved?: boolean
   onClose: () => void
   onConfirm: (
     preserve: string[],
@@ -19,6 +21,7 @@ export default function SkillReconciliationDialog({
   state,
   busy,
   error,
+  defaultPreserveRemoved = true,
   onClose,
   onConfirm,
 }: Props) {
@@ -26,9 +29,11 @@ export default function SkillReconciliationDialog({
   const [enabledBoundaries, setEnabledBoundaries] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    setSelected(new Set(state?.changes.removed.map(({ name }) => name) ?? []))
+    setSelected(
+      new Set(defaultPreserveRemoved ? (state?.changes.removed.map(({ name }) => name) ?? []) : []),
+    )
     setEnabledBoundaries(new Set())
-  }, [state?.sessionId])
+  }, [defaultPreserveRemoved, state?.sessionId])
 
   if (!state) return null
   const removedNames = state.changes.removed.map(({ name }) => name)
@@ -46,10 +51,20 @@ export default function SkillReconciliationDialog({
   }))
 
   return (
-    <Modal open title="确认 skills 更新" width={620} busy={busy} onClose={onClose}>
+    <Modal open title="确认 skills 更新" width={720} busy={busy} onClose={onClose}>
       <div className={styles.summary}>
-        <ChangeSection title="新增" names={state.changes.added.map(({ name }) => name)} />
-        <ChangeSection title="更新" names={state.changes.updated.map(({ name }) => name)} />
+        <ChangeSection
+          title="新增"
+          names={state.changes.added.map(({ name }) => name)}
+          icon={<Plus size={15} />}
+          tone="added"
+        />
+        <ChangeSection
+          title="更新"
+          names={state.changes.updated.map(({ name }) => name)}
+          icon={<RefreshCw size={14} />}
+          tone="updated"
+        />
         {(state.pathMoves?.length ?? 0) > 0 && (
           <section className={styles.section}>
             <div className={styles.heading}>
@@ -100,14 +115,21 @@ export default function SkillReconciliationDialog({
         )}
         <section className={styles.section}>
           <div className={styles.heading}>
-            <h3>删除</h3>
-            <span>{removedNames.length}</span>
+            <span className={styles.sectionTitle} data-tone="removed">
+              <Trash2 size={14} />
+              <h3>删除</h3>
+            </span>
+            <span className={styles.count}>{removedNames.length}</span>
           </div>
           {removedNames.length === 0 ? (
             <p className={styles.hint}>无变化</p>
           ) : (
             <>
-              <p className={styles.hint}>已默认保留为 local skill；取消勾选的项目将被删除。</p>
+              <p className={styles.hint}>
+                {defaultPreserveRemoved
+                  ? '已默认保留为 local skill；取消勾选的项目将被删除。'
+                  : '勾选的项目将保留为 local skill；未勾选的项目将被删除。'}
+              </p>
               <div className={styles.tools}>
                 <Button
                   size="sm"
@@ -160,14 +182,38 @@ export default function SkillReconciliationDialog({
   )
 }
 
-function ChangeSection({ title, names }: { title: string; names: string[] }) {
+function ChangeSection({
+  title,
+  names,
+  icon,
+  tone,
+}: {
+  title: string
+  names: string[]
+  icon: ReactNode
+  tone: 'added' | 'updated'
+}) {
   return (
     <section className={styles.section}>
       <div className={styles.heading}>
-        <h3>{title}</h3>
-        <span>{names.length}</span>
+        <span className={styles.sectionTitle} data-tone={tone}>
+          {icon}
+          <h3>{title}</h3>
+        </span>
+        <span className={styles.count}>{names.length}</span>
       </div>
-      <div className={styles.names}>{names.length > 0 ? names.join(', ') : '无变化'}</div>
+      {names.length > 0 ? (
+        <div className={styles.changeList}>
+          {names.map((name) => (
+            <div key={name} className={styles.changeRow}>
+              <Check size={13} />
+              <span>{name}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className={styles.empty}>无变化</p>
+      )}
     </section>
   )
 }

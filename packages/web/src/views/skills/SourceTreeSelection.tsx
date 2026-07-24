@@ -289,6 +289,10 @@ export default function SourceTreeSelection({
   const selectedResources = resourceLeaves.filter(
     (node) => !unavailable.has(node.path) && resourceSelected(node, value.resources),
   )
+  const availableBundles = bundles.filter((node) => !unavailable.has(node.entry))
+  const allBundlesSelected =
+    availableBundles.length > 0 &&
+    availableBundles.every((bundle) => value.memberEntries.has(bundle.entry))
   const projectionRoots = useMemo(() => {
     const selectedPaths = [
       ...selectedBundles.map((node) => node.path),
@@ -371,6 +375,16 @@ export default function SourceTreeSelection({
         !allResourcesSelected,
       ),
     })
+  }
+
+  const toggleBundles = () => {
+    const memberEntries = new Set(value.memberEntries)
+    for (const bundle of availableBundles) {
+      if (bundle.kind !== 'bundle') continue
+      if (allBundlesSelected) memberEntries.delete(bundle.entry)
+      else memberEntries.add(bundle.entry)
+    }
+    onChange({ memberEntries, resources: value.resources })
   }
 
   const removeUnavailableResourceRule = (
@@ -544,6 +558,19 @@ export default function SourceTreeSelection({
           aria-label="Skill bundles"
           data-empty={bundles.length === 0 || visibleBundles.length === 0 || undefined}
         >
+          {bundles.length > 0 && (
+            <div className={styles.bundleListHeader}>
+              <TriCheckbox
+                checked={allBundlesSelected}
+                mixed={!allBundlesSelected && selectedBundles.length > 0}
+                disabled={availableBundles.length === 0}
+                label={allBundlesSelected ? 'Clear all bundles' : 'Select all bundles'}
+                onChange={toggleBundles}
+              />
+              <span>{allBundlesSelected ? 'Clear all bundles' : 'Select all bundles'}</span>
+              <code>{availableBundles.length} available</code>
+            </div>
+          )}
           {bundles.length === 0 && !searchTerm ? (
             <div className={styles.emptyResult}>
               <PackageCheck size={18} />

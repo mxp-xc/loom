@@ -135,19 +135,22 @@ export async function prepareSourceUpdate(
     const pathMoves = previousTree
       ? compareProjectionPaths(source, previousTree, sourceTree, newMembers)
       : []
-    const previousSnapshots = oldMembers
-    const nextSnapshots = newMembers.map((member) => ({
-      name: member.name,
-      entry: member.entry,
-      path: member.entry,
-    }))
-    const changes = await classifySkillMemberChanges(
+    const selectedEntries = new Set(oldMembers.map((member) => member.entry ?? member.path))
+    const selectedChanges = await classifySkillMemberChanges(
       fs,
       stagingDir,
       candidateDir,
-      previousSnapshots,
-      nextSnapshots,
+      oldMembers,
+      newMembers
+        .filter((member) => selectedEntries.has(member.entry))
+        .map((member) => ({ name: member.name, entry: member.entry, path: member.entry })),
     )
+    const changes: SkillMemberChangeSet = {
+      ...selectedChanges,
+      added: newMembers
+        .filter((member) => !previousBundleEntries.has(member.entry))
+        .map((member) => ({ name: member.name, nextPath: member.entry })),
+    }
     return {
       pinned_commit,
       newMembers,

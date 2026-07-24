@@ -91,6 +91,17 @@ describe('SourceTreeSelection', () => {
     expect(screen.getAllByText('incident-triage')).toHaveLength(2)
   })
 
+  it('selects and clears every available bundle from the bundle column header', () => {
+    render(<Harness />)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all bundles' }))
+    expect(screen.getByText('1 bundles')).toBeDefined()
+    expect(screen.getByRole('checkbox', { name: 'Clear all bundles' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Clear all bundles' }))
+    expect(screen.getByText('0 bundles')).toBeDefined()
+  })
+
   it('shows the bundle folder path beside its name and keeps selection separate from viewing', async () => {
     const onOpenBundle = vi.fn()
     const onChange = vi.fn()

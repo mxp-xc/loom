@@ -428,11 +428,12 @@ describe('source namespace projection', () => {
     },
   )
 
-  it('preserves and rejects a source namespace marker missing its actual namespace', async () => {
+  it('preserves and rejects a legacy source marker whose source name mismatches its directory', async () => {
     const namespace = join(home, '.claude', 'skills', 'workflow-source')
     await mkdir(namespace, { recursive: true })
     await writeFile(join(namespace, 'keep.md'), 'keep')
     const { namespace: _namespace, ...incompleteMarker } = sourceMarker()
+    incompleteMarker.sourceName = 'different-source'
     await writeFile(join(namespace, '.loom-projection.json'), JSON.stringify(incompleteMarker))
     await mkdir(join(cacheRoot, 'skill'))
     await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
@@ -454,6 +455,32 @@ describe('source namespace projection', () => {
 
     expect(result.ok).toBe(false)
     expect(await readFile(join(namespace, 'keep.md'), 'utf8')).toBe('keep')
+  })
+
+  it('upgrades an owned legacy source marker missing its namespace', async () => {
+    const namespace = join(home, '.claude', 'skills', 'workflow-source')
+    const { namespace: _namespace, ...legacyMarker } = sourceMarker()
+    await mkdir(namespace, { recursive: true })
+    await writeFile(join(namespace, '.loom-projection.json'), JSON.stringify(legacyMarker))
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'updated')
+
+    const result = await executeProjection(
+      projectionPlan(
+        [sourcePlan({ entries: [{ kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' }] })],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result.ok).toBe(true)
+    expect(
+      JSON.parse(await readFile(join(namespace, '.loom-projection.json'), 'utf8')),
+    ).toMatchObject({ namespace: 'workflow-source' })
+    expect(await readFile(join(namespace, 'skill', 'SKILL.md'), 'utf8')).toBe('updated')
   })
 
   it.each(['CON', 'folder/nul.txt', 'trailing.', 'trailing '])(

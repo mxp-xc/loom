@@ -214,6 +214,8 @@ Rule:
 Implications:
 
 - 更新结果分别展示新增、更新和远端已删除的 members。
+- 新增以更新前后完整 SourceTree 的 bundle 差异为准；当前未选择但旧版本已存在的 bundle 不算新增。
+- 更新完成后只保留当前已选择且新版本仍存在的 members，不自动选择新发现或此前未选择的 bundles。
 - 更新确认始终展示新增、更新和删除摘要；没有对应变化时明确显示 0 项。
 - 缺失项支持逐项选择、全选、取消全选和不保留。
 - 打开 Skills 页面和编辑现有 source 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。

@@ -1,9 +1,16 @@
 import { dirname, join, normalize } from 'node:path'
-import { deriveRepoId, SkillSourceSchema, type SkillSource } from '@loom/core'
+import {
+  deriveRepoId,
+  SkillSourceSchema,
+  type SkillSource,
+  type SourceTreeBundleNode,
+  type SourceTreeNode,
+} from '@loom/core'
 import { logger } from '../lib/logger.js'
 import { readSkillsManifest, RepoManifestError } from '../api/repo-config.js'
 import type { IFileSystem } from '../ports/fs.js'
 import type { IGit } from '../ports/git.js'
+import { scanSourceTree } from '../remote/source-tree.js'
 import {
   LocalSkillBoundaryError,
   requireAvailableLocalSkill,
@@ -47,8 +54,7 @@ export async function readSkillContent(
     }
 
     const source = sources.get(identity.sourceUrl)
-    const member = source?.members?.find((candidate) => candidate.entry === identity.memberEntry)
-    if (!source || !member) {
+    if (!source) {
       throw new SkillContentError(404, 'source_skill_not_found', 'Source skill not found')
     }
     const commit = source.pinned_commit?.trim() ?? ''
@@ -61,16 +67,37 @@ export async function readSkillContent(
     }
 
     const cacheDir = await resolveSourceCache(fs, repoPath, deriveRepoId(source.url))
+    const sourceTree = await scanSourceTree(git, cacheDir, commit, source)
+    const bundle = flattenSourceTree(sourceTree.nodes).find(
+      (node): node is SourceTreeBundleNode =>
+        node.kind === 'bundle' && node.entry === identity.memberEntry,
+    )
+    const unavailable = sourceTree.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.path === identity.memberEntry ||
+        (diagnostic.code !== 'invalid-nested-bundle' &&
+          diagnostic.relatedPaths?.includes(identity.memberEntry)),
+    )
+    if (!bundle || unavailable) {
+      throw new SkillContentError(404, 'source_skill_not_found', 'Source skill not found')
+    }
     const entries = await git.readTree(cacheDir, commit)
-    const entry = entries.find((candidate) => candidate.path === member.entry)
-    if (!entry || entry.type !== 'blob' || !REGULAR_BLOB_MODES.has(entry.mode)) {
+    const skillEntry = entries.find((entry) => entry.path === bundle.entry)
+    if (!skillEntry || skillEntry.type !== 'blob' || !REGULAR_BLOB_MODES.has(skillEntry.mode)) {
       throw new SkillContentError(422, 'source_skill_unavailable', 'Source skill is unavailable')
     }
-    const content = await git.show(cacheDir, commit, member.entry)
+    const content = await git.show(cacheDir, commit, bundle.entry)
     return { content }
   } catch (err) {
     throw mapContentError(err, 'read', identity)
   }
+}
+
+function flattenSourceTree(nodes: SourceTreeNode[]): SourceTreeNode[] {
+  return nodes.flatMap((node) => [
+    node,
+    ...(node.kind === 'container' ? flattenSourceTree(node.children) : []),
+  ])
 }
 
 export async function writeLocalSkillContent(

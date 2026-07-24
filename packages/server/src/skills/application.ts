@@ -539,24 +539,26 @@ export class SkillsApplication {
         agents?: AgentId[]
         files: LocalArchiveFile[]
       }> = []
-      const repository = await resolveLocalSkillRepositoryRoot(this.fs, repoPath)
-      for (const name of preserve) {
-        if (currentManifest.skills.some((skill) => skill.id === name)) throw alreadyExists(name)
-        const previous = currentSource.members?.find((member) => member.name === name)
-        const skillFile = previous?.entry
-        if (!skillFile) throw new SkillsApplicationError(400, 'invalid_member_entry', name)
-        await preflightBuiltInLocalSkill(this.fs, repoPath, name)
-        preservedArchives.push({
-          name,
-          ...(previous.agents ? { agents: previous.agents } : {}),
-          files: await readPinnedLocalArchive(
-            this.fs,
-            this.git,
-            repository,
-            currentSource,
-            skillFile,
-          ),
-        })
+      if (preserve.length > 0) {
+        const repository = await resolveLocalSkillRepositoryRoot(this.fs, repoPath)
+        for (const name of preserve) {
+          if (currentManifest.skills.some((skill) => skill.id === name)) throw alreadyExists(name)
+          const previous = currentSource.members?.find((member) => member.name === name)
+          const skillFile = previous?.entry
+          if (!skillFile) throw new SkillsApplicationError(400, 'invalid_member_entry', name)
+          await preflightBuiltInLocalSkill(this.fs, repoPath, name)
+          preservedArchives.push({
+            name,
+            ...(previous.agents ? { agents: previous.agents } : {}),
+            files: await readPinnedLocalArchive(
+              this.fs,
+              this.git,
+              repository,
+              currentSource,
+              skillFile,
+            ),
+          })
+        }
       }
       if (preservedArchives.length > 0) {
         const destinations = new Map(

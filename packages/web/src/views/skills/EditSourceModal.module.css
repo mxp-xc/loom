@@ -17,6 +17,7 @@
 
 .layout {
   height: min(670px, calc(100dvh - 118px));
+  min-height: 0;
 }
 
 .fields {

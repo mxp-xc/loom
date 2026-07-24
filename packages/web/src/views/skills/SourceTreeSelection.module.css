@@ -281,6 +281,33 @@
   min-height: 0;
 }
 
+.bundleListHeader {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: grid;
+  min-height: 38px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 88%, var(--popover));
+}
+
+.bundleListHeader span {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.bundleListHeader code {
+  color: var(--muted);
+  font:
+    10px 'JetBrains Mono',
+    monospace;
+}
+
 .bundleRow {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr) auto;

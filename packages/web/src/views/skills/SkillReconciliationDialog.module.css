@@ -1,13 +1,13 @@
 .summary {
   display: grid;
-  gap: 14px;
+  gap: 0;
   max-height: min(58vh, 520px);
   overflow: auto;
 }
 
 .section {
   border-top: 1px solid var(--border);
-  padding-top: 12px;
+  padding: 16px 2px;
 }
 
 .heading {
@@ -15,12 +15,39 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
-.heading span {
-  color: var(--muted-foreground);
+.sectionTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.sectionTitle[data-tone='added'] {
+  color: var(--success);
+}
+
+.sectionTitle[data-tone='updated'] {
+  color: var(--primary);
+}
+
+.sectionTitle[data-tone='removed'] {
+  color: var(--error);
+}
+
+.count {
+  display: grid;
+  min-width: 26px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--muted);
   font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
 }
 
 .heading h3 {
@@ -29,12 +56,46 @@
 }
 
 .hint,
-.names {
-  margin: 6px 0 0;
+.empty {
+  margin: 9px 0 0;
   color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.changeList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.changeRow {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--card) 62%, transparent);
+  color: var(--text);
+  font:
+    13px 'JetBrains Mono',
+    monospace;
+}
+
+.changeRow svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.changeRow span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tools,
@@ -56,9 +117,9 @@
   min-width: 0;
   align-items: center;
   gap: 8px;
-  padding: 6px 2px;
+  padding: 8px 6px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .row span {

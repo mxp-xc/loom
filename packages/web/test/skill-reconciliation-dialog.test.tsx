@@ -61,6 +61,26 @@ describe('SkillReconciliationDialog', () => {
     expect(onConfirm).toHaveBeenLastCalledWith([], [])
   })
 
+  it('defaults explicit edit removals to delete while allowing preserve selection', () => {
+    render(
+      <SkillReconciliationDialog
+        state={{
+          sessionId: 'session-edit',
+          pinned_commit: 'abc',
+          changes: { added: [], updated: [], removed: [{ name: 'removed' }] },
+          resourceBoundaryChanges: [],
+        }}
+        busy={false}
+        defaultPreserveRemoved={false}
+        onClose={vi.fn()}
+        onConfirm={vi.fn(async () => {})}
+      />,
+    )
+
+    expect((screen.getByLabelText('保留 removed') as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByText(/未勾选的项目将被删除/)).toBeTruthy()
+  })
+
   it('chooses whether new resource boundaries stay excluded or become enabled bundles', () => {
     const onConfirm = vi.fn(async () => {})
     render(
