@@ -16,7 +16,7 @@
     "typecheck:tests": "bun --cwd packages/core typecheck:test && bun --cwd packages/server typecheck:test && bun --cwd packages/web typecheck:test",
     "format": "bun --bun prettier --write . --ignore-unknown --ignore-path .gitignore --log-level warn",
     "format:check": "bun --bun prettier --check . --ignore-unknown --ignore-path .gitignore",
-    "prepare": "bun --bun husky"
+    "prepare": "husky"
   },
   "workspaces": [
     "packages/*"
