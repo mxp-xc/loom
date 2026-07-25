@@ -38,6 +38,33 @@ export async function scanSourceTree(
     git.readTree(repoPath, ref),
     git.revParse(repoPath, `${ref}^{tree}`),
   ])
+  return renderSourceTree(git, repoPath, commit, source, entries, rootOid, true)
+}
+
+export async function scanProjectionSourceTree(
+  git: IGit,
+  repoPath: string,
+  commit: string,
+  source: SourceTreeSource,
+): Promise<{ tree: SourceTree; files: string[] }> {
+  const entries = await git.readTree(repoPath, commit)
+  return {
+    tree: await renderSourceTree(git, repoPath, commit, source, entries, '', false),
+    files: entries
+      .filter((entry) => entry.type === 'blob' && entry.mode !== '120000')
+      .map((entry) => entry.path),
+  }
+}
+
+async function renderSourceTree(
+  git: IGit,
+  repoPath: string,
+  commit: string,
+  source: SourceTreeSource,
+  entries: GitTreeEntry[],
+  rootOid: string,
+  includeMetadata: boolean,
+): Promise<SourceTree> {
   const root = buildDirectoryIndex(entries, rootOid)
   const candidates = findBundleCandidates(root)
   const candidatePaths = new Set(candidates.map((candidate) => candidate.path))
@@ -58,7 +85,7 @@ export async function scanSourceTree(
     source,
   )
   const nodes = validBundles.has('')
-    ? [await renderBundle(git, repoPath, commit, source, root, diagnostics)]
+    ? [await renderBundle(git, repoPath, commit, source, root, diagnostics, includeMetadata)]
     : await renderChildren(
         git,
         repoPath,
@@ -68,6 +95,7 @@ export async function scanSourceTree(
         validBundles,
         candidatePaths,
         diagnostics,
+        includeMetadata,
       )
   return { commit, nodes, diagnostics: sortDiagnostics(diagnostics) }
 }
@@ -161,13 +189,14 @@ async function renderChildren(
   validBundles: Set<string>,
   candidatePaths: Set<string>,
   diagnostics: SourceTreeDiagnostic[],
+  includeMetadata: boolean,
 ): Promise<SourceTreeNode[]> {
   const nodes: SourceTreeNode[] = await Promise.all(
     [...directory.children.values()]
       .sort((a, b) => comparePaths(a.path, b.path))
       .map(async (child): Promise<SourceTreeNode> => {
         if (validBundles.has(child.path)) {
-          return renderBundle(git, repoPath, commit, source, child, diagnostics)
+          return renderBundle(git, repoPath, commit, source, child, diagnostics, includeMetadata)
         }
         return {
           kind: 'container',
@@ -184,6 +213,7 @@ async function renderChildren(
             validBundles,
             candidatePaths,
             diagnostics,
+            includeMetadata,
           ),
         } satisfies SourceTreeContainerNode
       }),
@@ -204,6 +234,7 @@ async function renderBundle(
   source: SourceTreeSource,
   directory: TreeDirectory,
   diagnostics: SourceTreeDiagnostic[],
+  includeMetadata: boolean,
 ): Promise<SourceTreeBundleNode> {
   const entry = childPath(directory.path, 'SKILL.md')
   const name = bundleName(directory, source)
@@ -217,15 +248,17 @@ async function renderBundle(
   })
 
   let description = ''
-  try {
-    const content = await withMetadataReadSlot(() => git.show(repoPath, commit, entry))
-    description = parseSkillMeta(content, name, directory.path)?.description ?? ''
-  } catch (err) {
-    sourceTreeLogger.error('failed to read source skill metadata', {
-      err,
-      url: source.url,
-      path: entry,
-    })
+  if (includeMetadata) {
+    try {
+      const content = await withMetadataReadSlot(() => git.show(repoPath, commit, entry))
+      description = parseSkillMeta(content, name, directory.path)?.description ?? ''
+    } catch (err) {
+      sourceTreeLogger.error('failed to read source skill metadata', {
+        err,
+        url: source.url,
+        path: entry,
+      })
+    }
   }
   return {
     kind: 'bundle',

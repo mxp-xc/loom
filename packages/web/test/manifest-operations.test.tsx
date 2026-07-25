@@ -1,10 +1,19 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { api } from '../src/lib/api'
+import { ApiError, api } from '../src/lib/api'
 import { useManifestOperations } from '../src/hooks/useManifestOperations'
 
 vi.mock('../src/lib/api', () => ({
+  ApiError: class ApiError extends Error {
+    constructor(
+      message: string,
+      readonly status: number,
+      readonly code?: string,
+    ) {
+      super(message)
+    }
+  },
   api: {
     getManifest: vi.fn(async () => ({
       skills: { sources: [], skills: [] },
@@ -40,9 +49,7 @@ vi.mock('../src/lib/api', () => ({
     cancelSourceUpdate: vi.fn(async () => ({ ok: true })),
     importLocalSkills: vi.fn(async () => ({ ok: true })),
     writeLocalSkills: vi.fn(async () => ({ ok: true })),
-    updateSkillAgents: vi.fn(async () => ({ ok: true })),
-    updateSourceSkillAgents: vi.fn(async () => ({ ok: true })),
-    updateLocalSkillAgents: vi.fn(async () => ({ ok: true })),
+    updateSkillAgentsBatch: vi.fn(async () => ({ ok: true })),
     updateMcpAgents: vi.fn(async () => ({ ok: true })),
   },
 }))
@@ -574,13 +581,14 @@ describe('useManifestOperations', () => {
     }
   })
 
-  it('returns failure and refreshes when skill bulk agent update fails after an earlier update', async () => {
+  it('returns failure and refreshes when the skill agent batch fails', async () => {
     const onError = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     let result: Awaited<ReturnType<Operations['setAllSkillAgents']>> | undefined
-    vi.mocked(api.updateSkillAgents)
-      .mockResolvedValueOnce({ ok: true } as never)
-      .mockResolvedValueOnce({ ok: false, message: 'second agent failed' } as never)
+    vi.mocked(api.updateSkillAgentsBatch).mockResolvedValueOnce({
+      ok: false,
+      message: 'batch projection failed',
+    } as never)
 
     try {
       render(
@@ -594,7 +602,10 @@ describe('useManifestOperations', () => {
                     {
                       url: 'https://example.test/skills.git',
                       ref: 'main',
-                      members: [{ name: 'alpha' }, { name: 'beta' }],
+                      members: [
+                        { name: 'alpha', entry: 'alpha/SKILL.md' },
+                        { name: 'beta', entry: 'beta/SKILL.md' },
+                      ],
                     },
                   ],
                   skills: [],
@@ -612,14 +623,14 @@ describe('useManifestOperations', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
-      await waitFor(() => expect(api.updateSkillAgents).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
       await waitFor(() => expect(result?.ok).toBe(false))
-      expect(result?.message).toBe('second agent failed')
-      expect(onError).toHaveBeenCalledWith('second agent failed')
+      expect(result?.message).toBe('batch projection failed')
+      expect(onError).toHaveBeenCalledWith('batch projection failed')
       expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
       expect(consoleError).toHaveBeenCalledWith(
         expect.objectContaining({
-          key: 'skills:all-agents:codex',
+          key: 'skills:agents',
           result: expect.objectContaining({ ok: false }),
         }),
         expect.any(String),
@@ -629,7 +640,150 @@ describe('useManifestOperations', () => {
     }
   })
 
-  it('projects skills after bulk skill agent update succeeds', async () => {
+  it('refreshes and reports a projection warning without success notifications', async () => {
+    const onError = vi.fn()
+    const onSuccess = vi.fn()
+    const onToast = vi.fn()
+    let result: Awaited<ReturnType<Operations['toggleLocalSkillAgent']>> | undefined
+    vi.mocked(api.updateSkillAgentsBatch).mockResolvedValueOnce({
+      ok: true,
+      warnings: [{ message: 'Source shared-skills is unavailable' }],
+    } as never)
+
+    render(
+      <Harness
+        onError={onError}
+        onSuccess={onSuccess}
+        onToast={onToast}
+        action={async (ops) => {
+          result = await ops.toggleLocalSkillAgent('local-alpha', 'codex', [])
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() => expect(api.getManifest).toHaveBeenCalledWith('/tmp/r'))
+    expect(result).toMatchObject({ ok: true, message: 'Source shared-skills is unavailable' })
+    expect(onError).toHaveBeenCalledWith('Source shared-skills is unavailable')
+    expect(onSuccess).not.toHaveBeenCalled()
+    expect(onToast).not.toHaveBeenCalled()
+  })
+
+  it('refreshes manifest after a rejected skill-agent ApiError', async () => {
+    const onError = vi.fn()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let result: Awaited<ReturnType<Operations['toggleLocalSkillAgent']>> | undefined
+    vi.mocked(api.updateSkillAgentsBatch).mockRejectedValueOnce(
+      new ApiError('Skills state conflict', 409, 'stale_agent_state'),
+    )
+
+    try {
+      render(
+        <Harness
+          onError={onError}
+          action={async (ops) => {
+            result = await ops.toggleLocalSkillAgent('local-alpha', 'codex', [])
+          }}
+        />,
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+      await waitFor(() => expect(result?.ok).toBe(false))
+      expect(result?.message).toBe('Skills state conflict')
+      expect(onError).toHaveBeenCalledWith('Skills state conflict')
+      expect(api.getManifest).toHaveBeenCalledWith('/tmp/r')
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it('uses one shared pending key for item, source, and global skill batches', async () => {
+    let release!: (value: { ok: true }) => void
+    let sourceResult: Awaited<ReturnType<Operations['setSourceSkillAgents']>> | undefined
+    let globalResult: Awaited<ReturnType<Operations['setAllSkillAgents']>> | undefined
+    vi.mocked(api.updateSkillAgentsBatch).mockImplementationOnce(
+      () =>
+        new Promise<{ ok: true }>((resolve) => {
+          release = resolve
+        }) as never,
+    )
+
+    render(
+      <Harness
+        action={async (ops) => {
+          const item = ops.toggleLocalSkillAgent('local-alpha', 'codex', [])
+          sourceResult = await ops.setSourceSkillAgents(
+            {
+              url: 'https://example.test/skills.git',
+              ref: 'main',
+              members: [{ name: 'alpha', entry: 'alpha/SKILL.md', agents: [] }],
+            },
+            'codex',
+          )
+          globalResult = await ops.setAllSkillAgents(
+            {
+              skills: { sources: [], skills: [{ id: 'local-alpha', agents: [] }] },
+              mcp: [],
+              vars: { default: {}, active: {} },
+              config: { agents: ['codex'] },
+              errors: [],
+            } as never,
+            'codex',
+          )
+          release({ ok: true })
+          await item
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(sourceResult).toEqual({ ok: false, skipped: true }))
+    expect(globalResult).toEqual({ ok: false, skipped: true })
+  })
+
+  it('uses a one-element batch for a single source member toggle', async () => {
+    let result: Awaited<ReturnType<Operations['toggleSourceSkillAgent']>> | undefined
+
+    render(
+      <Harness
+        action={async (ops) => {
+          result = await ops.toggleSourceSkillAgent(
+            'https://example.test/skills.git',
+            'alpha/SKILL.md',
+            'codex',
+            ['claude-code'],
+          )
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
+    expect(api.updateSkillAgentsBatch).toHaveBeenCalledWith({
+      repo: '/tmp/r',
+      sources: [
+        {
+          sourceUrl: 'https://example.test/skills.git',
+          updates: [
+            {
+              memberEntry: 'alpha/SKILL.md',
+              expectedAgents: ['claude-code'],
+              agents: ['claude-code', 'codex'],
+            },
+          ],
+        },
+      ],
+      locals: [],
+    })
+    await waitFor(() => expect(result?.ok).toBe(true))
+  })
+
+  it('uses one server-side batch mutation for global skill agents', async () => {
     let result: Awaited<ReturnType<Operations['setAllSkillAgents']>> | undefined
 
     render(
@@ -642,7 +796,7 @@ describe('useManifestOperations', () => {
                   {
                     url: 'https://example.test/skills.git',
                     ref: 'main',
-                    members: [{ name: 'alpha', agents: [] }],
+                    members: [{ name: 'alpha', entry: 'alpha/SKILL.md', agents: [] }],
                   },
                 ],
                 skills: [{ id: 'local-alpha', agents: [] }],
@@ -660,17 +814,22 @@ describe('useManifestOperations', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
-    await waitFor(() => expect(api.updateSkillAgents).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(api.updateLocalSkillAgents).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(result?.ok).toBe(true))
-    expect(api.project).toHaveBeenCalledWith({
+    await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
+    expect(api.updateSkillAgentsBatch).toHaveBeenCalledWith({
       repo: '/tmp/r',
-      scope: 'skills',
-      agent: 'codex',
+      sources: [
+        {
+          sourceUrl: 'https://example.test/skills.git',
+          updates: [{ memberEntry: 'alpha/SKILL.md', expectedAgents: [], agents: ['codex'] }],
+        },
+      ],
+      locals: [{ id: 'local-alpha', expectedAgents: [], agents: ['codex'] }],
     })
+    await waitFor(() => expect(result?.ok).toBe(true))
+    expect(api.project).not.toHaveBeenCalled()
   })
 
-  it('projects skills after source bulk agent update succeeds', async () => {
+  it('relies on the source batch mutation to complete projection', async () => {
     let result: Awaited<ReturnType<Operations['setSourceSkillAgents']>> | undefined
 
     render(
@@ -694,24 +853,35 @@ describe('useManifestOperations', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'run' }))
 
-    await waitFor(() => expect(api.updateSourceSkillAgents).toHaveBeenCalledTimes(1))
-    expect(api.updateSourceSkillAgents).toHaveBeenCalledWith({
+    await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
+    expect(api.updateSkillAgentsBatch).toHaveBeenCalledWith({
       repo: '/tmp/r',
-      sourceUrl: 'https://example.test/skills.git',
-      updates: [
-        { memberEntry: 'alpha/SKILL.md', agents: ['codex'] },
-        { memberEntry: 'beta/SKILL.md', agents: ['codex'] },
-        { memberEntry: 'gamma/SKILL.md', agents: ['claude-code', 'codex'] },
+      sources: [
+        {
+          sourceUrl: 'https://example.test/skills.git',
+          updates: [
+            {
+              memberEntry: 'alpha/SKILL.md',
+              expectedAgents: [],
+              agents: ['codex'],
+            },
+            {
+              memberEntry: 'beta/SKILL.md',
+              expectedAgents: [],
+              agents: ['codex'],
+            },
+            {
+              memberEntry: 'gamma/SKILL.md',
+              expectedAgents: ['claude-code'],
+              agents: ['claude-code', 'codex'],
+            },
+          ],
+        },
       ],
+      locals: [],
     })
-    expect(api.updateSkillAgents).not.toHaveBeenCalled()
-    expect(api.updateLocalSkillAgents).not.toHaveBeenCalled()
     await waitFor(() => expect(result?.ok).toBe(true))
-    expect(api.project).toHaveBeenCalledWith({
-      repo: '/tmp/r',
-      scope: 'skills',
-      agent: 'codex',
-    })
+    expect(api.project).not.toHaveBeenCalled()
   })
 
   it('returns failure and refreshes when MCP bulk agent update fails after an earlier update', async () => {

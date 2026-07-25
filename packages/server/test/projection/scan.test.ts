@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { scanLocalSkills } from '../../src/projection/scan.js'
@@ -7,10 +8,14 @@ import {
   loadDisplayManifest,
   loadProjectionManifest,
   projectRepository,
+  projectSkillChanges,
 } from '../../src/projection/workflow.js'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 import type { IGit } from '../../src/ports/git.js'
 import type { ProjectionWorkflowDeps } from '../../src/projection/workflow.js'
+import { SourceProjectionCatalog } from '../../src/projection/source-catalog.js'
+import type { SkillsProjectionChangeSet } from '../../src/projection/change-set.js'
+import { SourceCacheHealthCatalog } from '../../src/remote/source-cache-health.js'
 
 vi.mock('../../src/lib/logger.js', () => {
   const logger = {
@@ -313,14 +318,16 @@ describe('projectRepository', () => {
     await mkdir(join(root, 'external'), { recursive: true })
     await writeFile(join(root, 'external', 'SKILL.md'), '# External skill\n')
     const projectDeps = deps(sourceTreeGit([]))
-    projectDeps.proc.isCommandInstalled = vi.fn(async () => true)
+    projectDeps.proc.isCommandInstalled = vi.fn(async () => {
+      throw new Error('agent command detection must not run during projection')
+    })
 
     const result = await projectRepository(projectDeps, root, {
       scope: 'skills',
-      installedAgents: ['codex'],
     })
 
     expect(result).toEqual({ ok: true })
+    expect(projectDeps.proc.isCommandInstalled).not.toHaveBeenCalled()
     await expect(
       projectDeps.fs.readFile(join(root, '.codex', 'skills', 'external-skill', 'SKILL.md')),
     ).resolves.toBe('# External skill\n')
@@ -434,6 +441,333 @@ describe('projectRepository', () => {
       expect(git.show).not.toHaveBeenCalled()
     },
   )
+})
+
+describe('projectSkillChanges', () => {
+  it('reads only the cold target source tree and uses the warm catalog without Git', async () => {
+    await writeFile(
+      join(root, 'config.yaml'),
+      ['agents: [codex]', 'active_memory: v1', 'projection:', '  strategy: copy', ''].join('\n'),
+    )
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: source-a',
+        '    url: https://example.test/source-a.git',
+        '    ref: main',
+        '    pinned_commit: commit-a',
+        '    members:',
+        '      - name: selected',
+        '        entry: skills/selected/SKILL.md',
+        '        agents: [codex]',
+        '  - name: source-b',
+        '    url: https://example.test/source-b.git',
+        '    ref: main',
+        '    pinned_commit: commit-b',
+        '    members:',
+        '      - name: unrelated',
+        '        entry: skills/unrelated/SKILL.md',
+        '        agents: [codex]',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    await mkdir(join(root, 'remote-cache', 'source-a', 'skills', 'selected'), {
+      recursive: true,
+    })
+    await writeFile(
+      join(root, 'remote-cache', 'source-a', 'skills', 'selected', 'SKILL.md'),
+      '# Selected\n',
+    )
+    await mkdir(join(root, 'remote-cache', 'source-b', 'skills', 'unrelated'), {
+      recursive: true,
+    })
+    await writeFile(
+      join(root, 'remote-cache', 'source-b', 'skills', 'unrelated', 'SKILL.md'),
+      '# Unrelated\n',
+    )
+    const git = sourceTreeGit([treeEntry('skills/selected/SKILL.md', 'selected-skill')])
+    const inspectedPaths: string[] = []
+    const fs = new NodeFileSystem()
+    const inspectEntry = fs.inspectEntry.bind(fs)
+    fs.inspectEntry = vi.fn(async (path) => {
+      inspectedPaths.push(path)
+      return inspectEntry(path)
+    })
+    const projectDeps = {
+      ...deps(git),
+      fs,
+      sourceProjectionCatalog: new SourceProjectionCatalog(),
+    }
+    const changes: SkillsProjectionChangeSet = {
+      sources: [{ sourceUrl: 'https://example.test/source-a.git', agents: ['codex'] }],
+      locals: [],
+    }
+
+    await expect(projectSkillChanges(projectDeps, root, changes)).resolves.toEqual({ ok: true })
+    expect(git.readTree).toHaveBeenCalledTimes(1)
+    expect(git.readTree).toHaveBeenCalledWith(
+      expect.stringMatching(/[\\/]remote-cache[\\/]source-a$/),
+      'commit-a',
+    )
+    expect(git.show).not.toHaveBeenCalled()
+    expect(git.revParse).not.toHaveBeenCalled()
+    expect(git.revParseHead).not.toHaveBeenCalled()
+    expect(git.checkout).not.toHaveBeenCalled()
+    expect(projectDeps.proc.isCommandInstalled).not.toHaveBeenCalled()
+    expect(inspectedPaths).not.toContain(join(root, 'mcp.yaml'))
+    expect(inspectedPaths).not.toContain(join(root, 'vars'))
+    expect(inspectedPaths).not.toContain(join(root, 'memories'))
+    expect(inspectedPaths).not.toContain(join(root, 'assets', 'skills'))
+
+    vi.mocked(git.readTree).mockClear()
+    await expect(projectSkillChanges(projectDeps, root, changes)).resolves.toEqual({ ok: true })
+    expect(git.readTree).not.toHaveBeenCalled()
+    expect(git.show).not.toHaveBeenCalled()
+    expect(git.revParse).not.toHaveBeenCalled()
+    expect(git.revParseHead).not.toHaveBeenCalled()
+    expect(git.checkout).not.toHaveBeenCalled()
+    expect(projectDeps.proc.isCommandInstalled).not.toHaveBeenCalled()
+  })
+
+  it('caches a cold source tree failure as unhealthy and returns warnings without retrying Git', async () => {
+    await writeFile(join(root, 'config.yaml'), 'agents: [codex]\n')
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: source-a',
+        '    url: https://example.test/source-a.git',
+        '    ref: main',
+        '    pinned_commit: commit-a',
+        '    members:',
+        '      - name: selected',
+        '        entry: skills/selected/SKILL.md',
+        '        agents: [codex]',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    await mkdir(join(root, 'remote-cache', 'source-a'), { recursive: true })
+    const readError = new Error('corrupt source tree')
+    const git = sourceTreeGit([])
+    git.readTree = vi.fn(async () => {
+      throw readError
+    })
+    const sourceProjectionCatalog = new SourceProjectionCatalog()
+    const sourceCacheHealthCatalog = new SourceCacheHealthCatalog()
+    const projectDeps = {
+      ...deps(git),
+      sourceProjectionCatalog,
+      sourceCacheHealthCatalog,
+    }
+    const source = {
+      url: 'https://example.test/source-a.git',
+      ref: 'main',
+      pinned_commit: 'commit-a',
+    }
+    const changes: SkillsProjectionChangeSet = {
+      sources: [{ sourceUrl: source.url, agents: ['codex'] }],
+      locals: [],
+    }
+
+    await expect(projectSkillChanges(projectDeps, root, changes)).resolves.toEqual({
+      ok: true,
+      warnings: [expect.objectContaining({ code: 'source-unavailable', sourceName: 'source-a' })],
+    })
+    expect(sourceCacheHealthCatalog.get(root, source)).toEqual({
+      healthy: false,
+      reason: 'invalid',
+      err: readError,
+    })
+    expect(git.readTree).toHaveBeenCalledTimes(1)
+
+    await expect(projectSkillChanges(projectDeps, root, changes)).resolves.toEqual({
+      ok: true,
+      warnings: [expect.objectContaining({ code: 'source-unavailable', sourceName: 'source-a' })],
+    })
+    expect(git.readTree).toHaveBeenCalledTimes(1)
+  })
+
+  it('cleans up a disabled local target without reading local or remote skill sources', async () => {
+    vi.stubEnv('CODEX_HOME', join(root, '.codex'))
+    await writeFile(join(root, 'config.yaml'), 'agents: [codex]\n')
+    await writeFile(
+      join(root, 'skills.yaml'),
+      'sources: []\nskills:\n  - id: local-alpha\n    agents: []\n',
+    )
+    const git = sourceTreeGit([])
+    const fs = new NodeFileSystem()
+    const inspectedPaths: string[] = []
+    const existenceChecks: string[] = []
+    const inspectEntry = fs.inspectEntry.bind(fs)
+    const exists = fs.exists.bind(fs)
+    fs.inspectEntry = vi.fn(async (path) => {
+      inspectedPaths.push(path)
+      return inspectEntry(path)
+    })
+    fs.exists = vi.fn(async (path) => {
+      existenceChecks.push(path)
+      return exists(path)
+    })
+
+    await expect(
+      projectSkillChanges({ ...deps(git), fs }, root, {
+        sources: [],
+        locals: [{ skillId: 'local-alpha', agents: ['codex'] }],
+      }),
+    ).resolves.toEqual({ ok: true })
+
+    const localSourceRoot = join(root, 'assets', 'skills')
+    expect(inspectedPaths.some((path) => path.startsWith(localSourceRoot))).toBe(false)
+    expect(existenceChecks.some((path) => path.startsWith(localSourceRoot))).toBe(false)
+    expect(inspectedPaths.some((path) => path.includes(`${join(root, 'remote-cache')}`))).toBe(
+      false,
+    )
+    expect(git.readTree).not.toHaveBeenCalled()
+    expect(git.show).not.toHaveBeenCalled()
+  })
+
+  it('preserves the namespace without Git when startup health marked the source unhealthy', async () => {
+    await writeFile(join(root, 'config.yaml'), 'agents: [codex]\n')
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: source-a',
+        '    url: https://example.test/source-a.git',
+        '    ref: main',
+        '    pinned_commit: commit-a',
+        '    members:',
+        '      - name: selected',
+        '        entry: skills/selected/SKILL.md',
+        '        agents: [codex]',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    await mkdir(join(root, 'remote-cache', 'source-a'), { recursive: true })
+    const git = sourceTreeGit([treeEntry('skills/selected/SKILL.md', 'selected-skill')])
+    const sourceCacheHealthCatalog = new SourceCacheHealthCatalog()
+    await sourceCacheHealthCatalog.getOrCheck(
+      root,
+      {
+        url: 'https://example.test/source-a.git',
+        ref: 'main',
+        pinned_commit: 'commit-a',
+      },
+      async () => ({ healthy: false, reason: 'invalid' }),
+    )
+
+    const result = await projectSkillChanges({ ...deps(git), sourceCacheHealthCatalog }, root, {
+      sources: [{ sourceUrl: 'https://example.test/source-a.git', agents: ['codex'] }],
+      locals: [],
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      warnings: [
+        expect.objectContaining({
+          code: 'source-unavailable',
+          sourceName: 'source-a',
+        }),
+      ],
+    })
+    expect(git.readTree).not.toHaveBeenCalled()
+    expect(git.show).not.toHaveBeenCalled()
+    expect(git.revParseHead).not.toHaveBeenCalled()
+  })
+
+  it('returns an unavailable warning when targeted projection beats startup health warmup', async () => {
+    await writeFile(join(root, 'config.yaml'), 'agents: [codex]\n')
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: source-a',
+        '    url: https://example.test/source-a.git',
+        '    ref: main',
+        '    pinned_commit: commit-a',
+        '    members:',
+        '      - name: selected',
+        '        entry: skills/selected/SKILL.md',
+        '        agents: [codex]',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    const git = sourceTreeGit([])
+
+    await expect(
+      projectSkillChanges(deps(git), root, {
+        sources: [{ sourceUrl: 'https://example.test/source-a.git', agents: ['codex'] }],
+        locals: [],
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      warnings: [
+        expect.objectContaining({
+          code: 'source-unavailable',
+          sourceName: 'source-a',
+        }),
+      ],
+    })
+
+    expect(git.readTree).not.toHaveBeenCalled()
+    expect(git.show).not.toHaveBeenCalled()
+    expect(git.revParseHead).not.toHaveBeenCalled()
+  })
+
+  it('removes a disabled managed namespace without reading an unavailable source cache', async () => {
+    vi.stubEnv('CODEX_HOME', join(root, '.codex'))
+    await writeFile(join(root, 'config.yaml'), 'agents: [codex]\n')
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: source-a',
+        '    url: https://example.test/source-a.git',
+        '    ref: main',
+        '    pinned_commit: commit-a',
+        '    members:',
+        '      - name: selected',
+        '        entry: skills/selected/SKILL.md',
+        '        agents: []',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    const namespace = join(root, '.codex', 'skills', 'source-a')
+    await mkdir(namespace, { recursive: true })
+    const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
+    await writeFile(
+      join(namespace, '.loom-projection.json'),
+      JSON.stringify({
+        version: 1,
+        managedBy: 'loom',
+        kind: 'skill-source',
+        ownerRepo: sha256(root),
+        sourceKey: sha256('https://example.test/source-a.git'),
+        sourceName: 'source-a',
+        namespace: 'source-a',
+      }) + '\n',
+    )
+    const git = sourceTreeGit([])
+    const fs = new NodeFileSystem()
+
+    await expect(
+      projectSkillChanges({ ...deps(git), fs }, root, {
+        sources: [{ sourceUrl: 'https://example.test/source-a.git', agents: ['codex'] }],
+        locals: [],
+      }),
+    ).resolves.toEqual({ ok: true })
+
+    await expect(fs.exists(namespace)).resolves.toBe(false)
+    expect(git.readTree).not.toHaveBeenCalled()
+    expect(git.show).not.toHaveBeenCalled()
+    expect(git.revParseHead).not.toHaveBeenCalled()
+  })
 })
 
 describe('loadDisplayManifest', () => {

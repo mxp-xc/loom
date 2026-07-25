@@ -1153,19 +1153,19 @@ describe('source metadata', () => {
 })
 
 describe('agents update', () => {
-  it('POST /api/skills/source-agents keeps separate invalid field error codes', async () => {
-    const res = await app.request('/api/skills/source-agents', {
+  it('POST /api/skills/agents/batch rejects malformed batches', async () => {
+    const res = await app.request('/api/skills/agents/batch', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         repo: '/tmp/r5',
-        sourceUrl: 'https://example.test/skills.git',
-        updates: null,
+        sources: null,
+        locals: [],
       }),
     })
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual(validationError('invalid_updates'))
+    expect(await res.json()).toEqual(validationError('invalid_agent_batch'))
   })
 
   it('POST /api/mcp/agents updates agents for an mcp server', async () => {

@@ -522,19 +522,14 @@ export const api = {
     }>,
   updateMcpAgents: (body: { repo: string; id: string; agents: string[] }) =>
     post('/mcp/agents', body).then(json),
-  updateSkillAgents: (body: {
+  updateSkillAgentsBatch: (body: {
     repo: string
-    sourceUrl: string
-    memberEntry: string
-    agents: string[]
-  }) => post('/skills/agents', body).then(json),
-  updateSourceSkillAgents: (body: {
-    repo: string
-    sourceUrl: string
-    updates: Array<{ memberEntry: string; agents: string[] }>
-  }) => post('/skills/source-agents', body).then(json),
-  updateLocalSkillAgents: (body: { repo: string; id: string; agents: string[] }) =>
-    post('/skills/local/agents', body).then(json),
+    sources: Array<{
+      sourceUrl: string
+      updates: Array<{ memberEntry: string; expectedAgents: string[]; agents: string[] }>
+    }>
+    locals: Array<{ id: string; expectedAgents: string[]; agents: string[] }>
+  }) => post('/skills/agents/batch', body).then(json),
   reorderSkillGroups: (body: { repo: string; ids: string[] }) =>
     put('/skills/order', body).then(json) as Promise<{ ok: true; ids: string[] }>,
   reorderMcpServers: (body: { repo: string; ids: string[] }) =>

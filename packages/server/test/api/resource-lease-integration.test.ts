@@ -22,6 +22,7 @@ import {
 import { createMcpImportRoutes } from '../../src/api/routes/mcp-import.js'
 import { createMemoryRoutes } from '../../src/api/routes/memory.js'
 import { createProjectionRoutes } from '../../src/api/routes/projection.js'
+import { createSkillsYamlRoutes } from '../../src/api/routes/skills-yaml.js'
 import { createVarsRoutes } from '../../src/api/routes/vars.js'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 import { readRepoConfig } from '../../src/api/repo-config.js'
@@ -429,6 +430,59 @@ describe('repository resource lease integration', () => {
     await expect(
       readFile(join(authorizedHome, '.codex', 'skills', 'demo', 'SKILL.md'), 'utf8'),
     ).resolves.toBe('# Demo\n')
+    await expect(
+      readFile(join(replacementHome, '.codex', 'skills', 'demo', 'SKILL.md'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('keeps a skill-agent batch on the authorized home after its alias is retargeted', async () => {
+    home = await mkdtemp(join(tmpdir(), 'loom-home-retarget-skill-batch-'))
+    const authorizedHome = join(home, 'authorized')
+    const replacementHome = join(home, 'replacement')
+    const alias = join(home, 'home-alias')
+    await createHomeRepository(authorizedHome, 'authorized')
+    await createHomeRepository(replacementHome, 'replacement')
+    const disabledManifest = 'sources: []\nskills:\n  - id: demo\n    agents: []\n'
+    await writeFile(
+      join(authorizedHome, '.loom', 'repos', 'default', 'skills.yaml'),
+      disabledManifest,
+    )
+    await writeFile(
+      join(replacementHome, '.loom', 'repos', 'default', 'skills.yaml'),
+      disabledManifest,
+    )
+    await linkDirectory(authorizedHome, alias)
+
+    const leases = new RecordingCoordinator(async () => {
+      await retargetDirectoryLink(replacementHome, alias)
+    })
+    const fs = new NodeFileSystem()
+    const app = new Hono().route(
+      '/',
+      createSkillsYamlRoutes({ fs, git: {} as never, proc: {} as never, home: alias, leases }),
+    )
+
+    const response = await app.request('/skills/agents/batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repo: 'default',
+        sources: [],
+        locals: [{ id: 'demo', expectedAgents: [], agents: ['codex'] }],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ ok: true })
+    await expect(
+      readFile(join(authorizedHome, '.loom', 'repos', 'default', 'skills.yaml'), 'utf8'),
+    ).resolves.toContain('- codex')
+    await expect(
+      readFile(join(authorizedHome, '.codex', 'skills', 'demo', 'SKILL.md'), 'utf8'),
+    ).resolves.toBe('# Demo\n')
+    await expect(
+      readFile(join(replacementHome, '.loom', 'repos', 'default', 'skills.yaml'), 'utf8'),
+    ).resolves.toBe(disabledManifest)
     await expect(
       readFile(join(replacementHome, '.codex', 'skills', 'demo', 'SKILL.md'), 'utf8'),
     ).rejects.toMatchObject({ code: 'ENOENT' })

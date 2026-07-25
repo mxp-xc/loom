@@ -55,6 +55,12 @@ import {
 import { homeResourceKey, projectionResourceKeys } from '../../concurrency/resource-keys.js'
 import { resourceLeases } from '../../concurrency/resource-lease-coordinator.js'
 import { runAuthorizedRepositoryLease, withRepositoryLease } from '../repository-lease.js'
+import {
+  SourceCacheHealthCatalog,
+  inspectSourceCacheHealth,
+  invalidateSourceRuntimeCatalogs,
+  refreshSourceRuntimeCatalogs,
+} from '../../remote/source-cache-health.js'
 
 const remoteLogger = logger.child('remote')
 const NonEmptyString = z.string().min(1)
@@ -123,6 +129,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
   const updateSessions = new SourceUpdateSessionStore(deps.fs)
   const leases = resourceLeases(deps, deps.leases)
   const leaseDeps = { ...deps, leases }
+  const sourceCacheHealthCatalog = deps.sourceCacheHealthCatalog ?? new SourceCacheHealthCatalog()
   app.post('/update', jsonValidator(UpdateCheckBody, { error: updateCheckError }), async (c) => {
     const { sources, repo } = c.req.valid('json')
     remoteLogger.info('check updates', { count: sources?.length ?? 0 })
@@ -139,25 +146,43 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
       )
     }
     try {
-      const updates = await checkUpdates(sources, deps.git)
+      let updates
       if (authorization) {
-        await runAuthorizedRepositoryLease(
+        const health = await runAuthorizedRepositoryLease(
           leaseDeps,
           authorization,
           'read',
           (repoPath) => [repoPath],
-          async (repoPath) => {
-            // Detect corrupt or missing local caches so the UI can offer a repair update.
-            for (const u of updates) {
-              const sourceId = deriveRepoId(u.source.url)
-              const cacheDir = join(repoPath, 'remote-cache', sourceId)
-              if (!(await isValidGitRepo(deps.fs, cacheDir))) {
-                ;(u as any).hasUpdate = true
-                ;(u as any).needsRepair = true
-              }
-            }
-          },
+          (repoPath) =>
+            Promise.all(
+              sources.map((source) =>
+                sourceCacheHealthCatalog.getOrCheck(repoPath, source, () =>
+                  inspectSourceCacheHealth(deps.fs, deps.git, repoPath, source),
+                ),
+              ),
+            ),
         )
+        const healthySources = sources.filter((_, index) => health[index]?.healthy)
+        const remoteUpdates = await checkUpdates(healthySources, deps.git)
+        let remoteIndex = 0
+        updates = sources.map((source, index) => {
+          const result = health[index]
+          if (result?.healthy) return remoteUpdates[remoteIndex++]!
+          const sourceId = deriveRepoId(source.url)
+          remoteLogger.error('source cache is unhealthy during update check', {
+            err: result?.err ?? new Error(`Source cache is ${result?.reason ?? 'unavailable'}`),
+            repo: authorization.name,
+            sourceId,
+          })
+          return {
+            source,
+            hasUpdate: true,
+            needsRepair: true,
+            latestCommit: source.pinned_commit ?? '',
+          }
+        })
+      } else {
+        updates = await checkUpdates(sources, deps.git)
       }
       return c.json({ updates })
     } catch (err) {
@@ -692,10 +717,22 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
                 finalizeJournal.candidateDirectoryIdentity!,
               )
               await updateSessions.applyManifest(session)
+              invalidateSourceRuntimeCatalogs(
+                deps.sourceProjectionCatalog,
+                sourceCacheHealthCatalog,
+                session.repoPath,
+                session.source.url,
+              )
               const projected = await projectRepository(scopedDeps, session.repoPath, {
                 scope: 'skills',
               })
               if (!projected.ok) throw projectionFailureError(projected)
+              await refreshRemoteSourceCatalogs(
+                deps,
+                sourceCacheHealthCatalog,
+                session.repoPath,
+                nextSource,
+              )
               const completed = {
                 preserved: preserve,
                 deleted: session.changes.removed
@@ -720,6 +757,12 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
                 ...completed,
               })
             } catch (e) {
+              invalidateSourceRuntimeCatalogs(
+                deps.sourceProjectionCatalog,
+                sourceCacheHealthCatalog,
+                session.repoPath,
+                session.source.url,
+              )
               const rollbackFailures = localTransaction ? await localTransaction.rollback() : []
               try {
                 const recovery = await updateSessions.recoverFinalize(session)
@@ -962,6 +1005,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
               ...(name ? { name } : {}),
             })
             await assertAuthorizedSourceCache(deps.fs, cache)
+            await refreshRemoteSourceCatalogs(deps, sourceCacheHealthCatalog, repoPath, source)
             return c.json({
               ok: true,
               tree,
@@ -1008,6 +1052,37 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
   })
 
   return app
+}
+
+async function refreshRemoteSourceCatalogs(
+  deps: RouteDeps,
+  healthCatalog: SourceCacheHealthCatalog,
+  repoPath: string,
+  source: SkillSource,
+): Promise<void> {
+  try {
+    const health = await refreshSourceRuntimeCatalogs(
+      deps.fs,
+      deps.git,
+      deps.sourceProjectionCatalog,
+      healthCatalog,
+      repoPath,
+      source,
+    )
+    if (!health.healthy) {
+      remoteLogger.error('source cache is unhealthy after source cache mutation', {
+        err: health.err ?? new Error(`Source cache is ${health.reason}`),
+        repo: repoPath,
+        sourceId: deriveRepoId(source.url),
+      })
+    }
+  } catch (err) {
+    remoteLogger.error('source runtime catalog refresh failed', {
+      err,
+      repo: repoPath,
+      sourceId: deriveRepoId(source.url),
+    })
+  }
 }
 
 function projectionFailureError(result: Extract<ProjectionResult, { ok: false }>): unknown {

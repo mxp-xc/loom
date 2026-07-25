@@ -305,7 +305,7 @@ const chevronStyle = (isCollapsed: boolean): React.CSSProperties => ({
   transform: isCollapsed ? 'rotate(-90deg)' : 'none',
 })
 
-const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
+const renderChip = (agent: AgentId, active: boolean, disabled: boolean, onClick?: () => void) => (
   <AgentChip
     key={agent}
     agent={agent}
@@ -313,6 +313,7 @@ const renderChip = (agent: AgentId, active: boolean, onClick?: () => void) => (
     state={active ? 'on' : 'off'}
     label={agentName[agent]}
     tooltip={active ? '已启用' : '未启用'}
+    disabled={disabled}
     onClick={onClick}
   />
 )
@@ -589,8 +590,7 @@ export default function SkillSourceList({
                                 ? '部分已选择'
                                 : '全部未选择'
                           const tooltip = state === 'mixed' ? `${status} ${count}/${total}` : status
-                          const disabled =
-                            total === 0 || operations.pending.skills.sourceAgents(src, agent)
+                          const disabled = total === 0 || operations.pending.skills.agents
                           return (
                             <AgentChip
                               key={agent}
@@ -745,6 +745,7 @@ export default function SkillSourceList({
                             renderChip(
                               a,
                               mAgents.includes(a),
+                              operations.pending.skills.agents,
                               memberEntry
                                 ? () => handleChipToggle(src.url, memberEntry, a, mAgents)
                                 : undefined,
@@ -761,7 +762,7 @@ export default function SkillSourceList({
                       未发现 members
                     </span>
                     <span className={styles.chips}>
-                      {visibleAgents.map((a) => renderChip(a, false))}
+                      {visibleAgents.map((a) => renderChip(a, false, true))}
                     </span>
                   </div>
                 )}
@@ -938,7 +939,7 @@ export default function SkillSourceList({
                       </span>
                       <span className={styles.chips} onClick={(e) => e.stopPropagation()}>
                         {visibleAgents.map((a) =>
-                          renderChip(a, lAgents.includes(a), () =>
+                          renderChip(a, lAgents.includes(a), operations.pending.skills.agents, () =>
                             handleLocalChipToggle(s.id, a, lAgents),
                           ),
                         )}

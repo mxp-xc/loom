@@ -84,10 +84,12 @@ describe('SkillsApplication', () => {
     await writeFile(join(repoPath, 'skills.yaml'), 'scalar\n')
     const replace = vi.spyOn(fs, 'replaceFile')
 
-    await expect(app.setLocalSkillAgents(repoPath, 'test-skill', ['codex'])).rejects.toMatchObject({
-      status: 422,
-      code: 'invalid_skills_manifest',
-    })
+    await expect(
+      app.setSkillAgentsBatch(repoPath, {
+        sources: [],
+        locals: [{ id: 'test-skill', expectedAgents: [], agents: ['codex'] }],
+      }),
+    ).rejects.toMatchObject({ status: 422, code: 'invalid_skills_manifest' })
     expect(replace).not.toHaveBeenCalled()
     await expect(readFile(join(repoPath, 'skills.yaml'), 'utf8')).resolves.toBe('scalar\n')
   })
@@ -414,18 +416,246 @@ describe('SkillsApplication', () => {
       ].join('\n'),
     )
     const writeSpy = vi.spyOn(fs, 'writeFile')
+    const projectSkills = vi.fn(async () => {})
+    app = new SkillsApplication(fs, git, home, log, projectSkills)
 
-    await app.setSourceMemberAgents(repoPath, 'https://example.test/skills.git', [
-      { memberEntry: 'alpha/SKILL.md', agents: ['codex'] },
-      { memberEntry: 'beta/SKILL.md', agents: ['codex', 'opencode'] },
-    ])
+    await app.setSkillAgentsBatch(repoPath, {
+      sources: [
+        {
+          sourceUrl: 'https://example.test/skills.git',
+          updates: [
+            {
+              memberEntry: 'alpha/SKILL.md',
+              expectedAgents: ['claude-code'],
+              agents: ['codex'],
+            },
+            {
+              memberEntry: 'beta/SKILL.md',
+              expectedAgents: [],
+              agents: ['codex', 'opencode'],
+            },
+          ],
+        },
+      ],
+      locals: [],
+    })
 
     expect(writeSpy).toHaveBeenCalledTimes(1)
+    expect(projectSkills).toHaveBeenCalledTimes(1)
+    expect(projectSkills).toHaveBeenCalledWith(repoPath, {
+      sources: [
+        {
+          sourceUrl: 'https://example.test/skills.git',
+          agents: ['claude-code', 'codex', 'opencode'],
+        },
+      ],
+      locals: [],
+    })
     const output = await readFile(join(repoPath, 'skills.yaml'), 'utf8')
     expect(output).toContain('name: alpha')
     expect(output).toContain('- codex')
     expect(output).toContain('name: beta')
     expect(output).toContain('- opencode')
+  })
+
+  it('projects only agents changed by a single source member mutation', async () => {
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      [
+        'sources:',
+        '  - url: https://example.test/skills.git',
+        '    ref: main',
+        '    members:',
+        '      - name: alpha',
+        '        entry: alpha/SKILL.md',
+        '        agents: [claude-code, codex]',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    const projectSkills = vi.fn(async () => {})
+    app = new SkillsApplication(fs, git, home, log, projectSkills)
+
+    await app.setSkillAgentsBatch(repoPath, {
+      sources: [
+        {
+          sourceUrl: 'https://example.test/skills.git',
+          updates: [
+            {
+              memberEntry: 'alpha/SKILL.md',
+              expectedAgents: ['claude-code', 'codex'],
+              agents: ['claude-code', 'opencode'],
+            },
+          ],
+        },
+      ],
+      locals: [],
+    })
+
+    expect(projectSkills).toHaveBeenCalledTimes(1)
+    expect(projectSkills).toHaveBeenCalledWith(repoPath, {
+      sources: [
+        {
+          sourceUrl: 'https://example.test/skills.git',
+          agents: ['codex', 'opencode'],
+        },
+      ],
+      locals: [],
+    })
+  })
+
+  it('rejects a missing source member before writing or projecting a batch', async () => {
+    const original = [
+      'sources:',
+      '  - url: https://example.test/skills.git',
+      '    ref: main',
+      '    members:',
+      '      - name: alpha',
+      '        entry: alpha/SKILL.md',
+      '        agents: []',
+      'skills: []',
+      '',
+    ].join('\n')
+    await writeFile(join(repoPath, 'skills.yaml'), original)
+    const writeSpy = vi.spyOn(fs, 'writeFile')
+    const projectSkills = vi.fn(async () => {})
+    app = new SkillsApplication(fs, git, home, log, projectSkills)
+
+    await expect(
+      app.setSkillAgentsBatch(repoPath, {
+        sources: [
+          {
+            sourceUrl: 'https://example.test/skills.git',
+            updates: [{ memberEntry: 'missing/SKILL.md', expectedAgents: [], agents: ['codex'] }],
+          },
+        ],
+        locals: [],
+      }),
+    ).rejects.toMatchObject({ status: 404, code: 'not_found' })
+
+    expect(writeSpy).not.toHaveBeenCalled()
+    expect(projectSkills).not.toHaveBeenCalled()
+    await expect(readFile(join(repoPath, 'skills.yaml'), 'utf8')).resolves.toBe(original)
+  })
+
+  it('writes and projects a mixed skill agent batch once', async () => {
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      [
+        'sources:',
+        '  - url: https://example.test/skills.git',
+        '    ref: main',
+        '    members:',
+        '      - name: alpha',
+        '        entry: alpha/SKILL.md',
+        '        agents: []',
+        'skills:',
+        '  - id: local-alpha',
+        '    agents: []',
+        '',
+      ].join('\n'),
+    )
+    const writeSpy = vi.spyOn(fs, 'writeFile')
+    const projectSkills = vi.fn(async () => {})
+    app = new SkillsApplication(fs, git, home, log, projectSkills)
+
+    await app.setSkillAgentsBatch(repoPath, {
+      sources: [
+        {
+          sourceUrl: 'https://example.test/skills.git',
+          updates: [{ memberEntry: 'alpha/SKILL.md', expectedAgents: [], agents: ['codex'] }],
+        },
+      ],
+      locals: [{ id: 'local-alpha', expectedAgents: [], agents: ['codex'] }],
+    })
+
+    expect(writeSpy).toHaveBeenCalledTimes(1)
+    expect(projectSkills).toHaveBeenCalledTimes(1)
+    expect(projectSkills).toHaveBeenCalledWith(repoPath, {
+      sources: [{ sourceUrl: 'https://example.test/skills.git', agents: ['codex'] }],
+      locals: [{ skillId: 'local-alpha', agents: ['codex'] }],
+    })
+  })
+
+  it('rejects a stale target before writing or projecting any part of the batch', async () => {
+    const original = [
+      'sources:',
+      '  - url: https://example.test/skills.git',
+      '    ref: main',
+      '    members:',
+      '      - name: alpha',
+      '        entry: alpha/SKILL.md',
+      '        agents: []',
+      'skills:',
+      '  - id: local-alpha',
+      '    agents: [codex]',
+      '',
+    ].join('\n')
+    await writeFile(join(repoPath, 'skills.yaml'), original)
+    const writeSpy = vi.spyOn(fs, 'writeFile')
+    const projectSkills = vi.fn(async () => {})
+    app = new SkillsApplication(fs, git, home, log, projectSkills)
+
+    await expect(
+      app.setSkillAgentsBatch(repoPath, {
+        sources: [
+          {
+            sourceUrl: 'https://example.test/skills.git',
+            updates: [{ memberEntry: 'alpha/SKILL.md', expectedAgents: [], agents: ['codex'] }],
+          },
+        ],
+        locals: [{ id: 'local-alpha', expectedAgents: [], agents: [] }],
+      }),
+    ).rejects.toMatchObject({ status: 409, code: 'stale_agent_state' })
+
+    expect(writeSpy).not.toHaveBeenCalled()
+    expect(projectSkills).not.toHaveBeenCalled()
+    await expect(readFile(join(repoPath, 'skills.yaml'), 'utf8')).resolves.toBe(original)
+  })
+
+  it('returns targeted projection warnings to the route layer', async () => {
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      'sources: []\nskills:\n  - id: local-alpha\n    agents: []\n',
+    )
+    const warning = {
+      code: 'source-unavailable' as const,
+      sourceName: 'shared-skills',
+      sourceUrl: 'https://example.test/shared-skills.git',
+      message: 'Source shared-skills is unavailable',
+    }
+    const projectSkills = vi.fn(async () => [warning])
+    app = new SkillsApplication(fs, git, home, log, projectSkills)
+
+    await expect(
+      app.setSkillAgentsBatch(repoPath, {
+        sources: [],
+        locals: [{ id: 'local-alpha', expectedAgents: [], agents: ['codex'] }],
+      }),
+    ).resolves.toEqual({ warnings: [warning] })
+  })
+
+  it('keeps the written desired state when targeted projection fails', async () => {
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      'sources: []\nskills:\n  - id: local-alpha\n    agents: []\n',
+    )
+    const projectionError = new Error('projection failed')
+    const projectSkills = vi.fn(async () => {
+      throw projectionError
+    })
+    app = new SkillsApplication(fs, git, home, log, projectSkills)
+
+    await expect(
+      app.setSkillAgentsBatch(repoPath, {
+        sources: [],
+        locals: [{ id: 'local-alpha', expectedAgents: [], agents: ['codex'] }],
+      }),
+    ).rejects.toBe(projectionError)
+
+    const persisted = await readFile(join(repoPath, 'skills.yaml'), 'utf8')
+    expect(persisted).toContain('id: local-alpha')
+    expect(persisted).toContain('- codex')
   })
 
   it('does not persist a source when installation fails and logs the full error object', async () => {

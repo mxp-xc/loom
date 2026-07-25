@@ -169,6 +169,20 @@ export async function readRepoFiles(
   return files
 }
 
+export async function readSkillsProjectionFiles(
+  fs: Pick<IFileSystem, 'readFile' | 'realPath' | 'inspectEntry'>,
+  repoPath: string,
+): Promise<Record<string, string>> {
+  const repo = await requireStableDirectory(fs, repoPath, 'repository')
+  const files: Record<string, string> = {}
+  for (const name of ['config.yaml', 'skills.yaml']) {
+    const content = await readStableOptionalFile(fs, join(repoPath, name))
+    if (content !== null) files[name] = content
+  }
+  await assertStableEntry(fs, repoPath, repo)
+  return files
+}
+
 async function readStableDirectoryFiles(
   fs: Pick<IFileSystem, 'readFile' | 'readDir' | 'realPath' | 'inspectEntry'>,
   repoPath: string,

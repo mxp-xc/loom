@@ -19,8 +19,6 @@ export default function GlobalAgentsBar({ manifest, agents, operations }: Props)
     ...(manifest.skills?.skills.map((skill) => ({ kind: 'local' as const, skill })) ?? []),
   ]
 
-  const anyUpdating = agents.some((agent) => operations.pending.skills.allAgents(agent))
-
   if (agents.length === 0 || (sourceCount === 0 && localCount === 0)) return null
 
   return (
@@ -64,7 +62,7 @@ export default function GlobalAgentsBar({ manifest, agents, operations }: Props)
               state={state}
               label={`${agentName[agent]}：${status}`}
               tooltip={tooltip}
-              disabled={anyUpdating}
+              disabled={operations.pending.skills.agents}
               onClick={() => void operations.setAllSkillAgents(manifest, agent)}
             />
           )

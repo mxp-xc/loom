@@ -191,6 +191,139 @@ describe('Skills route failure contract', () => {
       message: 'Skills configuration is invalid',
     })
   })
+
+  it('returns HTTP 409 for a stale skill-agent batch without changing desired state', async () => {
+    const original = 'sources: []\nskills:\n  - id: demo\n    agents: [codex]\n'
+    writeFileSync(join(repoPath, 'skills.yaml'), original)
+
+    const response = await request(app(), '/api/skills/agents/batch', 'POST', {
+      repo: 'default',
+      sources: [],
+      locals: [{ id: 'demo', expectedAgents: [], agents: [] }],
+    })
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: 'stale_agent_state',
+      message: 'Skills state conflict',
+    })
+    await expect(fs.readFile(join(repoPath, 'skills.yaml'))).resolves.toBe(original)
+  })
+
+  it('returns HTTP 404 when a skill-agent batch names a missing source member', async () => {
+    writeFileSync(
+      join(repoPath, 'skills.yaml'),
+      [
+        'sources:',
+        '  - url: https://example.test/skills.git',
+        '    ref: main',
+        '    members: []',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+
+    const response = await request(app(), '/api/skills/agents/batch', 'POST', {
+      repo: 'default',
+      sources: [
+        {
+          sourceUrl: 'https://example.test/skills.git',
+          updates: [{ memberEntry: 'missing/SKILL.md', expectedAgents: [], agents: ['codex'] }],
+        },
+      ],
+      locals: [],
+    })
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: 'not_found',
+      message: 'Skill or source not found',
+    })
+  })
+
+  it.each([
+    {
+      label: 'invalid config container',
+      file: 'config.yaml',
+      content: '[]\n',
+    },
+    {
+      label: 'duplicate source identity',
+      file: 'skills.yaml',
+      content: [
+        'sources:',
+        '  - name: first',
+        '    url: https://example.test/shared.git',
+        '    ref: main',
+        '  - name: second',
+        '    url: https://example.test/shared.git',
+        '    ref: main',
+        'skills: []',
+        '',
+      ].join('\n'),
+    },
+  ])('rejects $label before running the batch application', async ({ file, content }) => {
+    writeFileSync(join(repoPath, file), content)
+    const setBatch = vi.spyOn(SkillsApplication.prototype, 'setSkillAgentsBatch')
+
+    const response = await request(app(), '/api/skills/agents/batch', 'POST', {
+      repo: 'default',
+      sources: [],
+      locals: [],
+    })
+
+    expect(response.status).toBe(422)
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: 'invalid_skills_manifest',
+      message: 'Skills configuration is invalid',
+    })
+    expect(setBatch).not.toHaveBeenCalled()
+  })
+
+  it('returns targeted projection warnings from a successful batch', async () => {
+    const warning = {
+      code: 'source-unavailable' as const,
+      sourceName: 'shared-skills',
+      sourceUrl: 'https://example.test/shared-skills.git',
+      message: 'Source shared-skills is unavailable',
+    }
+    vi.spyOn(SkillsApplication.prototype, 'setSkillAgentsBatch').mockResolvedValueOnce({
+      warnings: [warning],
+    })
+
+    const response = await request(app(), '/api/skills/agents/batch', 'POST', {
+      repo: 'default',
+      sources: [],
+      locals: [],
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ ok: true, warnings: [warning] })
+  })
+
+  it('maps a targeted projection failure to the batch HTTP 500 contract', async () => {
+    const error = new Error(`secret projection failure at ${repoPath}`)
+    vi.spyOn(SkillsApplication.prototype, 'setSkillAgentsBatch').mockRejectedValueOnce(error)
+
+    const response = await request(app(), '/api/skills/agents/batch', 'POST', {
+      repo: 'default',
+      sources: [],
+      locals: [],
+    })
+    const result = await response.json()
+
+    expect(response.status).toBe(500)
+    expect(result).toEqual({
+      ok: false,
+      error: 'update_failed',
+      message: 'Failed to update skill agents',
+    })
+    expect(JSON.stringify(result)).not.toContain('secret')
+    expectLoggedOnce('skill agent batch update failed', error)
+  })
 })
 
 describe('MCP route failure contract', () => {

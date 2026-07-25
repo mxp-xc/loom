@@ -82,6 +82,7 @@ Implications:
 - 未写入 `members` 的 bundles 不会因为 source-level bulk action 被选择或投影。
 - Global、source、item 和 detail agent controls 只枚举 Applicable Skills agents；隐藏 agent 的已保存选择保持不变。
 - Applicable Skills agents 为空时，内容浏览、source 管理和编辑仍可用，但不显示 agent controls。
+- Source-level bulk 使用一个 batch mutation，一次写入 manifest，并为该 source 执行一次 targeted projection transaction。
 
 Safety:
 
@@ -111,6 +112,9 @@ Implications:
 - off 表示 scope 内没有 applicable item 有该 agent。
 - mixed 表示 scope 内部分但非全部 applicable items 有该 agent。
 - 有帮助时，mixed chip 应展示计数。
+- Global skills bulk 使用一个 batch mutation，一次写入 manifest，并在一个 targeted projection transaction 中处理全部变化。
+- Item-level toggle 是同一 batch API 的单元素特例。
+- Item、source 与 global controls 共用一个 pending 状态；batch 内每个 target 使用当前 agents 作为 `expectedAgents`，防止 stale UI 覆盖并发更新。
 
 Safety:
 

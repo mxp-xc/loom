@@ -26,6 +26,16 @@ import {
   resourceLeases,
 } from '../concurrency/resource-lease-coordinator.js'
 import { projectionResourceKeys } from '../concurrency/resource-keys.js'
+import { SourceProjectionCatalog } from '../projection/source-catalog.js'
+import { deriveRepoId, loadRepoManifest } from '@loom/core'
+import { authorizeRepository, listRepos } from './repo.js'
+import { readSkillsProjectionFiles } from './repo-config.js'
+import { runAuthorizedRepositoryLease } from './repository-lease.js'
+import {
+  SourceCacheHealthCatalog,
+  inspectSourceCacheHealth,
+  warmSourceProjectionCatalog,
+} from '../remote/source-cache-health.js'
 
 export interface RouteDeps {
   fs: IFileSystem
@@ -33,6 +43,8 @@ export interface RouteDeps {
   proc: IProcess
   home: string
   leases?: ResourceLeaseCoordinator
+  sourceProjectionCatalog?: SourceProjectionCatalog
+  sourceCacheHealthCatalog?: SourceCacheHealthCatalog
 }
 
 type RegisterRouteDeps = RouteDeps & {
@@ -65,7 +77,13 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): RouteApp {
   if (routeDeps?.sync && !routeDeps.sync.usesLeaseCoordinator(leases)) {
     throw new Error('Injected SyncSessionManager must use the route lease coordinator')
   }
-  const baseDeps = { ...platformDeps, leases }
+  const baseDeps = {
+    ...platformDeps,
+    leases,
+    sourceProjectionCatalog: platformDeps.sourceProjectionCatalog ?? new SourceProjectionCatalog(),
+    sourceCacheHealthCatalog:
+      platformDeps.sourceCacheHealthCatalog ?? new SourceCacheHealthCatalog(),
+  }
   const ownsSync = !baseDeps.sync
   const sync =
     baseDeps.sync ??
@@ -102,6 +120,9 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): RouteApp {
     ownedMcpDebug = manager
   }
   const deps = { ...baseDeps, sync, mcpDebug }
+  const sourceCacheWarmup = warmManagedSourceCaches(deps).catch((err: unknown) =>
+    syncLogger.error('source cache startup validation failed', { err }),
+  )
 
   let disposePromise: Promise<void> | null = null
   const app = Object.assign(new Hono(), {
@@ -109,7 +130,9 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): RouteApp {
       if (!disposePromise) {
         const syncDisposal = ownsSync ? sync.dispose() : Promise.resolve()
         const mcpDisposal = ownedMcpDebug?.dispose() ?? Promise.resolve()
-        disposePromise = Promise.all([recovery, syncDisposal, mcpDisposal]).then(() => undefined)
+        disposePromise = Promise.all([recovery, sourceCacheWarmup, syncDisposal, mcpDisposal]).then(
+          () => undefined,
+        )
       }
       return disposePromise
     },
@@ -138,4 +161,109 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): RouteApp {
     }),
   )
   return app
+}
+
+async function warmManagedSourceCaches(
+  deps: RouteDeps & {
+    leases: ResourceLeaseCoordinator
+    sourceProjectionCatalog: SourceProjectionCatalog
+    sourceCacheHealthCatalog: SourceCacheHealthCatalog
+  },
+): Promise<void> {
+  const cacheLogger = logger.child('source-cache-startup')
+  const repositories = await listRepos(deps.fs, deps.home)
+  await Promise.all(
+    repositories.map(async (repo) => {
+      try {
+        const authorization = await authorizeRepository(deps.fs, repo, deps.home)
+        const snapshot = await runAuthorizedRepositoryLease(
+          deps,
+          authorization,
+          'read',
+          (repoPath) => [repoPath],
+          async (repoPath) => {
+            const repoManifest = loadRepoManifest(
+              await readSkillsProjectionFiles(deps.fs, repoPath),
+            )
+            if (repoManifest.loadDiagnostics?.length) {
+              throw new Error('Repository skills projection manifest is invalid')
+            }
+            return {
+              repoPath,
+              sources: (repoManifest.skills.sources ?? []).map((source) => ({
+                source,
+                healthRevision: deps.sourceCacheHealthCatalog.revision(repoPath, source.url),
+                projectionRevision: deps.sourceProjectionCatalog.revision(repoPath, source.url),
+              })),
+            }
+          },
+        )
+        await Promise.all(
+          snapshot.sources.map(async ({ source, healthRevision, projectionRevision }) => {
+            const sourceId = deriveRepoId(source.url)
+            try {
+              if (
+                !deps.sourceCacheHealthCatalog.isCurrent(
+                  snapshot.repoPath,
+                  source.url,
+                  healthRevision,
+                ) ||
+                !deps.sourceProjectionCatalog.isCurrent(
+                  snapshot.repoPath,
+                  source.url,
+                  projectionRevision,
+                )
+              ) {
+                return
+              }
+              const health = await deps.sourceCacheHealthCatalog.getOrCheck(
+                snapshot.repoPath,
+                source,
+                () => inspectSourceCacheHealth(deps.fs, deps.git, snapshot.repoPath, source),
+                healthRevision,
+              )
+              if (
+                !deps.sourceCacheHealthCatalog.isCurrent(
+                  snapshot.repoPath,
+                  source.url,
+                  healthRevision,
+                ) ||
+                !deps.sourceProjectionCatalog.isCurrent(
+                  snapshot.repoPath,
+                  source.url,
+                  projectionRevision,
+                )
+              ) {
+                return
+              }
+              if (!health.healthy) {
+                cacheLogger.error('source cache startup validation found an unhealthy cache', {
+                  err: health.err ?? new Error(`Source cache is ${health.reason}`),
+                  repo,
+                  sourceId,
+                })
+                return
+              }
+              await warmSourceProjectionCatalog(
+                deps.fs,
+                deps.git,
+                deps.sourceProjectionCatalog,
+                snapshot.repoPath,
+                source,
+                projectionRevision,
+              )
+            } catch (err) {
+              cacheLogger.error('source cache startup validation failed', {
+                err,
+                repo,
+                sourceId,
+              })
+            }
+          }),
+        )
+      } catch (err) {
+        cacheLogger.error('repository source cache startup validation failed', { err, repo })
+      }
+    }),
+  )
 }

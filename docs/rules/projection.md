@@ -8,7 +8,7 @@ Status: active
 Applies to: skills, MCP, memory
 
 Rule:
-Projection 把 Loom 中选择的 desired state 写入同时满足 Configured、Applicable 和 Installed 的 agents。Projection 不能从现有 agent 文件反向推断新的 desired state。
+Projection 把 Loom 中选择的 desired state 写入同时满足 Configured 和 Applicable 的 agents。Agent 可执行命令是否位于 PATH 不属于 projection 范围。Projection 不能从现有 agent 文件反向推断新的 desired state。
 
 Implications:
 
@@ -16,6 +16,7 @@ Implications:
 - manifest 中选择了 agent 且源内容可用时，应投影到该 agent。
 - Scoped projection 只准备和写入所选领域；MCP 或 memory projection 不读取、安装或更新 skill sources。
 - Agent-scoped projection 只准备、锁定和写入所选 agent，并保留其他 agent 的 managed state。
+- Skills desired-state mutation 可以携带明确 target；targeted projection 只 reconcile target，不把 partial plan 当成全局 desired state。
 - Projection error 必须暴露，不能静默假装 reconciliation 已完成。
 - Skills 只删除 marker 或 namespace ownership 能证明为 managed 的 artifacts；MCP 只删除 managed id state 证明的 entries。
 - Memory 不因 agent 从配置移除而删除既有原生文件，直到存在独立 ownership 设计。
@@ -186,6 +187,10 @@ Safety:
 - Link projection 必须区分 file/directory link；稀疏目录不得用覆盖 excludes 的整目录 link。Copy 必须保持二进制内容。
 - Source 改名后的 orphan cleanup 只能删除 marker 能证明属于同一 repo/source 的旧 namespace。
 - Orphan cleanup 只枚举 agent skills root 的 direct children，不递归进入 namespace，也不跟随 child links。
+- Targeted source cleanup 只检查明确的 `source + agent` namespace；不枚举或清理无关 source namespace。
+- Targeted projection 热路径不检查 cache health、checkout、fetch 或读取 bundle metadata。冷 catalog miss 只允许对目标 source 读取一次 pinned Git tree；warm hit 不启动 Git。
+- Source cache health 在服务启动后异步检查并缓存；startup 只在短 read lease 内读取 manifest/revision 快照，Git health/tree 扫描在 lease 外执行。Source 失效后完成的旧 revision 结果不得写回 catalog。
+- Check update 先检查本地 health，unhealthy 时直接要求 Repair，不先访问 remote。
 
 Examples:
 

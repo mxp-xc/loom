@@ -383,24 +383,19 @@ export async function captureStableRelativeFiles(
     }
     let currentPath = root.path
     for (const [index, segment] of segments.entries()) {
-      currentPath = join(currentPath, segment)
+      currentPath = normalize(join(currentPath, segment))
       const kind = index === segments.length - 1 ? 'file' : 'directory'
-      const entry = await captureStableEntry(fs, currentPath, kind, description)
+      const existing = entriesByPath.get(currentPath)
+      if (existing && existing.kind !== kind) {
+        throw new Error(`${description} contains a file/ancestor collision: ${currentPath}`)
+      }
+      const entry = existing ?? (await captureStableEntry(fs, currentPath, kind, description))
       if (entry.kind === 'file' && entry.linkCount !== 1) {
         throw new Error(`${description} contains a hardlinked file: ${currentPath}`)
       }
       const expectedCanonical = normalize(join(root.canonicalPath, ...segments.slice(0, index + 1)))
       if (entry.canonicalPath !== expectedCanonical) {
         throw new Error(`${description} entry escaped its root: ${currentPath}`)
-      }
-      const existing = entriesByPath.get(entry.path)
-      if (
-        existing &&
-        (existing.kind !== entry.kind ||
-          existing.identity !== entry.identity ||
-          existing.canonicalPath !== entry.canonicalPath)
-      ) {
-        throw new Error(`${description} entry changed during validation: ${currentPath}`)
       }
       if (!existing && entriesByPath.size >= MAX_SOURCE_ENTRIES) {
         throw new Error(`${description} exceeds maximum entries`)

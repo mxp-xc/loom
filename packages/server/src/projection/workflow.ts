@@ -1,38 +1,42 @@
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import {
   buildManifest,
+  applicableAgents,
+  configuredAgents,
   deriveRepoId,
   loadRepoManifest,
+  mergeConfig,
   planProjection,
+  planSourceProjectionForAgents,
   sourceIdentity,
   type AgentId,
   type Config,
   type LocalSkill,
   type Manifest,
   type ProjectionPlan,
+  type RepoManifest,
   type SkillSource,
   type SourceTreeNode,
   type VarsContext,
-  AGENT_IDS,
-  getAgent,
 } from '@loom/core'
 import type { IFileSystem } from '../ports/fs.js'
 import type { IGit } from '../ports/git.js'
 import type { IProcess } from '../ports/process.js'
 import { logger } from '../lib/logger.js'
 import { cacheDirFor } from '../remote/cache.js'
-import { readLocalConfig, readRepoFiles } from '../api/repo-config.js'
+import { readLocalConfig, readRepoFiles, readSkillsProjectionFiles } from '../api/repo-config.js'
 import {
   executeProjection,
   type ProjectionResult,
   type ProjectionScope,
   type ProjectionWarning,
+  type SkillsProjectionTarget,
 } from './executor.js'
 import { resolveAgentAwareVars } from '../vars/agent-aware.js'
-import { createProjectionDeps, type AuthorizedSourceCache } from './deps.js'
+import { createProjectionDeps, sourceFilesKey, type AuthorizedSourceCache } from './deps.js'
 import { mergeLocalSkills } from './scan.js'
 import { parseSkillMeta } from '../remote/frontmatter.js'
-import { scanSourceTree } from '../remote/source-tree.js'
+import { scanProjectionSourceTree, scanSourceTree } from '../remote/source-tree.js'
 import { resolveRegisteredLocalSkills, type ResolvedLocalSkill } from '../skills/local-paths.js'
 import {
   captureRepoCacheRoot,
@@ -40,13 +44,19 @@ import {
   revalidateStableEntry,
   type StableEntry,
 } from './fs-boundary.js'
+import type { SkillsProjectionChangeSet } from './change-set.js'
+import { SourceProjectionCatalog, type SourceProjectionCatalogEntry } from './source-catalog.js'
+import type { SourceCacheHealthCatalog } from '../remote/source-cache-health.js'
 
 const workflowLogger = logger.child('projection.workflow')
+const fallbackSourceProjectionCatalog = new SourceProjectionCatalog()
 export interface ProjectionWorkflowDeps {
   fs: IFileSystem
   git: IGit
   proc: IProcess
   home: string
+  sourceProjectionCatalog?: SourceProjectionCatalog
+  sourceCacheHealthCatalog?: SourceCacheHealthCatalog
 }
 
 export interface ProjectRepositoryInput {
@@ -70,10 +80,10 @@ export async function projectRepository(
     scope === 'skills' || scope === 'all'
       ? await captureAvailableSourceCaches(deps.fs, repoPath, manifest.skills.sources ?? [])
       : new Map<string, AuthorizedSourceCache>()
-  const installed = await resolveInstalledAgents(deps.proc, input.installedAgents)
+  const eligibleAgents = new Set(input.installedAgents ?? configuredAgents(manifest.config.agents))
   const projectionAgents = input.agent
-    ? new Set([...installed].filter((agent) => agent === input.agent))
-    : installed
+    ? new Set([...eligibleAgents].filter((agent) => agent === input.agent))
+    : eligibleAgents
   const planningManifest =
     scope === 'mcp' || scope === 'memory'
       ? { ...manifest, skills: { ...manifest.skills, sources: [] } }
@@ -111,6 +121,202 @@ export async function projectRepository(
   return combinedWarnings.length > 0 ? { ...result, warnings: combinedWarnings } : result
 }
 
+export async function projectSkillChanges(
+  deps: ProjectionWorkflowDeps,
+  repoPath: string,
+  changes: SkillsProjectionChangeSet,
+): Promise<ProjectionResult> {
+  const manifest = await loadSkillsMutationManifest(deps, repoPath)
+  if (manifest.errors.length > 0) return invalidManifestResult(manifest)
+
+  const applicable = new Set(applicableAgents(manifest.config.agents, 'skills'))
+  const sourceTargets = changes.sources
+    .map((target) => ({
+      ...target,
+      agents: target.agents.filter((agent) => applicable.has(agent)),
+    }))
+    .filter((target) => target.agents.length > 0)
+  const localTargets = changes.locals
+    .map((target) => ({
+      ...target,
+      agents: target.agents.filter((agent) => applicable.has(agent)),
+    }))
+    .filter((target) => target.agents.length > 0)
+  if (sourceTargets.length === 0 && localTargets.length === 0) return { ok: true }
+
+  const sourceByUrl = new Map(manifest.skills.sources.map((source) => [source.url, source]))
+  const preparedSourceTargets = sourceTargets.map((target) => {
+    const source = sourceByUrl.get(target.sourceUrl)
+    if (!source) throw new Error(`Source not found during projection: ${target.sourceUrl}`)
+    const desiredAgents = target.agents.filter((agent) =>
+      (source.members ?? []).some((member) => (member.agents ?? []).includes(agent)),
+    )
+    const cleanupAgents = target.agents.filter((agent) => !desiredAgents.includes(agent))
+    const knownHealth = deps.sourceCacheHealthCatalog?.get(repoPath, source)
+    const knownUnavailable =
+      source.availability?.available === false || knownHealth?.healthy === false
+    return { target, source, desiredAgents, cleanupAgents, knownHealth, knownUnavailable }
+  })
+  const sourceCaches = await captureAvailableSourceCaches(
+    deps.fs,
+    repoPath,
+    preparedSourceTargets
+      .filter(
+        ({ desiredAgents, knownUnavailable }) => desiredAgents.length > 0 && !knownUnavailable,
+      )
+      .map(({ source }) => source),
+  )
+  const sourceFiles = new Map<string, readonly string[]>()
+  const sourcePlans: ProjectionPlan['sourcePlans'] = []
+  const executableSourceTargets: SkillsProjectionTarget['sources'] = []
+  const warnings: ProjectionWarning[] = []
+  const catalog = deps.sourceProjectionCatalog ?? fallbackSourceProjectionCatalog
+
+  for (const {
+    target,
+    source,
+    desiredAgents,
+    cleanupAgents,
+    knownHealth,
+  } of preparedSourceTargets) {
+    if (desiredAgents.length === 0) {
+      executableSourceTargets.push({
+        sourceName: sourceIdentity(source).repoId,
+        sourceUrl: source.url,
+        agents: cleanupAgents,
+      })
+      continue
+    }
+    if (source.availability?.available === false || knownHealth?.healthy === false) {
+      if (knownHealth?.healthy === false) {
+        source.availability = {
+          available: false,
+          reason: knownHealth.reason === 'missing' ? 'cache-unavailable' : 'cache-invalid',
+          message: `Source cache is ${knownHealth.reason}`,
+        }
+      }
+      warnings.push(...unavailableSourceWarnings([source]))
+      if (cleanupAgents.length > 0) {
+        executableSourceTargets.push({
+          sourceName: sourceIdentity(source).repoId,
+          sourceUrl: source.url,
+          agents: cleanupAgents,
+        })
+      }
+      continue
+    }
+    const commit = source.pinned_commit?.trim() || source.ref
+    const cacheId = deriveRepoId(source.url)
+    const sourceCache = sourceCaches.get(cacheId)
+    if (!sourceCache) throw new Error(`Source cache unavailable: ${source.url}`)
+    let cached: SourceProjectionCatalogEntry
+    try {
+      cached = await catalog.getOrLoad(repoPath, source, () =>
+        scanProjectionSourceTree(deps.git, sourceCache.root.canonicalPath, commit, source),
+      )
+    } catch (err) {
+      workflowLogger.error('targeted source catalog load failed', {
+        err,
+        url: source.url,
+        cacheId,
+      })
+      deps.sourceCacheHealthCatalog?.put(repoPath, source, {
+        healthy: false,
+        reason: 'invalid',
+        err,
+      })
+      source.availability = {
+        available: false,
+        reason: 'cache-invalid',
+        message: 'Source cache is invalid',
+      }
+      warnings.push(...unavailableSourceWarnings([source]))
+      if (cleanupAgents.length > 0) {
+        executableSourceTargets.push({
+          sourceName: sourceIdentity(source).repoId,
+          sourceUrl: source.url,
+          agents: cleanupAgents,
+        })
+      }
+      continue
+    }
+    source.sourceTree = cached.tree
+    sourceFiles.set(sourceFilesKey(cacheId, cached.tree.commit), cached.files)
+    sourcePlans.push(...planSourceProjectionForAgents(source, new Set(desiredAgents)))
+    executableSourceTargets.push({
+      sourceName: sourceIdentity(source).repoId,
+      sourceUrl: source.url,
+      agents: target.agents,
+    })
+  }
+
+  const targetSkills = localTargets.map((target) => {
+    const skill = manifest.skills.skills.find((candidate) => candidate.id === target.skillId)
+    if (!skill) throw new Error(`Local skill not found during projection: ${target.skillId}`)
+    return skill
+  })
+  const materializedSkills = targetSkills.filter((skill) => {
+    const target = localTargets.find((candidate) => candidate.skillId === skill.id)!
+    const desired = new Set(skill.agents ?? [])
+    return target.agents.some((agent) => desired.has(agent))
+  })
+  const localSkills =
+    materializedSkills.length > 0
+      ? await resolveRegisteredLocalSkills(deps.fs, repoPath, {
+          sources: [],
+          skills: materializedSkills,
+        })
+      : new Map<string, ResolvedLocalSkill>()
+  const localSourceEntries = await captureAvailableLocalSources(deps.fs, localSkills)
+  const links: ProjectionPlan['links'] = targetSkills.map((skill) => {
+    const target = localTargets.find((candidate) => candidate.skillId === skill.id)!
+    const desired = new Set(skill.agents ?? [])
+    return {
+      skillId: skill.id,
+      source: 'local',
+      ...(skill.path ? { localPath: skill.path } : {}),
+      agents: target.agents.filter((agent) => desired.has(agent)),
+    }
+  })
+  const activeAgents = new Set([
+    ...executableSourceTargets.flatMap((target) => target.agents),
+    ...localTargets.flatMap((target) => target.agents),
+  ])
+  const plan: ProjectionPlan = {
+    links,
+    sourcePlans,
+    preservedSourceNamespaces: [],
+    mcpEntries: [],
+    memoryPlan: { entries: [], active: null, content: null, agents: [] },
+    skippedAgents: [],
+    strategy: manifest.config.projection?.strategy ?? 'link',
+  }
+  const projectionDeps = createProjectionDeps(
+    { fs: deps.fs, git: deps.git, proc: deps.proc },
+    repoPath,
+    activeAgents,
+    deps.home,
+    localSkills,
+    localSourceEntries,
+    sourceCaches,
+    sourceFiles,
+  )
+  const varsCtx = {
+    env: {},
+    activeProfile: manifest.vars.active,
+    defaultProfile: manifest.vars.default,
+  }
+  const result = await executeProjection(plan, manifest, varsCtx, projectionDeps, 'skills', {
+    skillsTarget: {
+      sources: executableSourceTargets,
+      locals: localTargets,
+    },
+  })
+  if (!result.ok) return result
+  const combinedWarnings = [...(result.warnings ?? []), ...warnings]
+  return combinedWarnings.length > 0 ? { ...result, warnings: combinedWarnings } : result
+}
+
 export async function loadProjectionManifest(
   deps: ProjectionWorkflowDeps,
   repoPath: string,
@@ -138,18 +344,65 @@ export async function loadDisplayManifest(
   return manifest
 }
 
-async function loadBaseManifest(deps: ProjectionWorkflowDeps, repoPath: string): Promise<Manifest> {
+export async function loadSkillsMutationManifest(
+  deps: ProjectionWorkflowDeps,
+  repoPath: string,
+): Promise<Manifest> {
+  return loadTargetedSkillsManifest(deps, repoPath, false)
+}
+
+async function loadBaseManifest(
+  deps: ProjectionWorkflowDeps,
+  repoPath: string,
+  mergeDiscoveredLocalSkills = true,
+): Promise<Manifest> {
   const files = await readRepoFiles(deps.fs, repoPath)
   const repoManifest = loadRepoManifest(files)
   const localConfig = await readLocalConfig(deps.fs, deps.home)
   const baseManifest = buildManifest(repoManifest, localConfig as Config)
   if (baseManifest.errors.length > 0) return baseManifest
-  repoManifest.skills.skills = await mergeLocalSkills(
-    deps.fs,
-    repoPath,
-    repoManifest.skills.skills ?? [],
-  )
+  if (mergeDiscoveredLocalSkills) {
+    repoManifest.skills.skills = await mergeLocalSkills(
+      deps.fs,
+      repoPath,
+      repoManifest.skills.skills ?? [],
+    )
+  }
   return buildManifest(repoManifest, localConfig as Config)
+}
+
+async function loadTargetedSkillsManifest(
+  deps: ProjectionWorkflowDeps,
+  repoPath: string,
+  mergeDiscoveredLocalSkills: boolean,
+): Promise<Manifest> {
+  const [files, localConfig] = await Promise.all([
+    readSkillsProjectionFiles(deps.fs, repoPath),
+    readLocalConfig(deps.fs, deps.home),
+  ])
+  const repoManifest = loadRepoManifest(files)
+  const baseManifest = buildTargetedSkillsManifest(repoManifest, localConfig as Config)
+  if (baseManifest.errors.length > 0) return baseManifest
+  if (mergeDiscoveredLocalSkills) {
+    repoManifest.skills.skills = await mergeLocalSkills(
+      deps.fs,
+      repoPath,
+      repoManifest.skills.skills ?? [],
+    )
+  }
+  return buildTargetedSkillsManifest(repoManifest, localConfig as Config)
+}
+
+function buildTargetedSkillsManifest(repoManifest: RepoManifest, localConfig: Config): Manifest {
+  const config = mergeConfig(repoManifest.repoConfig, localConfig)
+  const scopedConfig = { ...config }
+  delete scopedConfig.active_memory
+  delete scopedConfig.memory_agents
+  delete scopedConfig.memory_order
+  return {
+    ...buildManifest({ ...repoManifest, repoConfig: scopedConfig }, {}),
+    config,
+  }
 }
 
 function invalidManifestResult(manifest: Manifest): ProjectionResult {
@@ -268,24 +521,6 @@ export async function annotateLocalSkillAvailability(
       }
     }),
   )
-}
-
-async function resolveInstalledAgents(
-  proc: IProcess,
-  requestedAgents: AgentId[] = AGENT_IDS,
-): Promise<Set<AgentId>> {
-  const installed = new Set<AgentId>()
-  for (const agent of requestedAgents) {
-    try {
-      if (await proc.isCommandInstalled(getAgent(agent).command)) {
-        installed.add(agent)
-      }
-    } catch (err) {
-      workflowLogger.warn('agent install check failed; assuming installed', { err, agent })
-      installed.add(agent)
-    }
-  }
-  return installed
 }
 
 async function ensureSourceTrees(

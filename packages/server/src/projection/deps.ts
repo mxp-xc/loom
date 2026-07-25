@@ -35,6 +35,7 @@ export function createProjectionDeps(
   localSkills: ReadonlyMap<string, ResolvedLocalSkill> = new Map(),
   localSourceEntries: ReadonlyMap<string, StableEntry> = new Map(),
   sourceCaches?: ReadonlyMap<string, AuthorizedSourceCache>,
+  sourceFiles: ReadonlyMap<string, readonly string[]> = new Map(),
 ): ProjectionDeps {
   const ownerRepo = sha256(resolve(repoPath))
   const stateFile = join(home, '.loom', 'state', ownerRepo, 'projected-mcp.json')
@@ -164,6 +165,8 @@ export function createProjectionDeps(
       if (enforceSourceAuthorization && !authorized) {
         throw new Error(`Source cache unavailable: ${sourcePlan.sourceUrl}`)
       }
+      const preparedFiles = sourceFiles.get(sourceFilesKey(sourcePlan.cacheId, sourcePlan.commit))
+      if (preparedFiles) return [...preparedFiles]
       const cache =
         authorized?.root ?? (await captureRepoCacheRoot(fs, repoPath, sourcePlan.cacheId))
       if (!cache) throw new Error(`Source cache unavailable: ${sourcePlan.sourceUrl}`)
@@ -192,6 +195,10 @@ export function createProjectionDeps(
     getManagedSkillArtifacts: readSkillState,
     setManagedSkillArtifacts: writeSkillState,
   }
+}
+
+export function sourceFilesKey(cacheId: string, commit: string): string {
+  return `${cacheId}\0${commit}`
 }
 
 async function readStableJsonFile(

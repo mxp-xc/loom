@@ -17,6 +17,7 @@ type MaybeOkResponse = {
   ok?: boolean
   message?: string
   error?: string
+  warnings?: Array<{ message?: string }>
 }
 
 export interface OperationResult<T> {
@@ -119,12 +120,7 @@ const pendingKey = {
   cancelSourceUpdate: (sessionId: string) => 'source:update-cancel:' + sessionId,
   deleteSource: (url: string) => 'source:delete:' + url,
   deleteLocalSkill: (id: string) => 'skills:delete-local:' + id,
-  sourceSkillAgent: (sourceUrl: string, memberEntry: string) =>
-    'skills:agent:' + sourceUrl + ':' + memberEntry,
-  localSkillAgent: (id: string) => 'skills:local-agent:' + id,
-  allSkillAgents: (agent: AgentId) => 'skills:all-agents:' + agent,
-  sourceSkillAgents: (sourceUrl: string, agent: AgentId) =>
-    'skills:source-agents:' + sourceUrl + ':' + agent,
+  skillAgents: () => 'skills:agents',
   addMcpServer: (id: string) => 'mcp:add:' + id,
   updateMcpServer: (id: string) => 'mcp:update:' + id,
   deleteMcpServer: (id: string) => 'mcp:delete:' + id,
@@ -145,6 +141,18 @@ function responseFailureMessage(result: unknown, fallback: string): string | nul
     (typeof result.error === 'string' && result.error) ||
     fallback
   )
+}
+
+function responseWarningMessage(result: unknown): string | null {
+  if (!isRecord(result) || result.ok === false || !Array.isArray(result.warnings)) return null
+  const warning = result.warnings.find(
+    (candidate) => isRecord(candidate) && typeof candidate.message === 'string',
+  )
+  return warning && typeof warning.message === 'string'
+    ? warning.message
+    : result.warnings.length > 0
+      ? '投影未完整完成'
+      : null
 }
 
 export function normalizeManifestOperationError(error: unknown, fallback = '操作失败'): string {
@@ -295,10 +303,14 @@ export function useManifestOperations(
           return { ok: false, result, message: failureMessage }
         }
         if (options.reload !== false) await refreshManifest(repoPath)
-        if (notify) notifySuccess()
+        const warningMessage = responseWarningMessage(result)
+        if (notify) {
+          if (warningMessage) notifyError(warningMessage)
+          else notifySuccess()
+        }
         const toast = successMessageFor(options.successMessage, result)
-        if (toast && notify) notifyToast(toast)
-        return { ok: true, result }
+        if (toast && notify && !warningMessage) notifyToast(toast)
+        return warningMessage ? { ok: true, result, message: warningMessage } : { ok: true, result }
       } catch (error) {
         const message = normalizeManifestOperationError(error, options.failureMessage)
         logOperationError(key, error, message)
@@ -543,25 +555,6 @@ export function useManifestOperations(
     [repoPath, run],
   )
 
-  const projectSkillsAfterManifestUpdate = useCallback(
-    async (
-      saveManifest: () => Promise<MaybeOkResponse>,
-      failureMessage: string,
-      agent: AgentId,
-    ): Promise<MaybeOkResponse> => {
-      const saved = await saveManifest()
-      if (responseFailureMessage(saved, failureMessage)) return saved
-      const projected = (await api.project({
-        repo: repoPath,
-        scope: 'skills',
-        agent,
-      })) as MaybeOkResponse
-      const projectError = responseFailureMessage(projected, '投影失败')
-      return projectError ? { ok: false, message: projectError } : projected
-    },
-    [repoPath],
-  )
-
   const checkSourceUpdate = useCallback(
     (source: SkillSource) =>
       run(
@@ -673,47 +666,52 @@ export function useManifestOperations(
   const toggleSourceSkillAgent = useCallback(
     (sourceUrl: string, memberEntry: string, agent: AgentId, currentAgents: readonly AgentId[]) =>
       run(
-        pendingKey.sourceSkillAgent(sourceUrl, memberEntry),
+        pendingKey.skillAgents(),
         () =>
-          projectSkillsAfterManifestUpdate(
-            () =>
-              api.updateSkillAgents({
-                repo: repoPath,
+          api.updateSkillAgentsBatch({
+            repo: repoPath,
+            sources: [
+              {
                 sourceUrl,
-                memberEntry,
-                agents: toggleAgent(currentAgents, agent),
-              }) as Promise<MaybeOkResponse>,
-            '保存 agents 失败',
-            agent,
-          ),
-        { failureMessage: '保存 agents 失败' },
+                updates: [
+                  {
+                    memberEntry,
+                    expectedAgents: [...currentAgents],
+                    agents: toggleAgent(currentAgents, agent),
+                  },
+                ],
+              },
+            ],
+            locals: [],
+          }) as Promise<MaybeOkResponse>,
+        { failureMessage: '保存 agents 失败', reloadOnFailure: true },
       ),
-    [projectSkillsAfterManifestUpdate, repoPath, run],
+    [repoPath, run],
   )
 
   const toggleLocalSkillAgent = useCallback(
     (id: string, agent: AgentId, currentAgents: readonly AgentId[]) =>
       run(
-        pendingKey.localSkillAgent(id),
+        pendingKey.skillAgents(),
         () =>
-          projectSkillsAfterManifestUpdate(
-            () =>
-              api.updateLocalSkillAgents({
-                repo: repoPath,
+          api.updateSkillAgentsBatch({
+            repo: repoPath,
+            sources: [],
+            locals: [
+              {
                 id,
+                expectedAgents: [...currentAgents],
                 agents: toggleAgent(currentAgents, agent),
-              }) as Promise<MaybeOkResponse>,
-            '保存 agents 失败',
-            agent,
-          ),
-        { failureMessage: '保存 agents 失败' },
+              },
+            ],
+          }) as Promise<MaybeOkResponse>,
+        { failureMessage: '保存 agents 失败', reloadOnFailure: true },
       ),
-    [projectSkillsAfterManifestUpdate, repoPath, run],
+    [repoPath, run],
   )
 
   const setAllSkillAgents = useCallback(
     (manifest: Manifest, agent: AgentId) => {
-      let agentsUpdated = false
       const skills = [
         ...(manifest.skills?.sources.flatMap((source) =>
           (source.members ?? []).map((member) => ({ kind: 'source' as const, source, member })),
@@ -727,42 +725,39 @@ export function useManifestOperations(
           return (agents ?? []).includes(agent)
         })
       return run(
-        pendingKey.allSkillAgents(agent),
-        async () => {
-          for (const item of skills) {
-            const agents =
-              item.kind === 'source' ? (item.member.agents ?? []) : (item.skill.agents ?? [])
-            const next = allOn
-              ? agents.filter((candidate) => candidate !== agent)
-              : AGENT_IDS.filter((candidate) => candidate === agent || agents.includes(candidate))
-            if (item.kind === 'source') {
-              const result = (await api.updateSkillAgents({
-                repo: repoPath,
-                sourceUrl: item.source.url,
-                memberEntry: item.member.entry,
-                agents: next,
-              })) as MaybeOkResponse
-              if (responseFailureMessage(result, '批量更新 agents 失败')) return result
-              agentsUpdated = true
-            } else {
-              const result = (await api.updateLocalSkillAgents({
-                repo: repoPath,
-                id: item.skill.id,
-                agents: next,
-              })) as MaybeOkResponse
-              if (responseFailureMessage(result, '批量更新 agents 失败')) return result
-              agentsUpdated = true
-            }
-          }
-          const projected = (await api.project({
+        pendingKey.skillAgents(),
+        () =>
+          api.updateSkillAgentsBatch({
             repo: repoPath,
-            scope: 'skills',
-            agent,
-          })) as MaybeOkResponse
-          const projectError = responseFailureMessage(projected, '投影失败')
-          return projectError ? { ok: false, message: projectError } : projected
-        },
-        { failureMessage: '批量更新 agents 失败', reloadOnFailure: () => agentsUpdated },
+            sources: (manifest.skills?.sources ?? []).map((source) => ({
+              sourceUrl: source.url,
+              updates: (source.members ?? []).map((member) => {
+                const agents = member.agents ?? []
+                return {
+                  memberEntry: member.entry,
+                  expectedAgents: agents,
+                  agents: allOn
+                    ? agents.filter((candidate) => candidate !== agent)
+                    : AGENT_IDS.filter(
+                        (candidate) => candidate === agent || agents.includes(candidate),
+                      ),
+                }
+              }),
+            })),
+            locals: (manifest.skills?.skills ?? []).map((skill) => {
+              const agents = skill.agents ?? []
+              return {
+                id: skill.id,
+                expectedAgents: agents,
+                agents: allOn
+                  ? agents.filter((candidate) => candidate !== agent)
+                  : AGENT_IDS.filter(
+                      (candidate) => candidate === agent || agents.includes(candidate),
+                    ),
+              }
+            }),
+          }) as Promise<MaybeOkResponse>,
+        { failureMessage: '批量更新 agents 失败', reloadOnFailure: true },
       )
     },
     [repoPath, run],
@@ -770,36 +765,26 @@ export function useManifestOperations(
 
   const setSourceSkillAgents = useCallback(
     (source: SkillSource, agent: AgentId) => {
-      let agentsUpdated = false
       const members = source.members ?? []
       const allOn =
         members.length > 0 && members.every((member) => (member.agents ?? []).includes(agent))
       return run(
-        pendingKey.sourceSkillAgents(source.url, agent),
-        async () => {
+        pendingKey.skillAgents(),
+        () => {
           const updates = members.map((member) => {
             const agents = member.agents ?? []
             const next = allOn
               ? agents.filter((candidate) => candidate !== agent)
               : AGENT_IDS.filter((candidate) => candidate === agent || agents.includes(candidate))
-            return { memberEntry: member.entry, agents: next }
+            return { memberEntry: member.entry, expectedAgents: agents, agents: next }
           })
-          const result = (await api.updateSourceSkillAgents({
+          return api.updateSkillAgentsBatch({
             repo: repoPath,
-            sourceUrl: source.url,
-            updates,
-          })) as MaybeOkResponse
-          if (responseFailureMessage(result, '批量更新 agents 失败')) return result
-          agentsUpdated = updates.length > 0
-          const projected = (await api.project({
-            repo: repoPath,
-            scope: 'skills',
-            agent,
-          })) as MaybeOkResponse
-          const projectError = responseFailureMessage(projected, '投影失败')
-          return projectError ? { ok: false, message: projectError } : projected
+            sources: [{ sourceUrl: source.url, updates }],
+            locals: [],
+          }) as Promise<MaybeOkResponse>
         },
-        { failureMessage: '批量更新 agents 失败', reloadOnFailure: () => agentsUpdated },
+        { failureMessage: '批量更新 agents 失败', reloadOnFailure: true },
       )
     },
     [repoPath, run],
@@ -914,10 +899,11 @@ export function useManifestOperations(
           pending.has(pendingKey.deleteSource(sourceRef(source))),
       },
       skills: {
+        agents: pending.has(pendingKey.skillAgents()),
         deleteLocal: (id: string) => pending.has(pendingKey.deleteLocalSkill(id)),
-        allAgents: (agent: AgentId) => pending.has(pendingKey.allSkillAgents(agent)),
-        sourceAgents: (source: SkillSource | string, agent: AgentId) =>
-          pending.has(pendingKey.sourceSkillAgents(sourceRef(source), agent)),
+        allAgents: (_agent: AgentId) => pending.has(pendingKey.skillAgents()),
+        sourceAgents: (_source: SkillSource | string, _agent: AgentId) =>
+          pending.has(pendingKey.skillAgents()),
       },
       mcp: {
         allAgents: (agent: AgentId) => pending.has(pendingKey.allMcpAgents(agent)),

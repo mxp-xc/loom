@@ -87,6 +87,18 @@ export type ProjectionResult =
   { ok: true; warnings?: ProjectionWarning[] } | { ok: false; failure: ProjectionFailure }
 
 export type ProjectionScope = 'skills' | 'mcp' | 'memory' | 'all'
+export interface SkillsProjectionTarget {
+  sources: Array<{
+    sourceName: string
+    sourceUrl: string
+    agents: AgentId[]
+  }>
+  locals: Array<{ skillId: string; agents: AgentId[] }>
+}
+
+export interface ProjectionExecutionOptions {
+  skillsTarget?: SkillsProjectionTarget
+}
 const COPY_MARKER = '.loom-projection.json'
 const SOURCE_MARKER_KIND = 'skill-source'
 
@@ -110,6 +122,7 @@ export async function executeProjection(
   varsCtx: AgentAwareVarsContext,
   deps: ProjectionDeps,
   scope: ProjectionScope = 'all',
+  options: ProjectionExecutionOptions = {},
 ): Promise<ProjectionResult> {
   if (manifest.errors.length > 0) {
     return {
@@ -123,6 +136,7 @@ export async function executeProjection(
   }
   const journal: ProjectionJournal = { undos: [] }
   const { fs, installedAgents } = deps
+  const skillsTarget = options.skillsTarget
   const pathContext = deps.pathContext ?? runtimeAgentPathContext()
   const installedSkillAgents = new Set(
     [...installedAgents].filter((agent) =>
@@ -131,11 +145,13 @@ export async function executeProjection(
   )
   try {
     const preparedSkills =
-      scope === 'skills' || scope === 'all'
-        ? await prepareSkillProjection(plan, installedSkillAgents, deps)
+      (scope === 'skills' || scope === 'all') && (!skillsTarget || skillsTarget.locals.length > 0)
+        ? await prepareSkillProjection(plan, installedSkillAgents, deps, skillsTarget?.locals)
         : null
     const preparedSources =
-      scope === 'skills' || scope === 'all' ? await prepareSourceNamespaces(plan, deps) : null
+      (scope === 'skills' || scope === 'all') && (!skillsTarget || skillsTarget.sources.length > 0)
+        ? await prepareSourceNamespaces(plan, deps, skillsTarget?.sources)
+        : null
     const preparedMcp =
       scope === 'mcp' || scope === 'all'
         ? await prepareMcpProjection(plan, manifest, varsCtx, deps)
@@ -146,8 +162,8 @@ export async function executeProjection(
         : []
     // Phase A: build enabled links
     if (scope === 'skills' || scope === 'all') {
-      await applySkillProjection(preparedSkills!, plan.strategy, deps, journal)
-      await projectSourceNamespaces(plan, deps, journal, preparedSources!)
+      if (preparedSkills) await applySkillProjection(preparedSkills, plan.strategy, deps, journal)
+      if (preparedSources) await projectSourceNamespaces(plan, deps, journal, preparedSources)
     }
     // MCP config
     if (scope === 'mcp' || scope === 'all') {
@@ -530,6 +546,7 @@ async function prepareSkillProjection(
   plan: ProjectionPlan,
   installedAgents: Set<AgentId>,
   deps: ProjectionDeps,
+  targets?: Array<{ skillId: string; agents: AgentId[] }>,
 ): Promise<PreparedSkillProjection> {
   const currentArtifacts = (await deps.getManagedSkillArtifacts?.()) ?? {}
   const nextArtifacts = cloneManagedSkillArtifacts(currentArtifacts)
@@ -538,8 +555,13 @@ async function prepareSkillProjection(
   const warnedUnavailable = new Set<string>()
   const planSkillIds = new Set<string>()
   const pathContext = deps.pathContext ?? runtimeAgentPathContext()
+  const targetAgents = targets
+    ? new Map(targets.map((target) => [target.skillId, new Set(target.agents)]))
+    : null
 
   for (const link of plan.links) {
+    const scopedAgents = targetAgents?.get(link.skillId)
+    if (targetAgents && !scopedAgents) continue
     assertSafeSkillDestination(link.skillId, link.source === 'local')
     if (planSkillIds.has(link.skillId)) {
       throw new Error(`Duplicate projection skill destination: ${link.skillId}`)
@@ -551,7 +573,9 @@ async function prepareSkillProjection(
       }
     }
 
-    const resolvedSource = deps.resolveSkillSrc(link)
+    const agents = scopedAgents ?? new Set<AgentId>([...installedAgents, ...link.agents])
+    const needsSource = [...agents].some((agent) => link.agents.includes(agent))
+    const resolvedSource = needsSource ? deps.resolveSkillSrc(link) : null
     let source: StableDirectoryTree | null = null
     if (resolvedSource) {
       const root =
@@ -566,7 +590,6 @@ async function prepareSkillProjection(
       await revalidateStableEntry(deps.fs, root, `skill source ${link.skillId}`)
       source = await captureSafeDirectoryTree(deps.fs, root, `skill source ${link.skillId}`)
     }
-    const agents = new Set<AgentId>([...installedAgents, ...link.agents])
     for (const agent of agents) {
       const skillsDir = agentSkillsDir(agent, pathContext)
       const destination = safeSkillDestination(skillsDir, link.skillId)
@@ -647,52 +670,53 @@ async function prepareSkillProjection(
     }
   }
 
-  for (const agent of installedAgents) {
-    for (const [skillId, expectedArtifact] of Object.entries(currentArtifacts[agent] ?? {})) {
-      if (planSkillIds.has(skillId)) continue
-      assertSafeSkillDestination(skillId, true)
-      const skillsDir = agentSkillsDir(agent, pathContext)
-      const destination = safeSkillDestination(skillsDir, skillId)
-      const destinationChain = await captureAgentDirectoryChain(
-        deps.fs,
-        agent,
-        'skills',
-        dirname(destination),
-        pathContext,
-      )
-      const transactionChain = await captureAgentDirectoryChain(
-        deps.fs,
-        agent,
-        'skills',
-        dirname(localSkillTransactionPath(skillsDir, destination, 'staging', 'preflight')),
-        pathContext,
-      )
-      const ownership = await inspectManagedSkillArtifact(
-        deps.fs,
-        destination,
-        expectedArtifact,
-        deps.ownerRepo,
-        skillId,
-        deps.logger,
-      )
-      if (ownership.state === 'owned') {
-        actions.push({
+  if (!targetAgents)
+    for (const agent of installedAgents) {
+      for (const [skillId, expectedArtifact] of Object.entries(currentArtifacts[agent] ?? {})) {
+        if (planSkillIds.has(skillId)) continue
+        assertSafeSkillDestination(skillId, true)
+        const skillsDir = agentSkillsDir(agent, pathContext)
+        const destination = safeSkillDestination(skillsDir, skillId)
+        const destinationChain = await captureAgentDirectoryChain(
+          deps.fs,
           agent,
-          skillId,
-          skillsDir,
+          'skills',
+          dirname(destination),
+          pathContext,
+        )
+        const transactionChain = await captureAgentDirectoryChain(
+          deps.fs,
+          agent,
+          'skills',
+          dirname(localSkillTransactionPath(skillsDir, destination, 'staging', 'preflight')),
+          pathContext,
+        )
+        const ownership = await inspectManagedSkillArtifact(
+          deps.fs,
           destination,
-          source: null,
-          operation: 'remove',
-          destinationChain,
-          transactionChain,
-          ownership,
           expectedArtifact,
-        })
-      } else {
-        deleteManagedSkillArtifact(nextArtifacts, agent, skillId)
+          deps.ownerRepo,
+          skillId,
+          deps.logger,
+        )
+        if (ownership.state === 'owned') {
+          actions.push({
+            agent,
+            skillId,
+            skillsDir,
+            destination,
+            source: null,
+            operation: 'remove',
+            destinationChain,
+            transactionChain,
+            ownership,
+            expectedArtifact,
+          })
+        } else {
+          deleteManagedSkillArtifact(nextArtifacts, agent, skillId)
+        }
       }
     }
-  }
 
   return { actions, currentArtifacts, nextArtifacts, warnings }
 }
@@ -1193,6 +1217,7 @@ interface PreparedSourceNamespaces {
 async function prepareSourceNamespaces(
   plan: ProjectionPlan,
   deps: ProjectionDeps,
+  targets?: Array<{ sourceName: string; sourceUrl: string; agents: AgentId[] }>,
 ): Promise<PreparedSourceNamespaces> {
   if ((plan.sourcePlans?.length ?? 0) > 0 && !deps.ownerRepo) {
     throw new Error('Source projection ownerRepo is unavailable')
@@ -1203,7 +1228,7 @@ async function prepareSourceNamespaces(
   const pathContext = deps.pathContext ?? runtimeAgentPathContext()
   const desired = new Set<string>()
   const preservedSourceKeysByAgent = new Map<AgentId, Set<string>>()
-  for (const preserved of plan.preservedSourceNamespaces ?? []) {
+  for (const preserved of targets ? [] : (plan.preservedSourceNamespaces ?? [])) {
     assertSafeNamespaceSegment(preserved.sourceName, 'preserved source namespace')
     if (!deps.installedAgents.has(preserved.agent)) {
       throw new Error(`Preserved source namespace targets an unavailable agent: ${preserved.agent}`)
@@ -1249,7 +1274,9 @@ async function prepareSourceNamespaces(
       sourceFilesPromise = deps.resolveSourceFiles!(sourcePlan)
       sourceFilesByTree.set(sourceTreeKey, sourceFilesPromise)
     }
-    const sourceFiles = normalizeTrackedSourceFiles(await sourceFilesPromise)
+    const sourceFiles = normalizeTrackedSourceFiles(await sourceFilesPromise).filter((sourcePath) =>
+      sourcePlan.entries.some((entry) => sourceFileBelongsToEntry(sourcePath, entry)),
+    )
     const stableSourceFiles = await captureStableRelativeFiles(
       deps.fs,
       sourceRoot,
@@ -1303,14 +1330,23 @@ async function prepareSourceNamespaces(
     })
   }
   const cleanups = deps.ownerRepo
-    ? await prepareOrphanedSourceNamespaces(
-        desired,
-        deps.ownerRepo,
-        deps.installedAgents,
-        deps.fs,
-        pathContext,
-        preservedSourceKeysByAgent,
-      )
+    ? targets
+      ? await prepareTargetedSourceNamespaces(
+          desired,
+          deps.ownerRepo,
+          targets,
+          deps.installedAgents,
+          deps.fs,
+          pathContext,
+        )
+      : await prepareOrphanedSourceNamespaces(
+          desired,
+          deps.ownerRepo,
+          deps.installedAgents,
+          deps.fs,
+          pathContext,
+          preservedSourceKeysByAgent,
+        )
     : []
   return { namespaces, desired, preservedSourceKeysByAgent, cleanups }
 }
@@ -1585,12 +1621,6 @@ async function replaceSourceNamespace(
         continue
       }
       for (const { sourcePath, targetPath } of materializedFiles) {
-        await revalidateStableRelativeFile(
-          fs,
-          sourceFiles,
-          sourcePath,
-          `source cache ${plan.cacheId}`,
-        )
         const source = normalize(join(sourceFiles.root.path, ...sourcePath.split('/')))
         const sourceEntry = sourceFiles.entriesByPath.get(source)
         if (!sourceEntry || sourceEntry.kind !== 'file') {
@@ -1599,18 +1629,28 @@ async function replaceSourceNamespace(
         const target = join(staging, targetPath)
         if (strategy === 'copy') {
           await fs.copyFileNoFollow(source, target, sourceEntry.identity)
-        } else await fs.createFileLink(source, target)
-        await revalidateStableRelativeFile(
-          fs,
-          sourceFiles,
-          sourcePath,
-          `source cache ${plan.cacheId}`,
-        )
+        } else {
+          await revalidateStableRelativeFile(
+            fs,
+            sourceFiles,
+            sourcePath,
+            `source cache ${plan.cacheId}`,
+          )
+          await fs.createFileLink(source, target)
+          await revalidateStableRelativeFile(
+            fs,
+            sourceFiles,
+            sourcePath,
+            `source cache ${plan.cacheId}`,
+          )
+        }
       }
     }
     await writeSourceMarker(fs, staging, plan, ownerRepo)
 
-    await revalidateStableRelativeFiles(fs, sourceFiles, `source cache ${plan.cacheId}`)
+    if (strategy === 'link') {
+      await revalidateStableRelativeFiles(fs, sourceFiles, `source cache ${plan.cacheId}`)
+    }
     await revalidateManagedSourceNamespace(fs, prepared.ownership)
     const existing = prepared.ownership.state === 'owned'
     let backupPath: string | null = null
@@ -1660,7 +1700,6 @@ async function replaceSourceNamespace(
       restoreUndo!.installedKind = installed.kind
       restoreUndo!.installedIdentity = installed.identity
     }
-    await revalidateStableRelativeFiles(fs, sourceFiles, `source cache ${plan.cacheId}`)
   } catch (error) {
     try {
       await fs.removeDir(staging)
@@ -1718,6 +1757,14 @@ function trackedFilesForEntry(
   if (!entry.sourcePath) return [...sourceFiles]
   const prefix = `${entry.sourcePath}/`
   return sourceFiles.filter((sourcePath) => sourcePath.startsWith(prefix))
+}
+
+function sourceFileBelongsToEntry(
+  sourcePath: string,
+  entry: SourceProjectionPlan['entries'][number],
+): boolean {
+  if (entry.kind === 'resource-file') return sourcePath === entry.sourcePath
+  return !entry.sourcePath || sourcePath.startsWith(`${entry.sourcePath}/`)
 }
 
 async function writeSourceMarker(
@@ -1890,6 +1937,54 @@ async function prepareOrphanedSourceNamespaces(
       cleanups.push({ namespace, destinationChain, transactionChain, ownership })
     }
     await revalidateSafeDirectoryChain(fs, destinationChain, `${agent} skills destination`)
+  }
+  return cleanups
+}
+
+async function prepareTargetedSourceNamespaces(
+  desired: Set<string>,
+  ownerRepo: string,
+  targets: Array<{ sourceName: string; sourceUrl: string; agents: AgentId[] }>,
+  installedAgents: Set<AgentId>,
+  fs: IFileSystem,
+  pathContext: AgentPathContext,
+): Promise<PreparedSourceCleanup[]> {
+  const cleanups: PreparedSourceCleanup[] = []
+  const visited = new Set<string>()
+  for (const target of targets) {
+    assertSafeNamespaceSegment(target.sourceName, 'source namespace')
+    for (const agent of target.agents) {
+      if (!installedAgents.has(agent)) {
+        throw new Error(`Targeted source namespace targets an unavailable agent: ${agent}`)
+      }
+      if (!contextSupportsAgentCapability(agent, 'skills', pathContext)) continue
+      const skillsDir = agentSkillsDir(agent, pathContext)
+      const namespace = join(skillsDir, target.sourceName)
+      if (desired.has(namespace) || visited.has(namespace)) continue
+      visited.add(namespace)
+      const destinationChain = await captureAgentDirectoryChain(
+        fs,
+        agent,
+        'skills',
+        skillsDir,
+        pathContext,
+      )
+      const ownership = await inspectManagedSourceNamespace(fs, namespace, {
+        ownerRepo,
+        sourceKey: sha256(target.sourceUrl),
+        sourceName: target.sourceName,
+      })
+      if (ownership.state !== 'owned') continue
+      const transactionChain = await captureAgentDirectoryChain(
+        fs,
+        agent,
+        'skills',
+        dirname(sourceTransactionPath(namespace, 'backup', 'preflight')),
+        pathContext,
+      )
+      await revalidateSafeDirectoryChain(fs, destinationChain, `${agent} skills destination`)
+      cleanups.push({ namespace, destinationChain, transactionChain, ownership })
+    }
   }
   return cleanups
 }

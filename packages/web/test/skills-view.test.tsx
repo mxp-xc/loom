@@ -73,9 +73,7 @@ vi.mock('../src/lib/api', () => ({
       finalized: true,
       changes: { added: [], updated: [], removed: [] },
     })),
-    updateSkillAgents: vi.fn(async () => ({ ok: true })),
-    updateSourceSkillAgents: vi.fn(async () => ({ ok: true })),
-    updateLocalSkillAgents: vi.fn(async () => ({ ok: true })),
+    updateSkillAgentsBatch: vi.fn(async () => ({ ok: true })),
     getSkillContent: vi.fn(async () => ({ ok: true, content: '# Skill' })),
     deleteSource: vi.fn(async () => ({ ok: true })),
     deleteLocalSkill: vi.fn(async () => ({ ok: true })),
@@ -432,10 +430,10 @@ describe('Skills page', () => {
     ).toBeNull()
     fireEvent.click(within(frontendRow).getByRole('button', { name: 'Codex' }))
     await waitFor(() =>
-      expect(api.updateLocalSkillAgents).toHaveBeenCalledWith({
+      expect(api.updateSkillAgentsBatch).toHaveBeenCalledWith({
         repo: '/tmp/skills-layout',
-        id: 'frontend-design',
-        agents: ['codex'],
+        sources: [],
+        locals: [{ id: 'frontend-design', expectedAgents: [], agents: ['codex'] }],
       }),
     )
 
@@ -448,7 +446,7 @@ describe('Skills page', () => {
     expect(screen.queryByText('test-qa-skill')).toBeNull()
   })
 
-  it('projects skills after an individual agent chip is toggled', async () => {
+  it('uses one batch mutation when an individual agent chip is toggled', async () => {
     render(
       <TestRouter>
         <Skills repoPath="/tmp/skills-layout" />
@@ -460,18 +458,54 @@ describe('Skills page', () => {
     fireEvent.click(within(frontendRow).getByRole('button', { name: 'Codex' }))
 
     await waitFor(() =>
-      expect(api.updateLocalSkillAgents).toHaveBeenCalledWith({
+      expect(api.updateSkillAgentsBatch).toHaveBeenCalledWith({
         repo: '/tmp/skills-layout',
-        id: 'frontend-design',
-        agents: ['codex'],
+        sources: [],
+        locals: [{ id: 'frontend-design', expectedAgents: [], agents: ['codex'] }],
       }),
     )
-    await waitFor(() => expect(api.project).toHaveBeenCalledTimes(1))
-    expect(api.project).toHaveBeenLastCalledWith({
-      repo: '/tmp/skills-layout',
-      scope: 'skills',
-      agent: 'codex',
+    expect(api.project).not.toHaveBeenCalled()
+  })
+
+  it('disables item, source, and global skill chips while one batch is pending', async () => {
+    let release!: (value: { ok: true }) => void
+    vi.mocked(api.updateSkillAgentsBatch).mockImplementationOnce(
+      () =>
+        new Promise<{ ok: true }>((resolve) => {
+          release = resolve
+        }) as never,
+    )
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-layout" />
+      </TestRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '全部展开' }))
+    const localChip = within(
+      screen.getByTestId('local-skill-frontend-design'),
+    ).getByRole<HTMLButtonElement>('button', { name: 'Codex' })
+    fireEvent.click(localChip)
+
+    await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
+    const globalChip = screen.getByRole<HTMLButtonElement>('button', {
+      name: 'Codex：部分已选择',
     })
+    const sourceBulkChip = screen.getByRole<HTMLButtonElement>('button', {
+      name: 'superpowers Codex：全部已选择',
+    })
+    const sourceItemChip = within(
+      screen.getByTestId('source-skill-systematic-debugging'),
+    ).getByRole<HTMLButtonElement>('button', { name: 'Codex' })
+    await waitFor(() => {
+      expect(localChip.disabled).toBe(true)
+      expect(globalChip.disabled).toBe(true)
+      expect(sourceBulkChip.disabled).toBe(true)
+      expect(sourceItemChip.disabled).toBe(true)
+    })
+
+    release({ ok: true })
+    await waitFor(() => expect(localChip.disabled).toBe(false))
   })
 
   it('supports source-level bulk projection chips in the source header', async () => {
@@ -518,37 +552,37 @@ describe('Skills page', () => {
     expect(sourceBulkCodex).toBeDefined()
     fireEvent.click(sourceBulkCodex)
 
-    await waitFor(() => expect(api.updateSourceSkillAgents).toHaveBeenCalledTimes(1))
-    expect(api.updateSourceSkillAgents).toHaveBeenLastCalledWith({
+    await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
+    expect(api.updateSkillAgentsBatch).toHaveBeenLastCalledWith({
       repo: '/tmp/skills-layout',
-      sourceUrl: 'https://github.com/obra/superpowers.git',
-      updates: [
-        { memberEntry: 'brainstorming/SKILL.md', agents: ['codex'] },
-        { memberEntry: 'executing-plans/SKILL.md', agents: ['codex'] },
-        { memberEntry: 'disabled-skill/SKILL.md', agents: ['codex'] },
+      sources: [
+        {
+          sourceUrl: 'https://github.com/obra/superpowers.git',
+          updates: [
+            {
+              memberEntry: 'brainstorming/SKILL.md',
+              expectedAgents: ['codex'],
+              agents: ['codex'],
+            },
+            {
+              memberEntry: 'executing-plans/SKILL.md',
+              expectedAgents: [],
+              agents: ['codex'],
+            },
+            {
+              memberEntry: 'disabled-skill/SKILL.md',
+              expectedAgents: [],
+              agents: ['codex'],
+            },
+          ],
+        },
       ],
+      locals: [],
     })
-    expect(api.updateSkillAgents).not.toHaveBeenCalled()
-    expect(api.updateLocalSkillAgents).not.toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'local-only' }),
-    )
-    await waitFor(() => expect(api.project).toHaveBeenCalledTimes(1))
-    expect(api.project).toHaveBeenLastCalledWith({
-      repo: '/tmp/skills-layout',
-      scope: 'skills',
-      agent: 'codex',
-    })
+    expect(api.project).not.toHaveBeenCalled()
   })
 
-  it('updates skill bulk agents one item at a time', async () => {
-    let releaseFirst!: () => void
-    vi.mocked(api.updateSkillAgents).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          releaseFirst = () => resolve({ ok: true })
-        }) as never,
-    )
-
+  it('updates global skill agents with one batch request', async () => {
     render(
       <TestRouter>
         <Skills repoPath="/tmp/skills-layout" />
@@ -557,12 +591,8 @@ describe('Skills page', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Codex：部分已选择' }))
 
-    await waitFor(() => expect(api.updateSkillAgents).toHaveBeenCalledTimes(1))
-    expect(api.updateLocalSkillAgents).not.toHaveBeenCalled()
-
-    releaseFirst()
-    await waitFor(() => expect(api.updateLocalSkillAgents).toHaveBeenCalledTimes(2))
-    vi.mocked(api.updateSkillAgents).mockResolvedValue({ ok: true } as never)
+    await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
+    expect(api.project).not.toHaveBeenCalled()
   })
 })
 

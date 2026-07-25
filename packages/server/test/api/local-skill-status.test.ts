@@ -110,16 +110,29 @@ describe('source skill agent routes', () => {
       } as never),
     )
 
-    const response = await app.request('/api/skills/source-agents', {
+    const response = await app.request('/api/skills/agents/batch', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         repo: 'demo',
-        sourceUrl: 'https://example.test/skills.git',
-        updates: [
-          { memberEntry: 'skills/alpha/SKILL.md', agents: ['codex'] },
-          { memberEntry: 'skills/beta/SKILL.md', agents: ['codex', 'opencode'] },
+        sources: [
+          {
+            sourceUrl: 'https://example.test/skills.git',
+            updates: [
+              {
+                memberEntry: 'skills/alpha/SKILL.md',
+                expectedAgents: ['claude-code'],
+                agents: ['codex'],
+              },
+              {
+                memberEntry: 'skills/beta/SKILL.md',
+                expectedAgents: [],
+                agents: ['codex', 'opencode'],
+              },
+            ],
+          },
         ],
+        locals: [],
       }),
     })
 

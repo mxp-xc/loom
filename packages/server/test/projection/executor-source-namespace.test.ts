@@ -788,6 +788,49 @@ describe('source namespace projection', () => {
     expect(await fs.exists(join(userOwned, 'notes.md'))).toBe(true)
   })
 
+  it('limits targeted cleanup to the requested source and agent namespace', async () => {
+    const skillsDir = join(home, '.claude', 'skills')
+    const targeted = join(skillsDir, 'workflow-source')
+    const unrelated = join(skillsDir, 'other-source')
+    await mkdir(targeted, { recursive: true })
+    await mkdir(unrelated, { recursive: true })
+    await writeFile(join(targeted, '.loom-projection.json'), JSON.stringify(sourceMarker()))
+    await writeFile(
+      join(unrelated, '.loom-projection.json'),
+      JSON.stringify({
+        ...sourceMarker('https://example.com/other.git'),
+        sourceName: 'other-source',
+        namespace: 'other-source',
+      }),
+    )
+    await writeFile(join(unrelated, 'keep.md'), 'keep')
+
+    const result = await executeProjection(
+      projectionPlan([], 'copy'),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+      {
+        skillsTarget: {
+          sources: [
+            {
+              sourceName: 'workflow-source',
+              sourceUrl: 'https://example.com/workflow-source.git',
+              agents: ['claude-code'],
+            },
+          ],
+          locals: [],
+        },
+      },
+    )
+
+    expect(result).toEqual({ ok: true })
+    const fs = new NodeFileSystem()
+    expect(await fs.exists(targeted)).toBe(false)
+    expect(await fs.exists(join(unrelated, 'keep.md'))).toBe(true)
+  })
+
   it('preserves a managed namespace whose source is unavailable on this machine', async () => {
     const namespace = join(home, '.claude', 'skills', 'previous-source-name')
     await mkdir(namespace, { recursive: true })

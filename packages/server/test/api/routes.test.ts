@@ -1,15 +1,22 @@
 import { afterAll, describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { loadRepoManifest } from '@loom/core'
 import { registerRoutes } from '../../src/api/router'
 import { responseJson, validationError } from '../helpers/http.js'
 import {
   loadDisplayManifest,
   loadProjectionManifest,
+  loadSkillsMutationManifest,
   projectRepository,
 } from '../../src/projection/workflow.js'
 import { syncForcePush, syncPush } from '../../src/sync/push'
 import { SyncSessionError } from '../../src/sync/session-manager.js'
 import { ResourceLeaseCoordinator } from '../../src/concurrency/resource-lease-coordinator.js'
+import { listRepos } from '../../src/api/repo.js'
+import { NodeFileSystem } from '../../src/platform/node/fs.js'
 
 const platformGit = vi.hoisted(() => ({
   status: vi.fn(async () => {
@@ -71,6 +78,15 @@ vi.mock('../../src/projection/workflow.js', () => ({
     config: {},
     errors: [],
   })),
+  loadSkillsMutationManifest: vi.fn(async () => ({
+    skills: { sources: [], skills: [] },
+    mcp: [],
+    vars: { default: {}, active: {} },
+    memory: { memories: [], active: null, activeContent: '' },
+    config: {},
+    errors: [],
+  })),
+  projectSkillChanges: vi.fn(async () => ({ ok: true })),
   projectRepository: vi.fn(async () => ({ ok: true })),
 }))
 vi.mock('../../src/sync/session-manager.js', () => ({
@@ -160,6 +176,130 @@ describe('API routes', () => {
     expect(second).toBe(first)
     await first
     expect(syncManager.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not block API readiness on source cache warmup and waits for it during dispose', async () => {
+    let releaseWarmup!: (repositories: string[]) => void
+    vi.mocked(listRepos).mockImplementationOnce(
+      () =>
+        new Promise<string[]>((resolve) => {
+          releaseWarmup = resolve
+        }),
+    )
+    const runtime = registerRoutes()
+    const runtimeApp = new Hono().route('/api', runtime)
+
+    const health = await runtimeApp.request('/api/health')
+    expect(health.status).toBe(200)
+
+    let disposed = false
+    const disposal = runtime.dispose().then(() => {
+      disposed = true
+    })
+    await Promise.resolve()
+    expect(disposed).toBe(false)
+
+    releaseWarmup([])
+    await disposal
+    expect(disposed).toBe(true)
+  })
+
+  it('does not hold the repository lease while startup source health inspection is pending', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'loom-startup-source-health-'))
+    const repoPath = join(home, '.loom', 'repos', 'default')
+    const cachePath = join(repoPath, 'remote-cache', 'source-a')
+    await mkdir(join(cachePath, '.git'), { recursive: true })
+    await writeFile(join(home, '.loom', 'config.yaml'), 'active_repo: default\n')
+    await writeFile(join(repoPath, 'config.yaml'), 'agents: []\n')
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: source-a',
+        '    url: https://example.test/source-a.git',
+        '    ref: main',
+        '    pinned_commit: commit-a',
+        '    members: []',
+        'skills:',
+        '  - id: demo',
+        '    agents: []',
+        '',
+      ].join('\n'),
+    )
+    let markHealthStarted!: () => void
+    const healthStarted = new Promise<void>((resolve) => {
+      markHealthStarted = resolve
+    })
+    let releaseHealth!: () => void
+    const healthRelease = new Promise<void>((resolve) => {
+      releaseHealth = resolve
+    })
+    const git = {
+      revParseHead: vi.fn(async () => {
+        markHealthStarted()
+        await healthRelease
+        return 'commit-a'
+      }),
+      readTree: vi.fn(async () => []),
+    }
+    const fs = new NodeFileSystem()
+    const leases = new ResourceLeaseCoordinator(async () => async () => undefined)
+    vi.mocked(listRepos).mockResolvedValueOnce([repoPath])
+    const startupManifest = {
+      skills: {
+        sources: [
+          {
+            name: 'source-a',
+            url: 'https://example.test/source-a.git',
+            ref: 'main',
+            pinned_commit: 'commit-a',
+            members: [],
+          },
+        ],
+        skills: [{ id: 'demo', agents: [] }],
+      },
+      mcp: [],
+      varsFiles: {},
+      repoConfig: { agents: [] },
+      memoriesFiles: {},
+      loadDiagnostics: [],
+    }
+    vi.mocked(loadRepoManifest)
+      .mockReturnValueOnce(startupManifest)
+      .mockReturnValueOnce(startupManifest)
+    vi.mocked(loadSkillsMutationManifest).mockResolvedValueOnce({
+      skills: { sources: [], skills: [{ id: 'demo', agents: [] }] },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      memory: { memories: [], active: null, activeContent: '' },
+      config: { agents: [] },
+      errors: [],
+    } as never)
+    const runtime = registerRoutes({ fs, git: git as never, proc: {} as never, home, leases })
+    const runtimeApp = new Hono().route('/api', runtime)
+
+    try {
+      await healthStarted
+      const response = runtimeApp.request('/api/skills/agents/batch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          repo: repoPath,
+          sources: [],
+          locals: [{ id: 'demo', expectedAgents: [], agents: [] }],
+        }),
+      })
+      await expect(
+        Promise.race([
+          Promise.resolve(response).then((result) => result.status),
+          new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 1_000)),
+        ]),
+      ).resolves.toBe(200)
+    } finally {
+      releaseHealth()
+      await runtime.dispose()
+      await rm(home, { recursive: true, force: true })
+    }
   })
 
   it('does not start or dispose an injected sync manager', async () => {

@@ -14,10 +14,10 @@ import {
   LocalSkillSchema,
   SOURCE_NAME_REGEX,
   setLocalSkillAgents as setLocalSkillAgentsMutation,
-  setSkillAgents as setSkillAgentsMutation,
   setSourceMembers as setSourceMembersMutation,
   setSourceMemberAgents as setSourceMemberAgentsMutation,
   updateSourceMeta as updateSourceMetaMutation,
+  AGENT_IDS,
   type AgentId,
   type LocalSkill,
   type SourceResources,
@@ -59,6 +59,8 @@ import {
   readPinnedLocalArchive,
   type LocalArchiveFile,
 } from './local-directory-transaction.js'
+import type { SkillsProjectionChangeSet } from '../projection/change-set.js'
+import type { ProjectionWarning } from '../projection/executor.js'
 
 const skillsLogger = logger.child('skills-application')
 
@@ -106,10 +108,12 @@ export interface ReconcileSourceCommand extends SourceMetaFields {
   preserve?: string[]
 }
 
-export interface SetSkillAgentsCommand {
-  sourceUrl: string
-  memberEntry: string
-  agents: AgentId[]
+export interface SetSkillAgentsBatchCommand {
+  sources: Array<{
+    sourceUrl: string
+    updates: Array<{ memberEntry: string; expectedAgents: AgentId[]; agents: AgentId[] }>
+  }>
+  locals: Array<{ id: string; expectedAgents: AgentId[]; agents: AgentId[] }>
 }
 
 export class SkillsApplication {
@@ -118,7 +122,10 @@ export class SkillsApplication {
     private readonly git: IGit,
     private readonly home: string,
     private readonly log: LoggerPort = skillsLogger,
-    private readonly projectSkills?: (repoPath: string) => Promise<void>,
+    private readonly projectSkills?: (
+      repoPath: string,
+      changes?: SkillsProjectionChangeSet,
+    ) => Promise<readonly ProjectionWarning[] | void>,
   ) {}
 
   async scanLocalSkills(command: { dir: string; repoPath?: string }): Promise<ScannedLocalSkill[]> {
@@ -708,43 +715,85 @@ export class SkillsApplication {
     }
   }
 
-  async setSkillAgents(repoPath: string, command: SetSkillAgentsCommand): Promise<void> {
-    const result = await this.updateManifest(repoPath, (manifest) =>
-      setSkillAgentsMutation(manifest, command.sourceUrl, command.memberEntry, command.agents),
-    )
-    if (!result.changed) throw sourceNotFound(command.sourceUrl)
-  }
-
-  async setSourceMemberAgents(
+  async setSkillAgentsBatch(
     repoPath: string,
-    sourceUrl: string,
-    updates: Array<{ memberEntry: string; agents: AgentId[] }>,
-  ): Promise<void> {
-    const memberUpdates = updates.map((update) => ({
-      memberEntry: String(update?.memberEntry ?? ''),
-      agents: Array.isArray(update?.agents) ? update.agents : [],
-    }))
-    const result = await this.updateManifest(repoPath, (manifest) =>
-      setSourceMemberAgentsMutation(manifest, sourceUrl, memberUpdates),
-    )
-    if (!result.changed) throw sourceNotFound(sourceUrl)
-  }
-
-  async setLocalSkillAgents(repoPath: string, id: string, agents: AgentId[]): Promise<void> {
-    assertLocalSkillIdentifier(id)
+    command: SetSkillAgentsBatchCommand,
+  ): Promise<{ warnings?: ProjectionWarning[] }> {
     const manifest = await this.readManifest(repoPath)
-    const registered = indexRegisteredLocalSkills(manifest).get(id)
-    const result = registered
-      ? setLocalSkillAgentsMutation(manifest, id, agents)
-      : addLocalSkillMutation(manifest, {
-          id: requireAvailableLocalSkill(
-            await resolveEffectiveLocalSkill(this.fs, repoPath, manifest, id),
-            id,
-          ).id,
-          agents,
-        })
-    if (!result.changed) throw localSkillNotFound(id)
-    await this.writeManifest(repoPath, result.data)
+    let next = manifest
+    const sourceUrls = new Set<string>()
+    const localIds = new Set<string>()
+
+    for (const sourceUpdate of command.sources) {
+      if (sourceUrls.has(sourceUpdate.sourceUrl)) throw invalidAgentBatch()
+      sourceUrls.add(sourceUpdate.sourceUrl)
+      const source = next.sources.find((candidate) => candidate.url === sourceUpdate.sourceUrl)
+      if (!source) throw sourceNotFound(sourceUpdate.sourceUrl)
+      const members = new Map((source.members ?? []).map((member) => [member.entry, member]))
+      const memberEntries = new Set<string>()
+      for (const update of sourceUpdate.updates) {
+        const memberEntry = update.memberEntry.trim()
+        if (memberEntries.has(memberEntry)) throw invalidAgentBatch()
+        memberEntries.add(memberEntry)
+        const member = members.get(memberEntry)
+        if (!member) {
+          throw sourceMemberNotFound(sourceUpdate.sourceUrl, memberEntry)
+        }
+        if (!sameAgentSelection(member.agents, update.expectedAgents)) {
+          throw staleAgentBatch()
+        }
+      }
+      const result = setSourceMemberAgentsMutation(
+        next,
+        sourceUpdate.sourceUrl,
+        sourceUpdate.updates,
+      )
+      if (!result.changed) throw sourceNotFound(sourceUpdate.sourceUrl)
+      next = result.data
+    }
+    for (const localUpdate of command.locals) {
+      assertLocalSkillIdentifier(localUpdate.id)
+      if (localIds.has(localUpdate.id)) throw invalidAgentBatch()
+      localIds.add(localUpdate.id)
+      const registered = indexRegisteredLocalSkills(next).get(localUpdate.id)
+      if (!sameAgentSelection(registered?.agents, localUpdate.expectedAgents)) {
+        throw staleAgentBatch()
+      }
+      const result = registered
+        ? setLocalSkillAgentsMutation(next, localUpdate.id, localUpdate.agents)
+        : addLocalSkillMutation(next, {
+            id: requireAvailableLocalSkill(
+              await resolveEffectiveLocalSkill(this.fs, repoPath, next, localUpdate.id),
+              localUpdate.id,
+            ).id,
+            agents: localUpdate.agents,
+          })
+      if (!result.changed) throw localSkillNotFound(localUpdate.id)
+      next = result.data
+    }
+
+    if (command.sources.length > 0 || command.locals.length > 0) {
+      await this.writeManifest(repoPath, next)
+    }
+    const changes: SkillsProjectionChangeSet = {
+      sources: command.sources.flatMap(({ sourceUrl }) => {
+        const previous = manifest.sources.find((source) => source.url === sourceUrl)
+        const current = next.sources.find((source) => source.url === sourceUrl)
+        const agents = changedSourceAgents(previous?.members, current?.members)
+        return agents.length > 0 ? [{ sourceUrl, agents }] : []
+      }),
+      locals: command.locals.flatMap(({ id }) => {
+        const previous = manifest.skills.find((skill) => skill.id === id)
+        const current = next.skills.find((skill) => skill.id === id)
+        const agents = changedAgents(previous?.agents, current?.agents)
+        return agents.length > 0 ? [{ skillId: id, agents }] : []
+      }),
+    }
+    const warnings =
+      changes.sources.length > 0 || changes.locals.length > 0
+        ? await this.projectSkills?.(repoPath, changes)
+        : undefined
+    return warnings?.length ? { warnings: [...warnings] } : {}
   }
 
   async reorderGroups(repoPath: string, ids: string[]): Promise<{ ids: string[] }> {
@@ -941,6 +990,42 @@ function assertUniqueLocalSkillNames(names: string[]): void {
   }
 }
 
+function changedAgents(
+  previous: readonly AgentId[] | undefined,
+  next: readonly AgentId[] | undefined,
+): AgentId[] {
+  const before = new Set(previous ?? [])
+  const after = new Set(next ?? [])
+  return AGENT_IDS.filter((agent) => before.has(agent) !== after.has(agent))
+}
+
+function sameAgentSelection(
+  current: readonly AgentId[] | undefined,
+  expected: readonly AgentId[],
+): boolean {
+  const currentSet = new Set(current ?? [])
+  const expectedSet = new Set(expected)
+  return (
+    currentSet.size === expectedSet.size && [...currentSet].every((agent) => expectedSet.has(agent))
+  )
+}
+
+function changedSourceAgents(
+  previous: readonly { entry: string; agents?: AgentId[] }[] | undefined,
+  next: readonly { entry: string; agents?: AgentId[] }[] | undefined,
+): AgentId[] {
+  const before = new Map((previous ?? []).map((member) => [member.entry, member.agents]))
+  const changed = new Set<AgentId>()
+  for (const member of next ?? []) {
+    for (const agent of changedAgents(before.get(member.entry), member.agents)) changed.add(agent)
+    before.delete(member.entry)
+  }
+  for (const agents of before.values()) {
+    for (const agent of changedAgents(agents, [])) changed.add(agent)
+  }
+  return AGENT_IDS.filter((agent) => changed.has(agent))
+}
+
 function alreadyExists(skillName: string): SkillsApplicationError {
   return new SkillsApplicationError(
     409,
@@ -953,8 +1038,24 @@ function sourceNotFound(url: string): SkillsApplicationError {
   return new SkillsApplicationError(404, 'not_found', `Source ${url} not found`)
 }
 
+function sourceMemberNotFound(url: string, entry: string): SkillsApplicationError {
+  return new SkillsApplicationError(404, 'not_found', `Source member ${entry} not found in ${url}`)
+}
+
 function localSkillNotFound(id: string): SkillsApplicationError {
   return new SkillsApplicationError(404, 'local_skill_not_found', `Local skill ${id} not found`)
+}
+
+function invalidAgentBatch(): SkillsApplicationError {
+  return new SkillsApplicationError(400, 'invalid_agent_batch', 'Duplicate skill agent target')
+}
+
+function staleAgentBatch(): SkillsApplicationError {
+  return new SkillsApplicationError(
+    409,
+    'stale_agent_state',
+    'Skill agent state changed; refresh and retry',
+  )
 }
 
 function sourceCommitChanged(expectedCommit: string, actualCommit: string): SkillsApplicationError {

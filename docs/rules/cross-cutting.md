@@ -71,10 +71,10 @@ Rule:
 
 Implications:
 
-- 单个 agent toggle 保存 manifest 后，会投影相关 scope。
-- Skills agent toggle 和按 agent 的批量操作只 reconcile 该 agent，不能被其他 agent 的 destination conflict 阻断；手动投影和非 agent-specific mutation 仍 reconcile 全部 applicable agents。
+- Skills 单个 agent toggle 由 server 在保存 manifest 后定向投影变化的 artifact。
+- Skills agent toggle 和按 agent 的批量操作只 reconcile 发生变化的 target 与 agent，不能被其他 agent 的 destination conflict 阻断；手动投影和非 agent-specific mutation 仍 reconcile 全部 applicable agents。
 - Memory 页面修改某个 agent 的 Memory assignment 后，会自动运行 memory projection。
-- 批量 agent 更新在所有 manifest 更新成功后投影。
+- Skills 批量 agent 更新使用一次 batch command、一次 manifest 写入和一次定向投影事务。
 - 保存 source members/resources selection 后，会投影 skills。
 - MCP agent chip 和全局 agent chip 只保存 desired agent state，不自动投影；MCP projection 由 Project changes 显式触发。
 
@@ -82,6 +82,8 @@ Safety:
 
 - 批量更新中途失败且已有部分更新成功时，要刷新 manifest，让 UI 反映已保存状态。
 - projection 成功前不能报告整体成功。
+- Skills agent batch 的每个 target 携带 `expectedAgents`；server 在 lease 内与当前 manifest 比较，任一不匹配返回 409 `stale_agent_state`，整批不写入、不投影。
+- Successful projection warning 必须传播到 UI；UI 刷新 manifest、显示 warning，并抑制普通 success/toast。
 
 Examples:
 
@@ -112,6 +114,8 @@ Implications:
 - Source 级 skills 批量控制只作用于该 source 下 selected members。
 - Item 级控制只作用于该 item。
 - Source 内容选择与 agent 应用是分离的操作；Add/Edit Source 内不提供 agent controls。
+- 单 item 是 batch 的单元素特例；source/global bulk 不按 item 或 member 发请求、写 manifest 或执行 projection。
+- Item、source 与 global skills agent controls 共用一个 pending gate，不能用同一份旧 manifest 并发提交多个 batch。
 
 Safety:
 

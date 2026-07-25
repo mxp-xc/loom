@@ -1,21 +1,34 @@
 import { Hono, type Context } from 'hono'
-import { AgentIdSchema, LocalSkillIdSchema, LocalSkillSchema } from '@loom/core'
+import { AgentIdSchema, LocalSkillIdSchema, LocalSkillSchema, deriveRepoId } from '@loom/core'
 import { z } from 'zod'
 import { SkillsApplication, SkillsApplicationError } from '../../skills/application.js'
 import { logger } from '../../lib/logger.js'
 import { jsonValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
-import { projectRepository } from '../../projection/workflow.js'
+import {
+  loadSkillsMutationManifest,
+  projectRepository,
+  projectSkillChanges,
+} from '../../projection/workflow.js'
 import { LocalSkillBoundaryError } from '../../skills/local-paths.js'
 import { repositoryErrorResponse } from '../repository-route-error.js'
-import { RepoConfigError } from '../repo-config.js'
+import { readSkillsManifest, RepoConfigError } from '../repo-config.js'
 import { homeResourceKey, projectionResourceKeys } from '../../concurrency/resource-keys.js'
-import { withRepositoryLease } from '../repository-lease.js'
+import { canonicalRepositoryHome, withRepositoryLease } from '../repository-lease.js'
 import { resourceLeases } from '../../concurrency/resource-lease-coordinator.js'
+import {
+  invalidateSourceRuntimeCatalogs,
+  refreshSourceRuntimeCatalogs,
+} from '../../remote/source-cache-health.js'
 
 const skillsRouteLogger = logger.child('skills-route')
 const RepoField = z.unknown().optional()
 const NonEmptyString = z.string().min(1)
+const AgentSelection = z.array(AgentIdSchema).superRefine((agents, ctx) => {
+  if (new Set(agents).size !== agents.length) {
+    ctx.addIssue({ code: 'custom', message: 'agents must be unique' })
+  }
+})
 
 const LocalSkillBody = LocalSkillSchema
 
@@ -98,27 +111,36 @@ const ReconcileSourceBody = UpdateSourceBody.extend({
 
 const DeleteLocalSkillBody = z.object({ repo: RepoField, id: LocalSkillIdSchema }).strict()
 
-const SetSkillAgentsBody = z.object({
-  repo: RepoField,
-  sourceUrl: NonEmptyString,
-  memberEntry: NonEmptyString,
-  agents: z.array(AgentIdSchema),
-})
-
-const SetSourceMemberAgentsBody = z.object({
-  repo: RepoField,
-  sourceUrl: NonEmptyString,
-  updates: z.array(
-    z.object({
-      memberEntry: NonEmptyString,
-      agents: z.array(AgentIdSchema),
-    }),
-  ),
-})
-
-const SetLocalSkillAgentsBody = DeleteLocalSkillBody.extend({
-  agents: z.array(AgentIdSchema),
-})
+const SetSkillAgentsBatchBody = z
+  .object({
+    repo: RepoField,
+    sources: z.array(
+      z
+        .object({
+          sourceUrl: NonEmptyString,
+          updates: z.array(
+            z
+              .object({
+                memberEntry: NonEmptyString,
+                expectedAgents: AgentSelection,
+                agents: AgentSelection,
+              })
+              .strict(),
+          ),
+        })
+        .strict(),
+    ),
+    locals: z.array(
+      z
+        .object({
+          id: LocalSkillIdSchema,
+          expectedAgents: AgentSelection,
+          agents: AgentSelection,
+        })
+        .strict(),
+    ),
+  })
+  .strict()
 
 const ReorderSkillGroupsBody = z.object({
   repo: RepoField,
@@ -135,6 +157,20 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     mode: 'read' | 'mutation',
     operation: (repoPath: string) => Promise<T>,
   ) => withRepositoryLease(leaseDeps, repo as string, mode, (repoPath) => [repoPath], operation)
+  const runSkillsMutation = async <T>(
+    repo: unknown,
+    operation: (repoPath: string, scopedDeps: RouteDeps) => Promise<T>,
+  ) => {
+    const home = await canonicalRepositoryHome(deps)
+    const scopedDeps = { ...leaseDeps, home }
+    return withRepositoryLease(
+      scopedDeps,
+      repo as string,
+      'mutation',
+      (repoPath) => projectionResourceKeys(home, repoPath, home, 'skills'),
+      (repoPath) => operation(repoPath, scopedDeps),
+    )
+  }
 
   app.post(
     '/skills/local',
@@ -217,9 +253,18 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   app.post('/sources', jsonValidator(AddSourceBody, { error: sourceError }), async (c) => {
     try {
       const { repo, name, url, ref, type, members, resources } = c.req.valid('json')
-      const result = await runRepo(repo, 'mutation', (repoPath) =>
-        skills.addSource(repoPath, { name, url, ref, type, members, resources }),
-      )
+      const result = await runRepo(repo, 'mutation', async (repoPath) => {
+        const added = await skills.addSource(repoPath, {
+          name,
+          url,
+          ref,
+          type,
+          members,
+          resources,
+        })
+        await refreshSourceCatalogs(deps, repoPath, added.source)
+        return added
+      })
       return c.json({ ok: true, source: result.source })
     } catch (e) {
       return skillsErrorResponse(c, e, {
@@ -233,7 +278,15 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   app.delete('/sources', jsonValidator(SourceUrlBody, { error: 'invalid_url' }), async (c) => {
     try {
       const { repo, url } = c.req.valid('json')
-      await runRepo(repo, 'mutation', (repoPath) => skills.removeSource(repoPath, url))
+      await runRepo(repo, 'mutation', async (repoPath) => {
+        await skills.removeSource(repoPath, url)
+        invalidateSourceRuntimeCatalogs(
+          deps.sourceProjectionCatalog,
+          deps.sourceCacheHealthCatalog,
+          repoPath,
+          url,
+        )
+      })
       return c.json({ ok: true })
     } catch (e) {
       return skillsErrorResponse(c, e, {
@@ -257,7 +310,18 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
           body.repo as string,
           'mutation',
           (repoPath) => projectionResourceKeys(home, repoPath, home, 'skills'),
-          (repoPath) => createSkillsApplication(scopedDeps).reconcileSource(repoPath, body),
+          async (repoPath) => {
+            const reconciled = await createSkillsApplication(scopedDeps).reconcileSource(
+              repoPath,
+              body,
+            )
+            if (reconciled.finalized) {
+              const manifest = await readSkillsManifest(deps.fs, repoPath)
+              const source = manifest.sources?.find((candidate) => candidate.url === body.url)
+              if (source) await refreshSourceCatalogs(deps, repoPath, source)
+            }
+            return reconciled
+          },
         )
         return c.json({ ok: true, ...result })
       } catch (e) {
@@ -290,63 +354,31 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   )
 
   app.post(
-    '/skills/agents',
-    jsonValidator(SetSkillAgentsBody, { error: skillAgentsError }),
+    '/skills/agents/batch',
+    jsonValidator(SetSkillAgentsBatchBody, { error: 'invalid_agent_batch' }),
     async (c) => {
       try {
-        const { repo, sourceUrl, memberEntry, agents } = c.req.valid('json')
-        await runRepo(repo, 'mutation', (repoPath) =>
-          skills.setSkillAgents(repoPath, { sourceUrl, memberEntry, agents }),
-        )
-        return c.json({ ok: true })
+        const { repo, sources, locals } = c.req.valid('json')
+        const result = await runSkillsMutation(repo, async (repoPath, scopedDeps) => {
+          const manifest = await loadSkillsMutationManifest(scopedDeps, repoPath)
+          if (manifest.errors.length > 0) {
+            throw new SkillsApplicationError(
+              422,
+              'invalid_skills_manifest',
+              manifest.errors.join('; '),
+            )
+          }
+          return createSkillsApplication(scopedDeps).setSkillAgentsBatch(repoPath, {
+            sources,
+            locals,
+          })
+        })
+        return c.json({ ok: true, ...result })
       } catch (e) {
         return skillsErrorResponse(c, e, {
           code: 'update_failed',
           message: 'Failed to update skill agents',
-          logMessage: 'skill agent update failed',
-        })
-      }
-    },
-  )
-
-  app.post(
-    '/skills/source-agents',
-    jsonValidator(SetSourceMemberAgentsBody, {
-      error: (issues) =>
-        issues[0]?.path[0] === 'sourceUrl' ? 'invalid_source_url' : 'invalid_updates',
-    }),
-    async (c) => {
-      try {
-        const { repo, sourceUrl, updates } = c.req.valid('json')
-        await runRepo(repo, 'mutation', (repoPath) =>
-          skills.setSourceMemberAgents(repoPath, sourceUrl, updates),
-        )
-        return c.json({ ok: true })
-      } catch (e) {
-        return skillsErrorResponse(c, e, {
-          code: 'update_failed',
-          message: 'Failed to update source member agents',
-          logMessage: 'source member agent update failed',
-        })
-      }
-    },
-  )
-
-  app.post(
-    '/skills/local/agents',
-    jsonValidator(SetLocalSkillAgentsBody, { error: localSkillAgentsError }),
-    async (c) => {
-      try {
-        const { repo, id, agents } = c.req.valid('json')
-        await runRepo(repo, 'mutation', (repoPath) =>
-          skills.setLocalSkillAgents(repoPath, id, agents),
-        )
-        return c.json({ ok: true })
-      } catch (e) {
-        return skillsErrorResponse(c, e, {
-          code: 'update_failed',
-          message: 'Failed to update local skill agents',
-          logMessage: 'local skill agent update failed',
+          logMessage: 'skill agent batch update failed',
         })
       }
     },
@@ -376,10 +408,47 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 }
 
 function createSkillsApplication(deps: RouteDeps): SkillsApplication {
-  return new SkillsApplication(deps.fs, deps.git, deps.home, undefined, async (repoPath) => {
-    const projected = await projectRepository(deps, repoPath, { scope: 'skills' })
-    if (!projected.ok) throw projected.failure.originalError
-  })
+  return new SkillsApplication(
+    deps.fs,
+    deps.git,
+    deps.home,
+    undefined,
+    async (repoPath, changes) => {
+      const projected = changes
+        ? await projectSkillChanges(deps, repoPath, changes)
+        : await projectRepository(deps, repoPath, { scope: 'skills' })
+      if (!projected.ok) throw projected.failure.originalError
+      return projected.warnings
+    },
+  )
+}
+
+async function refreshSourceCatalogs(
+  deps: RouteDeps,
+  repoPath: string,
+  source: Awaited<ReturnType<typeof readSkillsManifest>>['sources'][number],
+): Promise<void> {
+  try {
+    const health = await refreshSourceRuntimeCatalogs(
+      deps.fs,
+      deps.git,
+      deps.sourceProjectionCatalog,
+      deps.sourceCacheHealthCatalog,
+      repoPath,
+      source,
+    )
+    if (!health.healthy) {
+      skillsRouteLogger.error('source cache is unhealthy after source mutation', {
+        err: health.err ?? new Error(`Source cache is ${health.reason}`),
+        sourceId: deriveRepoId(source.url),
+      })
+    }
+  } catch (err) {
+    skillsRouteLogger.error('source runtime catalog refresh failed', {
+      err,
+      sourceId: deriveRepoId(source.url),
+    })
+  }
 }
 
 function skillsRepositoryFailure(
@@ -403,17 +472,6 @@ function updateSourceError(issues: z.ZodIssue[]): string {
   if (field === 'name') return 'invalid_source_name'
   if (field === 'ref') return 'invalid_ref'
   return 'invalid_url'
-}
-
-function skillAgentsError(issues: z.ZodIssue[]): string {
-  const field = issues[0]?.path[0]
-  if (field === 'sourceUrl') return 'invalid_source_url'
-  if (field === 'memberEntry') return 'invalid_member_entry'
-  return 'invalid_agents'
-}
-
-function localSkillAgentsError(issues: z.ZodIssue[]): string {
-  return issues[0]?.path[0] === 'id' ? 'invalid_id' : 'invalid_agents'
 }
 
 type SkillsErrorStatus = 400 | 404 | 409 | 422 | 500
