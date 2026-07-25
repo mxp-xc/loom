@@ -98,6 +98,7 @@ export interface SkillsProjectionTarget {
 
 export interface ProjectionExecutionOptions {
   skillsTarget?: SkillsProjectionTarget
+  skillsCleanupAgents?: ReadonlySet<AgentId>
 }
 const COPY_MARKER = '.loom-projection.json'
 const SOURCE_MARKER_KIND = 'skill-source'
@@ -143,14 +144,25 @@ export async function executeProjection(
       contextSupportsAgentCapability(agent, 'skills', pathContext),
     ),
   )
+  const skillsCleanupAgents = new Set(
+    [...(options.skillsCleanupAgents ?? installedSkillAgents)].filter((agent) =>
+      contextSupportsAgentCapability(agent, 'skills', pathContext),
+    ),
+  )
   try {
     const preparedSkills =
       (scope === 'skills' || scope === 'all') && (!skillsTarget || skillsTarget.locals.length > 0)
-        ? await prepareSkillProjection(plan, installedSkillAgents, deps, skillsTarget?.locals)
+        ? await prepareSkillProjection(
+            plan,
+            installedSkillAgents,
+            skillsCleanupAgents,
+            deps,
+            skillsTarget?.locals,
+          )
         : null
     const preparedSources =
       (scope === 'skills' || scope === 'all') && (!skillsTarget || skillsTarget.sources.length > 0)
-        ? await prepareSourceNamespaces(plan, deps, skillsTarget?.sources)
+        ? await prepareSourceNamespaces(plan, deps, skillsTarget?.sources, skillsCleanupAgents)
         : null
     const preparedMcp =
       scope === 'mcp' || scope === 'all'
@@ -545,6 +557,7 @@ interface PreparedSkillProjection {
 async function prepareSkillProjection(
   plan: ProjectionPlan,
   installedAgents: Set<AgentId>,
+  cleanupAgents: Set<AgentId>,
   deps: ProjectionDeps,
   targets?: Array<{ skillId: string; agents: AgentId[] }>,
 ): Promise<PreparedSkillProjection> {
@@ -573,7 +586,7 @@ async function prepareSkillProjection(
       }
     }
 
-    const agents = scopedAgents ?? new Set<AgentId>([...installedAgents, ...link.agents])
+    const agents = scopedAgents ?? new Set<AgentId>([...cleanupAgents, ...link.agents])
     const needsSource = [...agents].some((agent) => link.agents.includes(agent))
     const resolvedSource = needsSource ? deps.resolveSkillSrc(link) : null
     let source: StableDirectoryTree | null = null
@@ -671,7 +684,7 @@ async function prepareSkillProjection(
   }
 
   if (!targetAgents)
-    for (const agent of installedAgents) {
+    for (const agent of cleanupAgents) {
       for (const [skillId, expectedArtifact] of Object.entries(currentArtifacts[agent] ?? {})) {
         if (planSkillIds.has(skillId)) continue
         assertSafeSkillDestination(skillId, true)
@@ -1218,6 +1231,7 @@ async function prepareSourceNamespaces(
   plan: ProjectionPlan,
   deps: ProjectionDeps,
   targets?: Array<{ sourceName: string; sourceUrl: string; agents: AgentId[] }>,
+  cleanupAgents: ReadonlySet<AgentId> = deps.installedAgents,
 ): Promise<PreparedSourceNamespaces> {
   if ((plan.sourcePlans?.length ?? 0) > 0 && !deps.ownerRepo) {
     throw new Error('Source projection ownerRepo is unavailable')
@@ -1342,7 +1356,7 @@ async function prepareSourceNamespaces(
       : await prepareOrphanedSourceNamespaces(
           desired,
           deps.ownerRepo,
-          deps.installedAgents,
+          cleanupAgents,
           deps.fs,
           pathContext,
           preservedSourceKeysByAgent,
@@ -1898,7 +1912,7 @@ async function revalidateManagedSourceNamespace(
 async function prepareOrphanedSourceNamespaces(
   desired: Set<string>,
   ownerRepo: string,
-  installedAgents: Set<AgentId>,
+  installedAgents: ReadonlySet<AgentId>,
   fs: IFileSystem,
   pathContext: AgentPathContext,
   preservedSourceKeysByAgent: Map<AgentId, Set<string>> = new Map(),

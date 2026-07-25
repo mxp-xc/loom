@@ -772,9 +772,6 @@ export class SkillsApplication {
       next = result.data
     }
 
-    if (command.sources.length > 0 || command.locals.length > 0) {
-      await this.writeManifest(repoPath, next)
-    }
     const changes: SkillsProjectionChangeSet = {
       sources: command.sources.flatMap(({ sourceUrl }) => {
         const previous = manifest.sources.find((source) => source.url === sourceUrl)
@@ -788,6 +785,9 @@ export class SkillsApplication {
         const agents = changedAgents(previous?.agents, current?.agents)
         return agents.length > 0 ? [{ skillId: id, agents }] : []
       }),
+    }
+    if (changes.sources.length > 0 || changes.locals.length > 0) {
+      await this.writeManifest(repoPath, next)
     }
     const warnings =
       changes.sources.length > 0 || changes.locals.length > 0

@@ -515,6 +515,7 @@ export default function SkillSourceList({
             a.path.localeCompare(b.path, 'en'),
           )
           const resourceRuleCount = includedResources.length + excludedResources.length
+          const hasSkillMembers = (src.members?.length ?? 0) > 0
           const resourcesVisible = !hiddenResourceSources.has(src.url)
           const resourceSectionId = `source-resources-${repoId}`
           const repositoryWebUrl = inferRepositoryWebUrl(src.url)
@@ -576,7 +577,7 @@ export default function SkillSourceList({
                     </span>
                   )}
                   <span className={styles.gacts} onClick={(e) => e.stopPropagation()}>
-                    {visibleAgents.length > 0 && (
+                    {visibleAgents.length > 0 && hasSkillMembers && (
                       <span
                         className={cn('agent-chips', styles['source-agent-chips'])}
                         aria-label={`${repoId} 批量投影`}
@@ -606,7 +607,7 @@ export default function SkillSourceList({
                         })}
                       </span>
                     )}
-                    {visibleAgents.length > 0 && (
+                    {visibleAgents.length > 0 && hasSkillMembers && (
                       <span className={styles['source-actions-divider']} />
                     )}
                     {isExpanded && resourceRuleCount > 0 && (

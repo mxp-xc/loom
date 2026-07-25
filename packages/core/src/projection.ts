@@ -175,8 +175,8 @@ export function planProjection(
   }
 }
 
-function assertSkillDestinationCollisions(
-  links: LinkPlan[],
+export function assertSkillDestinationCollisions(
+  links: Array<Pick<LinkPlan, 'skillId' | 'agents'>>,
   sourcePlans: Array<Pick<SourceProjectionPlan, 'sourceName' | 'agent'>>,
 ): void {
   const namespacesByAgent = new Map<

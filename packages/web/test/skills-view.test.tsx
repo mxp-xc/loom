@@ -322,6 +322,37 @@ describe('Skills page', () => {
     expect(document.querySelector('[data-agent-chip="true"]')).toBeNull()
   })
 
+  it('hides global agent controls for a resource-only source', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: {
+        sources: [
+          {
+            name: 'resource-source',
+            url: 'https://example.test/resources.git',
+            ref: 'main',
+            members: [],
+            resources: { include: [{ path: 'docs', kind: 'directory' }], exclude: [] },
+          },
+        ],
+        skills: [],
+      },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: ['codex'] },
+      errors: [],
+    } as never)
+
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-resource-only" />
+      </TestRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: '添加 Skill 或 Source' })).toBeDefined()
+    expect(screen.queryByText('批量设置 · 应用于全部 skills')).toBeNull()
+    expect(screen.queryByLabelText('resource-source 批量投影')).toBeNull()
+  })
+
   it('clears stale project errors after a successful project mutation refreshes manifest', async () => {
     const repoPath = '/tmp/skills-project-error-clear'
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})

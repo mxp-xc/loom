@@ -1,7 +1,9 @@
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import {
-  buildManifest,
+  agentsSupporting,
   applicableAgents,
+  assertSkillDestinationCollisions,
+  buildManifest,
   configuredAgents,
   deriveRepoId,
   loadRepoManifest,
@@ -114,7 +116,17 @@ export async function projectRepository(
     localSourceEntries,
     sourceCaches,
   )
-  const result = await executeProjection(plan, manifest, varsCtx, projectionDeps, scope)
+  const skillsCleanupAgents =
+    scope === 'skills' || scope === 'all'
+      ? new Set(
+          input.agent
+            ? agentsSupporting('skills').filter((agent) => agent === input.agent)
+            : agentsSupporting('skills'),
+        )
+      : undefined
+  const result = await executeProjection(plan, manifest, varsCtx, projectionDeps, scope, {
+    ...(skillsCleanupAgents ? { skillsCleanupAgents } : {}),
+  })
   if (!result.ok || (scope !== 'skills' && scope !== 'all')) return result
   const warnings = unavailableSourceWarnings(manifest.skills.sources ?? [])
   const combinedWarnings = [...(result.warnings ?? []), ...warnings]
@@ -143,6 +155,12 @@ export async function projectSkillChanges(
     }))
     .filter((target) => target.agents.length > 0)
   if (sourceTargets.length === 0 && localTargets.length === 0) return { ok: true }
+
+  const affectedAgents = new Set([
+    ...sourceTargets.flatMap((target) => target.agents),
+    ...localTargets.flatMap((target) => target.agents),
+  ])
+  assertTargetedSkillDestinationCollisions(manifest, affectedAgents)
 
   const sourceByUrl = new Map(manifest.skills.sources.map((source) => [source.url, source]))
   const preparedSourceTargets = sourceTargets.map((target) => {
@@ -315,6 +333,25 @@ export async function projectSkillChanges(
   if (!result.ok) return result
   const combinedWarnings = [...(result.warnings ?? []), ...warnings]
   return combinedWarnings.length > 0 ? { ...result, warnings: combinedWarnings } : result
+}
+
+function assertTargetedSkillDestinationCollisions(
+  manifest: Manifest,
+  affectedAgents: ReadonlySet<AgentId>,
+): void {
+  const links = manifest.skills.skills.map((skill) => ({
+    skillId: skill.id,
+    agents: (skill.agents ?? []).filter((agent) => affectedAgents.has(agent)),
+  }))
+  const sourcePlans = manifest.skills.sources.flatMap((source) => {
+    const sourceName = sourceIdentity(source).repoId
+    return [...affectedAgents]
+      .filter((agent) =>
+        (source.members ?? []).some((member) => (member.agents ?? []).includes(agent)),
+      )
+      .map((agent) => ({ sourceName, agent }))
+  })
+  assertSkillDestinationCollisions(links, sourcePlans)
 }
 
 export async function loadProjectionManifest(

@@ -10,8 +10,6 @@ interface Props {
 }
 
 export default function GlobalAgentsBar({ manifest, agents, operations }: Props) {
-  const sourceCount = manifest.skills?.sources?.length ?? 0
-  const localCount = manifest.skills?.skills?.length ?? 0
   const skills = [
     ...(manifest.skills?.sources.flatMap((source) =>
       (source.members ?? []).map((member) => ({ kind: 'source' as const, source, member })),
@@ -19,7 +17,7 @@ export default function GlobalAgentsBar({ manifest, agents, operations }: Props)
     ...(manifest.skills?.skills.map((skill) => ({ kind: 'local' as const, skill })) ?? []),
   ]
 
-  if (agents.length === 0 || (sourceCount === 0 && localCount === 0)) return null
+  if (agents.length === 0 || skills.length === 0) return null
 
   return (
     <div

@@ -458,6 +458,36 @@ describe('SkillsApplication', () => {
     expect(output).toContain('- opencode')
   })
 
+  it('does not write or project a resource-only source batch with no skill updates', async () => {
+    const original = [
+      'sources:',
+      '  - url: https://example.test/resources.git',
+      '    ref: main',
+      '    members: []',
+      '    resources:',
+      '      include:',
+      '        - path: docs',
+      '          kind: directory',
+      'skills: []',
+      '',
+    ].join('\n')
+    await writeFile(join(repoPath, 'skills.yaml'), original)
+    const writeSpy = vi.spyOn(fs, 'writeFile')
+    const projectSkills = vi.fn(async () => {})
+    app = new SkillsApplication(fs, git, home, log, projectSkills)
+
+    await expect(
+      app.setSkillAgentsBatch(repoPath, {
+        sources: [{ sourceUrl: 'https://example.test/resources.git', updates: [] }],
+        locals: [],
+      }),
+    ).resolves.toEqual({})
+
+    expect(writeSpy).not.toHaveBeenCalled()
+    expect(projectSkills).not.toHaveBeenCalled()
+    await expect(readFile(join(repoPath, 'skills.yaml'), 'utf8')).resolves.toBe(original)
+  })
+
   it('projects only agents changed by a single source member mutation', async () => {
     await writeFile(
       join(repoPath, 'skills.yaml'),

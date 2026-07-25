@@ -333,6 +333,70 @@ describe('projectRepository', () => {
     ).resolves.toBe('# External skill\n')
   })
 
+  it('cleans managed local artifacts after an agent is removed from config', async () => {
+    await writeFile(join(root, 'config.yaml'), 'agents: [codex]\nprojection:\n  strategy: copy\n')
+    await writeFile(
+      join(root, 'skills.yaml'),
+      'sources: []\nskills:\n  - id: local-skill\n    agents: [codex]\n',
+    )
+    const localSkill = join(root, 'assets', 'skills', 'local-skill')
+    await mkdir(localSkill, { recursive: true })
+    await writeFile(join(localSkill, 'SKILL.md'), '# Local skill\n')
+    const projectDeps = deps(sourceTreeGit([]))
+    const destination = join(root, '.codex', 'skills', 'local-skill')
+
+    await expect(projectRepository(projectDeps, root, { scope: 'skills' })).resolves.toEqual({
+      ok: true,
+    })
+    await expect(projectDeps.fs.exists(destination)).resolves.toBe(true)
+
+    await writeFile(join(root, 'config.yaml'), 'agents: []\nprojection:\n  strategy: copy\n')
+    await expect(projectRepository(projectDeps, root, { scope: 'skills' })).resolves.toEqual({
+      ok: true,
+    })
+
+    await expect(projectDeps.fs.exists(destination)).resolves.toBe(false)
+  })
+
+  it('cleans managed source namespaces after an agent is removed from config', async () => {
+    await writeFile(join(root, 'config.yaml'), 'agents: [codex]\nprojection:\n  strategy: copy\n')
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: source-a',
+        '    url: https://example.test/source-a.git',
+        '    ref: main',
+        '    pinned_commit: abc123',
+        '    members:',
+        '      - name: selected',
+        '        entry: skills/selected/SKILL.md',
+        '        agents: [codex]',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    const sourceRoot = join(root, 'remote-cache', 'source-a', 'skills', 'selected')
+    await mkdir(sourceRoot, { recursive: true })
+    await writeFile(join(sourceRoot, 'SKILL.md'), '# Selected\n')
+    const projectDeps = deps(
+      sourceTreeGit([treeEntry('skills/selected/SKILL.md', 'selected-skill')]),
+    )
+    const namespace = join(root, '.codex', 'skills', 'source-a')
+
+    await expect(projectRepository(projectDeps, root, { scope: 'skills' })).resolves.toEqual({
+      ok: true,
+    })
+    await expect(projectDeps.fs.exists(namespace)).resolves.toBe(true)
+
+    await writeFile(join(root, 'config.yaml'), 'agents: []\nprojection:\n  strategy: copy\n')
+    await expect(projectRepository(projectDeps, root, { scope: 'skills' })).resolves.toEqual({
+      ok: true,
+    })
+
+    await expect(projectDeps.fs.exists(namespace)).resolves.toBe(false)
+  })
+
   it('agent-scoped projection ignores another agent user-owned destination', async () => {
     await writeFile(join(root, 'config.yaml'), 'agents: [codex, opencode]\n')
     await writeFile(
@@ -444,6 +508,50 @@ describe('projectRepository', () => {
 })
 
 describe('projectSkillChanges', () => {
+  it.each(['local', 'source'] as const)(
+    'rejects a targeted %s projection that overlaps the complete desired skill destinations',
+    async (targetKind) => {
+      await writeFile(join(root, 'config.yaml'), 'agents: [codex]\nprojection:\n  strategy: copy\n')
+      await writeFile(
+        join(root, 'skills.yaml'),
+        [
+          'sources:',
+          '  - url: https://example.test/Shared.git',
+          '    ref: main',
+          '    pinned_commit: commit-a',
+          '    members:',
+          '      - name: selected',
+          '        entry: skills/selected/SKILL.md',
+          '        agents: [codex]',
+          'skills:',
+          '  - id: shared',
+          '    agents: [codex]',
+          '',
+        ].join('\n'),
+      )
+      const localSkill = join(root, 'assets', 'skills', 'shared')
+      await mkdir(localSkill, { recursive: true })
+      await writeFile(join(localSkill, 'SKILL.md'), '# Local skill\n')
+      const projectDeps = deps(sourceTreeGit([]))
+      const changes: SkillsProjectionChangeSet =
+        targetKind === 'local'
+          ? { sources: [], locals: [{ skillId: 'shared', agents: ['codex'] }] }
+          : {
+              sources: [{ sourceUrl: 'https://example.test/Shared.git', agents: ['codex'] }],
+              locals: [],
+            }
+
+      await expect(projectSkillChanges(projectDeps, root, changes)).rejects.toThrow(
+        'Local skill destination "shared" overlaps source namespace "Shared" for codex',
+      )
+
+      await expect(projectDeps.fs.exists(join(root, '.codex', 'skills', 'shared'))).resolves.toBe(
+        false,
+      )
+      expect(projectDeps.git.readTree).not.toHaveBeenCalled()
+    },
+  )
+
   it('reads only the cold target source tree and uses the warm catalog without Git', async () => {
     await writeFile(
       join(root, 'config.yaml'),
