@@ -69,7 +69,21 @@ describe('planProjection', () => {
       new Set(['claude-code', 'codex', 'opencode']),
     )
     const fd = p.links.find((l) => l.skillId === 'frontend-design')!
-    expect(fd.agents).toEqual([])
+    expect(fd.destinations).toEqual([])
+  })
+  it('plans a shared-only local skill without configured or installed agents', () => {
+    const sharedOnly: Manifest = {
+      ...manifest,
+      skills: {
+        sources: [],
+        skills: [{ id: 'frontend-design', shared: true }],
+      },
+      config: { ...manifest.config, agents: [] },
+    }
+
+    const plan = planProjection(sharedOnly, sharedOnly.config, new Set())
+
+    expect(plan.links[0].destinations).toEqual([{ kind: 'shared' }])
   })
   it('preserves an explicit local skill path in the projection plan', () => {
     const withExternalLocal: Manifest = {
@@ -113,7 +127,7 @@ describe('planProjection', () => {
       expect.objectContaining({
         sourceName: 'superpowers',
         commit: 'aaa',
-        agent: 'codex',
+        destination: { kind: 'agent', agent: 'codex' },
         projectionBase: 'skills',
         entries: [{ kind: 'bundle', sourcePath: 'skills/writing', targetPath: 'writing' }],
       }),
@@ -208,7 +222,7 @@ describe('planProjection', () => {
     const p = planProjection(manifest, manifest.config, new Set(['claude-code']))
     expect(p.skippedAgents).toContain('codex')
     const fd = p.links.find((l) => l.skillId === 'frontend-design')!
-    expect(fd.agents).toEqual([])
+    expect(fd.destinations).toEqual([])
   })
 
   it('intersects explicit agents with configured and installed agents', () => {
@@ -221,7 +235,9 @@ describe('planProjection', () => {
       config: { ...manifest.config, agents: ['claude-code', 'codex'] },
     }
     const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
-    expect(p.links.find((l) => l.skillId === 'frontend-design')?.agents).toEqual(['claude-code'])
+    expect(p.links.find((l) => l.skillId === 'frontend-design')?.destinations).toEqual([
+      { kind: 'agent', agent: 'claude-code' },
+    ])
   })
   it('filters hidden agents for remote skills and MCP without mutating the manifest', () => {
     const m: Manifest = {
@@ -247,7 +263,9 @@ describe('planProjection', () => {
     }
     const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
 
-    expect(p.sourcePlans.map((plan) => plan.agent)).toEqual(['claude-code'])
+    expect(p.sourcePlans.map((plan) => plan.destination)).toEqual([
+      { kind: 'agent', agent: 'claude-code' },
+    ])
     expect(p.mcpEntries[0].agents).toEqual(['codex'])
     expect(m.skills.sources[0].members?.[0].agents).toEqual(['claude-code', 'opencode'])
     expect(m.mcp[0].agents).toEqual(['codex', 'opencode'])
@@ -280,7 +298,7 @@ describe('planProjection', () => {
       { kind: 'bundle', sourcePath: 'skills/writing', targetPath: 'writing' },
     ])
   })
-  it('preserves unavailable source namespaces for every installed skills agent', () => {
+  it('preserves unavailable source namespaces only for selected destinations', () => {
     const unavailableSource = {
       ...manifest.skills.sources[0],
       members: [
@@ -288,6 +306,7 @@ describe('planProjection', () => {
           name: 'writing',
           entry: 'skills/writing/SKILL.md',
           agents: ['codex' as const],
+          shared: true,
         },
       ],
       sourceTree: undefined,
@@ -309,12 +328,12 @@ describe('planProjection', () => {
         {
           sourceName: 'superpowers',
           sourceUrl: 'github:obra/superpowers',
-          agent: 'codex',
+          destination: { kind: 'agent', agent: 'codex' },
         },
         {
           sourceName: 'superpowers',
           sourceUrl: 'github:obra/superpowers',
-          agent: 'claude-code',
+          destination: { kind: 'shared' },
         },
       ],
     })
@@ -327,8 +346,31 @@ describe('planProjection', () => {
       },
     }
     expect(() => planProjection(withOverlap, withOverlap.config, new Set(['codex']))).toThrow(
-      'Local skill destination "superpowers" overlaps source namespace "superpowers" for codex',
+      'Local skill destination "superpowers" overlaps source namespace "superpowers" for agent:codex',
     )
+  })
+  it('isolates collisions by destination', () => {
+    const m: Manifest = {
+      ...manifest,
+      skills: {
+        sources: [
+          {
+            ...manifest.skills.sources[0],
+            members: [
+              {
+                name: 'writing',
+                entry: 'skills/writing/SKILL.md',
+                agents: ['codex'],
+              },
+            ],
+            sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
+          },
+        ],
+        skills: [{ id: 'superpowers', shared: true }],
+      },
+    }
+
+    expect(() => planProjection(m, m.config, new Set(['codex']))).not.toThrow()
   })
   it('rejects a local skill destination overlapping a source namespace on the same agent', () => {
     const localSkillId = 'superpowers'
@@ -353,7 +395,7 @@ describe('planProjection', () => {
     }
 
     expect(() => planProjection(m, m.config, new Set(['codex']))).toThrow(
-      `Local skill destination "${localSkillId}" overlaps source namespace "superpowers" for codex`,
+      `Local skill destination "${localSkillId}" overlaps source namespace "superpowers" for agent:codex`,
     )
   })
 
@@ -380,7 +422,7 @@ describe('planProjection', () => {
     }
 
     expect(() => planProjection(m, m.config, new Set(['codex']))).toThrow(
-      'Local skill destination "superpowers" overlaps source namespace "SuperPowers" for codex',
+      'Local skill destination "superpowers" overlaps source namespace "SuperPowers" for agent:codex',
     )
   })
 

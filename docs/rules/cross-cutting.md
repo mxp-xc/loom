@@ -15,6 +15,7 @@ Implications:
 - `config.agents` 缺失或为空数组时，Configured agents 是空集合，不回退到产品默认 agent。
 - 从 Configured agents 移除 agent 只隐藏其业务 controls，不删除 per-item selections、Memory assignment 或 agent Vars；重新加入后恢复显示。
 - 新仓库显式写入创建时的 Registered agents；Catalog 后续新增 agent 不自动启用到既有仓库。
+- Skills 额外提供固定的 Shared skills destination；它不是 Agent，不进入 Agent Catalog、Settings 或 `config.agents`，也不改变 MCP、Memory、Vars 的 Agent 范围。
 
 Safety:
 
@@ -41,7 +42,8 @@ Implications:
 - 磁盘上的 projection artifact 不会单独让某个 item 显示为已选择。
 - 引用的本地文件缺失时，UI 可以展示 unavailable 或缺失诊断，但不能自动删除 desired entry。
 - Vars 的目标 agent chips 必须来自 Settings agents；default/agent 查看范围独立于“配置管理/最终结果”视图切换，配置管理中的当前值按所选查看范围展示 default 或 agent-specific 值。
-- 没有 Configured agents 时，业务页面保持非 agent 功能，但不显示 agent controls，也不发起 agent-specific 请求。
+- 没有 Configured agents 时，业务页面保持非 agent 功能，不显示 agent controls，也不发起 agent-specific 请求；Skills 仍显示 Shared skills control。
+- Skills 的 `shared` 缺失或为 `false` 均表示未选择 Shared skills destination；磁盘上存在 `~/.agents/skills/<id>` 不会把它反推为 `shared: true`。
 
 Safety:
 
@@ -67,14 +69,14 @@ Status: active
 Applies to: skills, MCP, memory
 
 Rule:
-用户修改 skills 或 Memory 的 desired agent state 后，Loom 应自动 reconcile 对应 projection，不要求用户再手动点击一次 project。MCP 是显式 Project changes 例外，见 R-MCP-002。
+用户修改 Skills projection assignment 或 Memory 的 desired agent state 后，Loom 应自动 reconcile 对应 projection，不要求用户再手动点击一次 project。MCP 是显式 Project changes 例外，见 R-MCP-002。
 
 Implications:
 
-- Skills 单个 agent toggle 由 server 在保存 manifest 后定向投影变化的 artifact。
-- Skills agent toggle 和按 agent 的批量操作只 reconcile 发生变化的 target 与 agent，不能被其他 agent 的 destination conflict 阻断；手动投影和非 agent-specific mutation 仍 reconcile 全部 applicable agents。
+- Skills 单个 Agent 或 Shared toggle 由 server 在保存 manifest 后定向投影变化的 artifact。
+- Skills assignment toggle 和批量操作只 reconcile 发生变化的 item 与 destination，不能被其他 destination 的 collision 阻断；手动投影和非 assignment-specific mutation仍 reconcile 全部 Applicable agents 与 Shared skills destination。
 - Memory 页面修改某个 agent 的 Memory assignment 后，会自动运行 memory projection。
-- Skills 批量 agent 更新使用一次 batch command、一次 manifest 写入和一次定向投影事务。
+- Skills 批量 assignment 更新使用一次 batch command、一次 manifest 写入和一次定向投影事务。
 - 保存 source members/resources selection 后，会投影 skills。
 - MCP agent chip 和全局 agent chip 只保存 desired agent state，不自动投影；MCP projection 由 Project changes 显式触发。
 
@@ -82,12 +84,14 @@ Safety:
 
 - 批量更新中途失败且已有部分更新成功时，要刷新 manifest，让 UI 反映已保存状态。
 - projection 成功前不能报告整体成功。
-- Skills agent batch 的每个 target 携带 `expectedAgents`；server 在 lease 内与当前 manifest 比较，任一不匹配返回 409 `stale_agent_state`，整批不写入、不投影。
+- 新 Skills batch 的每个 item 携带完整 `expected` / `next` assignment，其中包含规范化的 `agents` 与 `shared`；server 在 lease 内与当前 manifest 比较，任一不匹配返回 409 `stale_projection_assignment`，整批不写入、不投影。
+- 兼容的 agent-only batch 不改变当前 `shared` 值。
 - Successful projection warning 必须传播到 UI；UI 刷新 manifest、显示 warning，并抑制普通 success/toast。
 
 Examples:
 
 - 点击某个 skill 的 OC chip，会更新 manifest agents，然后运行 skills projection。
+- 点击某个 skill 的“通用” chip，会更新 manifest `shared`，然后只 reconcile Shared skills destination。
 - 把 Memory `team` 分配给 OpenCode，会更新 `memory_agents.opencode`，然后运行 memory projection。
 - 保存 source 内容选择，会更新 source members/resources，然后运行 skills projection。
 - 点击 MCP server 的 CX chip，只更新 manifest agents；用户点击 MCP 页面 Project changes 后才运行 MCP projection。
@@ -106,13 +110,14 @@ Status: active
 Applies to: skills, MCP
 
 Rule:
-批量 agent 控制必须让 scope 清晰，并且只更新该 scope。
+Skills destination 与 MCP agent 的批量控制必须让 scope 清晰，并且只更新该 scope。
 
 Implications:
 
 - 全局 skills 批量控制作用于全部 skills。
 - Source 级 skills 批量控制只作用于该 source 下 selected members。
 - Item 级控制只作用于该 item。
+- Skills 的 Agent controls 在前，Shared control 以分隔线区分；Shared control 使用“通用”语义，不伪造 Agent id。
 - Source 内容选择与 agent 应用是分离的操作；Add/Edit Source 内不提供 agent controls。
 - 单 item 是 batch 的单元素特例；source/global bulk 不按 item 或 member 发请求、写 manifest 或执行 projection。
 - Item、source 与 global skills agent controls 共用一个 pending gate，不能用同一份旧 manifest 并发提交多个 batch。
@@ -323,7 +328,8 @@ Implications:
 - `read` 与 `mutation` 双向排斥，writer等待active reader，reader等待先到writer；读取不得观察跨文件 mutation 的中间状态。
 - 同一命令的read、validate、write、projection、rollback与cleanup属于同一 lease；不能只锁最终文件写入。
 - Local config使用canonical home identity，不挂到任一repository key；需要repo与local config的命令一次获取两个key。
-- Projection同时获取repository、projection state与所有可能触达的agent-native target key；MCP import同时获取实际native source config key。不同repository只有完整资源集不相交时才能并行。
+- Projection同时获取repository、projection state与所有可能触达的destination key；MCP import同时获取实际native source config key。Full Skills projection锁全部 Agent Skills roots与Shared skills root，Agent-scoped projection不锁Shared root，targeted Skills mutation只锁变化的destinations。
+- 带repository的local skill scan、`ref` import与Skills projection对同一实际scan/source root使用同一key；默认`~/.agents/skills` scan不能观察Shared projection的中间状态。
 - Sync、普通API和child process复用同一跨进程lock protocol；push、force-push与remote update不得绕过。
 - 跨进程协议必须能锁定尚不存在的逻辑资源，不得为了加锁预先创建业务文件或目录。
 - Top-level command只获取一次。内部callback使用已持有上下文或unlocked helper，不得重入同一non-reentrant resource。

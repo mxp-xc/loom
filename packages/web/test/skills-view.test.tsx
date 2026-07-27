@@ -12,10 +12,18 @@ import SkillDetailEditor from '../src/views/skills/SkillDetailEditor'
 import AddSkillModal from '../src/views/skills/AddSkillModal'
 import EditSourceModal from '../src/views/skills/EditSourceModal'
 import { useManifestOperations } from '../src/hooks/useManifestOperations'
+import type { ManifestOperations } from '../src/hooks/useManifestOperations'
 import { createMonacoEditorMock } from './monaco-test-utils'
 import { agentIds } from '../src/lib/agents'
 
 const monacoEditorMock = createMonacoEditorMock()
+const skillDetailOperations = {
+  pending: { skills: { assignments: false } },
+  toggleSourceSkillAgent: vi.fn(async () => ({ ok: true })),
+  toggleSourceSkillShared: vi.fn(async () => ({ ok: true })),
+  toggleLocalSkillAgent: vi.fn(async () => ({ ok: true })),
+  toggleLocalSkillShared: vi.fn(async () => ({ ok: true })),
+} as unknown as ManifestOperations
 
 vi.mock('@monaco-editor/react', async () => {
   const { createMonacoEditorMock } = await import('./monaco-test-utils')
@@ -464,7 +472,13 @@ describe('Skills page', () => {
       expect(api.updateSkillAgentsBatch).toHaveBeenCalledWith({
         repo: '/tmp/skills-layout',
         sources: [],
-        locals: [{ id: 'frontend-design', expectedAgents: [], agents: ['codex'] }],
+        locals: [
+          {
+            id: 'frontend-design',
+            expected: { agents: [], shared: false },
+            next: { agents: ['codex'], shared: false },
+          },
+        ],
       }),
     )
 
@@ -492,7 +506,13 @@ describe('Skills page', () => {
       expect(api.updateSkillAgentsBatch).toHaveBeenCalledWith({
         repo: '/tmp/skills-layout',
         sources: [],
-        locals: [{ id: 'frontend-design', expectedAgents: [], agents: ['codex'] }],
+        locals: [
+          {
+            id: 'frontend-design',
+            expected: { agents: [], shared: false },
+            next: { agents: ['codex'], shared: false },
+          },
+        ],
       }),
     )
     expect(api.project).not.toHaveBeenCalled()
@@ -528,11 +548,25 @@ describe('Skills page', () => {
     const sourceItemChip = within(
       screen.getByTestId('source-skill-systematic-debugging'),
     ).getByRole<HTMLButtonElement>('button', { name: 'Codex' })
+    const globalShared = screen.getByRole<HTMLButtonElement>('button', {
+      name: '通用：全部未选择',
+    })
+    const sourceShared = screen.getByRole<HTMLButtonElement>('button', {
+      name: 'superpowers 通用：全部未选择',
+    })
+    const itemShared = within(
+      screen.getByTestId('source-skill-systematic-debugging'),
+    ).getByRole<HTMLButtonElement>('button', {
+      name: 'systematic-debugging 通用：未选择',
+    })
     await waitFor(() => {
       expect(localChip.disabled).toBe(true)
       expect(globalChip.disabled).toBe(true)
       expect(sourceBulkChip.disabled).toBe(true)
       expect(sourceItemChip.disabled).toBe(true)
+      expect(globalShared.disabled).toBe(true)
+      expect(sourceShared.disabled).toBe(true)
+      expect(itemShared.disabled).toBe(true)
     })
 
     release({ ok: true })
@@ -549,7 +583,12 @@ describe('Skills page', () => {
             ref: 'v6.1.1',
             type: 'tag',
             members: [
-              { name: 'brainstorming', entry: 'brainstorming/SKILL.md', agents: ['codex'] },
+              {
+                name: 'brainstorming',
+                entry: 'brainstorming/SKILL.md',
+                agents: ['codex'],
+                shared: true,
+              },
               { name: 'executing-plans', entry: 'executing-plans/SKILL.md', agents: [] },
               { name: 'disabled-skill', entry: 'disabled-skill/SKILL.md', agents: [] },
             ],
@@ -592,18 +631,18 @@ describe('Skills page', () => {
           updates: [
             {
               memberEntry: 'brainstorming/SKILL.md',
-              expectedAgents: ['codex'],
-              agents: ['codex'],
+              expected: { agents: ['codex'], shared: true },
+              next: { agents: ['codex'], shared: true },
             },
             {
               memberEntry: 'executing-plans/SKILL.md',
-              expectedAgents: [],
-              agents: ['codex'],
+              expected: { agents: [], shared: false },
+              next: { agents: ['codex'], shared: false },
             },
             {
               memberEntry: 'disabled-skill/SKILL.md',
-              expectedAgents: [],
-              agents: ['codex'],
+              expected: { agents: [], shared: false },
+              next: { agents: ['codex'], shared: false },
             },
           ],
         },
@@ -611,6 +650,41 @@ describe('Skills page', () => {
       locals: [],
     })
     expect(api.project).not.toHaveBeenCalled()
+
+    vi.mocked(api.updateSkillAgentsBatch).mockClear()
+    const sourceBulkShared = screen.getByRole('button', {
+      name: 'openai-skills 通用：部分已选择',
+    })
+    expect(sourceBulkShared.textContent).toContain('1/3')
+    fireEvent.click(sourceBulkShared)
+
+    await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
+    expect(api.updateSkillAgentsBatch).toHaveBeenLastCalledWith({
+      repo: '/tmp/skills-layout',
+      sources: [
+        {
+          sourceUrl: 'https://github.com/obra/superpowers.git',
+          updates: [
+            {
+              memberEntry: 'brainstorming/SKILL.md',
+              expected: { agents: ['codex'], shared: true },
+              next: { agents: ['codex'], shared: true },
+            },
+            {
+              memberEntry: 'executing-plans/SKILL.md',
+              expected: { agents: [], shared: false },
+              next: { agents: [], shared: true },
+            },
+            {
+              memberEntry: 'disabled-skill/SKILL.md',
+              expected: { agents: [], shared: false },
+              next: { agents: [], shared: true },
+            },
+          ],
+        },
+      ],
+      locals: [],
+    })
   })
 
   it('updates global skill agents with one batch request', async () => {
@@ -624,6 +698,135 @@ describe('Skills page', () => {
 
     await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
     expect(api.project).not.toHaveBeenCalled()
+
+    vi.mocked(api.updateSkillAgentsBatch).mockClear()
+    fireEvent.click(screen.getByRole('button', { name: '通用：全部未选择' }))
+
+    await waitFor(() =>
+      expect(api.updateSkillAgentsBatch).toHaveBeenCalledWith({
+        repo: '/tmp/skills-layout',
+        sources: [
+          {
+            sourceUrl: 'https://github.com/obra/superpowers.git',
+            updates: [
+              {
+                memberEntry: 'skills/systematic-debugging/SKILL.md',
+                expected: {
+                  agents: ['claude-code', 'codex', 'opencode'],
+                  shared: false,
+                },
+                next: {
+                  agents: ['claude-code', 'codex', 'opencode'],
+                  shared: true,
+                },
+              },
+            ],
+          },
+        ],
+        locals: [
+          {
+            id: 'test-qa-skill',
+            expected: {
+              agents: ['claude-code', 'codex', 'opencode'],
+              shared: false,
+            },
+            next: {
+              agents: ['claude-code', 'codex', 'opencode'],
+              shared: true,
+            },
+          },
+          {
+            id: 'frontend-design',
+            expected: { agents: [], shared: false },
+            next: { agents: [], shared: true },
+          },
+        ],
+      }),
+    )
+  })
+
+  it('updates a local shared destination without changing its agent assignment', async () => {
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-layout" />
+      </TestRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '全部展开' }))
+    const frontendRow = screen.getByTestId('local-skill-frontend-design')
+    fireEvent.click(
+      within(frontendRow).getByRole('button', { name: 'frontend-design 通用：未选择' }),
+    )
+
+    await waitFor(() =>
+      expect(api.updateSkillAgentsBatch).toHaveBeenCalledWith({
+        repo: '/tmp/skills-layout',
+        sources: [],
+        locals: [
+          {
+            id: 'frontend-design',
+            expected: { agents: [], shared: false },
+            next: { agents: [], shared: true },
+          },
+        ],
+      }),
+    )
+  })
+
+  it('keeps shared controls available without configured agents and refreshes open detail state', async () => {
+    const initial = {
+      skills: {
+        sources: [],
+        skills: [{ id: 'shared-only', agents: [], shared: false }],
+      },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: [] },
+      errors: [],
+    }
+    const updated = {
+      ...initial,
+      skills: {
+        ...initial.skills,
+        skills: [{ id: 'shared-only', agents: [], shared: true }],
+      },
+    }
+    vi.mocked(api.getManifest)
+      .mockResolvedValueOnce(initial as never)
+      .mockResolvedValueOnce(updated as never)
+
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/shared-only-detail" />
+      </TestRouter>,
+    )
+
+    const globalShared = await screen.findByRole('button', { name: '通用：全部未选择' })
+    expect(document.querySelectorAll('[data-agent-chip="true"]')).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: '全部展开' }))
+    fireEvent.click(screen.getByTestId('local-skill-shared-only'))
+
+    const dialog = await screen.findByRole('dialog', { name: 'shared-only' })
+    const detailShared = within(dialog).getByRole('button', { name: '通用：未选择' })
+    expect(globalShared.hasAttribute('data-agent')).toBe(false)
+    expect(detailShared.hasAttribute('data-agent')).toBe(false)
+    fireEvent.click(detailShared)
+
+    await waitFor(() =>
+      expect(api.updateSkillAgentsBatch).toHaveBeenCalledWith({
+        repo: '/tmp/shared-only-detail',
+        sources: [],
+        locals: [
+          {
+            id: 'shared-only',
+            expected: { agents: [], shared: false },
+            next: { agents: [], shared: true },
+          },
+        ],
+      }),
+    )
+    expect(await within(dialog).findByRole('button', { name: '通用：已选择' })).toBeDefined()
+    expect(within(dialog).getByText('~/.agents/skills/shared-only')).toBeDefined()
   })
 })
 
@@ -1213,9 +1416,8 @@ describe('Skill source updates', () => {
     fireEvent.click(screen.getByTestId('local-skill-frontend-design'))
 
     expect(onOpenDetail).toHaveBeenCalledWith({
+      kind: 'local',
       skillId: 'frontend-design',
-      path: undefined,
-      agents: ['codex'],
     })
   })
 
@@ -1234,6 +1436,7 @@ describe('Skill source updates', () => {
       <SkillDetailEditor
         repoPath="/tmp/skills-layout"
         agents={agentIds}
+        operations={skillDetailOperations}
         detail={{
           skillId: 'test-qa-skill',
           path: './assets/skills/test-qa-skill',
@@ -1279,6 +1482,7 @@ describe('Skill source updates', () => {
       <SkillDetailEditor
         repoPath="/tmp/skill-save-refresh"
         agents={agentIds}
+        operations={skillDetailOperations}
         detail={{
           skillId: 'frontend-design',
           path: './assets/skills/frontend-design',
@@ -1339,7 +1543,7 @@ describe('Skill source updates', () => {
     }
   })
 
-  it('opens source member detail with the configured source member skill id', () => {
+  it('opens source member detail by stable source identity', () => {
     const onOpenDetail = vi.fn()
     render(
       <SkillSourceListHarness
@@ -1380,10 +1584,9 @@ describe('Skill source updates', () => {
     fireEvent.click(screen.getByText('systematic-debugging'))
 
     expect(onOpenDetail).toHaveBeenCalledWith({
-      skillId: 'superpowers-systematic-debugging',
-      source: 'https://github.com/obra/superpowers.git',
-      path: 'skills/engineering/systematic-debugging/SKILL.md',
-      agents: ['codex'],
+      kind: 'source',
+      sourceUrl: 'https://github.com/obra/superpowers.git',
+      memberEntry: 'skills/engineering/systematic-debugging/SKILL.md',
     })
   })
 

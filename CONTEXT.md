@@ -25,8 +25,16 @@ _Avoid_: supported agent, available agent
 _Avoid_: current filesystem state, installed state
 
 **Projection**:
-把 desired state 对齐到 agent 原生文件和目录的动作。
+把 desired state 对齐到 projection destination 原生文件和目录的动作。
 _Avoid_: deploy, export, sync
+
+**Projection destination**:
+某项 capability 可以接收 projection 的明确目标。Skills destination 可以是 Applicable agent 的原生 Skills 目录，也可以是 Shared skills destination；其他 capability 仍只使用 Agent。
+_Avoid_: agent alias, integration id
+
+**Shared skills destination**:
+固定路径 `~/.agents/skills`，用于跨客户端共享 Skills。它不是 Agent，不属于 Agent Catalog 或 `config.agents`，在 Configured agents 为空时仍可独立选择。
+_Avoid_: shared agent, agents-home agent
 
 **Projection artifact**:
 由 projection 创建或更新的文件、目录、符号链接或配置项。

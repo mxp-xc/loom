@@ -9,6 +9,7 @@ export interface SkillMemberSnapshot {
   path: string
   entry?: string
   agents?: readonly AgentId[]
+  shared?: boolean
 }
 
 export interface SkillMemberChange {
@@ -16,6 +17,7 @@ export interface SkillMemberChange {
   previousPath?: string
   nextPath?: string
   agents?: AgentId[]
+  shared?: boolean
 }
 
 export interface SkillMemberChangeSet {
@@ -101,5 +103,6 @@ function toChange(
     ...(previous ? { previousPath: normalizeSkillPath(previous.path) } : {}),
     ...(next ? { nextPath: normalizeSkillPath(next.path) } : {}),
     ...(previous?.agents ? { agents: [...previous.agents] } : {}),
+    ...(previous?.shared ? { shared: true } : {}),
   }
 }

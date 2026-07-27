@@ -246,6 +246,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
                 entry: member.entry,
                 path: member.entry,
                 agents: member.agents,
+                shared: member.shared,
               })),
             )
             const session = await updateSessions.create({
@@ -565,6 +566,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
               const preservedArchives: Array<{
                 name: string
                 agents?: AgentId[]
+                shared?: boolean
                 files: LocalArchiveFile[]
               }> = []
               const repository =
@@ -618,6 +620,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
                 preservedArchives.push({
                   name,
                   ...(currentMember.agents ? { agents: currentMember.agents } : {}),
+                  ...(currentMember.shared ? { shared: true } : {}),
                   files: normalizeLocalArchiveFiles([
                     ...files,
                     {
@@ -646,6 +649,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
                 data.skills.push({
                   id: skill.name,
                   ...(skill.agents ? { agents: skill.agents } : {}),
+                  ...(skill.shared ? { shared: true } : {}),
                 })
               }
               const liveCacheEntry = await deps.fs.inspectEntry(session.liveCacheDir)

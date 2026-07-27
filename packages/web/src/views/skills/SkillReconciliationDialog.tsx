@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import Modal from '@/components/Modal'
 import { Button } from '@/components/ui/button'
 import type { PreparedSkillReconciliation } from '@/hooks/useManifestOperations'
+import { agentName } from '@/lib/agents'
+import { skillProjectionDestinationKey, type SkillProjectionDestination } from '@loom/core'
 import { Check, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import styles from './SkillReconciliationDialog.module.css'
 
@@ -49,6 +51,8 @@ export default function SkillReconciliationDialog({
     entry,
     action: enabledBoundaries.has(entry) ? ('enable' as const) : ('exclude' as const),
   }))
+  const destinationLabel = (destination: SkillProjectionDestination) =>
+    destination.kind === 'shared' ? '通用' : agentName[destination.agent]
 
   return (
     <Modal open title="确认 skills 更新" width={720} busy={busy} onClose={onClose}>
@@ -73,8 +77,11 @@ export default function SkillReconciliationDialog({
             </div>
             <div className={styles.list}>
               {state.pathMoves!.map((move) => (
-                <div key={`${move.agent}:${move.kind}:${move.sourcePath}`} className={styles.row}>
-                  <span>{move.agent}</span>
+                <div
+                  key={`${skillProjectionDestinationKey(move.destination)}:${move.kind}:${move.sourcePath}`}
+                  className={styles.row}
+                >
+                  <span>{destinationLabel(move.destination)}</span>
                   <code>
                     {move.previousTargetPath ?? 'new'} → {move.nextTargetPath ?? 'removed'}
                   </code>

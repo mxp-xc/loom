@@ -52,7 +52,13 @@ function manifest(overrides: Partial<Manifest> = {}): Manifest {
 
 function skillPlan(agent: AgentId, strategy: 'link' | 'copy' = 'link'): ProjectionPlan {
   return {
-    links: [{ skillId: 'skill', source: 'local', agents: [agent] }],
+    links: [
+      {
+        skillId: 'skill',
+        source: 'local',
+        destinations: [{ kind: 'agent', agent }],
+      },
+    ],
     sourcePlans: [],
     mcpEntries: [],
     memoryPlan: { active: null, content: null, agents: [] },
@@ -423,7 +429,7 @@ describe('projection filesystem boundary', () => {
         getManagedSkillArtifacts: async () => structuredClone(artifacts),
         setManagedSkillArtifacts: async (next) => {
           artifacts = structuredClone(next)
-          if (artifacts.codex?.skill) throw new Error('managed skill state write failed')
+          if (artifacts['agent:codex']?.skill) throw new Error('managed skill state write failed')
         },
       }),
       'skills',

@@ -765,7 +765,10 @@ describe('useManifestOperations', () => {
         onSuccess={onSuccess}
         onToast={onToast}
         action={async (ops) => {
-          result = await ops.toggleLocalSkillAgent('local-alpha', 'codex', [])
+          result = await ops.toggleLocalSkillAgent('local-alpha', 'codex', {
+            agents: [],
+            shared: false,
+          })
         }}
       />,
     )
@@ -792,7 +795,10 @@ describe('useManifestOperations', () => {
         <Harness
           onError={onError}
           action={async (ops) => {
-            result = await ops.toggleLocalSkillAgent('local-alpha', 'codex', [])
+            result = await ops.toggleLocalSkillAgent('local-alpha', 'codex', {
+              agents: [],
+              shared: false,
+            })
           }}
         />,
       )
@@ -822,7 +828,10 @@ describe('useManifestOperations', () => {
     render(
       <Harness
         action={async (ops) => {
-          const item = ops.toggleLocalSkillAgent('local-alpha', 'codex', [])
+          const item = ops.toggleLocalSkillAgent('local-alpha', 'codex', {
+            agents: [],
+            shared: false,
+          })
           sourceResult = await ops.setSourceSkillAgents(
             {
               url: 'https://example.test/skills.git',
@@ -864,7 +873,7 @@ describe('useManifestOperations', () => {
             'https://example.test/skills.git',
             'alpha/SKILL.md',
             'codex',
-            ['claude-code'],
+            { agents: ['claude-code'], shared: false },
           )
         }}
       />,
@@ -881,8 +890,45 @@ describe('useManifestOperations', () => {
           updates: [
             {
               memberEntry: 'alpha/SKILL.md',
-              expectedAgents: ['claude-code'],
-              agents: ['claude-code', 'codex'],
+              expected: { agents: ['claude-code'], shared: false },
+              next: { agents: ['claude-code', 'codex'], shared: false },
+            },
+          ],
+        },
+      ],
+      locals: [],
+    })
+    await waitFor(() => expect(result?.ok).toBe(true))
+  })
+
+  it('uses the complete assignment for a shared destination toggle', async () => {
+    let result: Awaited<ReturnType<Operations['toggleSourceSkillShared']>> | undefined
+
+    render(
+      <Harness
+        action={async (ops) => {
+          result = await ops.toggleSourceSkillShared(
+            'https://example.test/skills.git',
+            'alpha/SKILL.md',
+            { agents: ['codex'], shared: true },
+          )
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'run' }))
+
+    await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
+    expect(api.updateSkillAgentsBatch).toHaveBeenCalledWith({
+      repo: '/tmp/r',
+      sources: [
+        {
+          sourceUrl: 'https://example.test/skills.git',
+          updates: [
+            {
+              memberEntry: 'alpha/SKILL.md',
+              expected: { agents: ['codex'], shared: true },
+              next: { agents: ['codex'], shared: false },
             },
           ],
         },
@@ -929,10 +975,22 @@ describe('useManifestOperations', () => {
       sources: [
         {
           sourceUrl: 'https://example.test/skills.git',
-          updates: [{ memberEntry: 'alpha/SKILL.md', expectedAgents: [], agents: ['codex'] }],
+          updates: [
+            {
+              memberEntry: 'alpha/SKILL.md',
+              expected: { agents: [], shared: false },
+              next: { agents: ['codex'], shared: false },
+            },
+          ],
         },
       ],
-      locals: [{ id: 'local-alpha', expectedAgents: [], agents: ['codex'] }],
+      locals: [
+        {
+          id: 'local-alpha',
+          expected: { agents: [], shared: false },
+          next: { agents: ['codex'], shared: false },
+        },
+      ],
     })
     await waitFor(() => expect(result?.ok).toBe(true))
     expect(api.project).not.toHaveBeenCalled()
@@ -971,18 +1029,18 @@ describe('useManifestOperations', () => {
           updates: [
             {
               memberEntry: 'alpha/SKILL.md',
-              expectedAgents: [],
-              agents: ['codex'],
+              expected: { agents: [], shared: false },
+              next: { agents: ['codex'], shared: false },
             },
             {
               memberEntry: 'beta/SKILL.md',
-              expectedAgents: [],
-              agents: ['codex'],
+              expected: { agents: [], shared: false },
+              next: { agents: ['codex'], shared: false },
             },
             {
               memberEntry: 'gamma/SKILL.md',
-              expectedAgents: ['claude-code'],
-              agents: ['claude-code', 'codex'],
+              expected: { agents: ['claude-code'], shared: false },
+              next: { agents: ['claude-code', 'codex'], shared: false },
             },
           ],
         },

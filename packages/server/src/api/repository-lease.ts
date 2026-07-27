@@ -35,7 +35,7 @@ export async function withRepositoryLease<T>(
   deps: RepositoryLeaseDeps,
   repo: string,
   mode: RepositoryLeaseMode,
-  resourceKeys: (repoPath: string) => readonly string[],
+  resourceKeys: (repoPath: string) => readonly string[] | Promise<readonly string[]>,
   operation: (repoPath: string) => Promise<T>,
 ): Promise<T> {
   const authorization = await authorizeRepository(deps.fs, repo, deps.home)
@@ -46,12 +46,13 @@ export async function runAuthorizedRepositoryLease<T>(
   deps: RepositoryLeaseDeps,
   authorization: RepositoryAuthorization,
   mode: RepositoryLeaseMode,
-  resourceKeys: (repoPath: string) => readonly string[],
+  resourceKeys: (repoPath: string) => readonly string[] | Promise<readonly string[]>,
   operation: (repoPath: string) => Promise<T>,
 ): Promise<T> {
   const leases = resourceLeases(deps, deps.leases)
   const run = mode === 'read' ? leases.runRead.bind(leases) : leases.runMutation.bind(leases)
-  return run([...resourceKeys(authorization.path)], async () => {
+  const keys = await resourceKeys(authorization.path)
+  return run([...keys], async () => {
     await revalidateRepositoryAuthorization(deps.fs, deps.home, authorization)
     return operation(authorization.path)
   })

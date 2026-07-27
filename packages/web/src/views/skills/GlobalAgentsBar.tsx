@@ -2,6 +2,7 @@ import { agentName, type AgentId } from '@/lib/agents'
 import type { Manifest } from '@loom/core'
 import { AgentChip } from '@/components/ui/AgentChip'
 import type { ManifestOperations } from '@/hooks/useManifestOperations'
+import SharedSkillChip from './SharedSkillChip'
 
 interface Props {
   manifest: Manifest
@@ -17,7 +18,13 @@ export default function GlobalAgentsBar({ manifest, agents, operations }: Props)
     ...(manifest.skills?.skills.map((skill) => ({ kind: 'local' as const, skill })) ?? []),
   ]
 
-  if (agents.length === 0 || skills.length === 0) return null
+  if (skills.length === 0) return null
+  const sharedCount = skills.filter((item) =>
+    item.kind === 'source' ? item.member.shared === true : item.skill.shared === true,
+  ).length
+  const sharedState = sharedCount === 0 ? 'off' : sharedCount === skills.length ? 'on' : 'mixed'
+  const sharedStatus =
+    sharedState === 'on' ? '全部已选择' : sharedState === 'mixed' ? '部分已选择' : '全部未选择'
 
   return (
     <div
@@ -65,6 +72,14 @@ export default function GlobalAgentsBar({ manifest, agents, operations }: Props)
             />
           )
         })}
+        {agents.length > 0 && <span className="skill-destination-divider" aria-hidden="true" />}
+        <SharedSkillChip
+          state={sharedState}
+          label={`通用：${sharedStatus}`}
+          count={sharedState === 'mixed' ? `${sharedCount}/${skills.length}` : undefined}
+          disabled={operations.pending.skills.assignments}
+          onClick={() => void operations.setAllSkillShared(manifest)}
+        />
       </span>
     </div>
   )

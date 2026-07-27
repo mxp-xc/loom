@@ -40,7 +40,7 @@ function sourcePlan(overrides: Partial<SourceProjectionPlan> = {}): SourceProjec
     sourceUrl: 'https://example.com/workflow-source.git',
     cacheId: 'workflow-source',
     commit: 'commit-oid',
-    agent: 'claude-code',
+    destination: { kind: 'agent', agent: 'claude-code' },
     projectionBase: '',
     entries: [],
     ...overrides,
@@ -844,7 +844,7 @@ describe('source namespace projection', () => {
             {
               sourceName: 'workflow-source',
               sourceUrl: 'https://example.com/workflow-source.git',
-              agents: ['claude-code'],
+              destinations: [{ kind: 'agent', agent: 'claude-code' }],
             },
           ],
           locals: [],
@@ -872,7 +872,7 @@ describe('source namespace projection', () => {
         {
           sourceName: 'workflow-source',
           sourceUrl: 'https://example.com/workflow-source.git',
-          agent: 'claude-code' as const,
+          destination: { kind: 'agent' as const, agent: 'claude-code' as const },
         },
       ],
     }

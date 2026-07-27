@@ -9,7 +9,8 @@ import {
   loadRepoManifest,
   mergeConfig,
   planProjection,
-  planSourceProjectionForAgents,
+  planSourceProjectionForDestinations,
+  skillProjectionDestinationKey,
   sourceIdentity,
   type AgentId,
   type Config,
@@ -18,6 +19,7 @@ import {
   type ProjectionPlan,
   type RepoManifest,
   type SkillSource,
+  type SkillProjectionDestination,
   type SourceTreeNode,
   type VarsContext,
 } from '@loom/core'
@@ -116,16 +118,20 @@ export async function projectRepository(
     localSourceEntries,
     sourceCaches,
   )
-  const skillsCleanupAgents =
+  const skillsCleanupDestinations =
     scope === 'skills' || scope === 'all'
-      ? new Set(
-          input.agent
-            ? agentsSupporting('skills').filter((agent) => agent === input.agent)
-            : agentsSupporting('skills'),
-        )
+      ? input.agent
+        ? ([{ kind: 'agent', agent: input.agent }] satisfies SkillProjectionDestination[])
+        : ([
+            ...agentsSupporting('skills').map((agent): SkillProjectionDestination => ({
+              kind: 'agent',
+              agent,
+            })),
+            { kind: 'shared' },
+          ] satisfies SkillProjectionDestination[])
       : undefined
   const result = await executeProjection(plan, manifest, varsCtx, projectionDeps, scope, {
-    ...(skillsCleanupAgents ? { skillsCleanupAgents } : {}),
+    ...(skillsCleanupDestinations ? { skillsCleanupDestinations } : {}),
   })
   if (!result.ok || (scope !== 'skills' && scope !== 'all')) return result
   const warnings = unavailableSourceWarnings(manifest.skills.sources ?? [])
@@ -145,42 +151,53 @@ export async function projectSkillChanges(
   const sourceTargets = changes.sources
     .map((target) => ({
       ...target,
-      agents: target.agents.filter((agent) => applicable.has(agent)),
+      destinations: applicableSkillDestinations(target.destinations, applicable),
     }))
-    .filter((target) => target.agents.length > 0)
+    .filter((target) => target.destinations.length > 0)
   const localTargets = changes.locals
     .map((target) => ({
       ...target,
-      agents: target.agents.filter((agent) => applicable.has(agent)),
+      destinations: applicableSkillDestinations(target.destinations, applicable),
     }))
-    .filter((target) => target.agents.length > 0)
+    .filter((target) => target.destinations.length > 0)
   if (sourceTargets.length === 0 && localTargets.length === 0) return { ok: true }
 
-  const affectedAgents = new Set([
-    ...sourceTargets.flatMap((target) => target.agents),
-    ...localTargets.flatMap((target) => target.agents),
+  const affectedDestinations = uniqueSkillDestinations([
+    ...sourceTargets.flatMap((target) => target.destinations),
+    ...localTargets.flatMap((target) => target.destinations),
   ])
-  assertTargetedSkillDestinationCollisions(manifest, affectedAgents)
+  assertTargetedSkillDestinationCollisions(manifest, affectedDestinations)
 
   const sourceByUrl = new Map(manifest.skills.sources.map((source) => [source.url, source]))
   const preparedSourceTargets = sourceTargets.map((target) => {
     const source = sourceByUrl.get(target.sourceUrl)
     if (!source) throw new Error(`Source not found during projection: ${target.sourceUrl}`)
-    const desiredAgents = target.agents.filter((agent) =>
-      (source.members ?? []).some((member) => (member.agents ?? []).includes(agent)),
+    const desiredDestinations = target.destinations.filter((destination) =>
+      (source.members ?? []).some((member) => memberSelectsDestination(member, destination)),
     )
-    const cleanupAgents = target.agents.filter((agent) => !desiredAgents.includes(agent))
+    const desiredKeys = new Set(desiredDestinations.map(skillProjectionDestinationKey))
+    const cleanupDestinations = target.destinations.filter(
+      (destination) => !desiredKeys.has(skillProjectionDestinationKey(destination)),
+    )
     const knownHealth = deps.sourceCacheHealthCatalog?.get(repoPath, source)
     const knownUnavailable =
       source.availability?.available === false || knownHealth?.healthy === false
-    return { target, source, desiredAgents, cleanupAgents, knownHealth, knownUnavailable }
+    return {
+      target,
+      source,
+      desiredDestinations,
+      cleanupDestinations,
+      knownHealth,
+      knownUnavailable,
+    }
   })
   const sourceCaches = await captureAvailableSourceCaches(
     deps.fs,
     repoPath,
     preparedSourceTargets
       .filter(
-        ({ desiredAgents, knownUnavailable }) => desiredAgents.length > 0 && !knownUnavailable,
+        ({ desiredDestinations, knownUnavailable }) =>
+          desiredDestinations.length > 0 && !knownUnavailable,
       )
       .map(({ source }) => source),
   )
@@ -193,15 +210,15 @@ export async function projectSkillChanges(
   for (const {
     target,
     source,
-    desiredAgents,
-    cleanupAgents,
+    desiredDestinations,
+    cleanupDestinations,
     knownHealth,
   } of preparedSourceTargets) {
-    if (desiredAgents.length === 0) {
+    if (desiredDestinations.length === 0) {
       executableSourceTargets.push({
         sourceName: sourceIdentity(source).repoId,
         sourceUrl: source.url,
-        agents: cleanupAgents,
+        destinations: cleanupDestinations,
       })
       continue
     }
@@ -214,11 +231,11 @@ export async function projectSkillChanges(
         }
       }
       warnings.push(...unavailableSourceWarnings([source]))
-      if (cleanupAgents.length > 0) {
+      if (cleanupDestinations.length > 0) {
         executableSourceTargets.push({
           sourceName: sourceIdentity(source).repoId,
           sourceUrl: source.url,
-          agents: cleanupAgents,
+          destinations: cleanupDestinations,
         })
       }
       continue
@@ -249,22 +266,27 @@ export async function projectSkillChanges(
         message: 'Source cache is invalid',
       }
       warnings.push(...unavailableSourceWarnings([source]))
-      if (cleanupAgents.length > 0) {
+      if (cleanupDestinations.length > 0) {
         executableSourceTargets.push({
           sourceName: sourceIdentity(source).repoId,
           sourceUrl: source.url,
-          agents: cleanupAgents,
+          destinations: cleanupDestinations,
         })
       }
       continue
     }
     source.sourceTree = cached.tree
     sourceFiles.set(sourceFilesKey(cacheId, cached.tree.commit), cached.files)
-    sourcePlans.push(...planSourceProjectionForAgents(source, new Set(desiredAgents)))
+    sourcePlans.push(
+      ...planSourceProjectionForDestinations(
+        source,
+        new Set(desiredDestinations.map(skillProjectionDestinationKey)),
+      ),
+    )
     executableSourceTargets.push({
       sourceName: sourceIdentity(source).repoId,
       sourceUrl: source.url,
-      agents: target.agents,
+      destinations: target.destinations,
     })
   }
 
@@ -275,8 +297,7 @@ export async function projectSkillChanges(
   })
   const materializedSkills = targetSkills.filter((skill) => {
     const target = localTargets.find((candidate) => candidate.skillId === skill.id)!
-    const desired = new Set(skill.agents ?? [])
-    return target.agents.some((agent) => desired.has(agent))
+    return target.destinations.some((destination) => memberSelectsDestination(skill, destination))
   })
   const localSkills =
     materializedSkills.length > 0
@@ -288,17 +309,26 @@ export async function projectSkillChanges(
   const localSourceEntries = await captureAvailableLocalSources(deps.fs, localSkills)
   const links: ProjectionPlan['links'] = targetSkills.map((skill) => {
     const target = localTargets.find((candidate) => candidate.skillId === skill.id)!
-    const desired = new Set(skill.agents ?? [])
     return {
       skillId: skill.id,
       source: 'local',
       ...(skill.path ? { localPath: skill.path } : {}),
-      agents: target.agents.filter((agent) => desired.has(agent)),
+      destinations: target.destinations.filter((destination) =>
+        memberSelectsDestination(skill, destination),
+      ),
     }
   })
   const activeAgents = new Set([
-    ...executableSourceTargets.flatMap((target) => target.agents),
-    ...localTargets.flatMap((target) => target.agents),
+    ...executableSourceTargets.flatMap((target) =>
+      target.destinations.flatMap((destination) =>
+        destination.kind === 'agent' ? [destination.agent] : [],
+      ),
+    ),
+    ...localTargets.flatMap((target) =>
+      target.destinations.flatMap((destination) =>
+        destination.kind === 'agent' ? [destination.agent] : [],
+      ),
+    ),
   ])
   const plan: ProjectionPlan = {
     links,
@@ -337,21 +367,56 @@ export async function projectSkillChanges(
 
 function assertTargetedSkillDestinationCollisions(
   manifest: Manifest,
-  affectedAgents: ReadonlySet<AgentId>,
+  affectedDestinations: readonly SkillProjectionDestination[],
 ): void {
+  const affectedKeys = new Set(affectedDestinations.map(skillProjectionDestinationKey))
   const links = manifest.skills.skills.map((skill) => ({
     skillId: skill.id,
-    agents: (skill.agents ?? []).filter((agent) => affectedAgents.has(agent)),
+    destinations: affectedDestinations.filter(
+      (destination) =>
+        affectedKeys.has(skillProjectionDestinationKey(destination)) &&
+        memberSelectsDestination(skill, destination),
+    ),
   }))
   const sourcePlans = manifest.skills.sources.flatMap((source) => {
     const sourceName = sourceIdentity(source).repoId
-    return [...affectedAgents]
-      .filter((agent) =>
-        (source.members ?? []).some((member) => (member.agents ?? []).includes(agent)),
+    return affectedDestinations
+      .filter((destination) =>
+        (source.members ?? []).some((member) => memberSelectsDestination(member, destination)),
       )
-      .map((agent) => ({ sourceName, agent }))
+      .map((destination) => ({ sourceName, destination }))
   })
   assertSkillDestinationCollisions(links, sourcePlans)
+}
+
+function memberSelectsDestination(
+  item: { agents?: readonly AgentId[]; shared?: boolean },
+  destination: SkillProjectionDestination,
+): boolean {
+  return destination.kind === 'shared'
+    ? item.shared === true
+    : (item.agents ?? []).includes(destination.agent)
+}
+
+function applicableSkillDestinations(
+  destinations: readonly SkillProjectionDestination[],
+  applicableAgents: ReadonlySet<AgentId>,
+): SkillProjectionDestination[] {
+  return uniqueSkillDestinations(
+    destinations.filter(
+      (destination) => destination.kind === 'shared' || applicableAgents.has(destination.agent),
+    ),
+  )
+}
+
+function uniqueSkillDestinations(
+  destinations: readonly SkillProjectionDestination[],
+): SkillProjectionDestination[] {
+  return [
+    ...new Map(
+      destinations.map((destination) => [skillProjectionDestinationKey(destination), destination]),
+    ).values(),
+  ]
 }
 
 export async function loadProjectionManifest(

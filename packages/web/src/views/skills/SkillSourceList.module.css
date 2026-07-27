@@ -581,14 +581,45 @@
     display: none;
   }
 
+  .group-head {
+    flex-wrap: wrap;
+  }
+
   .group-head .gname {
     min-width: 0;
     flex: 1;
   }
 
+  .group-head .gacts {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+
   .skill {
-    grid-template-columns: 24px minmax(0, 1fr) max-content 32px !important;
+    grid-template-areas:
+      'icon main actions'
+      '. chips chips';
+    grid-template-columns: 24px minmax(0, 1fr) 32px !important;
+    align-items: start;
     gap: 8px !important;
+  }
+
+  .bundle-skill-icon {
+    grid-area: icon;
+  }
+
+  .skill-main {
+    grid-area: main;
+  }
+
+  .chips {
+    grid-area: chips;
+    flex-wrap: wrap;
+  }
+
+  .skill-actions {
+    grid-area: actions;
   }
 
   .resource-section-head {

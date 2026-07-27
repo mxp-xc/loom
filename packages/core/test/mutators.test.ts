@@ -6,8 +6,11 @@ import {
   removeSource,
   setSourceMembers,
   setSourceMemberAgents,
+  setSourceMemberProjectionAssignments,
   setSkillAgents,
+  setSkillProjectionAssignment,
   setLocalSkillAgents,
+  setLocalSkillProjectionAssignment,
   pinSourceCommit,
   addMcpServer,
   removeMcpServer,
@@ -159,14 +162,19 @@ describe('removeSource', () => {
 })
 
 describe('setSourceMembers', () => {
-  it('preserves existing member agents for retained entries and refreshes names', () => {
+  it('preserves existing member assignment for retained entries and refreshes names', () => {
     const skills: SkillsManifest = {
       sources: [
         {
           url: 'https://github.com/test/repo',
           ref: 'main',
           members: [
-            { name: 'old-name', entry: 'skills/skill-a/SKILL.md', agents: ['codex' as AgentId] },
+            {
+              name: 'old-name',
+              entry: 'skills/skill-a/SKILL.md',
+              agents: ['codex' as AgentId],
+              shared: true,
+            },
           ],
         },
       ],
@@ -181,6 +189,7 @@ describe('setSourceMembers', () => {
       name: 'skill-a',
       entry: 'skills/skill-a/SKILL.md',
       agents: ['codex'],
+      shared: true,
     })
     expect(members[1]).toEqual({ name: 'skill-b', entry: 'skills/skill-b/SKILL.md' })
   })
@@ -208,6 +217,60 @@ describe('setSourceMembers', () => {
     const result = setSourceMembers(emptySkills, 'missing', [{ name: 'a', entry: 'a/SKILL.md' }])
     expect(result.changed).toBe(false)
     expect(result.data).toBe(emptySkills)
+  })
+})
+
+describe('skill projection assignment mutations', () => {
+  const skills: SkillsManifest = {
+    sources: [
+      {
+        url: 'https://github.com/test/repo',
+        ref: 'main',
+        members: [
+          {
+            name: 'skill-a',
+            entry: 'skills/skill-a/SKILL.md',
+            agents: ['codex'],
+            shared: false,
+          },
+        ],
+      },
+    ],
+    skills: [{ id: 'local', agents: ['claude-code'], shared: false }],
+  }
+
+  it('sets a complete source member assignment', () => {
+    const result = setSkillProjectionAssignment(
+      skills,
+      'https://github.com/test/repo',
+      'skills/skill-a/SKILL.md',
+      { agents: ['opencode', 'codex'], shared: true },
+    )
+
+    expect(result.data.sources[0].members?.[0]).toMatchObject({
+      agents: ['codex', 'opencode'],
+      shared: true,
+    })
+  })
+
+  it('sets multiple complete source assignments in one mutation', () => {
+    const result = setSourceMemberProjectionAssignments(skills, 'https://github.com/test/repo', [
+      {
+        memberEntry: 'skills/skill-a/SKILL.md',
+        assignment: { agents: [], shared: true },
+      },
+    ])
+
+    expect(result.data.sources[0].members?.[0]).toMatchObject({ agents: [], shared: true })
+  })
+
+  it('sets a complete local assignment', () => {
+    const result = setLocalSkillProjectionAssignment(skills, 'local', {
+      agents: ['opencode'],
+      shared: true,
+    })
+
+    expect(result.data.skills[0]).toMatchObject({ agents: ['opencode'], shared: true })
   })
 })
 

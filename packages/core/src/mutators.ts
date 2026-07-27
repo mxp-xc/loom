@@ -1,5 +1,9 @@
 import type { SkillsManifest, McpServer, AgentId, LocalSkill, SkillSource } from './types.js'
 import { assertLocalSkillId } from './skill-id.js'
+import {
+  normalizeSkillProjectionAssignment,
+  type SkillProjectionAssignment,
+} from './skill-projection.js'
 
 export type MutationResult<T> = { changed: boolean; data: T }
 
@@ -77,6 +81,7 @@ export function setSourceMembers(
   const members = selectedMembers.map((member) => ({
     ...member,
     ...(prev.get(member.entry)?.agents ? { agents: prev.get(member.entry)!.agents } : {}),
+    ...(prev.get(member.entry)?.shared ? { shared: true } : {}),
   }))
   const sources = skills.sources.slice()
   sources[idx] = { ...source, members }
@@ -100,6 +105,15 @@ export function setSkillAgents(
   const sources = skills.sources.slice()
   sources[idx] = next
   return { changed: true, data: { ...skills, sources } }
+}
+
+export function setSkillProjectionAssignment(
+  skills: SkillsManifest,
+  sourceUrl: string,
+  memberEntry: string,
+  assignment: SkillProjectionAssignment,
+): MutationResult<SkillsManifest> {
+  return setSourceMemberProjectionAssignments(skills, sourceUrl, [{ memberEntry, assignment }])
 }
 
 export function setSourceMemberAgents(
@@ -126,6 +140,35 @@ export function setSourceMemberAgents(
   return { changed: true, data: { ...skills, sources } }
 }
 
+export function setSourceMemberProjectionAssignments(
+  skills: SkillsManifest,
+  sourceUrl: string,
+  updates: Array<{ memberEntry: string; assignment: SkillProjectionAssignment }>,
+): MutationResult<SkillsManifest> {
+  const idx = skills.sources.findIndex((source) => source.url === sourceUrl)
+  if (idx === -1) return { changed: false, data: skills }
+  const source = skills.sources[idx]
+  const members = source.members ? source.members.slice() : []
+
+  for (const update of updates) {
+    const memberEntry = update.memberEntry.trim()
+    if (!memberEntry) continue
+    const memberIdx = members.findIndex((member) => member.entry === memberEntry)
+    if (memberIdx === -1) continue
+    const assignment = normalizeSkillProjectionAssignment(update.assignment)
+    members[memberIdx] = {
+      ...members[memberIdx],
+      agents: assignment.agents,
+      ...(assignment.shared ? { shared: true } : {}),
+    }
+    if (!assignment.shared) delete members[memberIdx].shared
+  }
+
+  const sources = skills.sources.slice()
+  sources[idx] = { ...source, members }
+  return { changed: true, data: { ...skills, sources } }
+}
+
 export function setLocalSkillAgents(
   skills: SkillsManifest,
   id: string,
@@ -136,6 +179,25 @@ export function setLocalSkillAgents(
   if (idx === -1) return { changed: false, data: skills }
   const list = skills.skills.slice()
   list[idx] = { ...skills.skills[idx], agents }
+  return { changed: true, data: { ...skills, skills: list } }
+}
+
+export function setLocalSkillProjectionAssignment(
+  skills: SkillsManifest,
+  id: string,
+  assignmentInput: SkillProjectionAssignment,
+): MutationResult<SkillsManifest> {
+  assertLocalSkillId(id)
+  const idx = skills.skills.findIndex((skill) => skill.id === id)
+  if (idx === -1) return { changed: false, data: skills }
+  const assignment = normalizeSkillProjectionAssignment(assignmentInput)
+  const list = skills.skills.slice()
+  list[idx] = {
+    ...skills.skills[idx],
+    agents: assignment.agents,
+    ...(assignment.shared ? { shared: true } : {}),
+  }
+  if (!assignment.shared) delete list[idx].shared
   return { changed: true, data: { ...skills, skills: list } }
 }
 

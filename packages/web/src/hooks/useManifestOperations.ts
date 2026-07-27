@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   deriveRepoId,
+  normalizeSkillProjectionAssignment,
   sourceIdentity,
   AGENT_IDS,
   type AgentId,
@@ -9,6 +10,8 @@ import {
   type SourceResources,
   type SourceTree,
   type SkillSource,
+  type SkillProjectionAssignment,
+  type SkillProjectionDestination,
 } from '@loom/core'
 import { api } from '@/lib/api'
 import { refreshManifest } from './useManifest'
@@ -58,7 +61,7 @@ export type SourceUpdateState = 'repair' | { label: string; newRef?: string }
 export interface SkillMemberChanges {
   added: Array<{ name: string }>
   updated: Array<{ name: string }>
-  removed: Array<{ name: string; agents?: string[] }>
+  removed: Array<{ name: string; agents?: string[]; shared?: boolean }>
 }
 
 export interface ResourceBoundaryChange {
@@ -73,7 +76,7 @@ export interface PreparedSkillReconciliation {
   changes: SkillMemberChanges
   resourceBoundaryChanges: ResourceBoundaryChange[]
   pathMoves?: Array<{
-    agent: AgentId
+    destination: SkillProjectionDestination
     kind: 'bundle' | 'resource-file' | 'resource-directory'
     sourcePath: string
     previousTargetPath?: string
@@ -216,10 +219,11 @@ function persistedSourceDto(source: SkillSource): SkillSource {
     ...(source.pinned_commit ? { pinned_commit: source.pinned_commit } : {}),
     ...(source.members
       ? {
-          members: source.members.map(({ name, entry, agents }) => ({
+          members: source.members.map(({ name, entry, agents, shared }) => ({
             name,
             entry,
             ...(agents ? { agents } : {}),
+            ...(shared ? { shared: true } : {}),
           })),
         }
       : {}),
@@ -265,6 +269,38 @@ function toggleAgent(currentAgents: readonly AgentId[], agent: AgentId): AgentId
   return currentAgents.includes(agent)
     ? currentAgents.filter((item) => item !== agent)
     : [...currentAgents, agent]
+}
+
+function skillAssignment(input: {
+  agents?: readonly AgentId[]
+  shared?: boolean
+}): SkillProjectionAssignment {
+  return normalizeSkillProjectionAssignment(input)
+}
+
+function assignmentHasDestination(
+  assignment: SkillProjectionAssignment,
+  destination: SkillProjectionDestination,
+): boolean {
+  return destination.kind === 'shared'
+    ? assignment.shared
+    : assignment.agents.includes(destination.agent)
+}
+
+function setAssignmentDestination(
+  assignment: SkillProjectionAssignment,
+  destination: SkillProjectionDestination,
+  enabled: boolean,
+): SkillProjectionAssignment {
+  if (destination.kind === 'shared') return { ...assignment, shared: enabled }
+  return {
+    ...assignment,
+    agents: enabled
+      ? AGENT_IDS.filter(
+          (candidate) => candidate === destination.agent || assignment.agents.includes(candidate),
+        )
+      : assignment.agents.filter((candidate) => candidate !== destination.agent),
+  }
 }
 
 function sortByName<T extends { name: string }>(items: readonly T[]): T[] {
@@ -694,8 +730,14 @@ export function useManifestOperations(
   )
 
   const toggleSourceSkillAgent = useCallback(
-    (sourceUrl: string, memberEntry: string, agent: AgentId, currentAgents: readonly AgentId[]) =>
-      run(
+    (
+      sourceUrl: string,
+      memberEntry: string,
+      agent: AgentId,
+      currentAssignment: { agents?: readonly AgentId[]; shared?: boolean },
+    ) => {
+      const expected = skillAssignment(currentAssignment)
+      return run(
         pendingKey.skillAgents(),
         () =>
           api.updateSkillAgentsBatch({
@@ -706,22 +748,59 @@ export function useManifestOperations(
                 updates: [
                   {
                     memberEntry,
-                    expectedAgents: [...currentAgents],
-                    agents: toggleAgent(currentAgents, agent),
+                    expected,
+                    next: {
+                      ...expected,
+                      agents: toggleAgent(expected.agents, agent),
+                    },
                   },
                 ],
               },
             ],
             locals: [],
           }) as Promise<MaybeOkResponse>,
-        { failureMessage: '保存 agents 失败', reloadOnFailure: true },
-      ),
+        { failureMessage: '保存投影位置失败', reloadOnFailure: true },
+      )
+    },
+    [repoPath, run],
+  )
+
+  const toggleSourceSkillShared = useCallback(
+    (
+      sourceUrl: string,
+      memberEntry: string,
+      currentAssignment: { agents?: readonly AgentId[]; shared?: boolean },
+    ) => {
+      const expected = skillAssignment(currentAssignment)
+      return run(
+        pendingKey.skillAgents(),
+        () =>
+          api.updateSkillAgentsBatch({
+            repo: repoPath,
+            sources: [
+              {
+                sourceUrl,
+                updates: [
+                  { memberEntry, expected, next: { ...expected, shared: !expected.shared } },
+                ],
+              },
+            ],
+            locals: [],
+          }) as Promise<MaybeOkResponse>,
+        { failureMessage: '保存投影位置失败', reloadOnFailure: true },
+      )
+    },
     [repoPath, run],
   )
 
   const toggleLocalSkillAgent = useCallback(
-    (id: string, agent: AgentId, currentAgents: readonly AgentId[]) =>
-      run(
+    (
+      id: string,
+      agent: AgentId,
+      currentAssignment: { agents?: readonly AgentId[]; shared?: boolean },
+    ) => {
+      const expected = skillAssignment(currentAssignment)
+      return run(
         pendingKey.skillAgents(),
         () =>
           api.updateSkillAgentsBatch({
@@ -730,13 +809,34 @@ export function useManifestOperations(
             locals: [
               {
                 id,
-                expectedAgents: [...currentAgents],
-                agents: toggleAgent(currentAgents, agent),
+                expected,
+                next: {
+                  ...expected,
+                  agents: toggleAgent(expected.agents, agent),
+                },
               },
             ],
           }) as Promise<MaybeOkResponse>,
-        { failureMessage: '保存 agents 失败', reloadOnFailure: true },
-      ),
+        { failureMessage: '保存投影位置失败', reloadOnFailure: true },
+      )
+    },
+    [repoPath, run],
+  )
+
+  const toggleLocalSkillShared = useCallback(
+    (id: string, currentAssignment: { agents?: readonly AgentId[]; shared?: boolean }) => {
+      const expected = skillAssignment(currentAssignment)
+      return run(
+        pendingKey.skillAgents(),
+        () =>
+          api.updateSkillAgentsBatch({
+            repo: repoPath,
+            sources: [],
+            locals: [{ id, expected, next: { ...expected, shared: !expected.shared } }],
+          }) as Promise<MaybeOkResponse>,
+        { failureMessage: '保存投影位置失败', reloadOnFailure: true },
+      )
+    },
     [repoPath, run],
   )
 
@@ -751,8 +851,8 @@ export function useManifestOperations(
       const allOn =
         skills.length > 0 &&
         skills.every((item) => {
-          const agents = item.kind === 'source' ? item.member.agents : item.skill.agents
-          return (agents ?? []).includes(agent)
+          const assignment = skillAssignment(item.kind === 'source' ? item.member : item.skill)
+          return assignmentHasDestination(assignment, { kind: 'agent', agent })
         })
       return run(
         pendingKey.skillAgents(),
@@ -762,32 +862,67 @@ export function useManifestOperations(
             sources: (manifest.skills?.sources ?? []).map((source) => ({
               sourceUrl: source.url,
               updates: (source.members ?? []).map((member) => {
-                const agents = member.agents ?? []
+                const expected = skillAssignment(member)
                 return {
                   memberEntry: member.entry,
-                  expectedAgents: agents,
-                  agents: allOn
-                    ? agents.filter((candidate) => candidate !== agent)
-                    : AGENT_IDS.filter(
-                        (candidate) => candidate === agent || agents.includes(candidate),
-                      ),
+                  expected,
+                  next: setAssignmentDestination(expected, { kind: 'agent', agent }, !allOn),
                 }
               }),
             })),
             locals: (manifest.skills?.skills ?? []).map((skill) => {
-              const agents = skill.agents ?? []
+              const expected = skillAssignment(skill)
               return {
                 id: skill.id,
-                expectedAgents: agents,
-                agents: allOn
-                  ? agents.filter((candidate) => candidate !== agent)
-                  : AGENT_IDS.filter(
-                      (candidate) => candidate === agent || agents.includes(candidate),
-                    ),
+                expected,
+                next: setAssignmentDestination(expected, { kind: 'agent', agent }, !allOn),
               }
             }),
           }) as Promise<MaybeOkResponse>,
-        { failureMessage: '批量更新 agents 失败', reloadOnFailure: true },
+        { failureMessage: '批量更新投影位置失败', reloadOnFailure: true },
+      )
+    },
+    [repoPath, run],
+  )
+
+  const setAllSkillShared = useCallback(
+    (manifest: Manifest) => {
+      const skills = [
+        ...(manifest.skills?.sources.flatMap((source) =>
+          (source.members ?? []).map((member) => ({ kind: 'source' as const, source, member })),
+        ) ?? []),
+        ...(manifest.skills?.skills.map((skill) => ({ kind: 'local' as const, skill })) ?? []),
+      ]
+      const allOn =
+        skills.length > 0 &&
+        skills.every((item) =>
+          assignmentHasDestination(
+            skillAssignment(item.kind === 'source' ? item.member : item.skill),
+            { kind: 'shared' },
+          ),
+        )
+      return run(
+        pendingKey.skillAgents(),
+        () =>
+          api.updateSkillAgentsBatch({
+            repo: repoPath,
+            sources: (manifest.skills?.sources ?? []).map((source) => ({
+              sourceUrl: source.url,
+              updates: (source.members ?? []).map((member) => {
+                const expected = skillAssignment(member)
+                return {
+                  memberEntry: member.entry,
+                  expected,
+                  next: { ...expected, shared: !allOn },
+                }
+              }),
+            })),
+            locals: (manifest.skills?.skills ?? []).map((skill) => {
+              const expected = skillAssignment(skill)
+              return { id: skill.id, expected, next: { ...expected, shared: !allOn } }
+            }),
+          }) as Promise<MaybeOkResponse>,
+        { failureMessage: '批量更新投影位置失败', reloadOnFailure: true },
       )
     },
     [repoPath, run],
@@ -797,16 +932,20 @@ export function useManifestOperations(
     (source: SkillSource, agent: AgentId) => {
       const members = source.members ?? []
       const allOn =
-        members.length > 0 && members.every((member) => (member.agents ?? []).includes(agent))
+        members.length > 0 &&
+        members.every((member) =>
+          assignmentHasDestination(skillAssignment(member), { kind: 'agent', agent }),
+        )
       return run(
         pendingKey.skillAgents(),
         () => {
           const updates = members.map((member) => {
-            const agents = member.agents ?? []
-            const next = allOn
-              ? agents.filter((candidate) => candidate !== agent)
-              : AGENT_IDS.filter((candidate) => candidate === agent || agents.includes(candidate))
-            return { memberEntry: member.entry, expectedAgents: agents, agents: next }
+            const expected = skillAssignment(member)
+            return {
+              memberEntry: member.entry,
+              expected,
+              next: setAssignmentDestination(expected, { kind: 'agent', agent }, !allOn),
+            }
           })
           return api.updateSkillAgentsBatch({
             repo: repoPath,
@@ -814,7 +953,38 @@ export function useManifestOperations(
             locals: [],
           }) as Promise<MaybeOkResponse>
         },
-        { failureMessage: '批量更新 agents 失败', reloadOnFailure: true },
+        { failureMessage: '批量更新投影位置失败', reloadOnFailure: true },
+      )
+    },
+    [repoPath, run],
+  )
+
+  const setSourceSkillShared = useCallback(
+    (source: SkillSource) => {
+      const members = source.members ?? []
+      const allOn =
+        members.length > 0 &&
+        members.every((member) =>
+          assignmentHasDestination(skillAssignment(member), { kind: 'shared' }),
+        )
+      return run(
+        pendingKey.skillAgents(),
+        () => {
+          const updates = members.map((member) => {
+            const expected = skillAssignment(member)
+            return {
+              memberEntry: member.entry,
+              expected,
+              next: { ...expected, shared: !allOn },
+            }
+          })
+          return api.updateSkillAgentsBatch({
+            repo: repoPath,
+            sources: [{ sourceUrl: source.url, updates }],
+            locals: [],
+          }) as Promise<MaybeOkResponse>
+        },
+        { failureMessage: '批量更新投影位置失败', reloadOnFailure: true },
       )
     },
     [repoPath, run],
@@ -952,6 +1122,7 @@ export function useManifestOperations(
           pending.has(pendingKey.deleteSource(sourceRef(source))),
       },
       skills: {
+        assignments: pending.has(pendingKey.skillAgents()),
         agents: pending.has(pendingKey.skillAgents()),
         resolvingCollision: pending.has(pendingKey.resolveSourceNamespaceCollision()),
         deleteLocal: (id: string) => pending.has(pendingKey.deleteLocalSkill(id)),
@@ -988,12 +1159,16 @@ export function useManifestOperations(
       deleteSource,
       deleteLocalSkill,
       toggleSourceSkillAgent,
+      toggleSourceSkillShared,
       toggleLocalSkillAgent,
+      toggleLocalSkillShared,
       setAllSkillAgents,
+      setAllSkillShared,
       setSourceSkillAgents,
       sourceNamespaceCollision,
       resolveSourceNamespaceCollision,
       dismissSourceNamespaceCollision,
+      setSourceSkillShared,
       addMcpServer,
       updateMcpServer,
       deleteMcpServer,
@@ -1021,12 +1196,16 @@ export function useManifestOperations(
       deleteSource,
       deleteLocalSkill,
       toggleSourceSkillAgent,
+      toggleSourceSkillShared,
       toggleLocalSkillAgent,
+      toggleLocalSkillShared,
       setAllSkillAgents,
+      setAllSkillShared,
       setSourceSkillAgents,
       sourceNamespaceCollision,
       resolveSourceNamespaceCollision,
       dismissSourceNamespaceCollision,
+      setSourceSkillShared,
       addMcpServer,
       updateMcpServer,
       deleteMcpServer,

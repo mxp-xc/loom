@@ -79,6 +79,7 @@ const SkillMemberChangeSchema = z
     previousPath: SkillPathSchema.optional(),
     nextPath: SkillPathSchema.optional(),
     agents: z.array(AgentIdSchema).optional(),
+    shared: z.boolean().optional(),
   })
   .strict()
 const SkillMemberChangesSchema = z
@@ -98,7 +99,10 @@ const ResourceBoundaryChangeSchema = z
   .strict()
 const ProjectionPathMoveSchema = z
   .object({
-    agent: AgentIdSchema,
+    destination: z.union([
+      z.object({ kind: z.literal('agent'), agent: AgentIdSchema }).strict(),
+      z.object({ kind: z.literal('shared') }).strict(),
+    ]),
     kind: z.enum(['bundle', 'resource-file', 'resource-directory']),
     sourcePath: SafeRelativePathSchema,
     previousTargetPath: SafeRelativePathSchema.optional(),
@@ -1007,7 +1011,14 @@ export function persistedMembers(
     const member = previous.get(entry)
     if (!member && !enabledEntries.has(entry)) return []
     if (!member) return [{ name, entry }]
-    return [{ name, entry, ...(member.agents ? { agents: member.agents } : {}) }]
+    return [
+      {
+        name,
+        entry,
+        ...(member.agents ? { agents: member.agents } : {}),
+        ...(member.shared ? { shared: true } : {}),
+      },
+    ]
   })
 }
 

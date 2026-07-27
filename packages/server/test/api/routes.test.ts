@@ -1,6 +1,6 @@
 import { afterAll, describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadRepoManifest } from '@loom/core'
@@ -206,7 +206,7 @@ describe('API routes', () => {
   })
 
   it('does not hold the repository lease while startup source health inspection is pending', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'loom-startup-source-health-'))
+    const home = await realpath(await mkdtemp(join(tmpdir(), 'loom-startup-source-health-')))
     const repoPath = join(home, '.loom', 'repos', 'default')
     const cachePath = join(repoPath, 'remote-cache', 'source-a')
     await mkdir(join(cachePath, '.git'), { recursive: true })

@@ -206,7 +206,7 @@ describe('Skills route failure contract', () => {
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual({
       ok: false,
-      error: 'stale_agent_state',
+      error: 'stale_projection_assignment',
       message: 'Skills state conflict',
     })
     await expect(fs.readFile(join(repoPath, 'skills.yaml'))).resolves.toBe(original)

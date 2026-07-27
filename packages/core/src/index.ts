@@ -1,4 +1,6 @@
 export * from './agents.js'
+export * from './shared-home.js'
+export * from './skill-projection.js'
 export * from './types.js'
 export * from './mcp-codecs.js'
 export * from './vars-types.js'

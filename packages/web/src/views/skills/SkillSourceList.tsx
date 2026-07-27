@@ -33,7 +33,6 @@ import { CSS } from '@dnd-kit/utilities'
 import { agentName, type AgentId } from '@/lib/agents'
 import { inferRepositoryFileWebUrl, inferRepositoryWebUrl } from '@/lib/repository-links'
 import {
-  formatSourceMemberSkillId,
   normalizeSkillGroupOrder,
   sourceIdentity,
   type SkillSource,
@@ -61,13 +60,14 @@ import {
   Trash2,
   ScanLine,
 } from 'lucide-react'
-import { sortSkillMembers, type SkillDetail } from './types'
+import { sortSkillMembers, type SkillDetailIdentity } from './types'
 import type {
   ManifestOperations,
   PreparedSkillReconciliation,
   SourceUpdateState,
 } from '@/hooks/useManifestOperations'
 import SkillReconciliationDialog from './SkillReconciliationDialog'
+import SharedSkillChip from './SharedSkillChip'
 import { skillFolderDisplayPath } from './source-paths'
 import styles from './SkillSourceList.module.css'
 
@@ -75,7 +75,7 @@ interface Props {
   manifest: Manifest
   visibleAgents: AgentId[]
   operations: ManifestOperations
-  onOpenDetail: (d: SkillDetail) => void
+  onOpenDetail: (identity: SkillDetailIdentity) => void
   onOpenScan: (src: SkillSource) => void
   onOpenEdit: (src: SkillSource) => void
   expandedGroups: Set<string>
@@ -326,6 +326,14 @@ function sourceAgentState(src: SkillSource, agent: AgentId) {
   return { count, total: members.length, state }
 }
 
+function sourceSharedState(src: SkillSource) {
+  const members = src.members ?? []
+  const count = members.filter((member) => member.shared === true).length
+  const state: 'off' | 'on' | 'mixed' =
+    count === 0 ? 'off' : count === members.length ? 'on' : 'mixed'
+  return { count, total: members.length, state }
+}
+
 type SourceSkillMember = NonNullable<SkillSource['members']>[number]
 type LocalSkillItem = Manifest['skills']['skills'][number]
 
@@ -378,13 +386,17 @@ export default function SkillSourceList({
     sourceUrl: string,
     memberEntry: string,
     agent: AgentId,
-    currentAgents: AgentId[],
+    currentAssignment: { agents: AgentId[]; shared?: boolean },
   ) => {
-    await operations.toggleSourceSkillAgent(sourceUrl, memberEntry, agent, currentAgents)
+    await operations.toggleSourceSkillAgent(sourceUrl, memberEntry, agent, currentAssignment)
   }
 
-  const handleLocalChipToggle = async (id: string, agent: AgentId, currentAgents: AgentId[]) => {
-    await operations.toggleLocalSkillAgent(id, agent, currentAgents)
+  const handleLocalChipToggle = async (
+    id: string,
+    agent: AgentId,
+    currentAssignment: { agents: AgentId[]; shared?: boolean },
+  ) => {
+    await operations.toggleLocalSkillAgent(id, agent, currentAssignment)
   }
 
   const handleCheck = async (src: SkillSource) => {
@@ -577,7 +589,7 @@ export default function SkillSourceList({
                     </span>
                   )}
                   <span className={styles.gacts} onClick={(e) => e.stopPropagation()}>
-                    {visibleAgents.length > 0 && hasSkillMembers && (
+                    {hasSkillMembers && (
                       <span
                         className={cn('agent-chips', styles['source-agent-chips'])}
                         aria-label={`${repoId} 批量投影`}
@@ -605,11 +617,31 @@ export default function SkillSourceList({
                             />
                           )
                         })}
+                        {visibleAgents.length > 0 && (
+                          <span className="skill-destination-divider" aria-hidden="true" />
+                        )}
+                        {(() => {
+                          const { count, total, state } = sourceSharedState(src)
+                          const status =
+                            state === 'on'
+                              ? '全部已选择'
+                              : state === 'mixed'
+                                ? '部分已选择'
+                                : '全部未选择'
+                          return (
+                            <SharedSkillChip
+                              className="shared-skill-chip"
+                              state={state}
+                              label={`${repoId} 通用：${status}`}
+                              count={state === 'mixed' ? `${count}/${total}` : undefined}
+                              disabled={total === 0 || operations.pending.skills.assignments}
+                              onClick={() => void operations.setSourceSkillShared(src)}
+                            />
+                          )
+                        })()}
                       </span>
                     )}
-                    {visibleAgents.length > 0 && hasSkillMembers && (
-                      <span className={styles['source-actions-divider']} />
-                    )}
+                    {hasSkillMembers && <span className={styles['source-actions-divider']} />}
                     {isExpanded && resourceRuleCount > 0 && (
                       <IconButton
                         label={`${resourcesVisible ? '隐藏' : '显示'} ${repoId} resources`}
@@ -697,10 +729,9 @@ export default function SkillSourceList({
                         data-testid={`source-skill-${m.name}`}
                         onClick={() =>
                           onOpenDetail({
-                            skillId: formatSourceMemberSkillId(src, m.name, manifest.config),
-                            source: src.url,
-                            path: (m.path ?? memberEntry) || undefined,
-                            agents: mAgents,
+                            kind: 'source',
+                            sourceUrl: src.url,
+                            memberEntry,
                           })
                         }
                       >
@@ -748,10 +779,32 @@ export default function SkillSourceList({
                               mAgents.includes(a),
                               operations.pending.skills.agents,
                               memberEntry
-                                ? () => handleChipToggle(src.url, memberEntry, a, mAgents)
+                                ? () =>
+                                    handleChipToggle(src.url, memberEntry, a, {
+                                      agents: mAgents,
+                                      shared: m.shared,
+                                    })
                                 : undefined,
                             ),
                           )}
+                          {visibleAgents.length > 0 && (
+                            <span className="skill-destination-divider" aria-hidden="true" />
+                          )}
+                          <SharedSkillChip
+                            className="shared-skill-chip"
+                            state={m.shared ? 'on' : 'off'}
+                            label={`${m.name} 通用：${m.shared ? '已选择' : '未选择'}`}
+                            disabled={!memberEntry || operations.pending.skills.assignments}
+                            onClick={
+                              memberEntry
+                                ? () =>
+                                    void operations.toggleSourceSkillShared(src.url, memberEntry, {
+                                      agents: mAgents,
+                                      shared: m.shared,
+                                    })
+                                : undefined
+                            }
+                          />
                         </span>
                       </div>
                     )
@@ -877,7 +930,10 @@ export default function SkillSourceList({
                   const filePath = localSkillFilePath(s)
                   const displayPath = localSkillDisplayPath(filePath)
                   const openLocalDetail = () =>
-                    onOpenDetail({ skillId: s.id, path: s.path, agents: lAgents })
+                    onOpenDetail({
+                      kind: 'local',
+                      skillId: s.id,
+                    })
                   return (
                     <div
                       key={s.id}
@@ -940,10 +996,32 @@ export default function SkillSourceList({
                       </span>
                       <span className={styles.chips} onClick={(e) => e.stopPropagation()}>
                         {visibleAgents.map((a) =>
-                          renderChip(a, lAgents.includes(a), operations.pending.skills.agents, () =>
-                            handleLocalChipToggle(s.id, a, lAgents),
+                          renderChip(
+                            a,
+                            lAgents.includes(a),
+                            operations.pending.skills.assignments,
+                            () =>
+                              handleLocalChipToggle(s.id, a, {
+                                agents: lAgents,
+                                shared: s.shared,
+                              }),
                           ),
                         )}
+                        {visibleAgents.length > 0 && (
+                          <span className="skill-destination-divider" aria-hidden="true" />
+                        )}
+                        <SharedSkillChip
+                          className="shared-skill-chip"
+                          state={s.shared ? 'on' : 'off'}
+                          label={`${s.id} 通用：${s.shared ? '已选择' : '未选择'}`}
+                          disabled={operations.pending.skills.assignments}
+                          onClick={() =>
+                            void operations.toggleLocalSkillShared(s.id, {
+                              agents: lAgents,
+                              shared: s.shared,
+                            })
+                          }
+                        />
                       </span>
                       <span
                         className={styles['skill-actions']}

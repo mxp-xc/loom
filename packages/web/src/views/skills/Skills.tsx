@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ChevronsDownUp, ChevronsUpDown, LoaderCircle, Plus, Send } from 'lucide-react'
 import { useManifest } from '@/hooks/useManifest'
@@ -8,6 +8,7 @@ import { useViewError } from '@/hooks/useViewError'
 import { ErrorState, WarningState } from '@/components/ErrorFeedback'
 import {
   applicableAgents,
+  formatSourceMemberSkillId,
   normalizeOrder,
   normalizeSkillGroupOrder,
   type SkillSource,
@@ -19,7 +20,7 @@ import SkillDetailEditor from './SkillDetailEditor'
 import EditSourceModal from './EditSourceModal'
 import AddSkillModal from './AddSkillModal'
 import SourceNamespaceCollisionDialog from './SourceNamespaceCollisionDialog'
-import type { SkillDetail } from './types'
+import type { SkillDetail, SkillDetailIdentity } from './types'
 import styles from './Skills.module.css'
 
 export default function Skills({ repoPath }: { repoPath: string }) {
@@ -41,7 +42,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
     onToast: showToast,
   })
   const [addOpen, setAddOpen] = useState(false)
-  const [detail, setDetail] = useState<SkillDetail | null>(null)
+  const [detailIdentity, setDetailIdentity] = useState<SkillDetailIdentity | null>(null)
   const [editSource, setEditSource] = useState<SkillSource | null>(null)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [groupOrder, setGroupOrder] = useState<string[]>([])
@@ -62,6 +63,31 @@ export default function Skills({ repoPath }: { repoPath: string }) {
   const visibleAgents = applicableAgents(manifest?.config?.agents, 'skills')
   const unavailableSources =
     manifest?.skills.sources.filter((source) => source.availability?.available === false) ?? []
+  const detail = useMemo<SkillDetail | null>(() => {
+    if (!manifest || !detailIdentity) return null
+    if (detailIdentity.kind === 'local') {
+      const skill = manifest.skills.skills.find(({ id }) => id === detailIdentity.skillId)
+      if (!skill) return null
+      return {
+        skillId: skill.id,
+        path: skill.path,
+        agents: skill.agents ?? [],
+        shared: skill.shared === true,
+      }
+    }
+
+    const source = manifest.skills.sources.find(({ url }) => url === detailIdentity.sourceUrl)
+    const member = source?.members?.find(({ entry }) => entry === detailIdentity.memberEntry)
+    if (!source || !member) return null
+    return {
+      skillId: formatSourceMemberSkillId(source, member.name, manifest.config),
+      source: source.url,
+      memberEntry: member.entry,
+      path: member.path ?? member.entry,
+      agents: member.agents ?? [],
+      shared: member.shared === true,
+    }
+  }, [detailIdentity, manifest])
 
   const reorderGroups = async (ids: string[]) => {
     const previous = normalizedGroupOrder
@@ -186,7 +212,7 @@ export default function Skills({ repoPath }: { repoPath: string }) {
             manifest={manifest}
             visibleAgents={visibleAgents}
             operations={operations}
-            onOpenDetail={setDetail}
+            onOpenDetail={setDetailIdentity}
             onOpenScan={setEditSource}
             onOpenEdit={setEditSource}
             expandedGroups={expandedGroups}
@@ -201,8 +227,9 @@ export default function Skills({ repoPath }: { repoPath: string }) {
         repoPath={repoPath}
         detail={detail}
         agents={visibleAgents}
+        operations={operations}
         showToast={showToast}
-        onClose={() => setDetail(null)}
+        onClose={() => setDetailIdentity(null)}
       />
 
       <AddSkillModal open={addOpen} repoPath={repoPath} onClose={() => setAddOpen(false)} />

@@ -455,7 +455,7 @@ describe('projectRepository', () => {
             skillId: 'external-skill',
             localPath: './other',
             source: 'local',
-            agents: ['codex'],
+            destinations: [{ kind: 'agent', agent: 'codex' }],
           },
         ],
         sourcePlans: [],
@@ -535,14 +535,27 @@ describe('projectSkillChanges', () => {
       const projectDeps = deps(sourceTreeGit([]))
       const changes: SkillsProjectionChangeSet =
         targetKind === 'local'
-          ? { sources: [], locals: [{ skillId: 'shared', agents: ['codex'] }] }
+          ? {
+              sources: [],
+              locals: [
+                {
+                  skillId: 'shared',
+                  destinations: [{ kind: 'agent', agent: 'codex' }],
+                },
+              ],
+            }
           : {
-              sources: [{ sourceUrl: 'https://example.test/Shared.git', agents: ['codex'] }],
+              sources: [
+                {
+                  sourceUrl: 'https://example.test/Shared.git',
+                  destinations: [{ kind: 'agent', agent: 'codex' }],
+                },
+              ],
               locals: [],
             }
 
       await expect(projectSkillChanges(projectDeps, root, changes)).rejects.toThrow(
-        'Local skill destination "shared" overlaps source namespace "Shared" for codex',
+        'Local skill destination "shared" overlaps source namespace "Shared" for agent:codex',
       )
 
       await expect(projectDeps.fs.exists(join(root, '.codex', 'skills', 'shared'))).resolves.toBe(
@@ -609,7 +622,12 @@ describe('projectSkillChanges', () => {
       sourceProjectionCatalog: new SourceProjectionCatalog(),
     }
     const changes: SkillsProjectionChangeSet = {
-      sources: [{ sourceUrl: 'https://example.test/source-a.git', agents: ['codex'] }],
+      sources: [
+        {
+          sourceUrl: 'https://example.test/source-a.git',
+          destinations: [{ kind: 'agent', agent: 'codex' }],
+        },
+      ],
       locals: [],
     }
 
@@ -676,7 +694,12 @@ describe('projectSkillChanges', () => {
       pinned_commit: 'commit-a',
     }
     const changes: SkillsProjectionChangeSet = {
-      sources: [{ sourceUrl: source.url, agents: ['codex'] }],
+      sources: [
+        {
+          sourceUrl: source.url,
+          destinations: [{ kind: 'agent', agent: 'codex' }],
+        },
+      ],
       locals: [],
     }
 
@@ -723,7 +746,12 @@ describe('projectSkillChanges', () => {
     await expect(
       projectSkillChanges({ ...deps(git), fs }, root, {
         sources: [],
-        locals: [{ skillId: 'local-alpha', agents: ['codex'] }],
+        locals: [
+          {
+            skillId: 'local-alpha',
+            destinations: [{ kind: 'agent', agent: 'codex' }],
+          },
+        ],
       }),
     ).resolves.toEqual({ ok: true })
 
@@ -769,7 +797,12 @@ describe('projectSkillChanges', () => {
     )
 
     const result = await projectSkillChanges({ ...deps(git), sourceCacheHealthCatalog }, root, {
-      sources: [{ sourceUrl: 'https://example.test/source-a.git', agents: ['codex'] }],
+      sources: [
+        {
+          sourceUrl: 'https://example.test/source-a.git',
+          destinations: [{ kind: 'agent', agent: 'codex' }],
+        },
+      ],
       locals: [],
     })
 
@@ -809,7 +842,12 @@ describe('projectSkillChanges', () => {
 
     await expect(
       projectSkillChanges(deps(git), root, {
-        sources: [{ sourceUrl: 'https://example.test/source-a.git', agents: ['codex'] }],
+        sources: [
+          {
+            sourceUrl: 'https://example.test/source-a.git',
+            destinations: [{ kind: 'agent', agent: 'codex' }],
+          },
+        ],
         locals: [],
       }),
     ).resolves.toEqual({
@@ -866,7 +904,12 @@ describe('projectSkillChanges', () => {
 
     await expect(
       projectSkillChanges({ ...deps(git), fs }, root, {
-        sources: [{ sourceUrl: 'https://example.test/source-a.git', agents: ['codex'] }],
+        sources: [
+          {
+            sourceUrl: 'https://example.test/source-a.git',
+            destinations: [{ kind: 'agent', agent: 'codex' }],
+          },
+        ],
         locals: [],
       }),
     ).resolves.toEqual({ ok: true })

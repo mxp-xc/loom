@@ -6,10 +6,13 @@ import Modal from '@/components/Modal'
 import { MarkdownDocument } from '@/components/MarkdownPreview'
 import MonacoTextEditor from '@/components/monaco/MonacoTextEditor'
 import { Button } from '@/components/ui/button'
+import { AgentChip } from '@/components/ui/AgentChip'
 import { IconButton } from '@/components/ui/IconButton'
 import { Check, Code2, Copy, FileText, LoaderCircle } from 'lucide-react'
 import { agentColor, agentName, agentShort, agentSkillPath, type AgentId } from '@/lib/agents'
 import type { SkillDetail } from './types'
+import type { ManifestOperations } from '@/hooks/useManifestOperations'
+import SharedSkillChip from './SharedSkillChip'
 import SkillWorkbench, { SkillWorkbenchTitle } from './SkillWorkbench'
 import styles from './SkillDetailEditor.module.css'
 
@@ -17,6 +20,7 @@ interface Props {
   repoPath: string
   detail: SkillDetail | null
   agents?: AgentId[]
+  operations: ManifestOperations
   showToast: (msg: string) => void
   onClose: () => void
 }
@@ -33,6 +37,7 @@ export default function SkillDetailEditor({
   repoPath,
   detail,
   agents = [],
+  operations,
   showToast,
   onClose,
 }: Props) {
@@ -69,8 +74,8 @@ export default function SkillDetailEditor({
     setCopied(false)
 
     const identity = detail.source
-      ? detail.path
-        ? { kind: 'source' as const, sourceUrl: detail.source, memberEntry: detail.path }
+      ? detail.memberEntry
+        ? { kind: 'source' as const, sourceUrl: detail.source, memberEntry: detail.memberEntry }
         : null
       : { kind: 'local' as const, skillId: detail.skillId }
     if (!identity) {
@@ -100,7 +105,7 @@ export default function SkillDetailEditor({
     return () => {
       active = false
     }
-  }, [detail, reloadKey, repoPath])
+  }, [detail?.memberEntry, detail?.skillId, detail?.source, reloadKey, repoPath])
 
   const copySkillContent = async () => {
     if (!navigator.clipboard || skillContent == null) return
@@ -156,6 +161,24 @@ export default function SkillDetailEditor({
   const isLocal = Boolean(detail && !detail.source)
   const savedState = detail?.source ? 'Read only' : saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'
   const savedTone = saving ? 'saving' : dirty ? 'dirty' : 'saved'
+  const toggleAgent = (agent: AgentId) => {
+    if (!detail) return
+    const assignment = { agents: detail.agents, shared: detail.shared }
+    if (detail.source && detail.memberEntry) {
+      void operations.toggleSourceSkillAgent(detail.source, detail.memberEntry, agent, assignment)
+      return
+    }
+    void operations.toggleLocalSkillAgent(detail.skillId, agent, assignment)
+  }
+  const toggleShared = () => {
+    if (!detail) return
+    const assignment = { agents: detail.agents, shared: detail.shared }
+    if (detail.source && detail.memberEntry) {
+      void operations.toggleSourceSkillShared(detail.source, detail.memberEntry, assignment)
+      return
+    }
+    void operations.toggleLocalSkillShared(detail.skillId, assignment)
+  }
 
   return (
     <Modal
@@ -210,12 +233,43 @@ export default function SkillDetailEditor({
                 </dl>
               </section>
 
-              {agents.length > 0 && (
+              <section>
+                <div className={styles.sectionHeading}>
+                  <span className={styles.kicker}>Projection destinations</span>
+                  <span>
+                    {activeAgents + (detail.shared ? 1 : 0)} of {agents.length + 1}
+                  </span>
+                </div>
+                <div className={`agent-chips ${styles.destinationChips}`}>
+                  {agents.map((agent) => (
+                    <AgentChip
+                      key={agent}
+                      agent={agent}
+                      state={detail.agents.includes(agent) ? 'on' : 'off'}
+                      label={`${agentName[agent]}：${detail.agents.includes(agent) ? '已选择' : '未选择'}`}
+                      tooltip={detail.agents.includes(agent) ? '已启用' : '未启用'}
+                      disabled={operations.pending.skills.assignments}
+                      onClick={() => toggleAgent(agent)}
+                    />
+                  ))}
+                  {agents.length > 0 && (
+                    <span className="skill-destination-divider" aria-hidden="true" />
+                  )}
+                  <SharedSkillChip
+                    state={detail.shared ? 'on' : 'off'}
+                    label={`通用：${detail.shared ? '已选择' : '未选择'}`}
+                    disabled={operations.pending.skills.assignments}
+                    onClick={toggleShared}
+                  />
+                </div>
+              </section>
+
+              {(agents.length > 0 || detail.shared) && (
                 <section>
                   <div className={styles.sectionHeading}>
                     <span className={styles.kicker}>Projected links</span>
                     <span>
-                      {activeAgents} of {agents.length}
+                      {activeAgents + (detail.shared ? 1 : 0)} of {agents.length + 1}
                     </span>
                   </div>
                   <div className={styles.agentList}>
@@ -237,6 +291,18 @@ export default function SkillDetailEditor({
                         </div>
                       )
                     })}
+                    <div
+                      className={styles.agentRow}
+                      data-active={detail.shared}
+                      style={{ '--agent-color': 'var(--signal)' } as CSSProperties}
+                    >
+                      <span className={styles.sharedBadge}>通用</span>
+                      <div>
+                        <strong>通用 Skills</strong>
+                        <code>{`~/.agents/skills/${detail.skillId}`}</code>
+                      </div>
+                      <span className={styles.agentState}>{detail.shared ? 'linked' : 'off'}</span>
+                    </div>
                   </div>
                 </section>
               )}

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   mcpImportResourceKeys,
   projectionResourceKeys,
+  targetedSkillsProjectionResourceKeys,
 } from '../../src/concurrency/resource-keys.js'
 
 describe('resource keys', () => {
@@ -69,5 +70,22 @@ describe('resource keys', () => {
     expect(keys).toContain(resolve(home, '.config/opencode/skills'))
     expect(keys).not.toContain(resolve(home, '.codex/skills'))
     expect(keys).not.toContain(resolve(home, '.claude/skills'))
+    expect(keys).not.toContain(resolve(home, '.agents/skills'))
+  })
+
+  it('locks shared skills for full projection and only changed destinations for targeted projection', () => {
+    const home = resolve('/home/tester')
+    const repo = resolve('/work/repos/default')
+    const full = projectionResourceKeys(home, repo, home, 'skills')
+    const targeted = targetedSkillsProjectionResourceKeys(home, repo, home, [
+      { kind: 'agent', agent: 'codex' },
+      { kind: 'shared' },
+    ])
+
+    expect(full).toContain(resolve(home, '.agents/skills'))
+    expect(targeted).toContain(resolve(home, '.codex/skills'))
+    expect(targeted).toContain(resolve(home, '.agents/skills'))
+    expect(targeted).not.toContain(resolve(home, '.claude/skills'))
+    expect(targeted).not.toContain(resolve(home, '.config/opencode/skills'))
   })
 })

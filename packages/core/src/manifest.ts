@@ -241,6 +241,7 @@ export const SkillMemberOverrideSchema = z
       'entry must identify a SKILL.md file',
     ),
     agents: z.array(AgentIdSchema).optional(),
+    shared: z.boolean().optional(),
   })
   .strict()
 export const LocalSkillSchema = z
@@ -248,6 +249,7 @@ export const LocalSkillSchema = z
     id: LocalSkillIdSchema,
     path: z.string().min(1).optional(),
     agents: z.array(AgentIdSchema).optional(),
+    shared: z.boolean().optional(),
   })
   .strict()
 export const SkillSourceSchema = z

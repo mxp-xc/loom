@@ -118,6 +118,13 @@
   margin-top: 9px;
 }
 
+.destinationChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 9px;
+}
+
 .agentRow {
   display: grid;
   min-height: 48px;
@@ -129,6 +136,21 @@
   border-radius: 7px;
   background: var(--bg);
   opacity: 0.58;
+}
+
+.sharedBadge {
+  display: grid;
+  min-width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--signal) 48%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--signal) 10%, var(--card));
+  color: var(--signal);
+  font:
+    700 8px 'JetBrains Mono',
+    monospace;
 }
 
 .agentRow[data-active='true'] {

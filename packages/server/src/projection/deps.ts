@@ -2,7 +2,15 @@ import { join, dirname, isAbsolute, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { createAgentMcpAdapter } from '../adapters/mcp.js'
 import type { ManagedSkillArtifacts, ProjectionDeps } from './executor.js'
-import { AGENT_IDS, LocalSkillIdSchema, agentsSupporting, type AgentId } from '@loom/core'
+import {
+  AGENT_IDS,
+  LocalSkillIdSchema,
+  agentsSupporting,
+  parseSkillProjectionDestinationKey,
+  skillProjectionDestinationKey,
+  type AgentId,
+  type SkillProjectionDestinationKey,
+} from '@loom/core'
 import { logger } from '../lib/logger.js'
 import { cacheDirFor } from '../remote/cache.js'
 import type { IFileSystem } from '../ports/fs.js'
@@ -104,7 +112,7 @@ export function createProjectionDeps(
     await fs.mkdir(dirname(skillStateFile), true)
     await fs.writeFile(
       skillStateFile,
-      JSON.stringify({ version: 1, ownerRepo, agents: artifacts }, null, 2) + '\n',
+      JSON.stringify({ version: 2, ownerRepo, destinations: artifacts }, null, 2) + '\n',
     )
   }
   return {
@@ -251,31 +259,63 @@ function parseManagedMcpAgents(value: unknown): Record<string, string[]> {
 }
 
 function parseManagedSkillState(value: unknown, ownerRepo: string): ManagedSkillArtifacts {
-  if (!isRecord(value) || value.version !== 1 || value.ownerRepo !== ownerRepo) {
+  if (!isRecord(value) || value.ownerRepo !== ownerRepo) {
     throw new Error('Managed skill projection state identity is invalid')
   }
-  if (!isRecord(value.agents)) throw new Error('Managed skill projection state agents are invalid')
+  if (value.version === 1) {
+    assertExactKeys(value, ['agents', 'ownerRepo', 'version'])
+    return parseManagedSkillDestinations(value.agents, true)
+  }
+  if (value.version === 2) {
+    assertExactKeys(value, ['destinations', 'ownerRepo', 'version'])
+    return parseManagedSkillDestinations(value.destinations, false)
+  }
+  throw new Error('Managed skill projection state identity is invalid')
+}
+
+function parseManagedSkillDestinations(value: unknown, agentKeyed: boolean): ManagedSkillArtifacts {
+  if (!isRecord(value)) {
+    throw new Error('Managed skill projection state destinations are invalid')
+  }
   const artifacts: ManagedSkillArtifacts = {}
-  for (const [agent, entries] of Object.entries(value.agents)) {
-    if (!AGENT_IDS.includes(agent as AgentId) || !isRecord(entries)) {
-      throw new Error(`Managed skill projection state agent is invalid: ${agent}`)
+  for (const [rawKey, entries] of Object.entries(value)) {
+    const destination = agentKeyed
+      ? AGENT_IDS.includes(rawKey as AgentId)
+        ? ({ kind: 'agent', agent: rawKey as AgentId } as const)
+        : null
+      : parseSkillProjectionDestinationKey(rawKey)
+    if (!destination || !isRecord(entries)) {
+      throw new Error(`Managed skill projection state destination is invalid: ${rawKey}`)
     }
+    const key = skillProjectionDestinationKey(destination)
     const parsedEntries: Record<string, { kind: 'link' | 'copy'; source: string }> = {}
     for (const [skillId, artifact] of Object.entries(entries)) {
       if (
         !isSafeManagedSkillId(skillId) ||
         !isRecord(artifact) ||
+        !hasExactKeys(artifact, ['kind', 'source']) ||
         (artifact.kind !== 'link' && artifact.kind !== 'copy') ||
         typeof artifact.source !== 'string' ||
         !isAbsolute(artifact.source)
       ) {
-        throw new Error(`Managed skill projection state entry is invalid: ${agent}/${skillId}`)
+        throw new Error(`Managed skill projection state entry is invalid: ${key}/${skillId}`)
       }
       parsedEntries[skillId] = { kind: artifact.kind, source: artifact.source }
     }
-    artifacts[agent as AgentId] = parsedEntries
+    artifacts[key as SkillProjectionDestinationKey] = parsedEntries
   }
   return artifacts
+}
+
+function assertExactKeys(value: Record<string, unknown>, expected: string[]): void {
+  if (!hasExactKeys(value, expected)) {
+    throw new Error('Managed skill projection state fields are invalid')
+  }
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: string[]): boolean {
+  const keys = Object.keys(value).sort()
+  return keys.length === expected.length && keys.every((key, index) => key === expected[index])
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

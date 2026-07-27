@@ -120,6 +120,54 @@ describe('loadRepoManifest safeParse', () => {
 })
 
 describe('validateManifest (zod discriminatedUnion)', () => {
+  it('accepts shared assignments on source members and local skills', () => {
+    const manifest = loadRepoManifest({
+      'skills.yaml': [
+        'sources:',
+        '  - url: github:x/y',
+        '    ref: main',
+        '    members:',
+        '      - name: remote',
+        '        entry: skills/remote/SKILL.md',
+        '        shared: true',
+        'skills:',
+        '  - id: local',
+        '    shared: true',
+      ].join('\n'),
+      'mcp.yaml': '[]\n',
+    })
+
+    expect(validateManifest(manifest)).toEqual([])
+    expect(manifest.skills.sources[0].members?.[0].shared).toBe(true)
+    expect(manifest.skills.skills[0].shared).toBe(true)
+  })
+
+  it.each([
+    [
+      'source member',
+      [
+        'sources:',
+        '  - url: github:x/y',
+        '    ref: main',
+        '    members:',
+        '      - name: remote',
+        '        entry: skills/remote/SKILL.md',
+        '        shared: yes',
+        'skills: []',
+      ].join('\n'),
+      'source[0].members.0.shared',
+    ],
+    [
+      'local skill',
+      ['sources: []', 'skills:', '  - id: local', '    shared: yes'].join('\n'),
+      'skills.skills[0].shared',
+    ],
+  ])('rejects a non-boolean shared value on %s', (_label, yaml, path) => {
+    const manifest = loadRepoManifest({ 'skills.yaml': yaml, 'mcp.yaml': '[]\n' })
+
+    expect(validateManifest(manifest)).toEqual([expect.stringContaining(path)])
+  })
+
   it.each(['nested/skill', '../skill', '.', 'BadSkill', 'bad_skill', 'bad skill'])(
     'rejects invalid local skill id %s',
     (id) => {

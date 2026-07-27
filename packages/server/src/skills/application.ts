@@ -13,13 +13,18 @@ import {
   LocalSkillIdSchema,
   LocalSkillSchema,
   SOURCE_NAME_REGEX,
-  setLocalSkillAgents as setLocalSkillAgentsMutation,
+  changedSkillProjectionDestinations,
+  normalizeSkillProjectionAssignment,
+  sameSkillProjectionAssignment,
+  setLocalSkillProjectionAssignment as setLocalSkillProjectionAssignmentMutation,
   setSourceMembers as setSourceMembersMutation,
-  setSourceMemberAgents as setSourceMemberAgentsMutation,
+  setSourceMemberProjectionAssignments as setSourceMemberProjectionAssignmentsMutation,
   updateSourceMeta as updateSourceMetaMutation,
   AGENT_IDS,
   type AgentId,
   type LocalSkill,
+  type SkillProjectionAssignment,
+  type SkillProjectionDestination,
   type SourceResources,
   type SourceTree,
   type SourceTreeNode,
@@ -30,10 +35,7 @@ import { logger } from '../lib/logger.js'
 import type { IFileSystem } from '../ports/fs.js'
 import type { IGit } from '../ports/git.js'
 import type { LoggerPort } from '../ports/logger.js'
-import {
-  LOCAL_SKILL_SCAN_IGNORE,
-  scanLocalSkills as scanLocalSkillDirs,
-} from '../projection/scan.js'
+import { scanUnmanagedLocalSkills } from '../projection/scan.js'
 import type { ScannedLocalSkill } from '../projection/scan.js'
 import { readSkillsManifest, RepoManifestError, writeYaml } from '../api/repo-config.js'
 import { classifySkillMemberChanges } from './reconciliation.js'
@@ -111,9 +113,19 @@ export interface ReconcileSourceCommand extends SourceMetaFields {
 export interface SetSkillAgentsBatchCommand {
   sources: Array<{
     sourceUrl: string
-    updates: Array<{ memberEntry: string; expectedAgents: AgentId[]; agents: AgentId[] }>
+    updates: Array<
+      | {
+          memberEntry: string
+          expected: SkillProjectionAssignment
+          next: SkillProjectionAssignment
+        }
+      | { memberEntry: string; expectedAgents: AgentId[]; agents: AgentId[] }
+    >
   }>
-  locals: Array<{ id: string; expectedAgents: AgentId[]; agents: AgentId[] }>
+  locals: Array<
+    | { id: string; expected: SkillProjectionAssignment; next: SkillProjectionAssignment }
+    | { id: string; expectedAgents: AgentId[]; agents: AgentId[] }
+  >
 }
 
 export class SkillsApplication {
@@ -145,9 +157,10 @@ export class SkillsApplication {
       }
     }
     if (!(await this.fs.exists(resolvedDir))) return []
-    return (
-      await scanLocalSkillDirs(resolvedDir, { dot: true, ignore: LOCAL_SKILL_SCAN_IGNORE })
-    ).filter((skill) => LocalSkillIdSchema.safeParse(skill.name).success)
+    const registered = command.repoPath
+      ? indexRegisteredLocalSkills(await this.readManifest(command.repoPath))
+      : new Map<string, LocalSkill>()
+    return await scanUnmanagedLocalSkills(this.fs, resolvedDir, new Set(registered.keys()))
   }
 
   async addLocalSkill(repoPath: string, skill: LocalSkill): Promise<{ skill: LocalSkill }> {
@@ -178,6 +191,7 @@ export class SkillsApplication {
         candidate = {
           id: candidate.id,
           ...(candidate.agents ? { agents: candidate.agents } : {}),
+          ...(candidate.shared ? { shared: true } : {}),
         }
       }
     }
@@ -227,6 +241,31 @@ export class SkillsApplication {
       manifest,
     )
     if (command.mode === 'ref' || resolved.length === 0) {
+      for (const skill of resolved) {
+        const revalidated = requireAvailableLocalSkill(
+          await resolveRegisteredLocalSkill(
+            this.fs,
+            repoPath,
+            {
+              ...manifest,
+              skills: [...manifest.skills, { id: skill.name, path: skill.source.directory }],
+            },
+            skill.name,
+          ),
+          skill.name,
+        )
+        if (
+          revalidated.directory !== skill.source.directory ||
+          revalidated.directoryIdentity !== skill.source.directoryIdentity ||
+          revalidated.skillFileIdentity !== skill.source.skillFileIdentity
+        ) {
+          throw new LocalSkillBoundaryError(
+            409,
+            'local_skill_identity_changed',
+            'Local skill changed during validation',
+          )
+        }
+      }
       if (resolved.length > 0) await this.writeManifest(repoPath, nextManifest)
       return { count: command.skills.length }
     }
@@ -515,6 +554,7 @@ export class SkillsApplication {
           path: member.entry,
           entry: member.entry,
           agents: member.agents,
+          shared: member.shared,
         })),
         command.members.map((member) => ({
           name: member.name,
@@ -537,6 +577,7 @@ export class SkillsApplication {
       const preservedArchives: Array<{
         name: string
         agents?: AgentId[]
+        shared?: boolean
         files: LocalArchiveFile[]
       }> = []
       if (preserve.length > 0) {
@@ -550,6 +591,7 @@ export class SkillsApplication {
           preservedArchives.push({
             name,
             ...(previous.agents ? { agents: previous.agents } : {}),
+            ...(previous.shared ? { shared: true } : {}),
             files: await readPinnedLocalArchive(
               this.fs,
               this.git,
@@ -586,6 +628,7 @@ export class SkillsApplication {
         currentManifest.skills.push({
           id: skill.name,
           ...(skill.agents ? { agents: skill.agents } : {}),
+          ...(skill.shared ? { shared: true } : {}),
         })
       }
       const liveCacheMatchesCandidate =
@@ -720,8 +763,9 @@ export class SkillsApplication {
   async setSkillAgentsBatch(
     repoPath: string,
     command: SetSkillAgentsBatchCommand,
+    validatedManifest?: SkillsManifest,
   ): Promise<{ warnings?: ProjectionWarning[] }> {
-    const manifest = await this.readManifest(repoPath)
+    const manifest = validatedManifest ?? (await this.readManifest(repoPath))
     let next = manifest
     const sourceUrls = new Set<string>()
     const localIds = new Set<string>()
@@ -741,14 +785,21 @@ export class SkillsApplication {
         if (!member) {
           throw sourceMemberNotFound(sourceUpdate.sourceUrl, memberEntry)
         }
-        if (!sameAgentSelection(member.agents, update.expectedAgents)) {
-          throw staleAgentBatch()
+        const assignments = batchAssignments(update, member)
+        if (!sameSkillProjectionAssignment(member, assignments.expected)) {
+          throw staleProjectionAssignment()
         }
       }
-      const result = setSourceMemberAgentsMutation(
+      const result = setSourceMemberProjectionAssignmentsMutation(
         next,
         sourceUpdate.sourceUrl,
-        sourceUpdate.updates,
+        sourceUpdate.updates.map((update) => {
+          const member = members.get(update.memberEntry.trim())!
+          return {
+            memberEntry: update.memberEntry,
+            assignment: batchAssignments(update, member).next,
+          }
+        }),
       )
       if (!result.changed) throw sourceNotFound(sourceUpdate.sourceUrl)
       next = result.data
@@ -758,17 +809,19 @@ export class SkillsApplication {
       if (localIds.has(localUpdate.id)) throw invalidAgentBatch()
       localIds.add(localUpdate.id)
       const registered = indexRegisteredLocalSkills(next).get(localUpdate.id)
-      if (!sameAgentSelection(registered?.agents, localUpdate.expectedAgents)) {
-        throw staleAgentBatch()
+      const assignments = batchAssignments(localUpdate, registered)
+      if (!sameSkillProjectionAssignment(registered ?? {}, assignments.expected)) {
+        throw staleProjectionAssignment()
       }
       const result = registered
-        ? setLocalSkillAgentsMutation(next, localUpdate.id, localUpdate.agents)
+        ? setLocalSkillProjectionAssignmentMutation(next, localUpdate.id, assignments.next)
         : addLocalSkillMutation(next, {
             id: requireAvailableLocalSkill(
               await resolveEffectiveLocalSkill(this.fs, repoPath, next, localUpdate.id),
               localUpdate.id,
             ).id,
-            agents: localUpdate.agents,
+            agents: assignments.next.agents,
+            ...(assignments.next.shared ? { shared: true } : {}),
           })
       if (!result.changed) throw localSkillNotFound(localUpdate.id)
       next = result.data
@@ -778,14 +831,14 @@ export class SkillsApplication {
       sources: command.sources.flatMap(({ sourceUrl }) => {
         const previous = manifest.sources.find((source) => source.url === sourceUrl)
         const current = next.sources.find((source) => source.url === sourceUrl)
-        const agents = changedSourceAgents(previous?.members, current?.members)
-        return agents.length > 0 ? [{ sourceUrl, agents }] : []
+        const destinations = changedSourceDestinations(previous?.members, current?.members)
+        return destinations.length > 0 ? [{ sourceUrl, destinations }] : []
       }),
       locals: command.locals.flatMap(({ id }) => {
         const previous = manifest.skills.find((skill) => skill.id === id)
         const current = next.skills.find((skill) => skill.id === id)
-        const agents = changedAgents(previous?.agents, current?.agents)
-        return agents.length > 0 ? [{ skillId: id, agents }] : []
+        const destinations = changedSkillProjectionDestinations(previous ?? {}, current ?? {})
+        return destinations.length > 0 ? [{ skillId: id, destinations }] : []
       }),
     }
     if (changes.sources.length > 0 || changes.locals.length > 0) {
@@ -992,40 +1045,55 @@ function assertUniqueLocalSkillNames(names: string[]): void {
   }
 }
 
-function changedAgents(
-  previous: readonly AgentId[] | undefined,
-  next: readonly AgentId[] | undefined,
-): AgentId[] {
-  const before = new Set(previous ?? [])
-  const after = new Set(next ?? [])
-  return AGENT_IDS.filter((agent) => before.has(agent) !== after.has(agent))
+function batchAssignments(
+  update:
+    | { expected: SkillProjectionAssignment; next: SkillProjectionAssignment }
+    | { expectedAgents: AgentId[]; agents: AgentId[] },
+  current: { agents?: readonly AgentId[]; shared?: boolean } | undefined,
+): { expected: SkillProjectionAssignment; next: SkillProjectionAssignment } {
+  if ('expected' in update) {
+    return {
+      expected: normalizeSkillProjectionAssignment(update.expected),
+      next: normalizeSkillProjectionAssignment(update.next),
+    }
+  }
+  const shared = current?.shared === true
+  return {
+    expected: normalizeSkillProjectionAssignment({ agents: update.expectedAgents, shared }),
+    next: normalizeSkillProjectionAssignment({ agents: update.agents, shared }),
+  }
 }
 
-function sameAgentSelection(
-  current: readonly AgentId[] | undefined,
-  expected: readonly AgentId[],
-): boolean {
-  const currentSet = new Set(current ?? [])
-  const expectedSet = new Set(expected)
-  return (
-    currentSet.size === expectedSet.size && [...currentSet].every((agent) => expectedSet.has(agent))
-  )
-}
-
-function changedSourceAgents(
-  previous: readonly { entry: string; agents?: AgentId[] }[] | undefined,
-  next: readonly { entry: string; agents?: AgentId[] }[] | undefined,
-): AgentId[] {
-  const before = new Map((previous ?? []).map((member) => [member.entry, member.agents]))
+function changedSourceDestinations(
+  previous: readonly { entry: string; agents?: AgentId[]; shared?: boolean }[] | undefined,
+  next: readonly { entry: string; agents?: AgentId[]; shared?: boolean }[] | undefined,
+): SkillProjectionDestination[] {
+  const before = new Map((previous ?? []).map((member) => [member.entry, member]))
   const changed = new Set<AgentId>()
+  let sharedChanged = false
   for (const member of next ?? []) {
-    for (const agent of changedAgents(before.get(member.entry), member.agents)) changed.add(agent)
+    for (const destination of changedSkillProjectionDestinations(
+      before.get(member.entry) ?? {},
+      member,
+    )) {
+      if (destination.kind === 'shared') sharedChanged = true
+      else changed.add(destination.agent)
+    }
     before.delete(member.entry)
   }
-  for (const agents of before.values()) {
-    for (const agent of changedAgents(agents, [])) changed.add(agent)
+  for (const member of before.values()) {
+    for (const destination of changedSkillProjectionDestinations(member, {})) {
+      if (destination.kind === 'shared') sharedChanged = true
+      else changed.add(destination.agent)
+    }
   }
-  return AGENT_IDS.filter((agent) => changed.has(agent))
+  return [
+    ...AGENT_IDS.filter((agent) => changed.has(agent)).map((agent): SkillProjectionDestination => ({
+      kind: 'agent',
+      agent,
+    })),
+    ...(sharedChanged ? ([{ kind: 'shared' }] satisfies SkillProjectionDestination[]) : []),
+  ]
 }
 
 function alreadyExists(skillName: string): SkillsApplicationError {
@@ -1052,11 +1120,11 @@ function invalidAgentBatch(): SkillsApplicationError {
   return new SkillsApplicationError(400, 'invalid_agent_batch', 'Duplicate skill agent target')
 }
 
-function staleAgentBatch(): SkillsApplicationError {
+function staleProjectionAssignment(): SkillsApplicationError {
   return new SkillsApplicationError(
     409,
-    'stale_agent_state',
-    'Skill agent state changed; refresh and retry',
+    'stale_projection_assignment',
+    'Skill projection assignment changed; refresh and retry',
   )
 }
 

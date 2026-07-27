@@ -1,6 +1,6 @@
-import type { AgentId } from '@loom/core'
+import type { SkillProjectionDestination } from '@loom/core'
 
 export interface SkillsProjectionChangeSet {
-  sources: Array<{ sourceUrl: string; agents: AgentId[] }>
-  locals: Array<{ skillId: string; agents: AgentId[] }>
+  sources: Array<{ sourceUrl: string; destinations: SkillProjectionDestination[] }>
+  locals: Array<{ skillId: string; destinations: SkillProjectionDestination[] }>
 }

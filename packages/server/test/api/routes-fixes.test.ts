@@ -914,6 +914,7 @@ describe('source updates', () => {
       '      - name: old-skill',
       '        entry: skills/old-skill/SKILL.md',
       '        agents: [codex]',
+      '        shared: true',
       'skills: []',
       '',
     ].join('\n')
@@ -960,7 +961,7 @@ describe('source updates', () => {
       JSON.parse(memFiles[`${repo}/assets/skills/old-skill/.loom-source-update-owner.json`]),
     ).toMatchObject({ version: 1, sessionId, skillId: 'old-skill' })
     expect((yaml.load(memFiles[`${repo}/skills.yaml`]) as any).skills).toEqual([
-      { id: 'old-skill', agents: ['codex'] },
+      { id: 'old-skill', agents: ['codex'], shared: true },
     ])
     expect(memFs.mkdir).toHaveBeenCalledWith(
       join(repo, 'temp', 'source-updates', sessionId, 'preserve-transaction'),

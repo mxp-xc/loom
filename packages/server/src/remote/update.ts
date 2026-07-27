@@ -2,6 +2,7 @@ import type { IGit } from '../ports/git.js'
 import type { IFileSystem } from '../ports/fs.js'
 import type {
   AgentId,
+  SkillProjectionDestination,
   SkillSource,
   SourceProjectionEntry,
   SourceTree,
@@ -9,8 +10,10 @@ import type {
 } from '@loom/core'
 import {
   compareVersion,
-  planSourceProjectionForAgents,
+  parseSkillProjectionDestinationKey,
+  planSourceProjectionForDestinations,
   resourceSelectionState,
+  skillProjectionDestinationKey,
   type RemoteRef,
   type VersionStatus,
 } from '@loom/core'
@@ -71,7 +74,7 @@ export interface ResourceBoundaryChange {
 }
 
 export interface ProjectionPathMove {
-  agent: AgentId
+  destination: SkillProjectionDestination
   kind: SourceProjectionEntry['kind']
   sourcePath: string
   previousTargetPath?: string
@@ -285,18 +288,21 @@ export function compareProjectionPaths(
   nextTree: SourceTree,
   nextBundles: readonly ScannedSourceBundle[],
 ): ProjectionPathMove[] {
-  const agents = new Set(
-    (source.members ?? []).flatMap((member) => member.agents ?? []),
-  ) as Set<AgentId>
-  if (agents.size === 0) return []
+  const destinations = [
+    ...new Set((source.members ?? []).flatMap((member) => member.agents ?? [])),
+  ].map((agent): SkillProjectionDestination => ({ kind: 'agent', agent }))
+  if ((source.members ?? []).some((member) => member.shared === true)) {
+    destinations.push({ kind: 'shared' })
+  }
+  if (destinations.length === 0) return []
   const previousEntries = new Set(bundleMembers(previousTree.nodes).map(({ entry }) => entry))
-  const previousPlans = planSourceProjectionForAgents(
+  const previousPlans = planSourceProjectionForDestinations(
     {
       ...source,
       members: (source.members ?? []).filter(({ entry }) => previousEntries.has(entry)),
       sourceTree: previousTree,
     },
-    agents,
+    new Set(destinations.map(skillProjectionDestinationKey)),
   )
   const nextBundleEntries = new Set(nextBundles.map(({ entry }) => entry))
   const nextMembers = (source.members ?? [])
@@ -305,9 +311,9 @@ export function compareProjectionPaths(
       ...member,
       name: nextBundles.find(({ entry }) => entry === member.entry)?.name ?? member.name,
     }))
-  const nextPlans = planSourceProjectionForAgents(
+  const nextPlans = planSourceProjectionForDestinations(
     { ...source, members: nextMembers, sourceTree: nextTree },
-    agents,
+    new Set(destinations.map(skillProjectionDestinationKey)),
   )
   const previous = projectionEntryMap(previousPlans)
   const next = projectionEntryMap(nextPlans)
@@ -318,14 +324,16 @@ export function compareProjectionPaths(
     const before = previous.get(key)
     const after = next.get(key)
     if (before?.targetPath === after?.targetPath) return []
-    const [agent, kind, sourcePath] = key.split('\0') as [
-      AgentId,
+    const [destinationKey, kind, sourcePath] = key.split('\0') as [
+      string,
       SourceProjectionEntry['kind'],
       string,
     ]
+    const destination = parseSkillProjectionDestinationKey(destinationKey)
+    if (!destination) throw new Error(`Invalid projection destination key: ${destinationKey}`)
     return [
       {
-        agent,
+        destination,
         kind,
         sourcePath,
         ...(before ? { previousTargetPath: before.targetPath } : {}),
@@ -336,12 +344,16 @@ export function compareProjectionPaths(
 }
 
 function projectionEntryMap(
-  plans: ReturnType<typeof planSourceProjectionForAgents>,
+  plans: ReturnType<typeof planSourceProjectionForDestinations>,
 ): Map<string, SourceProjectionEntry> {
   return new Map(
     plans.flatMap((plan) =>
       plan.entries.map(
-        (entry) => [`${plan.agent}\0${entry.kind}\0${entry.sourcePath}`, entry] as const,
+        (entry) =>
+          [
+            `${skillProjectionDestinationKey(plan.destination)}\0${entry.kind}\0${entry.sourcePath}`,
+            entry,
+          ] as const,
       ),
     ),
   )

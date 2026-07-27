@@ -315,6 +315,89 @@ describe('repository resource lease integration', () => {
     expect(leases.acquired[2]!.every(({ mode }) => mode === 'mutation')).toBe(true)
   })
 
+  it('uses the shared projection root key for a repository-scoped default skill scan', async () => {
+    home = await mkdtemp(join(tmpdir(), 'loom-skill-scan-lease-'))
+    const repoPath = join(home, '.loom', 'repos', 'default')
+    const sharedRoot = join(home, '.agents', 'skills')
+    await mkdir(join(sharedRoot, 'user-skill'), { recursive: true })
+    await mkdir(repoPath, { recursive: true })
+    await writeFile(join(home, '.loom', 'config.yaml'), 'active_repo: default\n')
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    await writeFile(join(sharedRoot, 'user-skill', 'SKILL.md'), '# User\n')
+    const leases = new RecordingCoordinator()
+    const fs = new NodeFileSystem()
+    const app = new Hono().route(
+      '/',
+      createSkillsYamlRoutes({ fs, git: {} as never, proc: {} as never, home, leases }),
+    )
+
+    const response = await app.request('/skills/local/scan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: 'default', dir: '~/.agents/skills' }),
+    })
+
+    expect(response.status).toBe(200)
+    const canonicalHome = await fs.realPath(home)
+    const canonicalRepo = await fs.realPath(repoPath)
+    const sharedKey = join(canonicalHome, '.agents', 'skills')
+    expect(new Set(leases.acquired[0])).toEqual(
+      new Set([
+        { key: canonicalRepo, mode: 'read' as const },
+        { key: canonicalHome, mode: 'read' as const },
+        { key: sharedKey, mode: 'read' as const },
+      ]),
+    )
+    expect(projectionResourceKeys(canonicalHome, canonicalRepo, canonicalHome, 'skills')).toContain(
+      sharedKey,
+    )
+  })
+
+  it.each(['ref', 'move'] as const)(
+    'locks local skill source roots and the mode-specific destination for %s import',
+    async (mode) => {
+      home = await mkdtemp(join(tmpdir(), `loom-skill-${mode}-lease-`))
+      const repoPath = join(home, '.loom', 'repos', 'default')
+      const sharedRoot = join(home, '.agents', 'skills')
+      const source = join(sharedRoot, `${mode}-skill`)
+      await mkdir(source, { recursive: true })
+      await mkdir(repoPath, { recursive: true })
+      await writeFile(join(home, '.loom', 'config.yaml'), 'active_repo: default\n')
+      await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+      await writeFile(join(source, 'SKILL.md'), `# ${mode}\n`)
+      const leases = new RecordingCoordinator()
+      const fs = new NodeFileSystem()
+      const canonicalSource = await fs.realPath(source)
+      const app = new Hono().route(
+        '/',
+        createSkillsYamlRoutes({ fs, git: {} as never, proc: {} as never, home, leases }),
+      )
+
+      const response = await app.request('/skills/local/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          repo: 'default',
+          skills: [{ name: `${mode}-skill`, path: source }],
+          mode,
+        }),
+      })
+
+      expect(response.status).toBe(200)
+      const canonicalHome = await fs.realPath(home)
+      const canonicalRepo = await fs.realPath(repoPath)
+      const expectedKeys = new Set([
+        canonicalHome,
+        canonicalRepo,
+        canonicalSource,
+        join(canonicalHome, '.agents', 'skills'),
+        ...(mode === 'move' ? [join(canonicalRepo, 'assets', 'skills')] : []),
+      ])
+      expect(new Set(leases.acquired[0]!.map(({ key }) => key))).toEqual(expectedKeys)
+      expect(leases.acquired[0]!.every(({ mode }) => mode === 'mutation')).toBe(true)
+    },
+  )
+
   it('rejects a repository replaced after authorization without mutating either target', async () => {
     home = await mkdtemp(join(tmpdir(), 'loom-repository-replaced-'))
     const repoPath = join(home, '.loom', 'repos', 'default')

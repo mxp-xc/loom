@@ -1,6 +1,6 @@
 # Skills 规则
 
-这些规则定义 local skills、remote sources、source members、agent controls 和 skills projection 行为。
+这些规则定义 local skills、remote sources、source members、destination controls 和 skills projection 行为。
 
 ## R-SKILLS-001 assets/skills 是仓库内置 local skill home
 
@@ -16,6 +16,7 @@ Implications:
 - 当 manifest 中确实配置了 ref path 时，UI 仍可展示可用性和路径诊断。
 - Pathless identity、explicit external identity和 discovery 使用同一套 ID 与 duplicate policy。
 - External unregister只移除 manifest登记，不要求 external content 当前可访问，也不删除 external path。
+- External ref可以指向`~/.agents/skills`中的user-owned Skill；登记、关闭assignment或unregister都不移动、覆盖或删除该external path。
 - Built-in root缺失时只可在canonical repository下逐级创建真实目录，并为root、staging、candidate和destination携带稳定filesystem identity。
 
 Safety:
@@ -67,13 +68,13 @@ Tests:
 - packages/web/test/skill-member-order.test.ts
 - packages/web/test/skills-view.test.tsx
 
-## R-SKILLS-003 Source-level agent controls 只作用于 selected members
+## R-SKILLS-003 Source-level destination controls 只作用于 selected members
 
 Status: active
 Applies to: source members, skills UI
 
 Rule:
-Source 级 agent chip 只作用于该 source 的 `members` 中已选择的 bundles。
+Source 级 Agent 或 Shared chip 只作用于该 source 的 `members` 中已选择的 bundles。
 
 Implications:
 
@@ -81,7 +82,8 @@ Implications:
 - 否则，点击 source chip 会把该 agent 添加到 selected members。
 - 未写入 `members` 的 bundles 不会因为 source-level bulk action 被选择或投影。
 - Global、source、item 和 detail agent controls 只枚举 Applicable Skills agents；隐藏 agent 的已保存选择保持不变。
-- Applicable Skills agents 为空时，内容浏览、source 管理和编辑仍可用，但不显示 agent controls。
+- Shared control不枚举或伪造 Agent id，始终作为独立“通用”destination显示。
+- Applicable Skills agents 为空时，内容浏览、source 管理、Shared control和编辑仍可用，但不显示 agent controls。
 - Source-level bulk 使用一个 batch mutation，一次写入 manifest，并为该 source 执行一次 targeted projection transaction。
 
 Safety:
@@ -98,13 +100,13 @@ Tests:
 - packages/web/test/manifest-operations.test.tsx
 - packages/web/test/skills-view.test.tsx
 
-## R-SKILLS-004 Bulk scope 的 agent chip 是三态
+## R-SKILLS-004 Bulk scope 的 destination chip 是三态
 
 Status: active
 Applies to: skills UI, MCP UI
 
 Rule:
-Bulk agent chips 表达其 scope 内的全部选择、全部未选择或部分选择状态。
+Bulk Agent 与 Shared chips 分别表达其 scope 内的全部选择、全部未选择或部分选择状态。
 
 Implications:
 
@@ -114,7 +116,8 @@ Implications:
 - 有帮助时，mixed chip 应展示计数。
 - Global skills bulk 使用一个 batch mutation，一次写入 manifest，并在一个 targeted projection transaction 中处理全部变化。
 - Item-level toggle 是同一 batch API 的单元素特例。
-- Item、source 与 global controls 共用一个 pending 状态；batch 内每个 target 使用当前 agents 作为 `expectedAgents`，防止 stale UI 覆盖并发更新。
+- Item、source、global 与 detail controls 共用一个 pending 状态；batch 内每个 item 使用当前完整 assignment 作为 `expected`，防止 stale UI 覆盖并发更新。
+- Detail assignment 从最新 manifest 按 source/local identity 派生，mutation 后不保留 modal 内的 stale 副本。
 - Source namespace 与 user-owned Skill 目录冲突时，UI 提供“保留现有目录”和“备份并改由 Loom 管理”，不能只显示通用失败或要求用户执行 shell。
 
 Safety:
@@ -210,7 +213,7 @@ Status: active
 Applies to: remote source updates, source scan, source members, local skills
 
 Rule:
-远端更新或 SourceTree 变化导致已保存 member 缺失时，Loom 必须展示缺失项并让用户决定删除或保留为 local skill。缺失项默认选择保留；保留项复制到 assets/skills/<id>，并继承原 agents。
+远端更新或 SourceTree 变化导致已保存 member 缺失时，Loom 必须展示缺失项并让用户决定删除或保留为 local skill。缺失项默认选择保留；保留项复制到 assets/skills/<id>，并继承原 Agent 与 Shared assignment。
 
 Implications:
 
@@ -322,7 +325,7 @@ Rule:
 
 Implications:
 
-- Member 使用 `{ name, entry, agents? }`；是否被选择由它是否存在于 `members` 表达，不存在独立 `enabled`。
+- Member 使用 `{ name, entry, agents?, shared? }`；是否被选择由它是否存在于 `members` 表达，不存在独立 `enabled`。`shared`缺失等价于`false`。
 - `entry` 是 member identity；API 和 agent mutation 必须按 `entry` 定位，`name` 只保存当前展示快照。
 - Resource rule 使用规范化的 source-relative `path` 和 `kind: file | directory`；路径优先采用最具体规则，相同路径下 exclude 优先。
 - Resource directory 的选择遇到 SkillBundle root 时停止，不会自动选择当前或以后新增的 bundles。
@@ -336,7 +339,7 @@ Safety:
 
 - 新发现的 SkillBundle 必须由用户明确选择，不能因祖先 resource directory 已选择而自动加入 `members`。
 - Resource path 的实际类型与保存的 `kind` 不一致时标记 unavailable，不自动改变选择范围。
-- Resource 选择属于整个 source，不配置 agents；仅当某 agent 至少有一个该 source member 时才向该 agent 投影 resources。
+- Resource 选择属于整个 source，不单独配置destination；仅当某destination至少有一个该source member时才向该destination投影resources。
 
 Examples:
 
@@ -412,5 +415,39 @@ Tests:
 - packages/server/test/skills/update-sessions.test.ts
 - packages/server/test/api/source-update-routes.test.ts
 - packages/web/test/skill-reconciliation-dialog.test.tsx
+- packages/web/test/manifest-operations.test.tsx
+- packages/web/test/skills-view.test.tsx
+
+## R-SKILLS-013 Shared Skills assignment 与默认纳管
+
+Status: active
+Applies to: local skills, source members, skills UI, scan, import
+
+Rule:
+每个local skill和source member使用独立`shared?: boolean`选择固定Shared skills destination `~/.agents/skills`。Skills添加界面默认扫描该目录中的user-owned candidates，并通过现有`ref`模式纳管；扫描结果本身不自动设置`shared: true`。
+
+Implications:
+
+- `shared`缺失或`false`表示Loom不管理该destination；`agents: []`且`shared: true`表示shared-only。
+- 同一item可以同时选择多个Agent destinations与Shared skills destination，彼此不推导。
+- Global、source、item、detail均提供Shared on/off/mixed/count；tooltip固定说明`投影到 ~/.agents/skills`。
+- 默认scan排除已登记id、symbolic-link projection，以及candidate到scan root任一层包含保留名称`.loom-projection.json`的整个subtree。
+- Marker只按保留名称判断，不解析内容或owner；marker malformed不会让subtree重新成为user-owned candidate。
+- `ref` import重新验证source identity并保存canonical external path，不移动文件、不写`shared`；browser directory picker继续把内容写入`assets/skills`。
+- User-owned in-place Skill即使`shared: false`仍可能被读取该目录的客户端发现；该字段只表达Loom是否管理该destination。
+
+Safety:
+
+- Scan不跟随symbolic-link directories；candidate、ancestor或`SKILL.md` inspection、canonical containment或identity revalidation失败时整个scan失败，不返回部分结果。
+- Managed filtering不依赖遍历其他repository的ledger，也不因stale ledger隐藏unmarked user-owned directory。
+- In-place source不得获得marker或cleanup ownership；关闭Shared assignment、删除manifest entry和orphan cleanup都不得删除该user-owned directory。
+- 带repository的scan、`ref` import与Shared projection对同一root使用统一lease key。
+
+Tests:
+
+- packages/core/test/manifest.test.ts
+- packages/core/test/skill-projection.test.ts
+- packages/server/test/projection/scan.test.ts
+- packages/server/test/skills/application.test.ts
 - packages/web/test/manifest-operations.test.tsx
 - packages/web/test/skills-view.test.tsx

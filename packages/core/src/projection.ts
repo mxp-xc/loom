@@ -1,5 +1,11 @@
 import type { Manifest, AgentId, Config, Memory, SkillSource, SourceTreeNode } from './types.js'
-import { applicableAgents, supportsAgentCapability } from './agents.js'
+import { applicableAgents } from './agents.js'
+import {
+  skillProjectionDestinationKey,
+  skillProjectionDestinations,
+  type SkillProjectionDestination,
+  type SkillProjectionDestinationKey,
+} from './skill-projection.js'
 import { normalizeSourceResources, projectionBase, resourceSelectionState } from './source-tree.js'
 import { assertLocalSkillId } from './skill-id.js'
 
@@ -7,7 +13,7 @@ export interface LinkPlan {
   skillId: string
   localPath?: string
   source: 'local' | { repoId: string; cacheId?: string; memberName: string; path?: string }
-  agents: AgentId[]
+  destinations: SkillProjectionDestination[]
 }
 export interface McpPlanEntry {
   id: string
@@ -35,14 +41,14 @@ export interface SourceProjectionPlan {
   sourceUrl: string
   cacheId: string
   commit: string
-  agent: AgentId
+  destination: SkillProjectionDestination
   projectionBase: string
   entries: SourceProjectionEntry[]
 }
 export interface PreservedSourceNamespace {
   sourceName: string
   sourceUrl: string
-  agent: AgentId
+  destination: SkillProjectionDestination
 }
 export interface ProjectionPlan {
   links: LinkPlan[]
@@ -98,7 +104,10 @@ export function planProjection(
   installedAgents: Set<AgentId>,
 ): ProjectionPlan {
   const skippedAgents: AgentId[] = []
-  const activeAgents = (ts: AgentId[], capability: 'skills' | 'mcp' | 'memory'): AgentId[] => {
+  const activeAgents = (
+    ts: readonly AgentId[],
+    capability: 'skills' | 'mcp' | 'memory',
+  ): AgentId[] => {
     const out: AgentId[] = []
     const requested = new Set(ts)
     for (const a of applicableAgents(effectiveConfig.agents, capability)) {
@@ -112,21 +121,25 @@ export function planProjection(
   const links: LinkPlan[] = []
   for (const s of manifest.skills.skills) {
     assertLocalSkillId(s.id)
+    const agents = activeAgents(s.agents ?? [], 'skills')
     links.push({
       skillId: s.id,
       source: 'local',
       ...(s.path ? { localPath: s.path } : {}),
-      agents: activeAgents(s.agents ?? [], 'skills'),
+      destinations: skillProjectionDestinations(s, agents),
     })
   }
   const sourcePlans = manifest.skills.sources.flatMap((source) =>
-    planSourceProjection(source, (agents) => activeAgents(agents, 'skills')),
-  )
-  const installedSkillAgents = [...installedAgents].filter((agent) =>
-    supportsAgentCapability(agent, 'skills'),
+    planSourceProjection(source, (assignment) => {
+      const agents = activeAgents(assignment.agents ?? [], 'skills')
+      return skillProjectionDestinations(assignment, agents)
+    }),
   )
   const preservedSourceNamespaces = manifest.skills.sources.flatMap((source) =>
-    planUnavailableSourceNamespaces(source, installedSkillAgents),
+    planUnavailableSourceNamespaces(source, (assignment) => {
+      const agents = activeAgents(assignment.agents ?? [], 'skills')
+      return skillProjectionDestinations(assignment, agents)
+    }),
   )
   assertSkillDestinationCollisions(links, [...sourcePlans, ...preservedSourceNamespaces])
 
@@ -176,23 +189,25 @@ export function planProjection(
 }
 
 export function assertSkillDestinationCollisions(
-  links: Array<Pick<LinkPlan, 'skillId' | 'agents'>>,
-  sourcePlans: Array<Pick<SourceProjectionPlan, 'sourceName' | 'agent'>>,
+  links: Array<Pick<LinkPlan, 'skillId' | 'destinations'>>,
+  sourcePlans: Array<Pick<SourceProjectionPlan, 'sourceName' | 'destination'>>,
 ): void {
-  const namespacesByAgent = new Map<
-    AgentId,
-    Array<Pick<SourceProjectionPlan, 'sourceName' | 'agent'>>
+  const namespacesByDestination = new Map<
+    SkillProjectionDestinationKey,
+    Array<Pick<SourceProjectionPlan, 'sourceName' | 'destination'>>
   >()
   for (const sourcePlan of sourcePlans) {
-    const plans = namespacesByAgent.get(sourcePlan.agent) ?? []
+    const key = skillProjectionDestinationKey(sourcePlan.destination)
+    const plans = namespacesByDestination.get(key) ?? []
     plans.push(sourcePlan)
-    namespacesByAgent.set(sourcePlan.agent, plans)
+    namespacesByDestination.set(key, plans)
   }
 
   for (const link of links) {
     const localPath = normalizeProjectionDestination(link.skillId)
-    for (const agent of link.agents) {
-      for (const sourcePlan of namespacesByAgent.get(agent) ?? []) {
+    for (const destination of link.destinations) {
+      const destinationKey = skillProjectionDestinationKey(destination)
+      for (const sourcePlan of namespacesByDestination.get(destinationKey) ?? []) {
         const namespace = normalizeProjectionDestination(sourcePlan.sourceName)
         if (
           localPath === namespace ||
@@ -200,7 +215,7 @@ export function assertSkillDestinationCollisions(
           namespace.startsWith(`${localPath}/`)
         ) {
           throw new Error(
-            `Local skill destination "${link.skillId}" overlaps source namespace "${sourcePlan.sourceName}" for ${agent}`,
+            `Local skill destination "${link.skillId}" overlaps source namespace "${sourcePlan.sourceName}" for ${destinationKey}`,
           )
         }
       }
@@ -217,7 +232,10 @@ function normalizeProjectionDestination(path: string): string {
 
 function planSourceProjection(
   source: SkillSource,
-  activeAgents: (agents: AgentId[]) => AgentId[],
+  activeDestinations: (assignment: {
+    agents?: readonly AgentId[]
+    shared?: boolean
+  }) => SkillProjectionDestination[],
 ): SourceProjectionPlan[] {
   const sourceTree = source.sourceTree
   const members = source.members ?? []
@@ -237,20 +255,24 @@ function planSourceProjection(
     (node) =>
       node.kind === 'resource' && resourceSelectionState(node.path, 'file', resources).selected,
   )
-  const agents = new Map<AgentId, typeof members>()
+  const destinations = new Map<
+    SkillProjectionDestinationKey,
+    { destination: SkillProjectionDestination; members: typeof members }
+  >()
   for (const member of members) {
     if (!bundles.has(member.entry)) throw new Error(`Selected bundle unavailable: ${member.entry}`)
-    for (const agent of activeAgents(member.agents ?? [])) {
-      const current = agents.get(agent) ?? []
-      current.push(member)
-      agents.set(agent, current)
+    for (const destination of activeDestinations(member)) {
+      const key = skillProjectionDestinationKey(destination)
+      const current = destinations.get(key) ?? { destination, members: [] }
+      current.members.push(member)
+      destinations.set(key, current)
     }
   }
 
   const sourceName = sourceIdentity(source).repoId
   const cacheId = deriveRepoId(source.url)
-  return [...agents.entries()].map(([agent, agentMembers]) => {
-    const bundleEntries: SourceProjectionEntry[] = agentMembers.map((member) => {
+  return [...destinations.values()].map(({ destination, members: destinationMembers }) => {
+    const bundleEntries: SourceProjectionEntry[] = destinationMembers.map((member) => {
       const bundle = bundles.get(member.entry)!
       return { kind: 'bundle', sourcePath: bundle.path, targetPath: '' }
     })
@@ -273,7 +295,7 @@ function planSourceProjection(
       sourceUrl: source.url,
       cacheId,
       commit: sourceTree.commit,
-      agent,
+      destination,
       projectionBase: base,
       entries,
     }
@@ -282,18 +304,47 @@ function planSourceProjection(
 
 function planUnavailableSourceNamespaces(
   source: SkillSource,
-  installedSkillAgents: AgentId[],
+  activeDestinations: (assignment: {
+    agents?: readonly AgentId[]
+    shared?: boolean
+  }) => SkillProjectionDestination[],
 ): PreservedSourceNamespace[] {
   if (source.availability?.available !== false) return []
   const sourceName = sourceIdentity(source).repoId
-  return installedSkillAgents.map((agent) => ({ sourceName, sourceUrl: source.url, agent }))
+  const destinations = new Map<SkillProjectionDestinationKey, SkillProjectionDestination>()
+  for (const member of source.members ?? []) {
+    for (const destination of activeDestinations(member)) {
+      destinations.set(skillProjectionDestinationKey(destination), destination)
+    }
+  }
+  return [...destinations.values()].map((destination) => ({
+    sourceName,
+    sourceUrl: source.url,
+    destination,
+  }))
 }
 
 export function planSourceProjectionForAgents(
   source: SkillSource,
   agents: ReadonlySet<AgentId>,
 ): SourceProjectionPlan[] {
-  return planSourceProjection(source, (requested) => requested.filter((agent) => agents.has(agent)))
+  return planSourceProjection(source, (assignment) =>
+    skillProjectionDestinations(
+      assignment,
+      applicableAgents([...agents], 'skills').filter((agent) => agents.has(agent)),
+    ).filter((destination) => destination.kind === 'agent'),
+  )
+}
+
+export function planSourceProjectionForDestinations(
+  source: SkillSource,
+  destinationKeys: ReadonlySet<SkillProjectionDestinationKey>,
+): SourceProjectionPlan[] {
+  return planSourceProjection(source, (assignment) =>
+    skillProjectionDestinations(assignment, applicableAgents(assignment.agents, 'skills')).filter(
+      (destination) => destinationKeys.has(skillProjectionDestinationKey(destination)),
+    ),
+  )
 }
 
 function planResourceEntries(

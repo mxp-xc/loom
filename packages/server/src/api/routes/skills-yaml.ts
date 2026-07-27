@@ -1,6 +1,20 @@
 import { Hono, type Context } from 'hono'
-import { AgentIdSchema, LocalSkillIdSchema, LocalSkillSchema, deriveRepoId } from '@loom/core'
+import {
+  AgentIdSchema,
+  LocalSkillIdSchema,
+  LocalSkillSchema,
+  changedSkillProjectionDestinations,
+  deriveRepoId,
+  loadRepoManifest,
+  mergeConfig,
+  skillProjectionDestinationKey,
+  validateManifest,
+  type Config,
+  type SkillProjectionDestination,
+  type SkillsManifest,
+} from '@loom/core'
 import { z } from 'zod'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { SkillsApplication, SkillsApplicationError } from '../../skills/application.js'
 import { logger } from '../../lib/logger.js'
 import { jsonValidator } from '../request-validation.js'
@@ -17,8 +31,18 @@ import {
 import { backupUserOwnedSourceNamespace } from '../../skills/source-namespace-collision.js'
 import { LocalSkillBoundaryError } from '../../skills/local-paths.js'
 import { repositoryErrorResponse } from '../repository-route-error.js'
-import { readSkillsManifest, RepoConfigError } from '../repo-config.js'
-import { homeResourceKey, projectionResourceKeys } from '../../concurrency/resource-keys.js'
+import {
+  readLocalConfig,
+  readSkillsProjectionFiles,
+  readSkillsManifest,
+  RepoConfigError,
+} from '../repo-config.js'
+import {
+  homeResourceKey,
+  projectionResourceKeys,
+  skillProjectionDestinationRoots,
+  targetedSkillsProjectionResourceKeys,
+} from '../../concurrency/resource-keys.js'
 import { canonicalRepositoryHome, withRepositoryLease } from '../repository-lease.js'
 import { resourceLeases } from '../../concurrency/resource-lease-coordinator.js'
 import {
@@ -34,6 +58,12 @@ const AgentSelection = z.array(AgentIdSchema).superRefine((agents, ctx) => {
     ctx.addIssue({ code: 'custom', message: 'agents must be unique' })
   }
 })
+const SkillProjectionAssignmentBody = z
+  .object({
+    agents: AgentSelection,
+    shared: z.boolean(),
+  })
+  .strict()
 
 const LocalSkillBody = LocalSkillSchema
 
@@ -116,6 +146,27 @@ const ReconcileSourceBody = UpdateSourceBody.extend({
 
 const DeleteLocalSkillBody = z.object({ repo: RepoField, id: LocalSkillIdSchema }).strict()
 
+const NewAssignmentUpdateBody = z
+  .object({
+    expected: SkillProjectionAssignmentBody,
+    next: SkillProjectionAssignmentBody,
+  })
+  .strict()
+const LegacyAgentUpdateBody = z
+  .object({
+    expectedAgents: AgentSelection,
+    agents: AgentSelection,
+  })
+  .strict()
+const SourceAssignmentUpdateBody = z.union([
+  NewAssignmentUpdateBody.extend({ memberEntry: NonEmptyString }),
+  LegacyAgentUpdateBody.extend({ memberEntry: NonEmptyString }),
+])
+const LocalAssignmentUpdateBody = z.union([
+  NewAssignmentUpdateBody.extend({ id: LocalSkillIdSchema }),
+  LegacyAgentUpdateBody.extend({ id: LocalSkillIdSchema }),
+])
+
 const SetSkillAgentsBatchBody = z
   .object({
     repo: RepoField,
@@ -123,27 +174,11 @@ const SetSkillAgentsBatchBody = z
       z
         .object({
           sourceUrl: NonEmptyString,
-          updates: z.array(
-            z
-              .object({
-                memberEntry: NonEmptyString,
-                expectedAgents: AgentSelection,
-                agents: AgentSelection,
-              })
-              .strict(),
-          ),
+          updates: z.array(SourceAssignmentUpdateBody),
         })
         .strict(),
     ),
-    locals: z.array(
-      z
-        .object({
-          id: LocalSkillIdSchema,
-          expectedAgents: AgentSelection,
-          agents: AgentSelection,
-        })
-        .strict(),
-    ),
+    locals: z.array(LocalAssignmentUpdateBody),
   })
   .strict()
 
@@ -170,8 +205,67 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     mode: 'read' | 'mutation',
     operation: (repoPath: string) => Promise<T>,
   ) => withRepositoryLease(leaseDeps, repo as string, mode, (repoPath) => [repoPath], operation)
-  const runSkillsMutation = async <T>(
+  const runLocalSkillImport = async <T>(
     repo: unknown,
+    localSkills: z.infer<typeof ImportLocalSkillsBody>['skills'],
+    mode: z.infer<typeof ImportLocalSkillsBody>['mode'],
+    operation: (
+      repoPath: string,
+      scopedDeps: RouteDeps,
+      normalizedSkills: z.infer<typeof ImportLocalSkillsBody>['skills'],
+    ) => Promise<T>,
+  ) => {
+    const home = await canonicalRepositoryHome(deps)
+    const scopedDeps = { ...leaseDeps, home }
+    let normalizedSkills: z.infer<typeof ImportLocalSkillsBody>['skills'] | undefined
+    return withRepositoryLease(
+      scopedDeps,
+      repo as string,
+      'mutation',
+      async (repoPath) => {
+        normalizedSkills = await Promise.all(
+          localSkills.map(async (skill) => ({
+            ...skill,
+            path: await canonicalPhysicalDirectory(deps, resolve(repoPath, skill.path)),
+          })),
+        )
+        const sources = normalizedSkills.map((skill) => skill.path)
+        return localSkillInputResourceKeys(home, repoPath, sources, mode === 'move')
+      },
+      (repoPath) => {
+        if (!normalizedSkills) throw new Error('Local skill import lease paths are unavailable')
+        return operation(repoPath, scopedDeps, normalizedSkills)
+      },
+    )
+  }
+  const runLocalSkillScan = async <T>(
+    repo: unknown,
+    dir: string,
+    operation: (repoPath: string, scanRoot: string) => Promise<T>,
+  ) => {
+    const home = await canonicalRepositoryHome(deps)
+    const scopedDeps = { ...leaseDeps, home }
+    let scanRoot: string | undefined
+    return withRepositoryLease(
+      scopedDeps,
+      repo as string,
+      'read',
+      async (repoPath) => {
+        scanRoot = await canonicalPhysicalDirectory(
+          deps,
+          resolveLocalSkillScanRoot(home, repoPath, dir),
+        )
+        return localSkillInputResourceKeys(home, repoPath, [scanRoot], false)
+      },
+      (repoPath) => {
+        if (!scanRoot) throw new Error('Local skill scan lease path is unavailable')
+        return operation(repoPath, scanRoot)
+      },
+    )
+  }
+  const runTargetedSkillsMutation = async <T>(
+    repo: unknown,
+    destinations: readonly SkillProjectionDestination[],
     operation: (repoPath: string, scopedDeps: RouteDeps) => Promise<T>,
   ) => {
     const home = await canonicalRepositoryHome(deps)
@@ -180,7 +274,7 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       scopedDeps,
       repo as string,
       'mutation',
-      (repoPath) => projectionResourceKeys(home, repoPath, home, 'skills'),
+      (repoPath) => targetedSkillsProjectionResourceKeys(home, repoPath, home, destinations),
       (repoPath) => operation(repoPath, scopedDeps),
     )
   }
@@ -210,7 +304,9 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       try {
         const { dir, repo } = c.req.valid('json')
         const scanned = repo
-          ? await runRepo(repo, 'read', (repoPath) => skills.scanLocalSkills({ dir, repoPath }))
+          ? await runLocalSkillScan(repo, dir, (repoPath, scanRoot) =>
+              skills.scanLocalSkills({ dir: scanRoot, repoPath }),
+            )
           : await skills.scanLocalSkills({ dir })
         return c.json({ ok: true, skills: scanned })
       } catch (e) {
@@ -229,8 +325,15 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, skills: localSkills, mode } = c.req.valid('json')
-        const result = await runRepo(repo, 'mutation', (repoPath) =>
-          skills.importLocalSkills(repoPath, { skills: localSkills, mode }),
+        const result = await runLocalSkillImport(
+          repo,
+          localSkills,
+          mode,
+          (repoPath, scopedDeps, normalizedSkills) =>
+            createSkillsApplication(scopedDeps).importLocalSkills(repoPath, {
+              skills: normalizedSkills,
+              mode,
+            }),
         )
         return c.json({ ok: true, count: result.count })
       } catch (e) {
@@ -372,20 +475,22 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     async (c) => {
       try {
         const { repo, sources, locals } = c.req.valid('json')
-        const result = await runSkillsMutation(repo, async (repoPath, scopedDeps) => {
-          const manifest = await loadSkillsMutationManifest(scopedDeps, repoPath)
-          if (manifest.errors.length > 0) {
-            throw new SkillsApplicationError(
-              422,
-              'invalid_skills_manifest',
-              manifest.errors.join('; '),
+        const destinations = batchChangedDestinations(sources, locals)
+        const result = await runTargetedSkillsMutation(
+          repo,
+          destinations,
+          async (repoPath, scopedDeps) => {
+            const manifest = await validateSkillBatchManifest(scopedDeps, repoPath)
+            return createSkillsApplication(scopedDeps).setSkillAgentsBatch(
+              repoPath,
+              {
+                sources,
+                locals,
+              },
+              manifest,
             )
-          }
-          return createSkillsApplication(scopedDeps).setSkillAgentsBatch(repoPath, {
-            sources,
-            locals,
-          })
-        })
+          },
+        )
         return c.json({ ok: true, ...result })
       } catch (e) {
         return skillsErrorResponse(c, e, {
@@ -462,6 +567,97 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
   )
 
   return app
+}
+
+function resolveLocalSkillScanRoot(home: string, repoPath: string, dir: string): string {
+  const expanded = dir.replace(/^~/, home)
+  return resolve(isAbsolute(expanded) ? expanded : join(repoPath, expanded))
+}
+
+async function canonicalPhysicalDirectory(deps: RouteDeps, path: string): Promise<string> {
+  const entry = await deps.fs.inspectEntry(path)
+  if (entry?.kind !== 'directory') return path
+  const canonical = resolve(await deps.fs.realPath(path))
+  const confirmed = await deps.fs.inspectEntry(path)
+  if (confirmed?.kind !== 'directory' || confirmed.identity !== entry.identity) {
+    throw new Error(`Local skill lease path identity changed: ${path}`)
+  }
+  return canonical
+}
+
+function localSkillInputResourceKeys(
+  home: string,
+  repoPath: string,
+  inputs: readonly string[],
+  includeBuiltInRoot: boolean,
+): string[] {
+  const sources = inputs.map((path) => resolve(path))
+  const overlappingDestinations = skillProjectionDestinationRoots(home).filter((destination) =>
+    sources.some(
+      (source) => containsPath(destination, source) || containsPath(source, destination),
+    ),
+  )
+  return [
+    ...new Set([
+      resolve(repoPath),
+      resolve(home),
+      ...sources,
+      ...overlappingDestinations,
+      ...(includeBuiltInRoot ? [resolve(repoPath, 'assets', 'skills')] : []),
+    ]),
+  ]
+}
+
+function containsPath(parent: string, child: string): boolean {
+  const value = relative(parent, child)
+  return value === '' || (!isAbsolute(value) && value !== '..' && !value.startsWith(`..${sep}`))
+}
+
+function batchChangedDestinations(
+  sources: z.infer<typeof SetSkillAgentsBatchBody>['sources'],
+  locals: z.infer<typeof SetSkillAgentsBatchBody>['locals'],
+): SkillProjectionDestination[] {
+  const destinations = [...sources.flatMap((source) => source.updates), ...locals].flatMap(
+    (update) =>
+      'expected' in update
+        ? changedSkillProjectionDestinations(update.expected, update.next)
+        : changedSkillProjectionDestinations(
+            { agents: update.expectedAgents },
+            { agents: update.agents },
+          ),
+  )
+  return [
+    ...new Map(
+      destinations.map((destination) => [skillProjectionDestinationKey(destination), destination]),
+    ).values(),
+  ]
+}
+
+async function validateSkillBatchManifest(
+  deps: RouteDeps,
+  repoPath: string,
+): Promise<SkillsManifest> {
+  const [files, localConfig] = await Promise.all([
+    readSkillsProjectionFiles(deps.fs, repoPath),
+    readLocalConfig(deps.fs, deps.home),
+  ])
+  const repoManifest = loadRepoManifest(files)
+  const errors = validateManifest(repoManifest)
+  const effectiveConfig = z
+    .object({ agents: z.array(AgentIdSchema).optional() })
+    .passthrough()
+    .safeParse(mergeConfig(repoManifest.repoConfig, localConfig as Config))
+  if (!effectiveConfig.success) {
+    errors.push(
+      ...effectiveConfig.error.issues.map(
+        (issue) => `config.${issue.path.join('.')}: ${issue.message}`,
+      ),
+    )
+  }
+  if (errors.length > 0) {
+    throw new SkillsApplicationError(422, 'invalid_skills_manifest', errors.join('; '))
+  }
+  return repoManifest.skills
 }
 
 function createSkillsApplication(deps: RouteDeps): SkillsApplication {

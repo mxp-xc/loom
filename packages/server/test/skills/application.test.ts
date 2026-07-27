@@ -52,7 +52,10 @@ describe('SkillsApplication', () => {
     await writeFile(join(repoPath, 'assets', 'skills', 'repo-skill', 'SKILL.md'), 'x')
 
     await expect(app.scanLocalSkills({ dir: '~/.agents/skills' })).resolves.toEqual([
-      { name: 'cached-skill', path: join(home, '.agents', 'skills', '.cache', 'cached-skill') },
+      {
+        name: 'cached-skill',
+        path: await realpath(join(home, '.agents', 'skills', '.cache', 'cached-skill')),
+      },
     ])
     await expect(app.scanLocalSkills({ dir: 'assets/skills', repoPath })).resolves.toEqual([
       {
@@ -61,6 +64,93 @@ describe('SkillsApplication', () => {
       },
     ])
     await expect(app.scanLocalSkills({ dir: 'missing', repoPath })).resolves.toEqual([])
+  })
+
+  it('filters registered and Loom-managed skills from external scans', async () => {
+    const root = join(home, '.agents', 'skills')
+    const linkedSource = join(home, 'linked-source')
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      'sources: []\nskills:\n  - id: registered-skill\n',
+    )
+    await mkdir(join(root, 'user-skill'), { recursive: true })
+    await mkdir(join(root, 'registered-skill'), { recursive: true })
+    await mkdir(join(root, 'managed-copy'), { recursive: true })
+    await mkdir(join(root, 'managed-namespace', 'nested-skill'), { recursive: true })
+    await mkdir(linkedSource, { recursive: true })
+    await writeFile(join(root, 'user-skill', 'SKILL.md'), '# user')
+    await writeFile(join(root, 'registered-skill', 'SKILL.md'), '# registered')
+    await writeFile(join(root, 'managed-copy', 'SKILL.md'), '# copy')
+    await writeFile(join(root, 'managed-copy', '.loom-projection.json'), '{malformed')
+    await writeFile(join(root, 'managed-namespace', '.loom-projection.json'), 'foreign owner')
+    await writeFile(join(root, 'managed-namespace', 'nested-skill', 'SKILL.md'), '# nested')
+    await writeFile(join(linkedSource, 'SKILL.md'), '# linked')
+    await symlink(
+      linkedSource,
+      join(root, 'linked-skill'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+
+    await expect(app.scanLocalSkills({ dir: '~/.agents/skills', repoPath })).resolves.toEqual([
+      { name: 'user-skill', path: await realpath(join(root, 'user-skill')) },
+    ])
+  })
+
+  it('propagates an external scan inspection error to the route logging boundary', async () => {
+    const root = join(home, '.agents', 'skills')
+    const skillDir = join(root, 'broken-skill')
+    const failure = new Error('inspection failed')
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, 'SKILL.md'), '# broken')
+    const inspectEntry = fs.inspectEntry.bind(fs)
+    vi.spyOn(fs, 'inspectEntry').mockImplementation(async (path) => {
+      if (path.endsWith(join('skills', 'broken-skill'))) throw failure
+      return inspectEntry(path)
+    })
+
+    await expect(app.scanLocalSkills({ dir: '~/.agents/skills', repoPath })).rejects.toBe(failure)
+    expect(log.error).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['missing', null],
+    ['non-file', { kind: 'directory' as const, identity: 'replacement-directory' }],
+  ])('fails the whole external scan when a listed SKILL.md becomes %s', async (_case, entry) => {
+    const root = join(home, '.agents', 'skills')
+    const skillFile = join(root, 'changing-skill', 'SKILL.md')
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    await mkdir(join(root, 'changing-skill'), { recursive: true })
+    await writeFile(skillFile, '# changing')
+    const inspectEntry = fs.inspectEntry.bind(fs)
+    vi.spyOn(fs, 'inspectEntry').mockImplementation(async (path) => {
+      if (path.endsWith(join('.agents', 'skills', 'changing-skill', 'SKILL.md'))) return entry
+      return inspectEntry(path)
+    })
+
+    await expect(app.scanLocalSkills({ dir: '~/.agents/skills', repoPath })).rejects.toThrow(
+      /Local skill file changed during scan: .*changing-skill[/\\]SKILL\.md/,
+    )
+  })
+
+  it('fails the whole external scan when a listed child disappears', async () => {
+    const root = join(home, '.agents', 'skills')
+    const disappearingParent = join(root, 'disappearing-parent')
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    await mkdir(join(root, 'stable-skill'), { recursive: true })
+    await mkdir(join(disappearingParent, 'nested-skill'), { recursive: true })
+    await writeFile(join(root, 'stable-skill', 'SKILL.md'), '# stable')
+    await writeFile(join(disappearingParent, 'nested-skill', 'SKILL.md'), '# nested')
+    const canonicalDisappearingParent = await realpath(disappearingParent)
+    const inspectEntry = fs.inspectEntry.bind(fs)
+    vi.spyOn(fs, 'inspectEntry').mockImplementation(async (path) => {
+      if (path === canonicalDisappearingParent) return null
+      return inspectEntry(path)
+    })
+
+    await expect(app.scanLocalSkills({ dir: '~/.agents/skills', repoPath })).rejects.toThrow(
+      /Local skill scan entry changed during scan: .*disappearing-parent/,
+    )
   })
 
   it('imports repo asset refs as pathless local skills', async () => {
@@ -446,7 +536,11 @@ describe('SkillsApplication', () => {
       sources: [
         {
           sourceUrl: 'https://example.test/skills.git',
-          agents: ['claude-code', 'codex', 'opencode'],
+          destinations: [
+            { kind: 'agent', agent: 'claude-code' },
+            { kind: 'agent', agent: 'codex' },
+            { kind: 'agent', agent: 'opencode' },
+          ],
         },
       ],
       locals: [],
@@ -527,7 +621,10 @@ describe('SkillsApplication', () => {
       sources: [
         {
           sourceUrl: 'https://example.test/skills.git',
-          agents: ['codex', 'opencode'],
+          destinations: [
+            { kind: 'agent', agent: 'codex' },
+            { kind: 'agent', agent: 'opencode' },
+          ],
         },
       ],
       locals: [],
@@ -602,8 +699,18 @@ describe('SkillsApplication', () => {
     expect(writeSpy).toHaveBeenCalledTimes(1)
     expect(projectSkills).toHaveBeenCalledTimes(1)
     expect(projectSkills).toHaveBeenCalledWith(repoPath, {
-      sources: [{ sourceUrl: 'https://example.test/skills.git', agents: ['codex'] }],
-      locals: [{ skillId: 'local-alpha', agents: ['codex'] }],
+      sources: [
+        {
+          sourceUrl: 'https://example.test/skills.git',
+          destinations: [{ kind: 'agent', agent: 'codex' }],
+        },
+      ],
+      locals: [
+        {
+          skillId: 'local-alpha',
+          destinations: [{ kind: 'agent', agent: 'codex' }],
+        },
+      ],
     })
   })
 
@@ -636,7 +743,7 @@ describe('SkillsApplication', () => {
         ],
         locals: [{ id: 'local-alpha', expectedAgents: [], agents: [] }],
       }),
-    ).rejects.toMatchObject({ status: 409, code: 'stale_agent_state' })
+    ).rejects.toMatchObject({ status: 409, code: 'stale_projection_assignment' })
 
     expect(writeSpy).not.toHaveBeenCalled()
     expect(projectSkills).not.toHaveBeenCalled()

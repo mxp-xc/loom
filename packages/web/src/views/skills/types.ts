@@ -1,3 +1,8 @@
+import type { AgentId } from '@loom/core'
+
+export type SkillDetailIdentity =
+  { kind: 'source'; sourceUrl: string; memberEntry: string } | { kind: 'local'; skillId: string }
+
 export interface ScanMember {
   name: string
   description: string
@@ -8,8 +13,10 @@ export interface ScanMember {
 export interface SkillDetail {
   skillId: string
   source?: string
+  memberEntry?: string
   path?: string
-  agents: string[]
+  agents: AgentId[]
+  shared?: boolean
 }
 
 export interface RefreshMember {

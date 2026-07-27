@@ -14,6 +14,8 @@ import type {
   AgentId,
   Manifest,
   McpServer,
+  SkillProjectionAssignment,
+  SkillProjectionDestination,
   SourceResources,
   SourceTree,
   SourceTreeDiagnostic,
@@ -322,11 +324,11 @@ export const api = {
       changes: {
         added: Array<{ name: string }>
         updated: Array<{ name: string }>
-        removed: Array<{ name: string; agents?: string[] }>
+        removed: Array<{ name: string; agents?: AgentId[]; shared?: boolean }>
       }
       resourceBoundaryChanges: Array<{ name: string; entry: string; path: string }>
       pathMoves: Array<{
-        agent: AgentId
+        destination: SkillProjectionDestination
         kind: 'bundle' | 'resource-file' | 'resource-directory'
         sourcePath: string
         previousTargetPath?: string
@@ -526,9 +528,17 @@ export const api = {
     repo: string
     sources: Array<{
       sourceUrl: string
-      updates: Array<{ memberEntry: string; expectedAgents: string[]; agents: string[] }>
+      updates: Array<{
+        memberEntry: string
+        expected: SkillProjectionAssignment
+        next: SkillProjectionAssignment
+      }>
     }>
-    locals: Array<{ id: string; expectedAgents: string[]; agents: string[] }>
+    locals: Array<{
+      id: string
+      expected: SkillProjectionAssignment
+      next: SkillProjectionAssignment
+    }>
   }) => post('/skills/agents/batch', body).then(json),
   resolveSourceNamespaceCollision: (body: { repo: string; sourceUrl: string; agent: AgentId }) =>
     post('/skills/source-namespace-collisions/resolve', body).then(json) as Promise<{

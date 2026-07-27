@@ -52,7 +52,13 @@ afterEach(async () => {
 })
 
 const plan: ProjectionPlan = {
-  links: [{ skillId: 'frontend-design', source: 'local', agents: ['claude-code'] }],
+  links: [
+    {
+      skillId: 'frontend-design',
+      source: 'local',
+      destinations: [{ kind: 'agent', agent: 'claude-code' }],
+    },
+  ],
   sourcePlans: [],
   mcpEntries: [{ id: 'playwright', agents: ['claude-code'] }],
   memoryPlan: { active: null, content: null, agents: [] },
@@ -85,6 +91,192 @@ describe('executeProjection', () => {
       JSON.parse(await fs.readFile(join(home, '.claude.json'))).mcpServers.playwright.command,
     ).toBe('npx')
   })
+  it('projects a shared-only local skill without any installed agent', async () => {
+    const fs = new NodeFileSystem()
+    let managedArtifacts = {}
+    const result = await executeProjection(
+      {
+        ...plan,
+        links: [
+          {
+            skillId: 'frontend-design',
+            source: 'local',
+            destinations: [{ kind: 'shared' }],
+          },
+        ],
+        mcpEntries: [],
+      },
+      { ...manifest, mcp: [], config: { agents: [] } },
+      varsCtx,
+      {
+        fs,
+        ownerRepo: 'test-owner',
+        adapters: {},
+        installedAgents: new Set(),
+        resolveSkillSrc: () => join(srcDir, 'frontend-design'),
+        getManagedSkillArtifacts: async () => structuredClone(managedArtifacts),
+        setManagedSkillArtifacts: async (next: typeof managedArtifacts) => {
+          managedArtifacts = structuredClone(next)
+        },
+      },
+      'skills',
+    )
+
+    expect(result).toEqual({ ok: true })
+    expect(await fs.isLink(join(home, '.agents', 'skills', 'frontend-design'))).toBe(true)
+    expect(managedArtifacts).toEqual({
+      shared: {
+        'frontend-design': {
+          kind: 'link',
+          source: await fs.realPath(join(srcDir, 'frontend-design')),
+        },
+      },
+    })
+  })
+
+  it('treats an external skill already at the shared destination as user-owned in-place content', async () => {
+    const fs = new NodeFileSystem()
+    const source = join(home, '.agents', 'skills', 'user-skill')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'SKILL.md'), 'user-owned')
+    let managedArtifacts = {}
+    const projectionDeps = {
+      fs,
+      ownerRepo: 'test-owner',
+      adapters: {},
+      installedAgents: new Set<AgentId>(),
+      resolveSkillSrc: () => source,
+      getManagedSkillArtifacts: async () => structuredClone(managedArtifacts),
+      setManagedSkillArtifacts: async (next: typeof managedArtifacts) => {
+        managedArtifacts = structuredClone(next)
+      },
+    }
+    const sharedPlan: ProjectionPlan = {
+      ...plan,
+      links: [
+        {
+          skillId: 'user-skill',
+          localPath: source,
+          source: 'local',
+          destinations: [{ kind: 'shared' }],
+        },
+      ],
+      mcpEntries: [],
+    }
+
+    expect(
+      (
+        await executeProjection(
+          sharedPlan,
+          { ...manifest, mcp: [], config: { agents: [] } },
+          varsCtx,
+          projectionDeps,
+          'skills',
+        )
+      ).ok,
+    ).toBe(true)
+    expect(await fs.isLink(source)).toBe(false)
+    expect(await fs.exists(join(source, '.loom-projection.json'))).toBe(false)
+    expect(managedArtifacts).toEqual({})
+
+    expect(
+      (
+        await executeProjection(
+          {
+            ...sharedPlan,
+            links: [{ ...sharedPlan.links[0], destinations: [] }],
+          },
+          { ...manifest, mcp: [], config: { agents: [] } },
+          varsCtx,
+          { ...projectionDeps, resolveSkillSrc: () => null },
+          'skills',
+        )
+      ).ok,
+    ).toBe(true)
+    expect(await fs.readFile(join(source, 'SKILL.md'))).toBe('user-owned')
+    expect(managedArtifacts).toEqual({})
+  })
+
+  it('retains managed ownership when a copied shared destination becomes the external source', async () => {
+    const fs = new NodeFileSystem()
+    const sharedDestination = join(home, '.agents', 'skills', 'frontend-design')
+    let managedArtifacts = {}
+    let source = join(srcDir, 'frontend-design')
+    const projectionDeps = {
+      fs,
+      ownerRepo: 'test-owner',
+      adapters: {},
+      installedAgents: new Set<AgentId>(),
+      resolveSkillSrc: () => source,
+      getManagedSkillArtifacts: async () => structuredClone(managedArtifacts),
+      setManagedSkillArtifacts: async (next: typeof managedArtifacts) => {
+        managedArtifacts = structuredClone(next)
+      },
+    }
+    const sharedPlan: ProjectionPlan = {
+      ...plan,
+      strategy: 'copy',
+      links: [
+        {
+          skillId: 'frontend-design',
+          localPath: source,
+          source: 'local',
+          destinations: [{ kind: 'shared' }],
+        },
+      ],
+      mcpEntries: [],
+    }
+
+    expect(
+      (
+        await executeProjection(
+          sharedPlan,
+          { ...manifest, mcp: [], config: { agents: [] } },
+          varsCtx,
+          projectionDeps,
+          'skills',
+        )
+      ).ok,
+    ).toBe(true)
+    const expectedArtifacts = structuredClone(managedArtifacts)
+    expect(await fs.exists(join(sharedDestination, '.loom-projection.json'))).toBe(true)
+
+    source = sharedDestination
+    expect(
+      (
+        await executeProjection(
+          {
+            ...sharedPlan,
+            links: [{ ...sharedPlan.links[0], localPath: sharedDestination }],
+          },
+          { ...manifest, mcp: [], config: { agents: [] } },
+          varsCtx,
+          projectionDeps,
+          'skills',
+        )
+      ).ok,
+    ).toBe(true)
+    expect(managedArtifacts).toEqual(expectedArtifacts)
+    expect(await fs.exists(join(sharedDestination, '.loom-projection.json'))).toBe(true)
+
+    expect(
+      (
+        await executeProjection(
+          {
+            ...sharedPlan,
+            links: [{ ...sharedPlan.links[0], localPath: sharedDestination, destinations: [] }],
+          },
+          { ...manifest, mcp: [], config: { agents: [] } },
+          varsCtx,
+          { ...projectionDeps, resolveSkillSrc: () => null },
+          'skills',
+        )
+      ).ok,
+    ).toBe(true)
+    expect(await fs.exists(sharedDestination)).toBe(false)
+    expect(managedArtifacts).toEqual({})
+  })
+
   it('creates parent directories for source skill ids that include a repo prefix', async () => {
     const fs = new NodeFileSystem()
     const remoteSkillDir = join(srcDir, 'remote-member')
@@ -95,7 +287,7 @@ describe('executeProjection', () => {
         {
           skillId: 'superpowers/finishing-a-development-branch',
           source: { repoId: 'superpowers', memberName: 'finishing-a-development-branch' },
-          agents: ['claude-code'],
+          destinations: [{ kind: 'agent', agent: 'claude-code' }],
         },
       ],
       sourcePlans: [],
@@ -150,7 +342,7 @@ describe('executeProjection', () => {
     )
     expect(await fs.isLink(join(home, '.claude', 'skills', 'frontend-design'))).toBe(true)
     const disabledPlan: ProjectionPlan = {
-      links: [{ skillId: 'frontend-design', source: 'local', agents: [] }],
+      links: [{ skillId: 'frontend-design', source: 'local', destinations: [] }],
       sourcePlans: [],
       mcpEntries: [],
       memoryPlan: { active: null, content: null, agents: [] },
@@ -175,13 +367,13 @@ describe('executeProjection', () => {
     await mkdir(dirname(destination), { recursive: true })
     await fs.createLink(driftedSource, destination)
     let managedArtifacts = {
-      'claude-code': {
+      'agent:claude-code': {
         'frontend-design': { kind: 'link' as const, source: join(srcDir, 'frontend-design') },
       },
     }
     const disabledPlan: ProjectionPlan = {
       ...plan,
-      links: [{ ...plan.links[0], agents: [] }],
+      links: [{ ...plan.links[0], destinations: [] }],
       mcpEntries: [],
     }
 
@@ -206,7 +398,14 @@ describe('executeProjection', () => {
     const fs = new NodeFileSystem()
     const twoSkillPlan: ProjectionPlan = {
       ...plan,
-      links: [plan.links[0], { skillId: 'second-skill', source: 'local', agents: ['claude-code'] }],
+      links: [
+        plan.links[0],
+        {
+          skillId: 'second-skill',
+          source: 'local',
+          destinations: [{ kind: 'agent', agent: 'claude-code' }],
+        },
+      ],
       mcpEntries: [],
     }
 
@@ -287,7 +486,7 @@ describe('executeProjection', () => {
     )
 
     const removed = await executeProjection(
-      { ...plan, links: [{ ...plan.links[0], agents: [] }], mcpEntries: [] },
+      { ...plan, links: [{ ...plan.links[0], destinations: [] }], mcpEntries: [] },
       { ...manifest, mcp: [] },
       varsCtx,
       projectionDeps,
@@ -574,7 +773,7 @@ describe('executeProjection', () => {
         {
           skillId: 'superpowers/executing-plans',
           source: { repoId: 'superpowers', memberName: 'executing-plans' },
-          agents: ['claude-code'],
+          destinations: [{ kind: 'agent', agent: 'claude-code' }],
         },
       ],
       sourcePlans: [],
@@ -608,7 +807,7 @@ describe('executeProjection', () => {
     expect(await fs.exists(join(dest, 'SKILL.md'))).toBe(true)
 
     const cleared = await executeProjection(
-      { ...sourcePlan, links: [{ ...sourcePlan.links[0], agents: [] }] },
+      { ...sourcePlan, links: [{ ...sourcePlan.links[0], destinations: [] }] },
       { ...manifest, mcp: [] },
       varsCtx,
       projectionDeps,
@@ -630,7 +829,7 @@ describe('executeProjection', () => {
         {
           skillId: 'openai-skills/brainstorming',
           source: { repoId: 'openai-skills', cacheId: 'superpowers', memberName: 'brainstorming' },
-          agents: ['claude-code'],
+          destinations: [{ kind: 'agent', agent: 'claude-code' }],
         },
       ],
       sourcePlans: [],
@@ -677,7 +876,7 @@ describe('executeProjection', () => {
       sourceUrl: 'https://example.test/superpowers.git',
       cacheId: 'superpowers',
       commit: 'planned-commit',
-      agent: 'claude-code',
+      destination: { kind: 'agent', agent: 'claude-code' },
       projectionBase: '',
       entries: [],
     }
@@ -709,7 +908,7 @@ describe('executeProjection', () => {
       sourceUrl: 'https://example.test/superpowers.git',
       cacheId: 'superpowers',
       commit: 'planned-commit',
-      agent: 'claude-code',
+      destination: { kind: 'agent', agent: 'claude-code' },
       projectionBase: '',
       entries: [],
     }
@@ -740,7 +939,7 @@ describe('executeProjection', () => {
       sourceUrl: 'https://example.test/superpowers.git',
       cacheId: 'superpowers',
       commit: 'planned-commit',
-      agent: 'claude-code',
+      destination: { kind: 'agent', agent: 'claude-code' },
       projectionBase: '',
       entries: [],
     }
@@ -763,7 +962,7 @@ describe('executeProjection', () => {
         {
           skillId: 'superpowers/executing-plans',
           source: { repoId: 'superpowers', memberName: 'executing-plans' },
-          agents: [],
+          destinations: [],
         },
       ],
       sourcePlans: [],
@@ -814,7 +1013,7 @@ describe('executeProjection', () => {
 
       await deps.setManagedMcpIds?.('claude-code', ['playwright'])
       await deps.setManagedSkillArtifacts?.({
-        'claude-code': {
+        'agent:claude-code': {
           'frontend-design': {
             kind: 'link',
             source: join(srcDir, 'frontend-design'),
@@ -847,10 +1046,28 @@ describe('executeProjection', () => {
         ),
       ).toBe(true)
       await expect(deps.getManagedSkillArtifacts?.()).resolves.toEqual({
-        'claude-code': {
+        'agent:claude-code': {
           'frontend-design': {
             kind: 'link',
             source: join(srcDir, 'frontend-design'),
+          },
+        },
+      })
+      expect(
+        JSON.parse(
+          await fs.readFile(
+            join(explicitHome, '.loom', 'state', deps.ownerRepo!, 'projected-skills.json'),
+          ),
+        ),
+      ).toEqual({
+        version: 2,
+        ownerRepo: deps.ownerRepo,
+        destinations: {
+          'agent:claude-code': {
+            'frontend-design': {
+              kind: 'link',
+              source: join(srcDir, 'frontend-design'),
+            },
           },
         },
       })
@@ -860,6 +1077,135 @@ describe('executeProjection', () => {
         rm(envHome, { recursive: true, force: true }),
       ])
     }
+  })
+
+  it('reads agent-keyed v1 managed skill state into destination-keyed memory', async () => {
+    const fs = new NodeFileSystem()
+    const deps = createProjectionDeps(
+      { fs, git: {} as never, proc: {} as never },
+      join(srcDir, 'repo-with-v1-skill-state'),
+      installed,
+      home,
+    )
+    const stateFile = join(home, '.loom', 'state', deps.ownerRepo!, 'projected-skills.json')
+    await fs.mkdir(dirname(stateFile), true)
+    await fs.writeFile(
+      stateFile,
+      JSON.stringify({
+        version: 1,
+        ownerRepo: deps.ownerRepo,
+        agents: {
+          'claude-code': {
+            'frontend-design': {
+              kind: 'link',
+              source: join(srcDir, 'frontend-design'),
+            },
+          },
+        },
+      }),
+    )
+
+    await expect(deps.getManagedSkillArtifacts?.()).resolves.toEqual({
+      'agent:claude-code': {
+        'frontend-design': {
+          kind: 'link',
+          source: join(srcDir, 'frontend-design'),
+        },
+      },
+    })
+  })
+
+  it('rejects unknown destination keys in managed skill state', async () => {
+    const fs = new NodeFileSystem()
+    const deps = createProjectionDeps(
+      { fs, git: {} as never, proc: {} as never },
+      join(srcDir, 'repo-with-invalid-skill-state'),
+      installed,
+      home,
+    )
+    const stateFile = join(home, '.loom', 'state', deps.ownerRepo!, 'projected-skills.json')
+    await fs.mkdir(dirname(stateFile), true)
+    await fs.writeFile(
+      stateFile,
+      JSON.stringify({
+        version: 2,
+        ownerRepo: deps.ownerRepo,
+        destinations: { 'agent:unknown': {} },
+      }),
+    )
+
+    await expect(deps.getManagedSkillArtifacts?.()).rejects.toThrow(
+      'Managed skill projection state destination is invalid',
+    )
+    expect(projectionLog.error).toHaveBeenCalledWith(
+      'failed to read managed skill projection state',
+      expect.objectContaining({ err: expect.any(Error), skillStateFile: stateFile }),
+    )
+  })
+
+  it.each([
+    {
+      name: 'v1 fields in v2 state',
+      state: (ownerRepo: string) => ({
+        version: 2,
+        ownerRepo,
+        destinations: {},
+        agents: {},
+      }),
+    },
+    {
+      name: 'v2 fields in v1 state',
+      state: (ownerRepo: string) => ({
+        version: 1,
+        ownerRepo,
+        agents: {},
+        destinations: {},
+      }),
+    },
+    {
+      name: 'unknown top-level fields',
+      state: (ownerRepo: string) => ({
+        version: 2,
+        ownerRepo,
+        destinations: {},
+        extra: true,
+      }),
+    },
+    {
+      name: 'unknown artifact fields',
+      state: (ownerRepo: string) => ({
+        version: 2,
+        ownerRepo,
+        destinations: {
+          shared: {
+            'frontend-design': {
+              kind: 'link',
+              source: join(srcDir, 'frontend-design'),
+              extra: true,
+            },
+          },
+        },
+      }),
+    },
+  ])('rejects $name in managed skill state', async ({ state }) => {
+    const fs = new NodeFileSystem()
+    const deps = createProjectionDeps(
+      { fs, git: {} as never, proc: {} as never },
+      join(srcDir, 'repo-with-strict-skill-state'),
+      installed,
+      home,
+    )
+    const stateFile = join(home, '.loom', 'state', deps.ownerRepo!, 'projected-skills.json')
+    await fs.mkdir(dirname(stateFile), true)
+    await fs.writeFile(stateFile, JSON.stringify(state(deps.ownerRepo!)))
+
+    await expect(deps.getManagedSkillArtifacts?.()).rejects.toThrow(
+      /Managed skill projection state (fields are|entry is) invalid/,
+    )
+    expect(projectionLog.error).toHaveBeenCalledWith(
+      'failed to read managed skill projection state',
+      expect.objectContaining({ err: expect.any(Error), skillStateFile: stateFile }),
+    )
   })
 
   it('isolates managed MCP state for repositories with the same basename', async () => {

@@ -273,14 +273,14 @@ describe('compareProjectionPaths', () => {
       ]),
     ).toEqual([
       {
-        agent: 'codex',
+        destination: { kind: 'agent', agent: 'codex' },
         kind: 'bundle',
         sourcePath: 'group/alpha',
         previousTargetPath: 'group/alpha',
         nextTargetPath: 'alpha',
       },
       {
-        agent: 'codex',
+        destination: { kind: 'agent', agent: 'codex' },
         kind: 'bundle',
         sourcePath: 'other/beta',
         previousTargetPath: 'other/beta',

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { join, resolve } from 'node:path'
-import { agentsSupporting, type AgentId } from '@loom/core'
+import { agentsSupporting, type AgentId, type SkillProjectionDestination } from '@loom/core'
 import {
   agentMcpFile,
   agentMemoryFile,
@@ -9,6 +9,7 @@ import {
 } from '../adapters/paths.js'
 import type { IFileSystem } from '../ports/fs.js'
 import type { ProjectionScope } from '../projection/executor.js'
+import { resolveSkillDestinationRoot } from '../projection/skill-destinations.js'
 
 export async function homeResourceKey(fs: IFileSystem, home: string): Promise<string> {
   return typeof fs.realPath === 'function' ? fs.realPath(home) : home
@@ -25,10 +26,20 @@ export function projectionResourceKeys(
   const keys = [resolve(repoPath), canonicalHomeKey]
 
   if (scope === 'skills' || scope === 'all') {
-    const agents = agent ? [agent] : agentsSupporting('skills')
+    const destinations: SkillProjectionDestination[] = agent
+      ? [{ kind: 'agent', agent }]
+      : [
+          ...agentsSupporting('skills').map((candidate): SkillProjectionDestination => ({
+            kind: 'agent',
+            agent: candidate,
+          })),
+          { kind: 'shared' },
+        ]
     keys.push(
       join(home, '.loom', 'state', repoIdentity(repoPath), 'projected-skills.json'),
-      ...agents.map((agent) => agentSkillsDir(agent, context)),
+      ...destinations.map((destination) =>
+        resolve(resolveSkillDestinationRoot(destination, context)),
+      ),
     )
   }
   if (scope === 'mcp' || scope === 'all') {
@@ -45,6 +56,35 @@ export function projectionResourceKeys(
   }
 
   return keys.map((key) => resolve(key))
+}
+
+export function skillProjectionDestinationRoots(home: string): string[] {
+  const context = runtimeAgentPathContext(home)
+  const destinations: SkillProjectionDestination[] = [
+    ...agentsSupporting('skills').map((agent): SkillProjectionDestination => ({
+      kind: 'agent',
+      agent,
+    })),
+    { kind: 'shared' },
+  ]
+  return destinations.map((destination) =>
+    resolve(resolveSkillDestinationRoot(destination, context)),
+  )
+}
+
+export function targetedSkillsProjectionResourceKeys(
+  home: string,
+  repoPath: string,
+  canonicalHomeKey: string,
+  destinations: readonly SkillProjectionDestination[],
+): string[] {
+  const context = runtimeAgentPathContext(home)
+  return [
+    resolve(repoPath),
+    canonicalHomeKey,
+    join(home, '.loom', 'state', repoIdentity(repoPath), 'projected-skills.json'),
+    ...destinations.map((destination) => resolveSkillDestinationRoot(destination, context)),
+  ].map((key) => resolve(key))
 }
 
 export function mcpImportResourceKeys(
