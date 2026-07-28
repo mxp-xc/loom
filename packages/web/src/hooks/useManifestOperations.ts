@@ -97,6 +97,12 @@ export interface SourceUpdateCheck {
   update?: SourceUpdateState
 }
 
+export interface SourceNamespaceCollision {
+  agent: AgentId
+  sourceName: string
+  sourceUrl: string
+}
+
 type ProjectScope = 'skills' | 'mcp' | 'memory' | 'all'
 
 const pendingKey = {
@@ -121,6 +127,7 @@ const pendingKey = {
   deleteSource: (url: string) => 'source:delete:' + url,
   deleteLocalSkill: (id: string) => 'skills:delete-local:' + id,
   skillAgents: () => 'skills:agents',
+  resolveSourceNamespaceCollision: () => 'skills:source-namespace-collision',
   addMcpServer: (id: string) => 'mcp:add:' + id,
   updateMcpServer: (id: string) => 'mcp:update:' + id,
   deleteMcpServer: (id: string) => 'mcp:delete:' + id,
@@ -175,6 +182,25 @@ function logOperationFailure(key: string, result: unknown, message: string) {
 
 function logOperationError(key: string, err: unknown, message: string) {
   console.error({ key, err, message }, 'Manifest operation failed')
+}
+
+function sourceNamespaceCollisionFromError(error: unknown): SourceNamespaceCollision | null {
+  if (!isRecord(error) || error.code !== 'source_namespace_collision') return null
+  const diagnostics = Array.isArray(error.diagnostics) ? error.diagnostics : []
+  const diagnostic = diagnostics.find(
+    (candidate) => isRecord(candidate) && candidate.code === 'source_namespace_collision',
+  )
+  if (!isRecord(diagnostic)) return null
+  const { agent, sourceName, sourceUrl } = diagnostic
+  if (
+    typeof agent !== 'string' ||
+    !AGENT_IDS.some((candidate) => candidate === agent) ||
+    typeof sourceName !== 'string' ||
+    typeof sourceUrl !== 'string'
+  ) {
+    return null
+  }
+  return { agent: agent as AgentId, sourceName, sourceUrl }
 }
 
 function sourceRef(source: SkillSource | string): string {
@@ -254,6 +280,8 @@ export function useManifestOperations(
   const mountedRef = useRef(true)
   const pendingRef = useRef(new Set<string>())
   const [pending, setPending] = useState<Set<string>>(() => new Set())
+  const [sourceNamespaceCollision, setSourceNamespaceCollision] =
+    useState<SourceNamespaceCollision | null>(null)
 
   useEffect(() => {
     mountedRef.current = true
@@ -313,8 +341,10 @@ export function useManifestOperations(
         return warningMessage ? { ok: true, result, message: warningMessage } : { ok: true, result }
       } catch (error) {
         const message = normalizeManifestOperationError(error, options.failureMessage)
+        const collision = sourceNamespaceCollisionFromError(error)
         logOperationError(key, error, message)
-        if (shouldNotify(options)) notifyError(message)
+        if (collision && mountedRef.current) setSourceNamespaceCollision(collision)
+        else if (shouldNotify(options)) notifyError(message)
         await refreshAfterFailure(key, repoPath, options)
         return { ok: false, error, message }
       } finally {
@@ -790,6 +820,29 @@ export function useManifestOperations(
     [repoPath, run],
   )
 
+  const resolveSourceNamespaceCollision = useCallback(async () => {
+    if (!sourceNamespaceCollision) return { ok: false, skipped: true } as OperationResult<never>
+    const result = await run(
+      pendingKey.resolveSourceNamespaceCollision(),
+      () =>
+        api.resolveSourceNamespaceCollision({
+          repo: repoPath,
+          sourceUrl: sourceNamespaceCollision.sourceUrl,
+          agent: sourceNamespaceCollision.agent,
+        }),
+      {
+        failureMessage: '解决 Skill 目录冲突失败',
+        successMessage: (response) => `已备份到 skill-backups/${response.backupName} 并完成投影`,
+      },
+    )
+    if (result.ok && mountedRef.current) setSourceNamespaceCollision(null)
+    return result
+  }, [repoPath, run, sourceNamespaceCollision])
+
+  const dismissSourceNamespaceCollision = useCallback(() => {
+    setSourceNamespaceCollision(null)
+  }, [])
+
   const addMcpServer = useCallback(
     (server: McpServer) =>
       run(
@@ -900,6 +953,7 @@ export function useManifestOperations(
       },
       skills: {
         agents: pending.has(pendingKey.skillAgents()),
+        resolvingCollision: pending.has(pendingKey.resolveSourceNamespaceCollision()),
         deleteLocal: (id: string) => pending.has(pendingKey.deleteLocalSkill(id)),
         allAgents: (_agent: AgentId) => pending.has(pendingKey.skillAgents()),
         sourceAgents: (_source: SkillSource | string, _agent: AgentId) =>
@@ -937,6 +991,9 @@ export function useManifestOperations(
       toggleLocalSkillAgent,
       setAllSkillAgents,
       setSourceSkillAgents,
+      sourceNamespaceCollision,
+      resolveSourceNamespaceCollision,
+      dismissSourceNamespaceCollision,
       addMcpServer,
       updateMcpServer,
       deleteMcpServer,
@@ -967,6 +1024,9 @@ export function useManifestOperations(
       toggleLocalSkillAgent,
       setAllSkillAgents,
       setSourceSkillAgents,
+      sourceNamespaceCollision,
+      resolveSourceNamespaceCollision,
+      dismissSourceNamespaceCollision,
       addMcpServer,
       updateMcpServer,
       deleteMcpServer,

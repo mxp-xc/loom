@@ -245,6 +245,8 @@ Desired enabled artifact遇到user-owned destination collision时projection失�
 Implications:
 
 - Enabled collision在preflight发现时产生全计划零写入；apply-time collision触发rollback。
+- Source namespace collision 返回可判别的 409。用户在 Skills UI 确认后，Loom 将原目录原子移动到该 Agent 配置目录下、且不参与 Skill 扫描的 `skill-backups`，再重试 skills projection。
+- 备份名称必须无覆盖风险。重试发现下一个独立 namespace collision 时，保留用户已确认的备份并继续逐项确认；其他投影失败时按原目录 identity 自动恢复。Primary 与 rollback failure 必须同时可观测。
 - First-run source unavailable不创建destination，但结果明确包含warning。
 - Disabled或stale cleanup遇到unowned artifact时保留它，不把保留本身视为enabled desired state已满足。
 
@@ -252,6 +254,7 @@ Safety:
 
 - 不因source临时不可用删除仍属于desired state的旧link/copy/namespace。
 - 不覆盖或删除并发创建的user artifact。
+- 未经用户在冲突确认界面明确授权，不得移动 user-owned destination；不能通过补写 ownership marker、合并内容或覆盖原目录来解决冲突。
 
 Examples:
 

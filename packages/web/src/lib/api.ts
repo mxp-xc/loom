@@ -530,6 +530,13 @@ export const api = {
     }>
     locals: Array<{ id: string; expectedAgents: string[]; agents: string[] }>
   }) => post('/skills/agents/batch', body).then(json),
+  resolveSourceNamespaceCollision: (body: { repo: string; sourceUrl: string; agent: AgentId }) =>
+    post('/skills/source-namespace-collisions/resolve', body).then(json) as Promise<{
+      ok: true
+      agent: AgentId
+      sourceName: string
+      backupName: string
+    }>,
   reorderSkillGroups: (body: { repo: string; ids: string[] }) =>
     put('/skills/order', body).then(json) as Promise<{ ok: true; ids: string[] }>,
   reorderMcpServers: (body: { repo: string; ids: string[] }) =>

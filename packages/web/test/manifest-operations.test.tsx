@@ -10,6 +10,7 @@ vi.mock('../src/lib/api', () => ({
       message: string,
       readonly status: number,
       readonly code?: string,
+      readonly diagnostics?: unknown[],
     ) {
       super(message)
     }
@@ -50,6 +51,12 @@ vi.mock('../src/lib/api', () => ({
     importLocalSkills: vi.fn(async () => ({ ok: true })),
     writeLocalSkills: vi.fn(async () => ({ ok: true })),
     updateSkillAgentsBatch: vi.fn(async () => ({ ok: true })),
+    resolveSourceNamespaceCollision: vi.fn(async () => ({
+      ok: true,
+      agent: 'codex',
+      sourceName: 'playwright-cli',
+      backupName: 'playwright-cli-backup',
+    })),
     updateMcpAgents: vi.fn(async () => ({ ok: true })),
   },
 }))
@@ -73,6 +80,31 @@ function Harness({
     <button type="button" disabled={projectPending} onClick={() => void action(ops)}>
       {projectPending ? 'busy' : 'run'}
     </button>
+  )
+}
+
+function CollisionHarness() {
+  const ops = useManifestOperations('/tmp/r')
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          void ops.toggleSourceSkillAgent(
+            'https://github.com/microsoft/playwright-cli.git',
+            'skills/playwright-cli/SKILL.md',
+            'codex',
+            [],
+          )
+        }
+      >
+        trigger
+      </button>
+      <output>{ops.sourceNamespaceCollision?.sourceName ?? 'none'}</output>
+      <button type="button" onClick={() => void ops.resolveSourceNamespaceCollision()}>
+        resolve
+      </button>
+    </>
   )
 }
 
@@ -166,6 +198,83 @@ describe('useManifestOperations', () => {
 
     act(() => release())
     await waitFor(() => expect(api.getManifest).toHaveBeenCalledWith('/tmp/r'))
+  })
+
+  it('turns a source namespace collision into a resolvable GUI state', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(api.updateSkillAgentsBatch).mockRejectedValueOnce(
+      new ApiError('collision', 409, 'source_namespace_collision', [
+        {
+          code: 'source_namespace_collision',
+          message: 'backup required',
+          agent: 'codex',
+          sourceName: 'playwright-cli',
+          sourceUrl: 'https://github.com/microsoft/playwright-cli.git',
+        },
+      ] as never),
+    )
+
+    try {
+      render(<CollisionHarness />)
+      fireEvent.click(screen.getByRole('button', { name: 'trigger' }))
+      await screen.findByText('playwright-cli')
+
+      fireEvent.click(screen.getByRole('button', { name: 'resolve' }))
+      await waitFor(() =>
+        expect(api.resolveSourceNamespaceCollision).toHaveBeenCalledWith({
+          repo: '/tmp/r',
+          sourceUrl: 'https://github.com/microsoft/playwright-cli.git',
+          agent: 'codex',
+        }),
+      )
+      await screen.findByText('none')
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it('advances the GUI to the next source namespace collision', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const collision = (sourceName: string, sourceUrl: string) =>
+      new ApiError('collision', 409, 'source_namespace_collision', [
+        {
+          code: 'source_namespace_collision',
+          message: 'backup required',
+          agent: 'codex',
+          sourceName,
+          sourceUrl,
+        },
+      ] as never)
+    vi.mocked(api.updateSkillAgentsBatch).mockRejectedValueOnce(
+      collision('playwright-cli', 'https://github.com/microsoft/playwright-cli.git'),
+    )
+    vi.mocked(api.resolveSourceNamespaceCollision)
+      .mockRejectedValueOnce(collision('superpowers', 'https://github.com/example/superpowers.git'))
+      .mockResolvedValueOnce({
+        ok: true,
+        agent: 'codex',
+        sourceName: 'superpowers',
+        backupName: 'superpowers-backup',
+      })
+
+    try {
+      render(<CollisionHarness />)
+      fireEvent.click(screen.getByRole('button', { name: 'trigger' }))
+      await screen.findByText('playwright-cli')
+
+      fireEvent.click(screen.getByRole('button', { name: 'resolve' }))
+      await screen.findByText('superpowers')
+      fireEvent.click(screen.getByRole('button', { name: 'resolve' }))
+
+      await screen.findByText('none')
+      expect(api.resolveSourceNamespaceCollision).toHaveBeenNthCalledWith(2, {
+        repo: '/tmp/r',
+        sourceUrl: 'https://github.com/example/superpowers.git',
+        agent: 'codex',
+      })
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it('does not notify stale callers after the component unmounts', async () => {

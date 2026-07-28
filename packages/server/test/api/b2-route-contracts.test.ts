@@ -15,6 +15,7 @@ import { McpApplication, McpApplicationError } from '../../src/mcp/application.j
 import { McpDebugSessionError } from '../../src/mcp/debug-session.js'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 import { validationError } from '../helpers/http.js'
+import { SourceNamespaceCollisionError } from '../../src/projection/errors.js'
 
 const logFns = vi.hoisted(() => ({
   error: vi.fn(),
@@ -306,7 +307,8 @@ describe('Skills route failure contract', () => {
 
   it('maps a targeted projection failure to the batch HTTP 500 contract', async () => {
     const error = new Error(`secret projection failure at ${repoPath}`)
-    vi.spyOn(SkillsApplication.prototype, 'setSkillAgentsBatch').mockRejectedValueOnce(error)
+    const wrapped = new AggregateError([new Error('rollback failed'), error], 'mutation failed')
+    vi.spyOn(SkillsApplication.prototype, 'setSkillAgentsBatch').mockRejectedValueOnce(wrapped)
 
     const response = await request(app(), '/api/skills/agents/batch', 'POST', {
       repo: 'default',
@@ -322,7 +324,41 @@ describe('Skills route failure contract', () => {
       message: 'Failed to update skill agents',
     })
     expect(JSON.stringify(result)).not.toContain('secret')
-    expectLoggedOnce('skill agent batch update failed', error)
+    expectLoggedOnce('skill agent batch update failed', wrapped)
+  })
+
+  it('returns a safe actionable HTTP 409 for a source namespace collision', async () => {
+    const error = new SourceNamespaceCollisionError(
+      'codex',
+      'playwright-cli',
+      'https://github.com/microsoft/playwright-cli.git',
+      join(home, '.codex', 'skills', 'playwright-cli'),
+    )
+    const wrapped = new AggregateError([new Error('rollback failed'), error], 'mutation failed')
+    vi.spyOn(SkillsApplication.prototype, 'setSkillAgentsBatch').mockRejectedValueOnce(wrapped)
+
+    const response = await request(app(), '/api/skills/agents/batch', 'POST', {
+      repo: 'default',
+      sources: [],
+      locals: [],
+    })
+    const result = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(result).toMatchObject({
+      ok: false,
+      error: 'source_namespace_collision',
+      diagnostics: [
+        {
+          code: 'source_namespace_collision',
+          agent: 'codex',
+          sourceName: 'playwright-cli',
+          sourceUrl: 'https://github.com/microsoft/playwright-cli.git',
+        },
+      ],
+    })
+    expect(JSON.stringify(result)).not.toContain(home)
+    expectLoggedOnce('skill agent batch update failed', wrapped)
   })
 })
 

@@ -115,6 +115,7 @@ Implications:
 - Global skills bulk 使用一个 batch mutation，一次写入 manifest，并在一个 targeted projection transaction 中处理全部变化。
 - Item-level toggle 是同一 batch API 的单元素特例。
 - Item、source 与 global controls 共用一个 pending 状态；batch 内每个 target 使用当前 agents 作为 `expectedAgents`，防止 stale UI 覆盖并发更新。
+- Source namespace 与 user-owned Skill 目录冲突时，UI 提供“保留现有目录”和“备份并改由 Loom 管理”，不能只显示通用失败或要求用户执行 shell。
 
 Safety:
 
@@ -218,7 +219,7 @@ Implications:
 - 更新完成后只保留当前已选择且新版本仍存在的 members，不自动选择新发现或此前未选择的 bundles。
 - 更新确认始终展示新增、更新和删除摘要；没有对应变化时明确显示 0 项。
 - 缺失项支持逐项选择、全选、取消全选和不保留。
-- 打开 Skills 页面和编辑现有 source 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。
+- 打开 Skills 页面、编辑现有 source 和普通 projection 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。R-SYNC-006 的同步后 cache 对齐和启动时仅针对 unhealthy cache 的自动补偿不属于该限制。
 - Source cache 是否可用是当前机器的运行时状态，不是 manifest 配置有效性；单个 source 不可用时，其他 source、local skills 和非 Skills 功能保持可用。
 - Remote refs 只在用户首次打开 ref 选择或切换 branch/tag 时按需读取；同一编辑会话内复用结果。
 - 显式 branch 通过 remote HEAD 判断更新，即使存在同名 tag；合法 SemVer tag 只和其他合法 SemVer tag 比较 precedence；非 SemVer tag 只检查同名 tag 是否移动，不回退到 branch HEAD。

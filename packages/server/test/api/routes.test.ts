@@ -17,6 +17,7 @@ import { SyncSessionError } from '../../src/sync/session-manager.js'
 import { ResourceLeaseCoordinator } from '../../src/concurrency/resource-lease-coordinator.js'
 import { listRepos } from '../../src/api/repo.js'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
+import { SourceNamespaceCollisionError } from '../../src/projection/errors.js'
 
 const platformGit = vi.hoisted(() => ({
   status: vi.fn(async () => {
@@ -482,6 +483,40 @@ describe('API routes', () => {
         originalError: {},
         rollbackReport: { undone: 0, rollbackFailures: [] },
       },
+    })
+  })
+  it('POST /api/project returns an actionable conflict for a typed source collision', async () => {
+    vi.mocked(projectRepository).mockResolvedValueOnce({
+      ok: false,
+      failure: {
+        failedStep: 'projection',
+        originalError: new SourceNamespaceCollisionError(
+          'codex',
+          'playwright-cli',
+          'https://github.com/microsoft/playwright-cli.git',
+          '/private/agent/skills/playwright-cli',
+        ),
+        rollbackReport: { undone: 0, rollbackFailures: [] },
+      },
+    })
+
+    const res = await app.request('/api/project', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: '/tmp/r', scope: 'skills' }),
+    })
+
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      error: 'source_namespace_collision',
+      diagnostics: [
+        {
+          agent: 'codex',
+          sourceName: 'playwright-cli',
+          sourceUrl: 'https://github.com/microsoft/playwright-cli.git',
+        },
+      ],
     })
   })
   it.each(['manifest', 'plan', 'varsCtx', 'installedAgents'])(

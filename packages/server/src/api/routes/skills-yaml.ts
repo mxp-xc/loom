@@ -10,6 +10,11 @@ import {
   projectRepository,
   projectSkillChanges,
 } from '../../projection/workflow.js'
+import {
+  findSourceNamespaceCollision,
+  sourceNamespaceCollisionPayload,
+} from '../../projection/errors.js'
+import { backupUserOwnedSourceNamespace } from '../../skills/source-namespace-collision.js'
 import { LocalSkillBoundaryError } from '../../skills/local-paths.js'
 import { repositoryErrorResponse } from '../repository-route-error.js'
 import { readSkillsManifest, RepoConfigError } from '../repo-config.js'
@@ -139,6 +144,14 @@ const SetSkillAgentsBatchBody = z
         })
         .strict(),
     ),
+  })
+  .strict()
+
+const ResolveSourceNamespaceCollisionBody = z
+  .object({
+    repo: RepoField,
+    sourceUrl: NonEmptyString,
+    agent: AgentIdSchema,
   })
   .strict()
 
@@ -384,6 +397,50 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     },
   )
 
+  app.post(
+    '/skills/source-namespace-collisions/resolve',
+    jsonValidator(ResolveSourceNamespaceCollisionBody, { error: 'invalid_collision_resolution' }),
+    async (c) => {
+      const { repo, sourceUrl, agent } = c.req.valid('json')
+      try {
+        const result = await runSkillsMutation(repo, async (repoPath, scopedDeps) => {
+          const manifest = await readSkillsManifest(scopedDeps.fs, repoPath)
+          const source = manifest.sources.find((candidate) => candidate.url === sourceUrl)
+          if (!source) {
+            throw new SkillsApplicationError(404, 'source_not_found', 'Source not found')
+          }
+          return backupUserOwnedSourceNamespace(
+            scopedDeps,
+            repoPath,
+            source,
+            agent,
+            async () => {
+              const projected = await projectRepository(scopedDeps, repoPath, { scope: 'skills' })
+              if (!projected.ok) throw projected.failure.originalError
+            },
+            {
+              preserveBackupOnProjectionError: (err) => {
+                const nextCollision = findSourceNamespaceCollision(err)
+                return Boolean(
+                  nextCollision &&
+                  (nextCollision.agent !== agent || nextCollision.sourceUrl !== source.url),
+                )
+              },
+            },
+          )
+        })
+        return c.json({ ok: true, ...result })
+      } catch (e) {
+        return skillsErrorResponse(c, e, {
+          code: 'collision_resolution_failed',
+          message: 'Failed to resolve source namespace collision',
+          logMessage: 'source namespace collision resolution failed',
+          context: { sourceUrl, agent },
+        })
+      }
+    },
+  )
+
   app.put(
     '/skills/order',
     jsonValidator(ReorderSkillGroupsBody, { error: 'invalid_order' }),
@@ -499,6 +556,10 @@ function skillsErrorResponse(
   if (repoFailure) return repoFailure
 
   skillsRouteLogger.error(options.logMessage, { err: error, ...context })
+  const collision = findSourceNamespaceCollision(error)
+  if (collision) {
+    return c.json(sourceNamespaceCollisionPayload(collision), 409)
+  }
   if (error instanceof SkillsApplicationError || error instanceof LocalSkillBoundaryError) {
     return c.json(
       { ok: false, error: error.code, message: SKILLS_ERROR_MESSAGES[error.status] },

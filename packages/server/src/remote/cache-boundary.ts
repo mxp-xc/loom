@@ -114,7 +114,7 @@ export async function createSourceCacheStaging(
   root: SourceCacheRoot,
   name: string,
 ): Promise<StablePhysicalDirectory> {
-  if (!/^\.loom-cache-install-[0-9a-f-]+$/i.test(name)) {
+  if (!/^\.loom-cache-(?:install|reconcile)-[0-9a-f-]+$/i.test(name)) {
     throw invalid('source cache staging name is invalid')
   }
   await assertStablePhysicalDirectory(fs, root, 'revalidate source cache root')

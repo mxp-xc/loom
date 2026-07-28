@@ -18,6 +18,7 @@ import GlobalAgentsBar from './GlobalAgentsBar'
 import SkillDetailEditor from './SkillDetailEditor'
 import EditSourceModal from './EditSourceModal'
 import AddSkillModal from './AddSkillModal'
+import SourceNamespaceCollisionDialog from './SourceNamespaceCollisionDialog'
 import type { SkillDetail } from './types'
 import styles from './Skills.module.css'
 
@@ -211,6 +212,12 @@ export default function Skills({ repoPath }: { repoPath: string }) {
         showToast={showToast}
         onClose={() => setEditSource(null)}
         onSaved={() => setEditSource(null)}
+      />
+      <SourceNamespaceCollisionDialog
+        collision={operations.sourceNamespaceCollision}
+        busy={operations.pending.skills.resolvingCollision}
+        onClose={operations.dismissSourceNamespaceCollision}
+        onResolve={operations.resolveSourceNamespaceCollision}
       />
     </div>
   )

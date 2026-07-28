@@ -136,7 +136,7 @@ Status: active
 Applies to: Sync 普通拉取、冲突解决完成、强制拉取
 
 Rule:
-远端状态成功应用到本地仓库后，必须立即按同步后的 desired state 执行完整 projection reconciliation。
+远端状态成功应用到本地仓库后，必须先按同步后 manifest 的精确 `pinned_commit` 对齐本机 Source cache，再按同步后的 desired state 执行完整 projection reconciliation。
 
 Implications:
 
@@ -146,15 +146,22 @@ Implications:
 - Git 结果应用后、projection 完成前必须保留 durable session；服务重启后前向重试 projection，成功后才清理会话。
 - 强制拉取在 `reset --hard` / `clean` 前必须先持久化 `applying`；重启后可幂等重放 Git apply，再进入 `projection_pending`。
 - 等待 projection 的会话不能被 abort，也不能再创建同 repository 的同步会话。
-- 当前机器不可用的 remote skill source 按 Projection 规则降级为 warning；同步继续应用其他可投影内容，并保留该 source 的已有 managed namespace。
+- Source cache 已匹配 `pinned_commit` 时不得访问远端；缺失或落后时在 owned candidate 中恢复并完成 identity-bound cache 交换。
+- 服务启动时必须先离线检查 Source cache；只有发现缺失或落后时，才在 projection mutation lease 内复用同一 cache reconciliation，补偿功能上线前或异常退出后未留下 sync session 的历史漂移。
+- 单个 remote skill source 因网络、Git 或内容校验失败而无法恢复时，按 Projection 规则降级为 warning；同步继续应用其他可投影内容，并保留该 source 的旧 cache 与已有 managed namespace。
+- Cache journal、repository authorization、identity boundary 或 rollback 失败时必须保留 `projection_pending` 并作为同步失败暴露，不能降级为普通 Source warning。
 
 Safety:
 
 - 投影仍须遵守 Projection 规则中的 managed artifact 边界，不得删除 user-owned 文件。
+- Cache candidate、backup 和 cleanup 只能操作 identity 仍匹配的 owned physical directory；重启后根据 journal 与实际 identity 幂等继续或回滚。
 
 Tests:
 
 - packages/server/test/sync/session-manager.test.ts
+- packages/server/test/remote/source-cache-reconciliation.test.ts
+- packages/server/test/api/sync-applied-handler.test.ts
+- packages/server/test/api/startup-source-cache-reconciliation.test.ts
 
 ## R-SYNC-007 冲突编辑只接受有界 UTF-8 regular blob
 

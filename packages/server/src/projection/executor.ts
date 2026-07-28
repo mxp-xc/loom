@@ -49,6 +49,7 @@ import {
   type StableEntry,
   type StableRelativeFiles,
 } from './fs-boundary.js'
+import { SourceNamespaceCollisionError } from './errors.js'
 
 export interface ProjectionDeps {
   fs: IFileSystem
@@ -1327,7 +1328,12 @@ async function prepareSourceNamespaces(
       sourceName: sourcePlan.sourceName,
     })
     if (ownership.state === 'unowned') {
-      throw new Error(`refuse to overwrite user-owned source namespace: ${namespace}`)
+      throw new SourceNamespaceCollisionError(
+        sourcePlan.agent,
+        sourcePlan.sourceName,
+        sourcePlan.sourceUrl,
+        namespace,
+      )
     }
     if (desired.has(namespace)) {
       throw new Error(`Duplicate source namespace destination: ${sourcePlan.sourceName}`)
@@ -1801,7 +1807,7 @@ async function writeSourceMarker(
   )
 }
 
-interface ManagedSourceNamespaceInspection {
+export interface ManagedSourceNamespaceInspection {
   path: string
   state: ManagedArtifactOwnership
   destination: StableEntry | null
@@ -1812,7 +1818,7 @@ interface ManagedSourceNamespaceInspection {
   namespace?: string
 }
 
-async function inspectManagedSourceNamespace(
+export async function inspectManagedSourceNamespace(
   fs: IFileSystem,
   namespace: string,
   expected: { ownerRepo?: string; sourceKey?: string; sourceName?: string } = {},

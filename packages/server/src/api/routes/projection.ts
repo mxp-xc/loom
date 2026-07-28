@@ -17,6 +17,10 @@ import {
   writeLocalSkillContent,
 } from '../../skills/content.js'
 import { withRepositoryLease } from '../repository-lease.js'
+import {
+  findSourceNamespaceCollision,
+  sourceNamespaceCollisionPayload,
+} from '../../projection/errors.js'
 
 const apiLogger = logger.child('api')
 const NonEmptyString = z.string().min(1)
@@ -96,6 +100,8 @@ export function createProjectionRoutes(deps: RouteDeps): Hono {
               step: result.failure.failedStep,
               err: result.failure.originalError,
             })
+            const collision = findSourceNamespaceCollision(result.failure.originalError)
+            if (collision) return c.json(sourceNamespaceCollisionPayload(collision), 409)
           }
           return c.json(
             result.ok ? result : { ...result, message: projectionFailureMessage(result.failure) },

@@ -36,6 +36,10 @@ import {
   inspectSourceCacheHealth,
   warmSourceProjectionCatalog,
 } from '../remote/source-cache-health.js'
+import {
+  reconcileSourceCachesAfterSync,
+  type SourceCacheReconciliationResult,
+} from '../remote/source-cache-reconciliation.js'
 
 export interface RouteDeps {
   fs: IFileSystem
@@ -56,6 +60,46 @@ type RegisterRouteDeps = RouteDeps & {
 export type SyncRouteDeps = RouteDeps & { sync: SyncSessionManager }
 
 export type RouteApp = Hono & { dispose(): Promise<void> }
+
+type SyncAppliedDeps = RouteDeps & {
+  sourceProjectionCatalog: SourceProjectionCatalog
+  sourceCacheHealthCatalog: SourceCacheHealthCatalog
+}
+
+type SyncAppliedLogger = Pick<ReturnType<typeof logger.child>, 'warn'>
+
+export function createSyncAppliedHandler(
+  deps: SyncAppliedDeps,
+  options: {
+    reconcile?: typeof reconcileSourceCachesAfterSync
+    project?: typeof projectRepository
+    log?: SyncAppliedLogger
+  } = {},
+): (repoPath: string, home: string) => Promise<void> {
+  const reconcile = options.reconcile ?? reconcileSourceCachesAfterSync
+  const project = options.project ?? projectRepository
+  const log = options.log ?? logger.child('sync-session')
+  return async (repoPath, home) => {
+    const scopedDeps = { ...deps, home }
+    const reconciliation: SourceCacheReconciliationResult = await reconcile(scopedDeps, repoPath)
+    for (const { source, err } of reconciliation.unavailable) {
+      log.warn('sync source cache reconciliation completed with an unavailable source', {
+        err,
+        repoPath,
+        sourceUrl: source.url,
+        pinnedCommit: source.pinned_commit,
+      })
+    }
+    const result = await project(scopedDeps, repoPath, {})
+    if (!result.ok) throw result.failure.originalError
+    if (result.warnings?.length) {
+      log.warn('sync projection completed with unavailable sources', {
+        repoPath,
+        warnings: result.warnings,
+      })
+    }
+  }
+}
 
 export function registerRoutes(routeDeps?: RegisterRouteDeps): RouteApp {
   const syncLogger = logger.child('sync-session')
@@ -91,16 +135,7 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): RouteApp {
       home: baseDeps.home,
       leases,
       leaseKeys: (repoPath, home) => projectionResourceKeys(home, repoPath, home),
-      onApplied: async (repoPath, home) => {
-        const result = await projectRepository({ ...baseDeps, home }, repoPath, {})
-        if (!result.ok) throw result.failure.originalError
-        if (result.warnings?.length) {
-          syncLogger.warn('sync projection completed with unavailable sources', {
-            repoPath,
-            warnings: result.warnings,
-          })
-        }
-      },
+      onApplied: createSyncAppliedHandler(baseDeps, { log: syncLogger }),
       logger: {
         error: (message, context) => syncLogger.error(message, context),
         warn: (message, context) => syncLogger.warn(message, context),
@@ -163,7 +198,7 @@ export function registerRoutes(routeDeps?: RegisterRouteDeps): RouteApp {
   return app
 }
 
-async function warmManagedSourceCaches(
+export async function warmManagedSourceCaches(
   deps: RouteDeps & {
     leases: ResourceLeaseCoordinator
     sourceProjectionCatalog: SourceProjectionCatalog
@@ -198,6 +233,7 @@ async function warmManagedSourceCaches(
             }
           },
         )
+        let needsReconciliation = false
         await Promise.all(
           snapshot.sources.map(async ({ source, healthRevision, projectionRevision }) => {
             const sourceId = deriveRepoId(source.url)
@@ -237,11 +273,7 @@ async function warmManagedSourceCaches(
                 return
               }
               if (!health.healthy) {
-                cacheLogger.error('source cache startup validation found an unhealthy cache', {
-                  err: health.err ?? new Error(`Source cache is ${health.reason}`),
-                  repo,
-                  sourceId,
-                })
+                needsReconciliation = true
                 return
               }
               await warmSourceProjectionCatalog(
@@ -261,6 +293,23 @@ async function warmManagedSourceCaches(
             }
           }),
         )
+        if (needsReconciliation) {
+          const reconciliation = await runAuthorizedRepositoryLease(
+            deps,
+            authorization,
+            'mutation',
+            (repoPath) => projectionResourceKeys(deps.home, repoPath, deps.home),
+            (repoPath) => reconcileSourceCachesAfterSync(deps, repoPath),
+          )
+          for (const { source, err } of reconciliation.unavailable) {
+            cacheLogger.warn('source cache startup reconciliation found an unavailable source', {
+              err,
+              repo,
+              sourceId: deriveRepoId(source.url),
+              pinnedCommit: source.pinned_commit,
+            })
+          }
+        }
       } catch (err) {
         cacheLogger.error('repository source cache startup validation failed', { err, repo })
       }
