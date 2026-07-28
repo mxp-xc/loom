@@ -1458,12 +1458,15 @@ async function prepareSourceNamespaces(
       sourceName: sourcePlan.sourceName,
     })
     if (ownership.state === 'unowned') {
-      throw new SourceNamespaceCollisionError(
-        sourcePlan.agent,
-        sourcePlan.sourceName,
-        sourcePlan.sourceUrl,
-        namespace,
-      )
+      if (sourcePlan.destination.kind === 'agent') {
+        throw new SourceNamespaceCollisionError(
+          sourcePlan.destination.agent,
+          sourcePlan.sourceName,
+          sourcePlan.sourceUrl,
+          namespace,
+        )
+      }
+      throw new Error(`refuse to overwrite user-owned source namespace: ${namespace}`)
     }
     if (desired.has(namespace)) {
       throw new Error(`Duplicate source namespace destination: ${sourcePlan.sourceName}`)

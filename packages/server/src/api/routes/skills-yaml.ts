@@ -278,6 +278,20 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
       (repoPath) => operation(repoPath, scopedDeps),
     )
   }
+  const runSkillsMutation = async <T>(
+    repo: unknown,
+    operation: (repoPath: string, scopedDeps: RouteDeps) => Promise<T>,
+  ) => {
+    const home = await canonicalRepositoryHome(deps)
+    const scopedDeps = { ...leaseDeps, home }
+    return withRepositoryLease(
+      scopedDeps,
+      repo as string,
+      'mutation',
+      (repoPath) => projectionResourceKeys(home, repoPath, home, 'skills'),
+      (repoPath) => operation(repoPath, scopedDeps),
+    )
+  }
 
   app.post(
     '/skills/local',

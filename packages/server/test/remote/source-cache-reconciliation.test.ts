@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
@@ -17,7 +17,7 @@ let root: string
 let repoPath: string
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'loom-source-cache-reconcile-'))
+  root = await realpath(await mkdtemp(join(tmpdir(), 'loom-source-cache-reconcile-')))
   repoPath = join(root, 'repo')
   await mkdir(repoPath, { recursive: true })
 })

@@ -94,7 +94,7 @@ function CollisionHarness() {
             'https://github.com/microsoft/playwright-cli.git',
             'skills/playwright-cli/SKILL.md',
             'codex',
-            [],
+            { agents: [], shared: false },
           )
         }
       >

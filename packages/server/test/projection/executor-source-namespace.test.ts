@@ -560,6 +560,40 @@ describe('source namespace projection', () => {
     expect(await readFile(join(namespace, 'notes.md'), 'utf8')).toBe('mine')
   })
 
+  it('does not overwrite an unmarked user-owned shared namespace', async () => {
+    const namespace = join(home, '.agents', 'skills', 'workflow-source')
+    await mkdir(namespace, { recursive: true })
+    await writeFile(join(namespace, 'notes.md'), 'mine')
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            destination: { kind: 'shared' },
+            entries: [{ kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' }],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.failure.originalError).toEqual(
+        expect.objectContaining({
+          message: `refuse to overwrite user-owned source namespace: ${namespace}`,
+        }),
+      )
+    }
+    expect(await readFile(join(namespace, 'notes.md'), 'utf8')).toBe('mine')
+  })
+
   it('does not overwrite a namespace whose marker sourceName mismatches its directory', async () => {
     const namespace = join(home, '.claude', 'skills', 'workflow-source')
     await mkdir(namespace, { recursive: true })
