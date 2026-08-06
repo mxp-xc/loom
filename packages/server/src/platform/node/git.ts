@@ -1,7 +1,15 @@
 import { simpleGit, type SimpleGit } from 'simple-git'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { GitPushResult, GitTreeEntry, IGit } from '../../ports/git.js'
+import {
+  remoteGitRef,
+  type GitFetchRefOptions,
+  type GitPushResult,
+  type GitRefType,
+  type GitRemoteRefs,
+  type GitTreeEntry,
+  type IGit,
+} from '../../ports/git.js'
 import { GitUnbornHeadError, readGitHead } from './git-head.js'
 
 const execFileAsync = promisify(execFile)
@@ -23,23 +31,47 @@ export class NodeGit implements IGit {
     await this.git(repoPath).raw(['fetch', 'origin', '--tags'])
   }
 
+  async fetchRef(
+    repoPath: string,
+    ref: string,
+    type: GitRefType,
+    options: GitFetchRefOptions = {},
+  ): Promise<void> {
+    const remoteRef = remoteGitRef(ref, type)
+    const git = this.git(repoPath)
+    if (options.filter === 'blob:none') {
+      await git.raw(['config', 'remote.origin.promisor', 'true'])
+      await git.raw(['config', 'remote.origin.partialclonefilter', 'blob:none'])
+    }
+    await git.raw([
+      '-c',
+      'http.version=HTTP/1.1',
+      'fetch',
+      '--depth',
+      '1',
+      '--no-tags',
+      ...(options.filter ? [`--filter=${options.filter}`] : []),
+      'origin',
+      '--',
+      remoteRef,
+    ])
+  }
+
   async mergeBase(repoPath: string, a: string, b: string): Promise<string> {
     const r = await this.git(repoPath).raw(['merge-base', a, b])
     return r.trim()
   }
 
-  async lsRemote(
-    url: string,
-  ): Promise<{ tags: Record<string, string>; head: string; branches: string[] }> {
+  async lsRemote(url: string): Promise<GitRemoteRefs> {
     const out = await this.git().listRemote([url])
-    const tags: Record<string, string> = {}
-    const branches: string[] = []
+    const tags = Object.create(null) as Record<string, string>
+    const branches = Object.create(null) as Record<string, string>
     let head = ''
     for (const line of out.split('\n').filter(Boolean)) {
       const [sha, ref] = line.split(/\s+/)
       if (ref === 'HEAD') head = sha
       else if (ref?.startsWith('refs/heads/')) {
-        branches.push(ref.slice('refs/heads/'.length))
+        branches[ref.slice('refs/heads/'.length)] = sha
       } else if (ref?.startsWith('refs/tags/')) {
         const name = ref.slice('refs/tags/'.length).replace(/\^\{\}$/, '')
         tags[name] = sha
@@ -54,7 +86,7 @@ export class NodeGit implements IGit {
   }
 
   async checkout(repoPath: string, ref: string): Promise<void> {
-    await this.git(repoPath).checkout(ref)
+    await this.git(repoPath).raw(['-c', 'http.version=HTTP/1.1', 'checkout', ref])
   }
 
   async add(repoPath: string, paths: string[]): Promise<void> {

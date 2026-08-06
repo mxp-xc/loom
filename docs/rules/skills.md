@@ -225,11 +225,12 @@ Implications:
 - 打开 Skills 页面、编辑现有 source 和普通 projection 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。R-SYNC-006 的同步后 cache 对齐和启动时仅针对 unhealthy cache 的自动补偿不属于该限制。
 - Source cache 是否可用是当前机器的运行时状态，不是 manifest 配置有效性；单个 source 不可用时，其他 source、local skills 和非 Skills 功能保持可用。
 - Remote refs 只在用户首次打开 ref 选择或切换 branch/tag 时按需读取；同一编辑会话内复用结果。
-- 显式 branch 通过 remote HEAD 判断更新，即使存在同名 tag；合法 SemVer tag 只和其他合法 SemVer tag 比较 precedence；非 SemVer tag 只检查同名 tag 是否移动，不回退到 branch HEAD。
+- 显式 branch 通过该 branch ref 的 remote commit 判断更新，即使存在同名 tag；合法 SemVer tag 只和其他合法 SemVer tag 比较 precedence；非 SemVer tag 只检查同名 tag 是否移动，不回退到 branch HEAD。
 - 远端 SourceTree 只在用户选择其他 ref 或主动刷新时读取。
 - 初始编辑和未主动扫描的同 ref/type 保存必须基于当前 pinned commit，不得隐式拉取远端或替换 live cache。
 - 用户主动刷新或选择其他 ref 后，保存必须绑定当前展示的 SourceTree commit；如果该 ref 在扫描后再次移动，保存明确失败并要求刷新，不能静默写入其他 commit。
 - 远端更新先在隔离 candidate 中扫描和生成 preview；用户确认 finalize 前不能改变 live cache。
+- Preview 可以先基于目标 commit 的完整 Git tree 生成；finalize 必须等待 candidate checkout 完成并验证 clean，取消必须等待同进程中的 candidate 操作结束后再删除会话目录。Candidate hydration 持有 session 内 identity-bound exclusive lease；其他进程的 finalize 或 cancel 在 lease 释放前返回 busy。
 - Finalize 同时更新 cache、最新 commit、selection 和 projection；任一步失败必须恢复更新前状态。
 - 更新前 cache 缺失或损坏时，recovery 不得依赖该 cache 重新生成旧 projection，也不能因此阻塞重试。
 - Finalize journal记录candidate与existing cache的directory identity；cache切换使用同filesystem原子rename。`EXDEV`、destination collision或identity drift必须在移动对应source前失败。
@@ -396,7 +397,7 @@ Implications:
 - Finalize在mutation前重读session与当前source baseline；stale session返回可判别冲突。
 - Session state持久化成功后才替换内存状态。
 - 新session持久化machine ISO `createdAt`/`updatedAt`；transition只在durable replace成功后推进`updatedAt`。
-- Prepare在repo mutation lease内执行prune。Completed session优先重试cleanup；prepared session超过24小时或每repo容量8个时按持久化时间淘汰；finalize journal与无时间的legacy session不自动删除。
+- Prepare在repo mutation lease内执行prune。Completed session优先重试cleanup；无active hydration lease的prepared session超过24小时或每repo容量8个时按持久化时间淘汰；active hydration lease、finalize journal与无时间的legacy session不自动删除。
 
 Safety:
 

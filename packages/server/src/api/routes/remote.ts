@@ -3,7 +3,12 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { installSkill, isValidGitRepo } from '../../remote/install.js'
 import { cacheDirFor } from '../../remote/cache.js'
-import { checkUpdates } from '../../remote/update.js'
+import {
+  checkUpdates,
+  hydrateSourceUpdateCandidate,
+  prepareSourceUpdate,
+  SourceUpdateRefChangedError,
+} from '../../remote/update.js'
 import { scanSourceTree } from '../../remote/source-tree.js'
 import {
   LocalSkillIdSchema,
@@ -18,7 +23,6 @@ import { authorizeRepository, type RepositoryAuthorization } from '../repo.js'
 import { logger } from '../../lib/logger.js'
 import { jsonValidator } from '../request-validation.js'
 import type { RouteDeps } from '../router.js'
-import { prepareSourceUpdate } from '../../remote/update.js'
 import {
   SourceUpdateSessionError,
   SourceUpdateSessionStore,
@@ -61,9 +65,12 @@ import {
   invalidateSourceRuntimeCatalogs,
   refreshSourceRuntimeCatalogs,
 } from '../../remote/source-cache-health.js'
+import { isValidGitRefName } from '../../ports/git.js'
 
 const remoteLogger = logger.child('remote')
 const NonEmptyString = z.string().min(1)
+const GitRefName = NonEmptyString.refine(isValidGitRefName, 'invalid Git ref')
+const GitCommit = z.string().regex(/^[0-9a-f]{40,64}$/)
 const SourceType = z.enum(['branch', 'tag'])
 const SkillSource = SkillSourceSchema
 const UpdateCheckBody = z.object({
@@ -74,7 +81,8 @@ const PrepareUpdateBody = z
   .object({
     repo: NonEmptyString,
     source: SkillSource,
-    newRef: NonEmptyString,
+    newRef: GitRefName,
+    expectedCommit: GitCommit.optional(),
   })
   .strict()
 const FinalizeUpdateBody = z
@@ -248,12 +256,29 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
                 agents: member.agents,
                 shared: member.shared,
               })),
+              body.expectedCommit,
             )
             const session = await updateSessions.create({
               workspace,
               source,
               newRef: body.newRef,
               prepared,
+            })
+            const { completion } = await updateSessions.beginHydration(session, () =>
+              hydrateSourceUpdateCandidate(
+                deps.git,
+                deps.fs,
+                session,
+                session.pinned_commit,
+                session.candidateIdentity,
+              ),
+            )
+            void completion.catch((err) => {
+              remoteLogger.error('source update candidate hydration failed', {
+                err,
+                sessionId: session.id,
+                source: session.source.url,
+              })
             })
             return c.json({
               ok: true,
@@ -278,6 +303,22 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
           { repo: body.repo, source: body.source.url },
         )
         if (repoFailure) return repoFailure
+        if (e instanceof SourceUpdateRefChangedError) {
+          remoteLogger.warn('source update ref changed after check', {
+            err: e,
+            source: body.source.url,
+            expectedCommit: e.expectedCommit,
+            actualCommit: e.actualCommit,
+          })
+          return c.json(
+            {
+              ok: false,
+              error: e.code,
+              message: 'source changed after update check; check for updates again',
+            },
+            409,
+          )
+        }
         const sessionFailure = sourceUpdateSessionErrorResponse(
           c,
           e,
@@ -346,6 +387,14 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
               await updateSessions.discard(sessionId)
               return c.json({ ok: true })
             } catch (err) {
+              const response = sourceUpdateSessionErrorResponse(
+                c,
+                err,
+                remoteLogger,
+                'source update cancel failed',
+                { repo: repoPath, sessionId, source: session.source.url },
+              )
+              if (response) return response
               remoteLogger.error('source update cancel failed', {
                 err,
                 repo: repoPath,
@@ -652,6 +701,27 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
                   ...(skill.shared ? { shared: true } : {}),
                 })
               }
+              try {
+                await updateSessions.waitForHydration(session)
+              } catch (err) {
+                if (err instanceof SourceUpdateSessionError && err.code === 'update_session_busy') {
+                  throw err
+                }
+                remoteLogger.warn('retrying source update candidate hydration', {
+                  err,
+                  sessionId,
+                  source: session.source.url,
+                })
+              }
+              await updateSessions.runHydration(session, () =>
+                hydrateSourceUpdateCandidate(
+                  deps.git,
+                  deps.fs,
+                  session,
+                  session.pinned_commit,
+                  session.candidateIdentity,
+                ),
+              )
               const liveCacheEntry = await deps.fs.inspectEntry(session.liveCacheDir)
               if (liveCacheEntry && liveCacheEntry.kind !== 'directory') {
                 throw new Error('live source cache is not a physical directory')
@@ -761,6 +831,16 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
                 ...completed,
               })
             } catch (e) {
+              if (!session.finalize && !localTransaction) {
+                const response = sourceUpdateSessionErrorResponse(
+                  c,
+                  e,
+                  remoteLogger,
+                  'source update finalize session failed',
+                  { repo: session.repoPath, sessionId, source: session.source.url },
+                )
+                if (response) return response
+              }
               invalidateSourceRuntimeCatalogs(
                 deps.sourceProjectionCatalog,
                 sourceCacheHealthCatalog,
@@ -1046,7 +1126,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
       const result = await deps.git.lsRemote(url)
       return c.json({
         ok: true,
-        branches: result.branches,
+        branches: Object.keys(result.branches),
         tags: Object.keys(result.tags).sort().reverse(),
       })
     } catch (e) {
@@ -1229,7 +1309,9 @@ function sourceUpdateSessionErrorResponse(
       message:
         error.code === 'invalid_update_session_state'
           ? 'source update session state is invalid'
-          : 'source update session is unavailable',
+          : error.code === 'update_session_busy'
+            ? 'source update candidate is still preparing'
+            : 'source update session is unavailable',
     },
     error.status,
   )

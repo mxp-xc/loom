@@ -53,8 +53,78 @@ describe('NodeGit', () => {
     const git = new NodeGit()
     const result = await git.lsRemote(bare)
     expect(result.head).toBeTruthy()
-    expect(result.branches).toContain('main')
+    expect(result.branches.main).toBeTruthy()
     expect(result.tags['v1.0.0']).toBeTruthy()
+  })
+  it('fetchRef distinguishes a branch from a tag with the same short name', async () => {
+    const collisionBare = await createBareRepo([
+      {
+        message: 'tag target',
+        files: { 'value.txt': 'tag' },
+        tags: ['same'],
+      },
+      {
+        message: 'branch target',
+        files: { 'value.txt': 'branch' },
+      },
+    ])
+    created.push(collisionBare)
+    const remote = testGit()
+    await remote.raw([
+      '--git-dir',
+      collisionBare,
+      'update-ref',
+      'refs/heads/same',
+      'refs/heads/main',
+    ])
+    const dest = await mkdtemp(join(tmpdir(), 'fetch-ref-'))
+    created.push(dest)
+    const git = new NodeGit()
+    await git.clone(collisionBare, dest, false)
+
+    await git.fetchRef(dest, 'same', 'branch')
+    await git.checkout(dest, 'FETCH_HEAD')
+    expect(await git.show(dest, 'HEAD', 'value.txt')).toBe('branch')
+
+    await git.fetchRef(dest, 'same', 'tag')
+    await git.checkout(dest, 'FETCH_HEAD')
+    expect(await git.show(dest, 'HEAD', 'value.txt')).toBe('tag')
+
+    await git.fetchRef(dest, 'refs/heads/same', 'branch')
+    await git.checkout(dest, 'FETCH_HEAD')
+    expect(await git.show(dest, 'HEAD', 'value.txt')).toBe('branch')
+
+    await git.fetchRef(dest, 'refs/tags/same', 'tag')
+    await git.checkout(dest, 'FETCH_HEAD')
+    expect(await git.show(dest, 'HEAD', 'value.txt')).toBe('tag')
+  })
+  it('fetchRef rejects a full ref from the wrong namespace', async () => {
+    await expect(
+      new NodeGit().fetchRef(readOnlyRepo, 'refs/tags/v1.0.0', 'branch'),
+    ).rejects.toThrow(/invalid git ref/i)
+  })
+  it('fetchRef configures a promisor remote for metadata-only fetches', async () => {
+    const dest = await mkdtemp(join(tmpdir(), 'fetch-ref-metadata-'))
+    created.push(dest)
+    const git = new NodeGit()
+    await git.clone(bare, dest, false)
+
+    await git.fetchRef(dest, 'v1.0.0', 'tag', { filter: 'blob:none' })
+
+    expect((await simpleGit(dest).raw(['config', '--get', 'remote.origin.promisor'])).trim()).toBe(
+      'true',
+    )
+    expect(
+      (await simpleGit(dest).raw(['config', '--get', 'remote.origin.partialclonefilter'])).trim(),
+    ).toBe('blob:none')
+  })
+  it('fetchRef rejects a destination refspec', async () => {
+    await expect(
+      new NodeGit().fetchRef(readOnlyRepo, 'main:refs/heads/injected', 'branch'),
+    ).rejects.toThrow(/invalid git ref/i)
+    await expect(
+      simpleGit(readOnlyRepo).raw(['show-ref', '--verify', 'refs/heads/injected']),
+    ).rejects.toThrow()
   })
   it('push reports nonFastForward when remote ahead', async () => {
     const writableBare = await makeBareWithCommit()

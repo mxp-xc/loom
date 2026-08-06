@@ -105,6 +105,18 @@ describe('compareVersion', () => {
 
     expect(r).toEqual({ hasUpdate: true, latestCommit: 'branch-commit' })
   })
+  it('uses the target commit for a full non-default branch ref', () => {
+    const r = compareVersion(
+      { ref: 'refs/heads/release', pinned_commit: 'aaa', type: 'branch' },
+      {
+        tags: {},
+        branches: { main: 'main-commit', release: 'release-commit' },
+        head: 'main-commit',
+      },
+    )
+
+    expect(r).toEqual({ hasUpdate: true, latestCommit: 'release-commit' })
+  })
   it('finds the latest SemVer tag when the tracked tag disappeared', () => {
     const r = compareVersion(
       { ref: 'v1.0.0', pinned_commit: 'aaa', type: 'tag' },

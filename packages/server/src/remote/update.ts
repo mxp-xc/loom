@@ -1,4 +1,4 @@
-import type { IGit } from '../ports/git.js'
+import type { GitRefType, IGit } from '../ports/git.js'
 import type { IFileSystem } from '../ports/fs.js'
 import type {
   AgentId,
@@ -17,7 +17,7 @@ import {
   type RemoteRef,
   type VersionStatus,
 } from '@loom/core'
-import { scanSourceTree } from './source-tree.js'
+import { scanSourceTree, scanSourceTreeWithoutMetadata } from './source-tree.js'
 import { cacheDirFor } from './cache.js'
 import { deriveRepoId } from '@loom/core'
 import { dirname, join } from 'node:path'
@@ -61,6 +61,7 @@ export interface ScannedSourceBundle {
 
 export interface PreparedSourceUpdate {
   pinned_commit: string
+  candidateIdentity?: string
   newMembers: ScannedSourceBundle[]
   changes: SkillMemberChangeSet
   resourceBoundaryChanges: ResourceBoundaryChange[]
@@ -81,6 +82,18 @@ export interface ProjectionPathMove {
   nextTargetPath?: string
 }
 
+export class SourceUpdateRefChangedError extends Error {
+  readonly code = 'source_update_stale'
+
+  constructor(
+    readonly expectedCommit: string,
+    readonly actualCommit: string,
+  ) {
+    super('source ref changed after update check')
+    this.name = 'SourceUpdateRefChangedError'
+  }
+}
+
 export async function prepareSourceUpdate(
   git: IGit,
   fs: IFileSystem,
@@ -88,6 +101,7 @@ export async function prepareSourceUpdate(
   newRef: string,
   workspace: SourceUpdateWorkspace,
   oldMembers: SkillMemberSnapshot[],
+  expectedCommit?: string,
 ): Promise<PreparedSourceUpdate> {
   const cacheDir = cacheDirFor(workspace.repoPath, deriveRepoId(source.url))
   const { stagingDir, candidateDir } = workspace
@@ -121,10 +135,27 @@ export async function prepareSourceUpdate(
       stagingDir,
     )
     await assertOwnedDirectory(fs, stagingDir, stagingEntry.identity, 'previous source snapshot')
-    await git.clone(source.url, candidateDir, false)
-    await git.checkout(candidateDir, newRef)
+    const refType = await resolveUpdateRefType(git, source, newRef)
+    let metadataOnlyCandidate = false
+    let sourceTree: SourceTree
+    if (cacheEntry && previousTree) {
+      await assertOwnedDirectory(fs, cacheDir, cacheEntry.identity, 'previous source cache')
+      await git.clone(cacheDir, candidateDir, false)
+      await assertOwnedDirectory(fs, cacheDir, cacheEntry.identity, 'previous source cache')
+      await git.addOrUpdateRemote(candidateDir, source.url)
+      await git.fetchRef(candidateDir, newRef, refType, { filter: 'blob:none' })
+      sourceTree = await scanSourceTreeWithoutMetadata(git, candidateDir, 'FETCH_HEAD', source)
+      metadataOnlyCandidate = true
+    } else {
+      await git.clone(source.url, candidateDir, false)
+      await git.fetchRef(candidateDir, newRef, refType)
+      await git.checkout(candidateDir, 'FETCH_HEAD')
+      sourceTree = await scanSourceTree(git, candidateDir, 'HEAD', source)
+    }
     await assertOwnedDirectory(fs, candidateDir, candidateEntry.identity, 'candidate source cache')
-    const sourceTree = await scanSourceTree(git, candidateDir, 'HEAD', source)
+    if (expectedCommit && sourceTree.commit !== expectedCommit) {
+      throw new SourceUpdateRefChangedError(expectedCommit, sourceTree.commit)
+    }
     if (sourceTree.diagnostics.length > 0) {
       throw new Error(sourceTree.diagnostics.map(({ message }) => message).join('; '))
     }
@@ -139,15 +170,19 @@ export async function prepareSourceUpdate(
       ? compareProjectionPaths(source, previousTree, sourceTree, newMembers)
       : []
     const selectedEntries = new Set(oldMembers.map((member) => member.entry ?? member.path))
-    const selectedChanges = await classifySkillMemberChanges(
-      fs,
-      stagingDir,
-      candidateDir,
-      oldMembers,
-      newMembers
-        .filter((member) => selectedEntries.has(member.entry))
-        .map((member) => ({ name: member.name, entry: member.entry, path: member.entry })),
-    )
+    const selectedNextMembers = newMembers
+      .filter((member) => selectedEntries.has(member.entry))
+      .map((member) => ({ name: member.name, entry: member.entry, path: member.entry }))
+    const selectedChanges =
+      metadataOnlyCandidate && previousTree
+        ? classifySourceTreeMemberChanges(previousTree, sourceTree, oldMembers, selectedNextMembers)
+        : await classifySkillMemberChanges(
+            fs,
+            stagingDir,
+            candidateDir,
+            oldMembers,
+            selectedNextMembers,
+          )
     const changes: SkillMemberChangeSet = {
       ...selectedChanges,
       added: newMembers
@@ -156,6 +191,7 @@ export async function prepareSourceUpdate(
     }
     return {
       pinned_commit,
+      candidateIdentity: candidateEntry.identity,
       newMembers,
       changes,
       resourceBoundaryChanges,
@@ -179,6 +215,59 @@ export async function prepareSourceUpdate(
     })
     throw failure
   }
+}
+
+export async function hydrateSourceUpdateCandidate(
+  git: IGit,
+  fs: IFileSystem,
+  workspace: SourceUpdateWorkspace,
+  pinnedCommit: string,
+  expectedCandidateIdentity?: string,
+): Promise<void> {
+  const candidate = await inspectOptionalOwnedDirectory(
+    fs,
+    workspace.candidateDir,
+    'candidate source cache',
+  )
+  if (!candidate) throw new Error('Candidate source cache is unavailable')
+  if (expectedCandidateIdentity && candidate.identity !== expectedCandidateIdentity) {
+    throw new Error('Candidate source cache identity changed before checkout')
+  }
+  const candidateIdentity = expectedCandidateIdentity ?? candidate.identity
+  await assertOwnedDirectory(
+    fs,
+    workspace.candidateDir,
+    candidateIdentity,
+    'candidate source cache',
+  )
+  if ((await git.revParseHead(workspace.candidateDir)) !== pinnedCommit) {
+    await git.checkout(workspace.candidateDir, pinnedCommit)
+  }
+  await assertOwnedDirectory(
+    fs,
+    workspace.candidateDir,
+    candidateIdentity,
+    'candidate source cache',
+  )
+  const hydratedCommit = await git.revParseHead(workspace.candidateDir)
+  if (hydratedCommit !== pinnedCommit) {
+    throw new Error(`Candidate source cache checkout mismatch: ${hydratedCommit}`)
+  }
+  if ((await git.status(workspace.candidateDir)).dirty) {
+    throw new Error('Candidate source cache is dirty after checkout')
+  }
+}
+
+async function resolveUpdateRefType(
+  git: IGit,
+  source: Pick<SkillSource, 'url' | 'type'>,
+  newRef: string,
+): Promise<GitRefType> {
+  if (source.type) return source.type
+  if (newRef.startsWith('refs/heads/')) return 'branch'
+  if (newRef.startsWith('refs/tags/')) return 'tag'
+  const remote = await git.lsRemote(source.url)
+  return Object.hasOwn(remote.tags, newRef) ? 'tag' : 'branch'
 }
 
 async function snapshotPinnedMembers(
@@ -280,6 +369,75 @@ async function readPreviousSourceTree(
     }
   }
   return undefined
+}
+
+function classifySourceTreeMemberChanges(
+  previousTree: SourceTree,
+  nextTree: SourceTree,
+  previousMembers: readonly SkillMemberSnapshot[],
+  nextMembers: readonly SkillMemberSnapshot[],
+): SkillMemberChangeSet {
+  const previousByEntry = new Map(
+    previousMembers.map((member) => [member.entry ?? member.name, member]),
+  )
+  const nextByEntry = new Map(nextMembers.map((member) => [member.entry ?? member.name, member]))
+  const previousBundles = bundleNodeMap(previousTree.nodes)
+  const nextBundles = bundleNodeMap(nextTree.nodes)
+  const changes: SkillMemberChangeSet = { added: [], updated: [], removed: [], unchanged: [] }
+
+  for (const member of previousMembers) {
+    if (!nextByEntry.has(member.entry ?? member.name)) {
+      changes.removed.push(toMemberChange(member, undefined))
+    }
+  }
+  for (const member of nextMembers) {
+    const old = previousByEntry.get(member.entry ?? member.name)
+    if (!old) {
+      changes.added.push(toMemberChange(undefined, member))
+      continue
+    }
+    const previousPath = normalizeSkillPath(old.path)
+    const nextPath = normalizeSkillPath(member.path)
+    const previousBundle = previousBundles.get(previousPath)
+    const nextBundle = nextBundles.get(nextPath)
+    if (!previousBundle || !nextBundle) {
+      throw new Error(`Source update bundle tree is unavailable: ${nextPath}`)
+    }
+    const changed = previousPath !== nextPath || previousBundle.oid !== nextBundle.oid
+    changes[changed ? 'updated' : 'unchanged'].push(toMemberChange(old, member))
+  }
+
+  for (const list of [changes.added, changes.updated, changes.removed, changes.unchanged]) {
+    list.sort((left, right) => left.name.localeCompare(right.name, 'en'))
+  }
+  return changes
+}
+
+function bundleNodeMap(
+  nodes: readonly SourceTreeNode[],
+): Map<string, Extract<SourceTreeNode, { kind: 'bundle' }>> {
+  const bundles = new Map<string, Extract<SourceTreeNode, { kind: 'bundle' }>>()
+  for (const node of nodes) {
+    if (node.kind === 'bundle') {
+      bundles.set(node.entry, node)
+    } else if (node.kind === 'container') {
+      for (const [entry, bundle] of bundleNodeMap(node.children)) bundles.set(entry, bundle)
+    }
+  }
+  return bundles
+}
+
+function toMemberChange(
+  previous: SkillMemberSnapshot | undefined,
+  next: SkillMemberSnapshot | undefined,
+): SkillMemberChangeSet['updated'][number] {
+  return {
+    name: (next ?? previous)!.name,
+    ...(previous ? { previousPath: normalizeSkillPath(previous.path) } : {}),
+    ...(next ? { nextPath: normalizeSkillPath(next.path) } : {}),
+    ...(previous?.agents ? { agents: [...previous.agents] } : {}),
+    ...(previous?.shared ? { shared: true } : {}),
+  }
 }
 
 export function compareProjectionPaths(

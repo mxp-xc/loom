@@ -56,7 +56,8 @@ export interface ManifestOperationCallbacks {
   onToast?: (message: string) => void
 }
 
-export type SourceUpdateState = 'repair' | { label: string; newRef?: string }
+export type SourceUpdateState =
+  'repair' | { label: string; newRef?: string; expectedCommit?: string }
 
 export interface SkillMemberChanges {
   added: Array<{ name: string }>
@@ -649,7 +650,11 @@ export function useManifestOperations(
           return {
             kind: 'update',
             message: repoId + ' 有更新: ' + source.ref + ' -> ' + latest,
-            update: { label: latest, newRef: update.latestTag },
+            update: {
+              label: latest,
+              newRef: update.latestTag,
+              expectedCommit: update.latestCommit,
+            },
           }
         },
         {
@@ -669,6 +674,9 @@ export function useManifestOperations(
           api.prepareSourceUpdate({
             source: persistedSourceDto(source),
             newRef: update && update !== 'repair' ? (update.newRef ?? source.ref) : source.ref,
+            ...(update && update !== 'repair' && update.expectedCommit
+              ? { expectedCommit: update.expectedCommit }
+              : {}),
             repo: repoPath,
           }) as Promise<MaybeOkResponse & PreparedSkillReconciliation>,
         {

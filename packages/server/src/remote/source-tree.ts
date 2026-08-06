@@ -33,12 +33,31 @@ export async function scanSourceTree(
   ref: string,
   source: SourceTreeSource,
 ): Promise<SourceTree> {
+  return scanSourceTreeWithMetadata(git, repoPath, ref, source, true)
+}
+
+export async function scanSourceTreeWithoutMetadata(
+  git: IGit,
+  repoPath: string,
+  ref: string,
+  source: SourceTreeSource,
+): Promise<SourceTree> {
+  return scanSourceTreeWithMetadata(git, repoPath, ref, source, false)
+}
+
+async function scanSourceTreeWithMetadata(
+  git: IGit,
+  repoPath: string,
+  ref: string,
+  source: SourceTreeSource,
+  includeMetadata: boolean,
+): Promise<SourceTree> {
   const [commit, entries, rootOid] = await Promise.all([
     git.revParse(repoPath, `${ref}^{commit}`),
     git.readTree(repoPath, ref),
     git.revParse(repoPath, `${ref}^{tree}`),
   ])
-  return renderSourceTree(git, repoPath, commit, source, entries, rootOid, true)
+  return renderSourceTree(git, repoPath, commit, source, entries, rootOid, includeMetadata)
 }
 
 export async function scanProjectionSourceTree(

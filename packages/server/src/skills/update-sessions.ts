@@ -33,6 +33,7 @@ import {
 const sessionLogger = logger.child('source-update-session')
 export const SOURCE_UPDATE_PRESERVED_MARKER = '.loom-source-update-owner.json'
 const SOURCE_UPDATE_PRESERVED_MARKER_VERSION = 1
+const SOURCE_UPDATE_HYDRATION_LEASE = '.loom-source-update-hydration.json'
 
 type SessionFileSystem = Pick<
   IFileSystem,
@@ -168,6 +169,7 @@ const PersistedSourceUpdateSessionSchema = z
     source: SkillSourceSchema,
     newRef: z.string().min(1),
     pinned_commit: z.string().min(1),
+    candidateIdentity: IdentitySchema.optional(),
     newMembers: z.array(ScannedSourceBundleSchema),
     changes: SkillMemberChangesSchema,
     resourceBoundaryChanges: z.array(ResourceBoundaryChangeSchema),
@@ -220,6 +222,8 @@ export interface SourceUpdateSession extends PreparedSourceUpdate, SourceUpdateW
   sourceBaseline: string
   source: SkillSource
   newRef: string
+  /** Runtime-only candidate checkout started after the preview is persisted. */
+  hydration?: Promise<void>
   createdAt?: string
   updatedAt?: string
   finalize?: SourceFinalizeJournal
@@ -236,8 +240,9 @@ export interface BeginSourceFinalizeInput {
 
 export class SourceUpdateSessionError extends Error {
   constructor(
-    readonly code: 'invalid_update_session_state' | 'update_session_unavailable',
-    readonly status: 422 | 500,
+    readonly code:
+      'invalid_update_session_state' | 'update_session_busy' | 'update_session_unavailable',
+    readonly status: 409 | 422 | 500,
     message: string,
     options?: ErrorOptions,
   ) {
@@ -276,16 +281,30 @@ export class SourceUpdateSessionStore {
       input.workspace,
     )
     const createdAt = this.now()
-    const session: SourceUpdateSession = {
-      ...verifiedWorkspace,
-      ...input.prepared,
-      sourceBaseline: sourceUpdateBaseline(source),
-      source,
-      newRef: input.newRef,
-      createdAt,
-      updatedAt: createdAt,
-    }
+    let session: SourceUpdateSession
     try {
+      const candidate = await inspectOptionalOwnedDirectory(
+        this.fs,
+        verifiedWorkspace.candidateDir,
+        'source update candidate',
+      )
+      if (!candidate) throw invalidState('source update candidate is missing')
+      if (
+        input.prepared.candidateIdentity &&
+        input.prepared.candidateIdentity !== candidate.identity
+      ) {
+        throw invalidState('source update candidate identity changed before session creation')
+      }
+      session = {
+        ...verifiedWorkspace,
+        ...input.prepared,
+        candidateIdentity: input.prepared.candidateIdentity ?? candidate.identity,
+        sourceBaseline: sourceUpdateBaseline(source),
+        source,
+        newRef: input.newRef,
+        createdAt,
+        updatedAt: createdAt,
+      }
       await this.save(session)
     } catch (error) {
       try {
@@ -301,6 +320,72 @@ export class SourceUpdateSessionStore {
     }
     this.sessions.set(session.id, session)
     return session
+  }
+
+  async beginHydration(
+    session: SourceUpdateSession,
+    hydrate: () => Promise<void>,
+  ): Promise<{ completion: Promise<void> }> {
+    await this.verify(session)
+    const leasePath = hydrationLeasePath(session)
+    let lease
+    try {
+      lease = await this.fs.writeFileExclusive(
+        leasePath,
+        JSON.stringify({
+          version: 1,
+          sessionId: session.id,
+          ownerToken: session.ownerToken,
+          operationId: randomUUID(),
+          startedAt: this.now(),
+        }),
+      )
+    } catch (error) {
+      if (isAlreadyExists(error)) throw hydrationBusy(error)
+      throw unavailable('failed to create source update hydration lease', error)
+    }
+
+    let completion!: Promise<void>
+    completion = (async () => {
+      let failure: unknown
+      try {
+        await hydrate()
+      } catch (error) {
+        failure = error
+      }
+      try {
+        await this.fs.removeEntryIfIdentity(leasePath, lease.identity)
+      } catch (cleanupError) {
+        if (failure !== undefined) {
+          throw new AggregateError(
+            [failure, cleanupError],
+            'source update hydration and lease cleanup failed',
+            { cause: failure },
+          )
+        }
+        throw cleanupError
+      }
+      if (failure !== undefined) throw failure
+    })()
+    session.hydration = completion
+    const clearRuntimeHydration = () => {
+      if (session.hydration === completion) session.hydration = undefined
+    }
+    void completion.then(clearRuntimeHydration, clearRuntimeHydration)
+    return { completion }
+  }
+
+  async waitForHydration(session: SourceUpdateSession): Promise<void> {
+    if (session.hydration) {
+      await session.hydration
+      return
+    }
+    if (await this.hasHydrationLease(session)) throw hydrationBusy()
+  }
+
+  async runHydration(session: SourceUpdateSession, hydrate: () => Promise<void>): Promise<void> {
+    const { completion } = await this.beginHydration(session, hydrate)
+    await completion
   }
 
   async beginFinalize(
@@ -319,6 +404,9 @@ export class SourceUpdateSessionStore {
       'source update candidate',
     )
     if (!candidate) throw invalidState('source update candidate is missing')
+    if (session.candidateIdentity && candidate.identity !== session.candidateIdentity) {
+      throw invalidState('source update candidate identity changed before finalize')
+    }
     const candidateAnchor = await assertCacheAnchorFile(
       this.fs,
       workspace.candidateDir,
@@ -525,6 +613,16 @@ export class SourceUpdateSessionStore {
   async discard(id: string): Promise<void> {
     const session = this.sessions.get(id)
     if (!session) return
+    try {
+      await this.waitForHydration(session)
+    } catch (err) {
+      if (err instanceof SourceUpdateSessionError && err.code === 'update_session_busy') throw err
+      sessionLogger.warn('source update candidate hydration failed before discard', {
+        err,
+        sessionId: id,
+        repoPath: session.repoPath,
+      })
+    }
     await this.verify(session)
     await removeSourceUpdateWorkspace(this.fs, session, session.source.url)
     this.sessions.delete(id)
@@ -537,6 +635,7 @@ export class SourceUpdateSessionStore {
       try {
         const session = await this.get(id, repoPath)
         if (!session || session.finalize) continue
+        if (await this.hasHydrationLease(session)) continue
         if (session.completed) {
           await this.discard(session.id)
           continue
@@ -592,6 +691,7 @@ export class SourceUpdateSessionStore {
       source: persisted.source,
       newRef: persisted.newRef,
       pinned_commit: persisted.pinned_commit,
+      ...(persisted.candidateIdentity ? { candidateIdentity: persisted.candidateIdentity } : {}),
       newMembers: persisted.newMembers,
       changes: persisted.changes,
       resourceBoundaryChanges: persisted.resourceBoundaryChanges,
@@ -610,6 +710,10 @@ export class SourceUpdateSessionStore {
       session.source.url,
       workspaceIdentity(session),
     )
+  }
+
+  private async hasHydrationLease(session: SourceUpdateSession): Promise<boolean> {
+    return Boolean(await this.fs.inspectEntry(hydrationLeasePath(session)))
   }
 
   private async commitTransition(
@@ -1033,6 +1137,7 @@ function persistedSession(session: SourceUpdateSession): PersistedSourceUpdateSe
     source: session.source,
     newRef: session.newRef,
     pinned_commit: session.pinned_commit,
+    ...(session.candidateIdentity ? { candidateIdentity: session.candidateIdentity } : {}),
     newMembers: session.newMembers,
     changes: session.changes,
     resourceBoundaryChanges: session.resourceBoundaryChanges,
@@ -1176,6 +1281,23 @@ async function assertPreservedDestinationMarker(
     throw invalidState(`preserved local skill ownership marker does not match: ${artifact.name}`)
   }
   return { identity: after.identity }
+}
+
+function hydrationLeasePath(session: Pick<SourceUpdateSession, 'sessionRoot'>): string {
+  return join(session.sessionRoot, SOURCE_UPDATE_HYDRATION_LEASE)
+}
+
+function hydrationBusy(cause?: unknown): SourceUpdateSessionError {
+  return new SourceUpdateSessionError(
+    'update_session_busy',
+    409,
+    'source update candidate hydration is still running',
+    { cause },
+  )
+}
+
+function isAlreadyExists(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')
 }
 
 function isSafeRelativePath(path: string, allowEmpty: boolean): boolean {

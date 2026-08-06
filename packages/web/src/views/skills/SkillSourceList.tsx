@@ -54,6 +54,7 @@ import {
   FileMinus,
   Folder,
   FolderMinus,
+  LoaderCircle,
   PackageCheck,
   RefreshCw,
   Pencil,
@@ -520,6 +521,7 @@ export default function SkillSourceList({
           const key = src.url + '-' + src.ref
           const isExpanded = expandedGroups.has(key)
           const sourceUpdate = updates[src.url]
+          const updating = operations.pending.source.update(src)
           const includedResources = [...(src.resources?.include ?? [])].sort((a, b) =>
             a.path.localeCompare(b.path, 'en'),
           )
@@ -675,13 +677,17 @@ export default function SkillSourceList({
                     {updates[src.url] && (
                       <IconButton
                         label={`更新 source ${repoId}`}
-                        tooltip={operations.pending.source.update(src) ? '更新中…' : '更新'}
+                        tooltip={updating ? '更新中…' : '更新'}
                         size="sm"
                         onClick={() => handlePerformUpdate(src)}
-                        disabled={operations.pending.source.update(src)}
+                        disabled={updating}
                         tone="warning"
                       >
-                        <Download className="h-3.5 w-3.5" />
+                        {updating ? (
+                          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Download className="h-3.5 w-3.5" />
+                        )}
                       </IconButton>
                     )}
                     <IconButton

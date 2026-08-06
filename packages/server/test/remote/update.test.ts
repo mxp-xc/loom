@@ -8,6 +8,7 @@ import {
   checkUpdates,
   compareProjectionPaths,
   detectResourceBoundaryChanges,
+  hydrateSourceUpdateCandidate,
   prepareSourceUpdate,
 } from '../../src/remote/update'
 import { deriveRepoId, type SkillSource } from '@loom/core'
@@ -39,9 +40,35 @@ describe.concurrent('checkUpdates', () => {
     )
     expect(r[0].hasUpdate).toBe(false)
   })
+  it('binds an explicit non-default branch update to that branch commit', async () => {
+    const mockGit = {
+      lsRemote: async () => ({
+        tags: {},
+        head: 'main-commit',
+        branches: { main: 'main-commit', release: 'release-commit' },
+      }),
+    } as any
+
+    const [result] = await checkUpdates(
+      [
+        {
+          url: 'https://git.example.com/x/y.git',
+          ref: 'release',
+          type: 'branch',
+          pinned_commit: 'old-release-commit',
+        },
+      ],
+      mockGit,
+    )
+
+    expect(result).toMatchObject({
+      hasUpdate: true,
+      latestCommit: 'release-commit',
+    })
+  })
 })
 
-describe.concurrent('prepareSourceUpdate', () => {
+describe('prepareSourceUpdate', () => {
   let bare: string
   beforeAll(async () => {
     bare = await createBareRepo([
@@ -59,6 +86,7 @@ describe.concurrent('prepareSourceUpdate', () => {
         files: {
           'skills/brainstorming/SKILL.md': null,
           'skills/tdd/SKILL.md': '---\nname: tdd\n---\nv2\n',
+          'skills/unselected/SKILL.md': '---\nname: unselected\n---\nupdated\n',
         },
         tags: ['v2.0.0'],
       },
@@ -76,7 +104,7 @@ describe.concurrent('prepareSourceUpdate', () => {
     await rm(bare, { recursive: true, force: true })
   })
 
-  it('fetch + checkout new ref + detect orphan members', async () => {
+  it('prepares from Git metadata, preserves the live cache, then hydrates the candidate', async () => {
     const repoPath = await realpath(await mkdtemp(join(tmpdir(), 'updrepo-')))
     const git = new NodeGit(),
       fs = new NodeFileSystem()
@@ -92,25 +120,46 @@ describe.concurrent('prepareSourceUpdate', () => {
       await symlink(sentinel, join(cacheDir, 'skills', 'brainstorming', 'outside-link.md'))
     }
     const workspace = await createSourceUpdateWorkspace(fs, repoPath, bare)
+    const clone = vi.spyOn(git, 'clone')
+    const addOrUpdateRemote = vi.spyOn(git, 'addOrUpdateRemote')
+    const fetchRef = vi.spyOn(git, 'fetchRef')
+    const checkout = vi.spyOn(git, 'checkout')
     const oldMembers: SkillMemberSnapshot[] = [
       {
         name: 'brainstorming',
         entry: 'skills/brainstorming/SKILL.md',
         path: 'skills/brainstorming/SKILL.md',
       },
+      {
+        name: 'unselected',
+        entry: 'skills/unselected/SKILL.md',
+        path: 'skills/unselected/SKILL.md',
+      },
     ]
+    const expectedCommit = await git.revParse(cacheDir, 'v2.0.0^{commit}')
     const res = await prepareSourceUpdate(
       git,
       fs,
-      { url: bare, ref: 'v1.0.0', pinned_commit: liveCommit },
+      { url: bare, ref: 'v1.0.0', type: 'tag', pinned_commit: liveCommit },
       'v2.0.0',
       workspace,
       oldMembers,
+      expectedCommit,
     )
-    expect(res.pinned_commit).toMatch(/^[0-9a-f]{7,40}$/)
+    expect(clone).toHaveBeenCalledWith(cacheDir, workspace.candidateDir, false)
+    expect(clone).not.toHaveBeenCalledWith(bare, workspace.candidateDir, false)
+    expect(addOrUpdateRemote).toHaveBeenCalledWith(workspace.candidateDir, bare)
+    expect(fetchRef).toHaveBeenCalledWith(workspace.candidateDir, 'v2.0.0', 'tag', {
+      filter: 'blob:none',
+    })
+    expect(checkout).not.toHaveBeenCalledWith(workspace.candidateDir, expect.any(String))
+    expect(res.pinned_commit).toBe(expectedCommit)
+    expect(res.candidateIdentity).toBeTruthy()
     expect(await git.revParseHead(cacheDir)).toBe(liveCommit)
+    expect(await git.revParseHead(workspace.candidateDir)).toBe(liveCommit)
     expect(res.changes.removed.map((o) => o.name)).toEqual(['brainstorming'])
     expect(res.changes.added.map((o) => o.name)).toEqual(['tdd'])
+    expect(res.changes.updated.map((o) => o.name)).toEqual(['unselected'])
     expect(
       await fs.readFile(join(workspace.stagingDir, 'skills', 'brainstorming', 'reference.md')),
     ).toBe('old resource')
@@ -124,6 +173,127 @@ describe.concurrent('prepareSourceUpdate', () => {
         ),
       ).toBeNull()
     }
+    expect(await fs.readFile(join(cacheDir, 'skills', 'brainstorming', 'reference.md'))).toBe(
+      'dirty checkout',
+    )
+    expect(await fs.readFile(join(cacheDir, 'skills', 'brainstorming', 'untracked.md'))).toBe(
+      'untracked',
+    )
+    if (process.platform !== 'win32') {
+      expect(await fs.readLink(join(cacheDir, 'skills', 'brainstorming', 'outside-link.md'))).toBe(
+        sentinel,
+      )
+    }
+
+    await hydrateSourceUpdateCandidate(git, fs, workspace, expectedCommit, res.candidateIdentity)
+
+    expect(await git.revParseHead(workspace.candidateDir)).toBe(expectedCommit)
+    expect(await git.status(workspace.candidateDir)).toEqual({ dirty: false })
+    expect(await git.revParseHead(cacheDir)).toBe(liveCommit)
+    await rm(repoPath, { recursive: true, force: true })
+  })
+
+  it('rejects a dirty hydrated candidate without changing the live cache', async () => {
+    const repoPath = await realpath(await mkdtemp(join(tmpdir(), 'updrepo-dirty-hydration-')))
+    const git = new NodeGit()
+    const fs = new NodeFileSystem()
+    const cacheDir = join(repoPath, 'remote-cache', deriveRepoId(bare))
+    await git.clone(bare, cacheDir, false)
+    await git.checkout(cacheDir, 'v1.0.0')
+    const liveCommit = await git.revParseHead(cacheDir)
+    const workspace = await createSourceUpdateWorkspace(fs, repoPath, bare)
+    const prepared = await prepareSourceUpdate(
+      git,
+      fs,
+      { url: bare, ref: 'v1.0.0', type: 'tag', pinned_commit: liveCommit },
+      'v2.0.0',
+      workspace,
+      [],
+    )
+    await writeFile(join(workspace.candidateDir, 'untracked.tmp'), 'dirty')
+
+    await expect(
+      hydrateSourceUpdateCandidate(
+        git,
+        fs,
+        workspace,
+        prepared.pinned_commit,
+        prepared.candidateIdentity,
+      ),
+    ).rejects.toThrow(/dirty after checkout/i)
+
+    expect(await git.revParseHead(cacheDir)).toBe(liveCommit)
+    expect(await fs.readFile(join(workspace.candidateDir, 'untracked.tmp'))).toBe('dirty')
+    await rm(repoPath, { recursive: true, force: true })
+  })
+
+  it('cleans the workspace and preserves dirty live content when metadata fetch fails', async () => {
+    const repoPath = await realpath(await mkdtemp(join(tmpdir(), 'updrepo-fetch-failure-')))
+    const git = new NodeGit()
+    const fs = new NodeFileSystem()
+    const cacheDir = join(repoPath, 'remote-cache', deriveRepoId(bare))
+    await git.clone(bare, cacheDir, false)
+    await git.checkout(cacheDir, 'v1.0.0')
+    const liveCommit = await git.revParseHead(cacheDir)
+    const trackedPath = join(cacheDir, 'skills', 'brainstorming', 'reference.md')
+    const untrackedPath = join(cacheDir, 'skills', 'brainstorming', 'untracked.md')
+    await writeFile(trackedPath, 'dirty checkout')
+    await writeFile(untrackedPath, 'untracked')
+    const workspace = await createSourceUpdateWorkspace(fs, repoPath, bare)
+    const failure = new Error('metadata fetch failed')
+    vi.spyOn(git, 'fetchRef').mockRejectedValueOnce(failure)
+
+    await expect(
+      prepareSourceUpdate(
+        git,
+        fs,
+        { url: bare, ref: 'v1.0.0', type: 'tag', pinned_commit: liveCommit },
+        'v2.0.0',
+        workspace,
+        [],
+      ),
+    ).rejects.toBe(failure)
+
+    expect(await git.revParseHead(cacheDir)).toBe(liveCommit)
+    expect(await fs.readFile(trackedPath)).toBe('dirty checkout')
+    expect(await fs.readFile(untrackedPath)).toBe('untracked')
+    expect(await fs.inspectEntry(workspace.sessionRoot)).toBeNull()
+    await rm(repoPath, { recursive: true, force: true })
+  })
+
+  it('rejects a replaced candidate before background checkout', async () => {
+    const repoPath = await realpath(await mkdtemp(join(tmpdir(), 'updrepo-hydrate-race-')))
+    const git = new NodeGit()
+    const fs = new NodeFileSystem()
+    const cacheDir = join(repoPath, 'remote-cache', deriveRepoId(bare))
+    await git.clone(bare, cacheDir, false)
+    await git.checkout(cacheDir, 'v1.0.0')
+    const liveCommit = await git.revParseHead(cacheDir)
+    const workspace = await createSourceUpdateWorkspace(fs, repoPath, bare)
+    const prepared = await prepareSourceUpdate(
+      git,
+      fs,
+      { url: bare, ref: 'v1.0.0', type: 'tag', pinned_commit: liveCommit },
+      'v2.0.0',
+      workspace,
+      [],
+    )
+    const replacement = `${workspace.candidateDir}-replacement`
+    await mkdir(replacement)
+    await writeFile(join(replacement, 'keep.txt'), 'replacement')
+    await rm(workspace.candidateDir, { recursive: true, force: true })
+    await rename(replacement, workspace.candidateDir)
+
+    await expect(
+      hydrateSourceUpdateCandidate(
+        git,
+        fs,
+        workspace,
+        prepared.pinned_commit,
+        prepared.candidateIdentity,
+      ),
+    ).rejects.toThrow(/identity changed/i)
+    expect(await fs.readFile(join(workspace.candidateDir, 'keep.txt'))).toBe('replacement')
     await rm(repoPath, { recursive: true, force: true })
   })
 
@@ -180,7 +350,7 @@ describe.concurrent('prepareSourceUpdate', () => {
         pinned_commit: liveCommit,
         members: [{ name: 'root-skill', entry: 'SKILL.md' }],
       },
-      'v2',
+      'refs/tags/v2',
       workspace,
       [{ name: 'root-skill', entry: 'SKILL.md', path: 'SKILL.md' }],
     )

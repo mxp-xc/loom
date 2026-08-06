@@ -570,6 +570,32 @@ describe('SourceUpdateSessionStore', () => {
     expect(await fs.inspectEntry(newest.sessionRoot)).toMatchObject({ kind: 'directory' })
   })
 
+  it('does not capacity-prune a session while another store is hydrating it', async () => {
+    const repoPath = await createRepo('loom-update-prune-hydrating-')
+    const fs = new NodeFileSystem()
+    const owner = new SourceUpdateSessionStore(fs, { ttlMs: Number.POSITIVE_INFINITY })
+    const session = await createSession(owner, fs, repoPath)
+    let releaseHydration!: () => void
+    const hydration = new Promise<void>((resolve) => {
+      releaseHydration = resolve
+    })
+    const { completion } = await owner.beginHydration(session, () => hydration)
+    const otherProcess = new SourceUpdateSessionStore(fs, {
+      ttlMs: Number.POSITIVE_INFINITY,
+      maxSessionsPerRepo: 0,
+    })
+
+    await otherProcess.prune(repoPath)
+
+    expect(await fs.inspectEntry(session.sessionRoot)).toMatchObject({ kind: 'directory' })
+
+    releaseHydration()
+    await completion
+    await otherProcess.prune(repoPath)
+
+    expect(await fs.inspectEntry(session.sessionRoot)).toBeNull()
+  })
+
   it('does not overwrite a same-content manifest replacement during recovery', async () => {
     const repoPath = await createRepo('loom-update-manifest-replacement-')
     const fs = new NodeFileSystem()

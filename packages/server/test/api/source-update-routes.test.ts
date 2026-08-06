@@ -37,12 +37,19 @@ const prepareSourceUpdateMock = vi.hoisted(() =>
     }
   }),
 )
+const hydrateSourceUpdateCandidateMock = vi.hoisted(() =>
+  vi.fn(async (): Promise<void> => undefined),
+)
 const projectRepositoryMock = vi.hoisted(() => vi.fn(async () => ({ ok: true as const })))
 const log = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }))
 
 vi.mock('../../src/remote/update.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/remote/update.js')>()
-  return { ...actual, prepareSourceUpdate: prepareSourceUpdateMock }
+  return {
+    ...actual,
+    prepareSourceUpdate: prepareSourceUpdateMock,
+    hydrateSourceUpdateCandidate: hydrateSourceUpdateCandidateMock,
+  }
 })
 
 vi.mock('../../src/projection/workflow.js', async (importOriginal) => {
@@ -140,6 +147,7 @@ describe('source update route contract', () => {
         members: [{ name: 'forged-skill', entry: 'forged/SKILL.md' }],
       },
       newRef: 'next',
+      expectedCommit: 'a'.repeat(40),
     })
     expect(response.status).toBe(200)
     return (await response.json()) as { sessionId: string }
@@ -166,12 +174,91 @@ describe('source update route contract', () => {
       'next',
       expect.objectContaining({ repoPath }),
       expect.any(Array),
+      'a'.repeat(40),
+    )
+    expect(hydrateSourceUpdateCandidateMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      fs,
+      expect.objectContaining({ repoPath, pinned_commit: 'next-commit' }),
+      'next-commit',
+      expect.any(String),
     )
 
     const cancelled = await post(application, '/update/cancel', { repo: 'default', sessionId })
     expect(cancelled.status).toBe(200)
     expect(await cancelled.json()).toEqual({ ok: true })
     expect(await fs.inspectEntry(join(repoPath, 'temp', 'source-updates', sessionId))).toBeNull()
+  })
+
+  it('returns the preview before hydration completes and waits for hydration before cancel cleanup', async () => {
+    let releaseHydration!: () => void
+    hydrateSourceUpdateCandidateMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseHydration = resolve
+        }),
+    )
+    const application = app()
+    const { sessionId } = await prepare(application)
+
+    const cancelPromise = post(application, '/update/cancel', { repo: 'default', sessionId })
+    await vi.waitFor(() => expect(hydrateSourceUpdateCandidateMock).toHaveBeenCalledTimes(1))
+    expect(
+      await fs.inspectEntry(join(repoPath, 'temp', 'source-updates', sessionId)),
+    ).not.toBeNull()
+
+    releaseHydration()
+    const cancelled = await cancelPromise
+
+    expect(cancelled.status).toBe(200)
+    expect(await fs.inspectEntry(join(repoPath, 'temp', 'source-updates', sessionId))).toBeNull()
+  })
+
+  it('rejects cross-process cancel while candidate hydration is active', async () => {
+    let releaseHydration!: () => void
+    hydrateSourceUpdateCandidateMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseHydration = resolve
+        }),
+    )
+    const ownerProcess = app()
+    const { sessionId } = await prepare(ownerProcess)
+    const otherProcess = app()
+
+    const busy = await post(otherProcess, '/update/cancel', { repo: 'default', sessionId })
+
+    expect(busy.status).toBe(409)
+    expect(await busy.json()).toMatchObject({ error: 'update_session_busy' })
+    expect(
+      await fs.inspectEntry(join(repoPath, 'temp', 'source-updates', sessionId)),
+    ).toMatchObject({ kind: 'directory' })
+
+    releaseHydration()
+    let cancelled!: Response
+    await vi.waitFor(async () => {
+      cancelled = await post(otherProcess, '/update/cancel', { repo: 'default', sessionId })
+      expect(cancelled.status).toBe(200)
+    })
+
+    expect(cancelled.status).toBe(200)
+    expect(await fs.inspectEntry(join(repoPath, 'temp', 'source-updates', sessionId))).toBeNull()
+  })
+
+  it('rejects a destination refspec before creating an update workspace', async () => {
+    const response = await post(app(), '/update/prepare', {
+      repo: 'default',
+      source: {
+        url: 'https://example.test/skills.git',
+        ref: 'current',
+      },
+      newRef: 'main:refs/heads/injected',
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual(validationError('invalid_ref'))
+    expect(prepareSourceUpdateMock).not.toHaveBeenCalled()
+    expect(await fs.inspectEntry(join(repoPath, 'temp', 'source-updates'))).toBeNull()
   })
 
   it('maps malformed persisted state to 422 without executing injected paths', async () => {
@@ -245,6 +332,42 @@ describe('source update route contract', () => {
       new Set(projectionResourceKeys(canonicalHome, repoPath, canonicalHome, 'skills')),
     )
     expect(leases.acquired[0]!.every(({ mode }) => mode === 'mutation')).toBe(true)
+  })
+
+  it('does not mutate cache, manifest, or projection when hydration retry fails', async () => {
+    const liveCacheDir = join(repoPath, 'remote-cache', 'skills')
+    const manifestPath = join(repoPath, 'skills.yaml')
+    await mkdir(liveCacheDir, { recursive: true })
+    await writeFile(join(liveCacheDir, 'keep.txt'), 'live cache')
+    const originalManifest = await readFile(manifestPath, 'utf8')
+    const firstFailure = new Error('candidate is dirty after background checkout')
+    const retryFailure = new Error('candidate is still dirty after checkout retry')
+    hydrateSourceUpdateCandidateMock
+      .mockRejectedValueOnce(firstFailure)
+      .mockRejectedValueOnce(retryFailure)
+    const application = app()
+    const { sessionId } = await prepare(application)
+
+    const response = await post(application, '/update/finalize', {
+      repo: 'default',
+      sessionId,
+      preserve: [],
+      resourceBoundaryDecisions: [],
+    })
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toMatchObject({ error: 'update_finalize_failed' })
+    expect(hydrateSourceUpdateCandidateMock).toHaveBeenCalledTimes(2)
+    expect(projectRepositoryMock).not.toHaveBeenCalled()
+    expect(await readFile(manifestPath, 'utf8')).toBe(originalManifest)
+    expect(await readFile(join(liveCacheDir, 'keep.txt'), 'utf8')).toBe('live cache')
+    expect(
+      await fs.inspectEntry(join(repoPath, 'temp', 'source-updates', sessionId)),
+    ).toMatchObject({ kind: 'directory' })
+    expect(log.error).toHaveBeenCalledWith(
+      'source update finalize failed',
+      expect.objectContaining({ err: retryFailure, sessionId }),
+    )
   })
 
   it('logs projection primary and rollback failures and retains the recovery journal', async () => {

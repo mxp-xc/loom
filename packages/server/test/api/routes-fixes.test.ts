@@ -77,6 +77,9 @@ const prepareSourceUpdateMock = vi.hoisted(() =>
     },
   ),
 )
+const hydrateSourceUpdateCandidateMock = vi.hoisted(() =>
+  vi.fn(async (): Promise<void> => undefined),
+)
 
 const memFiles: Record<string, string> = {}
 const memFileIdentities = new Map<string, string>()
@@ -333,9 +336,11 @@ vi.mock('../../src/remote/discover.js', () => ({
     },
   ]),
 }))
-vi.mock('../../src/remote/update.js', () => ({
+vi.mock('../../src/remote/update.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/remote/update.js')>()),
   checkUpdates: vi.fn(async () => []),
   prepareSourceUpdate: prepareSourceUpdateMock,
+  hydrateSourceUpdateCandidate: hydrateSourceUpdateCandidateMock,
 }))
 
 const routes = registerRoutes()

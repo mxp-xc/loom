@@ -3,6 +3,7 @@ import { compare, valid } from 'semver'
 
 export interface RemoteRef {
   tags: Record<string, string>
+  branches?: Record<string, string>
   head: string
 }
 export interface VersionStatus {
@@ -18,7 +19,17 @@ export function compareVersion(
   const tagKeys = Object.keys(remote.tags)
   const refIsTag = tagKeys.includes(local.ref)
   if (local.type === 'branch' || (local.type !== 'tag' && !refIsTag)) {
-    return { hasUpdate: remote.head !== local.pinned_commit, latestCommit: remote.head }
+    const pinnedCommit = local.pinned_commit ?? ''
+    const branchName = local.ref.startsWith('refs/heads/')
+      ? local.ref.slice('refs/heads/'.length)
+      : local.ref
+    const latestCommit =
+      remote.branches === undefined
+        ? remote.head
+        : Object.hasOwn(remote.branches, branchName)
+          ? remote.branches[branchName]
+          : pinnedCommit
+    return { hasUpdate: latestCommit !== pinnedCommit, latestCommit }
   }
 
   const pinnedCommit = local.pinned_commit ?? ''

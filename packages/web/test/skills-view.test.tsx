@@ -1388,6 +1388,71 @@ describe('Skill source updates', () => {
     await waitFor(() => expect(button.querySelector('.animate-spin')).toBeNull())
   })
 
+  it('shows a spinning icon while preparing a source update', async () => {
+    let releasePrepare!: () => void
+    vi.mocked(api.update).mockResolvedValueOnce({
+      updates: [{ hasUpdate: true, latestTag: 'v1.2.2', latestCommit: 'bbb' }],
+    } as never)
+    vi.mocked(api.prepareSourceUpdate).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releasePrepare = () =>
+            resolve({
+              ok: true,
+              sessionId: 'update-1',
+              pinned_commit: 'bbb',
+              changes: { added: [], updated: [], removed: [] },
+              resourceBoundaryChanges: [],
+              pathMoves: [],
+            })
+        }) as never,
+    )
+
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/prepare-source"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  url: 'https://github.com/mattpocock/skills',
+                  ref: 'v1.1.0',
+                  type: 'tag',
+                  members: [],
+                },
+              ],
+              skills: [],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { agents: [] },
+            errors: [],
+          } as never
+        }
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set()}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '检查更新 source skills' }))
+    const button = await screen.findByRole('button', { name: '更新 source skills' })
+    fireEvent.click(button)
+
+    expect((button as HTMLButtonElement).disabled).toBe(true)
+    expect(button.querySelector('.animate-spin')).not.toBeNull()
+
+    await act(async () => releasePrepare())
+    expect(await screen.findByRole('dialog', { name: '确认 skills 更新' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '确认 skills 更新' })).toBeNull(),
+    )
+  })
+
   it('opens local skill detail when clicking blank space in the local skill row', () => {
     const onOpenDetail = vi.fn()
     render(
@@ -2032,7 +2097,7 @@ describe('Skill source updates', () => {
 
     await waitFor(() =>
       expect(api.prepareSourceUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ newRef: 'v6.1.1' }),
+        expect.objectContaining({ newRef: 'v6.1.1', expectedCommit: 'bbb' }),
       ),
     )
 

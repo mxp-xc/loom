@@ -93,6 +93,10 @@ function source() {
 function mockGit(): IGit {
   return {
     revParseHead: vi.fn(async () => 'commit-1'),
-    lsRemote: vi.fn(async () => ({ tags: {}, head: 'commit-1', branches: ['main'] })),
+    lsRemote: vi.fn(async () => ({
+      tags: {},
+      head: 'commit-1',
+      branches: { main: 'commit-1' },
+    })),
   } as Partial<IGit> as IGit
 }
