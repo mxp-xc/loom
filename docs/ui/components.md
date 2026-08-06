@@ -112,6 +112,8 @@ Utility、toolbar、row action 默认使用 `IconButton`：只显示 lucide 图�
 
 字段错误通过 `aria-describedby` 关联控件并在修正后清除。错误 Toast 使用 live region 且不抢焦点。错误 Dialog 提供可访问名称、描述及完整键盘操作。ErrorState 在具备恢复能力时提供明确的“重试”操作，恢复成功后回到正常内容。
 
+列表项的自动后台检查失败可以使用简短 inline status，不升级为 Toast 或 ErrorState。该 status 使用 `role="status"` 和明确 accessible name，只显示用户可操作的通用文案；完整错误对象仍写入日志，重试入口由同一列表项的操作按钮提供。
+
 ## 输入框
 
 | 属性  | 值                                      |
