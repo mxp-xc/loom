@@ -466,8 +466,13 @@ export class NodeFileSystem implements IFileSystem {
     const target = await readlink(src)
     await this.assertIdentity(src, 'link', sourceIdentity)
     try {
-      const targetKind = (await stat(src)).isDirectory() ? 'junction' : 'file'
-      await symlink(target, dest, process.platform === 'win32' ? targetKind : undefined)
+      const targetKind =
+        (this.opts.platform ?? process.platform) === 'win32'
+          ? (await stat(src)).isDirectory()
+            ? 'junction'
+            : 'file'
+          : undefined
+      await symlink(target, dest, targetKind)
     } catch (error) {
       if (isDestinationConflict(error) || (await this.inspectEntry(dest))) {
         throw new FileSystemDestinationExistsError(dest, { cause: error })

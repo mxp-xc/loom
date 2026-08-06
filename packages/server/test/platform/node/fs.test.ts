@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { spawnSync } from 'node:child_process'
 import {
   link,
   mkdtemp,
@@ -16,6 +17,7 @@ import { join } from 'node:path'
 import { NodeFileSystem } from '../../../src/platform/node/fs'
 import { renameDirectoryNoReplace } from '../../../src/platform/node/exclusive-rename'
 import { FileSystemDestinationExistsError } from '../../../src/ports/fs'
+import { bunExecutable } from '../../helpers/project-path'
 
 let root: string
 beforeEach(async () => {
@@ -240,6 +242,48 @@ describe('NodeFileSystem', () => {
     },
   )
 
+  it.skipIf(platform() !== 'darwin' && platform() !== 'linux')(
+    'keeps the native library alive while the cached rename binding is in use',
+    async () => {
+      const source = join(root, 'gc-source')
+      const destination = join(root, 'gc-destination')
+      await mkdir(source)
+      const moduleUrl = new URL('../../../src/platform/node/exclusive-rename.ts', import.meta.url)
+        .href
+      const script = `
+        const { mkdir } = await import('node:fs/promises')
+        const { renameDirectoryNoReplace } = await import(${JSON.stringify(moduleUrl)})
+        await renameDirectoryNoReplace(
+          process.env.LOOM_RENAME_SOURCE,
+          process.env.LOOM_RENAME_DESTINATION,
+        )
+        Bun.gc(true)
+        await Bun.sleep(100)
+        const secondSource = process.env.LOOM_RENAME_SOURCE + '-after-gc'
+        const secondDestination = process.env.LOOM_RENAME_DESTINATION + '-after-gc'
+        await mkdir(secondSource)
+        await renameDirectoryNoReplace(secondSource, secondDestination)
+        Bun.gc(true)
+        await Bun.sleep(100)
+        console.log('gc-ok')
+      `
+
+      const result = spawnSync(bunExecutable(), ['-e', script], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          LOOM_RENAME_SOURCE: source,
+          LOOM_RENAME_DESTINATION: destination,
+        },
+      })
+
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.signal, result.stderr).toBeNull()
+      expect(result.stderr).toBe('')
+      expect(result.stdout).toBe('gc-ok\n')
+    },
+  )
+
   it('copies an identity-bound regular file without following links or hardlinks', async () => {
     const fs = new NodeFileSystem()
     const source = join(root, 'source.bin')
@@ -336,6 +380,23 @@ describe('NodeFileSystem', () => {
     expect(failure.cause).toBe(moveFailure)
     expect(failure.errors).toEqual([moveFailure, rollbackFailure])
   })
+
+  it.skipIf(platform() === 'win32')(
+    'moves a directory containing a dangling link without following its target',
+    async () => {
+      const fs = new NodeFileSystem()
+      const source = join(root, 'source')
+      const destination = join(root, 'destination')
+      const missingTarget = join(root, 'missing-target')
+      await mkdir(source)
+      await symlink(missingTarget, join(source, 'dangling-link'), 'file')
+
+      await fs.moveNoReplace(source, destination)
+
+      expect(await fs.inspectEntry(source)).toBeNull()
+      await expect(readlink(join(destination, 'dangling-link'))).resolves.toBe(missingTarget)
+    },
+  )
 
   it('does not overwrite a child concurrently created in a reserved destination directory', async () => {
     const source = join(root, 'source')

@@ -2,6 +2,7 @@ import { constants } from 'node:fs'
 import { open, type FileHandle } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import { getSystemErrorName } from 'node:util'
+import type { LibraryHandle } from 'koffi'
 
 type NativeRename = (
   sourceParentFd: number,
@@ -15,6 +16,8 @@ type NativeSyscall = (number: number, ...args: unknown[]) => number
 
 interface NativeBinding {
   errno: () => number
+  // Keep the native library reachable for as long as its cached function.
+  library: LibraryHandle
   rename: NativeRename
 }
 
@@ -96,7 +99,7 @@ async function createBinding(): Promise<NativeBinding> {
           )
       }
     }
-    return { errno: koffi.errno, rename }
+    return { errno: koffi.errno, library, rename }
   } catch (cause) {
     throw unavailableError(cause)
   }
