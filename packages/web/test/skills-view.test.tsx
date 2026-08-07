@@ -15,6 +15,8 @@ import { useManifestOperations } from '../src/hooks/useManifestOperations'
 import type { ManifestOperations } from '../src/hooks/useManifestOperations'
 import { createMonacoEditorMock } from './monaco-test-utils'
 import { agentIds } from '../src/lib/agents'
+import { deferred } from './deferred'
+import { clearToasts } from '../src/hooks/useToast'
 
 const monacoEditorMock = createMonacoEditorMock()
 const skillDetailOperations = {
@@ -42,6 +44,7 @@ function TestRouter({ children }: { children: ReactNode }) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  clearToasts()
   monacoEditorMock.reset()
   window.history.replaceState({}, '', '/mcp')
 })
@@ -269,6 +272,342 @@ function sourceTreeResponse(names: string[], commit = 'abc123456789') {
 }
 
 describe('Skills page', () => {
+  it('checks remote sources on entry without blocking group controls', async () => {
+    const updateCheck = deferred<{ updates: Array<{ hasUpdate: boolean }> }>()
+    vi.mocked(api.update).mockReturnValueOnce(updateCheck.promise as never)
+
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-layout" />
+      </TestRouter>,
+    )
+
+    await waitFor(() =>
+      expect(api.update).toHaveBeenCalledWith('/tmp/skills-layout', [
+        expect.objectContaining({
+          url: 'https://github.com/obra/superpowers.git',
+          ref: 'main',
+          pinned_commit: 'abc123456789',
+        }),
+      ]),
+    )
+
+    const checkAll = screen.getByRole('button', { name: '检查全部更新' })
+    expect((checkAll as HTMLButtonElement).disabled).toBe(true)
+    expect(checkAll.querySelector('.animate-spin')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '全部展开' }))
+    expect(screen.getByText('systematic-debugging')).toBeDefined()
+
+    await act(async () => updateCheck.resolve({ updates: [{ hasUpdate: false }] }))
+    await waitFor(() => expect((checkAll as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  it('notifies for each automatic update as soon as that source check completes', async () => {
+    const alphaCheck = deferred<{ updates: Array<{ hasUpdate: boolean }> }>()
+    const betaCheck = deferred<{
+      updates: Array<{ hasUpdate: boolean; latestCommit: string }>
+    }>()
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: {
+        sources: [
+          {
+            name: 'alpha',
+            url: 'https://example.test/alpha.git',
+            ref: 'main',
+            pinned_commit: 'aaa',
+            members: [],
+          },
+          {
+            name: 'beta',
+            url: 'https://example.test/beta.git',
+            ref: 'main',
+            pinned_commit: 'bbb',
+            members: [],
+          },
+        ],
+        skills: [],
+      },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: [] },
+      errors: [],
+    } as never)
+    vi.mocked(api.update)
+      .mockReturnValueOnce(alphaCheck.promise as never)
+      .mockReturnValueOnce(betaCheck.promise as never)
+
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-immediate-update-toast" />
+        <ToastHost />
+      </TestRouter>,
+    )
+
+    await waitFor(() => expect(api.update).toHaveBeenCalledTimes(2))
+    await act(async () =>
+      betaCheck.resolve({
+        updates: [{ hasUpdate: true, latestCommit: 'ccccccc1234567' }],
+      }),
+    )
+
+    expect(await screen.findByText('beta 可更新')).toBeDefined()
+    expect(
+      (screen.getByRole('button', { name: '检查全部更新' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+
+    await act(async () => alphaCheck.resolve({ updates: [{ hasUpdate: false }] }))
+    expect(screen.queryByText('alpha 可更新')).toBeNull()
+  })
+
+  it('does not notify when an automatic update result belongs to a stale source snapshot', async () => {
+    const staleCheck = deferred<{
+      updates: Array<{ hasUpdate: boolean; latestCommit: string }>
+    }>()
+    const sourceManifest = (pinnedCommit: string) =>
+      ({
+        skills: {
+          sources: [
+            {
+              name: 'alpha',
+              url: 'https://example.test/alpha.git',
+              ref: 'main',
+              pinned_commit: pinnedCommit,
+              members: [],
+            },
+          ],
+          skills: [],
+        },
+        mcp: [],
+        vars: { default: {}, active: {} },
+        config: { agents: [] },
+        errors: [],
+      }) as never
+    vi.mocked(api.getManifest)
+      .mockResolvedValueOnce(sourceManifest('aaa'))
+      .mockResolvedValueOnce(sourceManifest('bbb'))
+    vi.mocked(api.update)
+      .mockReturnValueOnce(staleCheck.promise as never)
+      .mockResolvedValueOnce({ updates: [{ hasUpdate: false }] } as never)
+
+    const view = render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-stale-toast-a" />
+        <ToastHost />
+      </TestRouter>,
+    )
+
+    await waitFor(() => expect(api.update).toHaveBeenCalledTimes(1))
+    view.rerender(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-stale-toast-b" />
+        <ToastHost />
+      </TestRouter>,
+    )
+    await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(2))
+
+    await act(async () =>
+      staleCheck.resolve({
+        updates: [{ hasUpdate: true, latestCommit: 'ccccccc1234567' }],
+      }),
+    )
+
+    await waitFor(() => expect(api.update).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText('alpha 可更新')).toBeNull()
+  })
+
+  it('isolates automatic check failures and still marks other sources as updateable', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: {
+        sources: [
+          {
+            name: 'alpha',
+            url: 'https://example.test/alpha.git',
+            ref: 'main',
+            pinned_commit: 'aaa',
+            members: [],
+          },
+          {
+            name: 'beta',
+            url: 'https://example.test/beta.git',
+            ref: 'main',
+            pinned_commit: 'bbb',
+            members: [],
+          },
+        ],
+        skills: [],
+      },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: [] },
+      errors: [],
+    } as never)
+    vi.mocked(api.update)
+      .mockRejectedValueOnce(new Error('alpha network failed'))
+      .mockResolvedValueOnce({
+        updates: [{ hasUpdate: true, latestCommit: 'ccccccc1234567' }],
+      } as never)
+
+    try {
+      render(
+        <TestRouter>
+          <Skills repoPath="/tmp/skills-partial-update-check" />
+        </TestRouter>,
+      )
+
+      await screen.findByTestId('skill-group-head-alpha')
+      expect(await screen.findByRole('status', { name: 'alpha 更新检查失败' })).toBeDefined()
+      expect(await screen.findByRole('button', { name: '更新 source beta' })).toBeDefined()
+      expect(api.update).toHaveBeenCalledTimes(2)
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it('limits automatic source update checks to four concurrent requests', async () => {
+    const checks = Array.from({ length: 5 }, () =>
+      deferred<{ updates: Array<{ hasUpdate: boolean }> }>(),
+    )
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: {
+        sources: checks.map((_, index) => ({
+          name: `source-${index + 1}`,
+          url: `https://example.test/source-${index + 1}.git`,
+          ref: 'main',
+          pinned_commit: `commit-${index + 1}`,
+          members: [],
+        })),
+        skills: [],
+      },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: [] },
+      errors: [],
+    } as never)
+    for (const check of checks) {
+      vi.mocked(api.update).mockReturnValueOnce(check.promise as never)
+    }
+
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-check-concurrency" />
+      </TestRouter>,
+    )
+
+    await screen.findByTestId('skill-group-head-source-1')
+    await waitFor(() => expect(api.update).toHaveBeenCalled())
+    expect(api.update).toHaveBeenCalledTimes(4)
+    const queuedCheck = screen.getByRole('button', {
+      name: '检查更新 source source-5',
+    })
+    expect((queuedCheck as HTMLButtonElement).disabled).toBe(true)
+    expect(queuedCheck.querySelector('.animate-spin')).not.toBeNull()
+
+    await act(async () => checks[0].resolve({ updates: [{ hasUpdate: false }] }))
+    await waitFor(() => expect(api.update).toHaveBeenCalledTimes(5))
+
+    await act(async () => {
+      for (const check of checks.slice(1)) {
+        check.resolve({ updates: [{ hasUpdate: false }] })
+      }
+    })
+  })
+
+  it('rechecks only sources whose update identity changed after a manifest refresh', async () => {
+    const source = (name: string, pinnedCommit: string, agents: string[] = []) => ({
+      name,
+      url: `https://example.test/${name}.git`,
+      ref: 'main',
+      pinned_commit: pinnedCommit,
+      members: [{ name: `${name}-skill`, entry: `${name}/SKILL.md`, agents }],
+    })
+    const manifest = (betaCommit: string, agents: string[] = []) =>
+      ({
+        skills: {
+          sources: [source('alpha', 'aaa', agents), source('beta', betaCommit, agents)],
+          skills: [],
+        },
+        mcp: [],
+        vars: { default: {}, active: {} },
+        config: { agents: ['codex'] },
+        errors: [],
+      }) as never
+    vi.mocked(api.getManifest)
+      .mockResolvedValueOnce(manifest('bbb'))
+      .mockResolvedValueOnce(manifest('ccc', ['codex']))
+
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-selective-recheck" />
+      </TestRouter>,
+    )
+
+    await waitFor(() => expect(api.update).toHaveBeenCalledTimes(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Codex：全部未选择' }))
+    await waitFor(() => expect(api.getManifest).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.update).toHaveBeenCalledTimes(3))
+
+    expect(api.update).toHaveBeenLastCalledWith('/tmp/skills-selective-recheck', [
+      expect.objectContaining({
+        url: 'https://example.test/beta.git',
+        pinned_commit: 'ccc',
+      }),
+    ])
+  })
+
+  it('manually rechecks every source and reports one aggregate result', async () => {
+    vi.mocked(api.getManifest).mockResolvedValueOnce({
+      skills: {
+        sources: [
+          {
+            name: 'alpha',
+            url: 'https://example.test/alpha.git',
+            ref: 'main',
+            pinned_commit: 'aaa',
+            members: [],
+          },
+          {
+            name: 'beta',
+            url: 'https://example.test/beta.git',
+            ref: 'main',
+            pinned_commit: 'bbb',
+            members: [],
+          },
+        ],
+        skills: [],
+      },
+      mcp: [],
+      vars: { default: {}, active: {} },
+      config: { agents: [] },
+      errors: [],
+    } as never)
+
+    render(
+      <TestRouter>
+        <Skills repoPath="/tmp/skills-manual-check-all" />
+        <ToastHost />
+      </TestRouter>,
+    )
+
+    await waitFor(() => expect(api.update).toHaveBeenCalledTimes(2))
+    vi.mocked(api.update).mockClear()
+    vi.mocked(api.update)
+      .mockResolvedValueOnce({
+        updates: [{ hasUpdate: true, latestCommit: 'ccccccc1234567' }],
+      } as never)
+      .mockResolvedValueOnce({
+        updates: [{ hasUpdate: true, latestCommit: 'ddddddd1234567' }],
+      } as never)
+    fireEvent.click(screen.getByRole('button', { name: '检查全部更新' }))
+
+    await waitFor(() => expect(api.update).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('检查完成：2 个可更新，0 个需修复，0 个失败')).toBeDefined()
+    expect(screen.getAllByText(/检查完成：/)).toHaveLength(1)
+    expect(screen.queryByText('alpha 可更新')).toBeNull()
+    expect(screen.queryByText('beta 可更新')).toBeNull()
+  })
+
   it('shows machine-local source unavailability as a non-blocking warning', async () => {
     vi.mocked(api.getManifest).mockResolvedValueOnce({
       skills: {
@@ -1341,6 +1680,96 @@ describe('Add Skill modal', () => {
 })
 
 describe('Skill source updates', () => {
+  it('does not expose an update action from an outdated source snapshot', async () => {
+    vi.mocked(api.update).mockResolvedValueOnce({
+      updates: [{ hasUpdate: true, latestCommit: 'bbbbbbb1234567' }],
+    } as never)
+    const source = (pinnedCommit: string) =>
+      ({
+        skills: {
+          sources: [
+            {
+              name: 'alpha',
+              url: 'https://example.test/alpha.git',
+              ref: 'main',
+              pinned_commit: pinnedCommit,
+              members: [],
+            },
+          ],
+          skills: [],
+        },
+        mcp: [],
+        vars: { default: {}, active: {} },
+        config: { agents: [] },
+        errors: [],
+      }) as never
+    const props = {
+      repoPath: '/tmp/outdated-source-check',
+      visibleAgents: agentIds,
+      onOpenDetail: vi.fn(),
+      onOpenScan: vi.fn(),
+      onOpenEdit: vi.fn(),
+      expandedGroups: new Set<string>(),
+      onToggleGroup: vi.fn(),
+    }
+    const view = render(<SkillSourceListHarness {...props} manifest={source('aaaaaaa')} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '检查更新 source alpha' }))
+    expect(await screen.findByRole('button', { name: '更新 source alpha' })).toBeDefined()
+
+    view.rerender(<SkillSourceListHarness {...props} manifest={source('ccccccc')} />)
+    expect(screen.queryByRole('button', { name: '更新 source alpha' })).toBeNull()
+  })
+
+  it('clears an old update action when a recheck reports the source is current', async () => {
+    vi.mocked(api.update)
+      .mockResolvedValueOnce({
+        updates: [{ hasUpdate: true, latestCommit: 'bbbbbbb1234567' }],
+      } as never)
+      .mockResolvedValueOnce({ updates: [{ hasUpdate: false }] } as never)
+
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/recheck-current"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  name: 'alpha',
+                  url: 'https://example.test/alpha.git',
+                  ref: 'main',
+                  pinned_commit: 'aaaaaaa',
+                  members: [],
+                },
+              ],
+              skills: [],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { agents: [] },
+            errors: [],
+          } as never
+        }
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set()}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    const check = screen.getByRole('button', { name: '检查更新 source alpha' })
+    fireEvent.click(check)
+    expect(await screen.findByRole('button', { name: '更新 source alpha' })).toBeDefined()
+
+    fireEvent.click(check)
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: '更新 source alpha' })).toBeNull(),
+    )
+    expect(check.getAttribute('data-tooltip')).toBe('已是最新')
+  })
+
   it('shows a spinning icon while checking a source update', async () => {
     let releaseCheck!: () => void
     vi.mocked(api.update).mockImplementationOnce(

@@ -67,6 +67,7 @@ import type {
   PreparedSkillReconciliation,
   SourceUpdateState,
 } from '@/hooks/useManifestOperations'
+import { sourceUpdateSnapshot } from '@/hooks/useManifestOperations'
 import SkillReconciliationDialog from './SkillReconciliationDialog'
 import SharedSkillChip from './SharedSkillChip'
 import { skillFolderDisplayPath } from './source-paths'
@@ -373,7 +374,6 @@ export default function SkillSourceList({
   groupOrder,
   onReorderGroups,
 }: Props) {
-  const [updates, setUpdates] = useState<Record<string, SourceUpdateState>>({})
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [reconciliation, setReconciliation] = useState<PreparedSkillReconciliation | null>(null)
   const [reconciliationBusy, setReconciliationBusy] = useState(false)
@@ -400,15 +400,8 @@ export default function SkillSourceList({
     await operations.toggleLocalSkillAgent(id, agent, currentAssignment)
   }
 
-  const handleCheck = async (src: SkillSource) => {
-    const result = await operations.checkSourceUpdate(src)
-    if (result.ok && result.result?.update) {
-      setUpdates((prev) => ({ ...prev, [src.url]: result.result!.update! }))
-    }
-  }
-
-  const handlePerformUpdate = async (src: SkillSource) => {
-    const result = await operations.performSourceUpdate(src, updates[src.url])
+  const handlePerformUpdate = async (src: SkillSource, update: SourceUpdateState) => {
+    const result = await operations.performSourceUpdate(src, update)
     if (result.ok && result.result) {
       const prepared = result.result as PreparedSkillReconciliation
       setReconciliationError(null)
@@ -434,7 +427,6 @@ export default function SkillSourceList({
         return
       }
       setReconciliation(null)
-      setUpdates({})
     } finally {
       setReconciliationBusy(false)
     }
@@ -520,7 +512,16 @@ export default function SkillSourceList({
           const repoId = sourceIdentity(src).repoId
           const key = src.url + '-' + src.ref
           const isExpanded = expandedGroups.has(key)
-          const sourceUpdate = updates[src.url]
+          const storedSourceCheck = operations.sourceUpdateChecks[src.url]
+          const sourceCheck =
+            storedSourceCheck?.snapshot === sourceUpdateSnapshot(src)
+              ? storedSourceCheck
+              : undefined
+          const sourceUpdate =
+            sourceCheck?.kind === 'update' || sourceCheck?.kind === 'repair'
+              ? sourceCheck.update
+              : undefined
+          const checking = sourceCheck?.kind === 'checking'
           const updating = operations.pending.source.update(src)
           const includedResources = [...(src.resources?.include ?? [])].sort((a, b) =>
             a.path.localeCompare(b.path, 'en'),
@@ -578,6 +579,15 @@ export default function SkillSourceList({
                     </span>
                   )}
                   <span className={styles.gref}>@ {src.ref}</span>
+                  {sourceCheck?.kind === 'error' && (
+                    <span
+                      role="status"
+                      aria-label={`${repoId} 更新检查失败`}
+                      className={styles['source-check-error']}
+                    >
+                      检查失败
+                    </span>
+                  )}
                   {sourceUpdate && (
                     <span
                       style={{
@@ -662,24 +672,28 @@ export default function SkillSourceList({
                     )}
                     <IconButton
                       label={`检查更新 source ${repoId}`}
-                      tooltip={operations.pending.source.check(src) ? '检查中…' : '检查更新'}
+                      tooltip={
+                        checking
+                          ? '检查中…'
+                          : sourceCheck?.kind === 'current'
+                            ? '已是最新'
+                            : sourceCheck?.kind === 'error'
+                              ? '检查失败，点击重试'
+                              : '检查更新'
+                      }
                       size="sm"
-                      onClick={() => handleCheck(src)}
-                      disabled={operations.pending.source.check(src)}
+                      onClick={() => void operations.checkSourceUpdate(src)}
+                      disabled={checking}
+                      tone={sourceCheck?.kind === 'error' ? 'warning' : 'default'}
                     >
-                      <RefreshCw
-                        className={
-                          'h-3.5 w-3.5' +
-                          (operations.pending.source.check(src) ? ' animate-spin' : '')
-                        }
-                      />
+                      <RefreshCw className={'h-3.5 w-3.5' + (checking ? ' animate-spin' : '')} />
                     </IconButton>
-                    {updates[src.url] && (
+                    {sourceUpdate && (
                       <IconButton
                         label={`更新 source ${repoId}`}
                         tooltip={updating ? '更新中…' : '更新'}
                         size="sm"
-                        onClick={() => handlePerformUpdate(src)}
+                        onClick={() => handlePerformUpdate(src, sourceUpdate)}
                         disabled={updating}
                         tone="warning"
                       >

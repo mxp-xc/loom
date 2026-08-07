@@ -118,6 +118,12 @@
   color: var(--signal);
   flex-shrink: 0;
 }
+.source-check-error {
+  color: var(--error);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  flex-shrink: 0;
+}
 .group-head .gacts {
   margin-left: auto;
   display: flex;

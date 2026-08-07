@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { ChevronsDownUp, ChevronsUpDown, LoaderCircle, Plus, Send } from 'lucide-react'
+import { IconButton } from '@/components/ui/IconButton'
+import { ChevronsDownUp, ChevronsUpDown, LoaderCircle, Plus, RefreshCw, Send } from 'lucide-react'
 import { useManifest } from '@/hooks/useManifest'
-import { useManifestOperations } from '@/hooks/useManifestOperations'
+import { sourceUpdateSnapshot, useManifestOperations } from '@/hooks/useManifestOperations'
 import { useToast } from '@/hooks/useToast'
 import { useViewError } from '@/hooks/useViewError'
 import { ErrorState, WarningState } from '@/components/ErrorFeedback'
@@ -22,6 +23,10 @@ import AddSkillModal from './AddSkillModal'
 import SourceNamespaceCollisionDialog from './SourceNamespaceCollisionDialog'
 import type { SkillDetail, SkillDetailIdentity } from './types'
 import styles from './Skills.module.css'
+
+function repositorySourceUpdateSnapshot(repoPath: string, source: SkillSource): string {
+  return JSON.stringify([repoPath, sourceUpdateSnapshot(source)])
+}
 
 export default function Skills({ repoPath }: { repoPath: string }) {
   const { error, setError } = useViewError({
@@ -46,6 +51,14 @@ export default function Skills({ repoPath }: { repoPath: string }) {
   const [editSource, setEditSource] = useState<SkillSource | null>(null)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [groupOrder, setGroupOrder] = useState<string[]>([])
+  const checkedSourceSnapshotsRef = useRef(new Map<string, string>())
+  const manifestSourceSnapshotsRef = useRef(new Map<string, string>())
+  manifestSourceSnapshotsRef.current = new Map(
+    manifest?.skills.sources.map((source) => [
+      source.url,
+      repositorySourceUpdateSnapshot(repoPath, source),
+    ]) ?? [],
+  )
 
   const sourceCount = manifest?.skills?.sources?.length ?? 0
   const localCount = manifest?.skills?.skills?.length ?? 0
@@ -123,6 +136,34 @@ export default function Skills({ repoPath }: { repoPath: string }) {
     setExpandedGroups(allCollapsed ? new Set(groupKeys) : new Set())
   }
 
+  useEffect(() => {
+    if (!manifest) return
+    const sourceUrls = new Set(manifest.skills.sources.map((source) => source.url))
+    for (const url of checkedSourceSnapshotsRef.current.keys()) {
+      if (!sourceUrls.has(url)) checkedSourceSnapshotsRef.current.delete(url)
+    }
+    if (operations.pending.source.checkAll) return
+
+    const changedSources = manifest.skills.sources.filter((source) => {
+      const snapshot = repositorySourceUpdateSnapshot(repoPath, source)
+      return checkedSourceSnapshotsRef.current.get(source.url) !== snapshot
+    })
+    if (changedSources.length === 0) return
+    for (const source of changedSources) {
+      checkedSourceSnapshotsRef.current.set(
+        source.url,
+        repositorySourceUpdateSnapshot(repoPath, source),
+      )
+    }
+    void operations.checkAllSourceUpdates(changedSources, {
+      notify: false,
+      notifyUpdatesAsCompleted: true,
+      shouldNotifySourceUpdate: (source) =>
+        manifestSourceSnapshotsRef.current.get(source.url) ===
+        repositorySourceUpdateSnapshot(repoPath, source),
+    })
+  }, [manifest, operations.checkAllSourceUpdates, operations.pending.source.checkAll, repoPath])
+
   return (
     <div className={styles['skills-page']}>
       <div className={`page-head ${styles['skills-head']}`}>
@@ -133,6 +174,22 @@ export default function Skills({ repoPath }: { repoPath: string }) {
           </div>
         </div>
         <div className={styles['skills-head-actions']}>
+          {manifest && sourceCount > 0 && (
+            <IconButton
+              label="检查全部更新"
+              tooltip="检查全部更新"
+              variant="secondary"
+              size="sm"
+              disabled={operations.pending.source.checkAll}
+              onClick={() => void operations.checkAllSourceUpdates(manifest.skills.sources)}
+            >
+              <RefreshCw
+                className={
+                  'h-3.5 w-3.5' + (operations.pending.source.checkAll ? ' animate-spin' : '')
+                }
+              />
+            </IconButton>
+          )}
           {groupKeys.length > 0 && (
             <Button variant="secondary" size="sm" onClick={toggleAllGroups}>
               {allCollapsed ? (

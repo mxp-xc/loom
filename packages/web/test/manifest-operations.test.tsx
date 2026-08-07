@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ApiError, api } from '../src/lib/api'
 import { useManifestOperations } from '../src/hooks/useManifestOperations'
+import { deferred } from './deferred'
 
 vi.mock('../src/lib/api', () => ({
   ApiError: class ApiError extends Error {
@@ -104,6 +105,34 @@ function CollisionHarness() {
       <button type="button" onClick={() => void ops.resolveSourceNamespaceCollision()}>
         resolve
       </button>
+    </>
+  )
+}
+
+function SourceCheckRaceHarness() {
+  const ops = useManifestOperations('/tmp/r')
+  const oldSource = {
+    name: 'alpha',
+    url: 'https://example.test/alpha.git',
+    ref: 'main',
+    pinned_commit: 'aaaaaaa',
+    members: [],
+  }
+  const newSource = { ...oldSource, pinned_commit: 'bbbbbbb' }
+  const status = ops.sourceUpdateChecks[oldSource.url]
+  const label =
+    status?.kind === 'update' && status.update !== 'repair'
+      ? `${status.kind}:${status.update.label}`
+      : (status?.kind ?? 'none')
+  return (
+    <>
+      <button type="button" onClick={() => void ops.checkSourceUpdate(oldSource)}>
+        check old
+      </button>
+      <button type="button" onClick={() => void ops.checkSourceUpdate(newSource)}>
+        check new
+      </button>
+      <output>{label}</output>
     </>
   )
 }
@@ -518,6 +547,36 @@ describe('useManifestOperations', () => {
         },
       ]),
     )
+  })
+
+  it('does not let an old source snapshot overwrite a newer update check result', async () => {
+    const oldCheck = deferred<{
+      updates: Array<{ hasUpdate: boolean; latestCommit: string }>
+    }>()
+    const newCheck = deferred<{
+      updates: Array<{ hasUpdate: boolean; latestCommit: string }>
+    }>()
+    vi.mocked(api.update)
+      .mockReturnValueOnce(oldCheck.promise as never)
+      .mockReturnValueOnce(newCheck.promise as never)
+
+    render(<SourceCheckRaceHarness />)
+    fireEvent.click(screen.getByRole('button', { name: 'check old' }))
+    fireEvent.click(screen.getByRole('button', { name: 'check new' }))
+
+    await act(async () =>
+      newCheck.resolve({
+        updates: [{ hasUpdate: true, latestCommit: 'ccccccc1234567' }],
+      }),
+    )
+    await waitFor(() => expect(screen.getByText('update:ccccccc')).toBeDefined())
+
+    await act(async () =>
+      oldCheck.resolve({
+        updates: [{ hasUpdate: true, latestCommit: 'ddddddd1234567' }],
+      }),
+    )
+    expect(screen.getByText('update:ccccccc')).toBeDefined()
   })
 
   it('passes type, members, and resources when adding a source', async () => {

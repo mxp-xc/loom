@@ -37,6 +37,11 @@ export interface OperationNotificationOptions {
   allowConcurrent?: boolean
 }
 
+export interface CheckAllSourceUpdateOptions extends OperationNotificationOptions {
+  notifyUpdatesAsCompleted?: boolean
+  shouldNotifySourceUpdate?: (source: SkillSource) => boolean
+}
+
 export interface SourceScanOptions extends OperationNotificationOptions {
   name?: string
   ref?: string
@@ -58,6 +63,17 @@ export interface ManifestOperationCallbacks {
 
 export type SourceUpdateState =
   'repair' | { label: string; newRef?: string; expectedCommit?: string }
+
+export type SourceUpdateCheckStatus =
+  | { kind: 'checking'; snapshot: string }
+  | { kind: 'current'; snapshot: string; message: string }
+  | {
+      kind: 'update' | 'repair'
+      snapshot: string
+      message: string
+      update: SourceUpdateState
+    }
+  | { kind: 'error'; snapshot: string; message: string }
 
 export interface SkillMemberChanges {
   added: Array<{ name: string }>
@@ -125,7 +141,8 @@ const pendingKey = {
   addLocalSkills: () => 'skills:add-local',
   addSource: () => 'source:add',
   saveSource: (url: string) => 'source:save:' + url,
-  checkSourceUpdate: (url: string) => 'source:check:' + url,
+  checkSourceUpdate: (source: SkillSource) => 'source:check:' + sourceUpdateSnapshot(source),
+  checkAllSourceUpdates: () => 'source:check-all',
   performSourceUpdate: (url: string) => 'source:update:' + url,
   cancelSourceUpdate: (sessionId: string) => 'source:update-cancel:' + sessionId,
   deleteSource: (url: string) => 'source:delete:' + url,
@@ -209,6 +226,15 @@ function sourceNamespaceCollisionFromError(error: unknown): SourceNamespaceColli
 
 function sourceRef(source: SkillSource | string): string {
   return typeof source === 'string' ? source : source.url
+}
+
+export function sourceUpdateSnapshot(source: SkillSource): string {
+  return JSON.stringify([
+    source.url,
+    source.ref,
+    source.type ?? 'branch',
+    source.pinned_commit ?? '',
+  ])
 }
 
 function persistedSourceDto(source: SkillSource): SkillSource {
@@ -308,6 +334,23 @@ function sortByName<T extends { name: string }>(items: readonly T[]): T[] {
   return [...items].sort((a, b) => a.name.localeCompare(b.name, 'en'))
 }
 
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  task: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      results[index] = await task(items[index]!)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()))
+  return results
+}
+
 export function useManifestOperations(
   repoPath: string,
   callbacks: ManifestOperationCallbacks = {},
@@ -317,6 +360,9 @@ export function useManifestOperations(
   const mountedRef = useRef(true)
   const pendingRef = useRef(new Set<string>())
   const [pending, setPending] = useState<Set<string>>(() => new Set())
+  const [sourceUpdateChecks, setSourceUpdateChecks] = useState<
+    Record<string, SourceUpdateCheckStatus>
+  >({})
   const [sourceNamespaceCollision, setSourceNamespaceCollision] =
     useState<SourceNamespaceCollision | null>(null)
 
@@ -623,9 +669,14 @@ export function useManifestOperations(
   )
 
   const checkSourceUpdate = useCallback(
-    (source: SkillSource) =>
-      run(
-        pendingKey.checkSourceUpdate(source.url),
+    async (source: SkillSource, options: OperationNotificationOptions = {}) => {
+      const snapshot = sourceUpdateSnapshot(source)
+      setSourceUpdateChecks((current) => ({
+        ...current,
+        [source.url]: { kind: 'checking', snapshot },
+      }))
+      const result = await run(
+        pendingKey.checkSourceUpdate(source),
         async (): Promise<SourceUpdateCheck> => {
           const result = (await api.update(repoPath, [persistedSourceDto(source)])) as {
             updates?: Array<{
@@ -658,12 +709,99 @@ export function useManifestOperations(
           }
         },
         {
+          ...options,
           reload: false,
           failureMessage: '检查更新失败',
           successMessage: (result) => result.message,
         },
-      ),
+      )
+      if (!mountedRef.current || result.skipped) return result
+
+      let status: SourceUpdateCheckStatus
+      if (!result.ok || !result.result) {
+        status = {
+          kind: 'error',
+          snapshot,
+          message: result.message ?? '检查更新失败',
+        }
+      } else if (result.result.kind === 'update' && result.result.update) {
+        status = {
+          kind: 'update',
+          snapshot,
+          message: result.result.message,
+          update: result.result.update,
+        }
+      } else if (result.result.kind === 'repair') {
+        status = {
+          kind: 'repair',
+          snapshot,
+          message: result.result.message,
+          update: 'repair',
+        }
+      } else {
+        status = {
+          kind: 'current',
+          snapshot,
+          message: result.result.message,
+        }
+      }
+      setSourceUpdateChecks((current) => {
+        if (current[source.url]?.snapshot !== snapshot) return current
+        return { ...current, [source.url]: status }
+      })
+      return result
+    },
     [repoPath, run],
+  )
+
+  const checkAllSourceUpdates = useCallback(
+    (sources: SkillSource[], options: CheckAllSourceUpdateOptions = {}) =>
+      run(
+        pendingKey.checkAllSourceUpdates(),
+        async () => {
+          setSourceUpdateChecks((current) => {
+            const next = { ...current }
+            for (const source of sources) {
+              next[source.url] = {
+                kind: 'checking',
+                snapshot: sourceUpdateSnapshot(source),
+              }
+            }
+            return next
+          })
+          const results = await mapWithConcurrency(sources, 4, async (source) => {
+            const result = await checkSourceUpdate(source, { notify: false })
+            if (
+              options.notifyUpdatesAsCompleted &&
+              result.ok &&
+              result.result?.kind === 'update' &&
+              (options.shouldNotifySourceUpdate?.(source) ?? true)
+            ) {
+              notifyToast(sourceIdentity(source).repoId + ' 可更新')
+            }
+            return result
+          })
+          const updates = results.filter(
+            (result) => result.ok && result.result?.kind === 'update',
+          ).length
+          const repairs = results.filter(
+            (result) => result.ok && result.result?.kind === 'repair',
+          ).length
+          const failures = results.filter((result) => !result.ok).length
+          return {
+            ok: true,
+            results,
+            message: `检查完成：${updates} 个可更新，${repairs} 个需修复，${failures} 个失败`,
+          }
+        },
+        {
+          ...options,
+          reload: false,
+          failureMessage: '检查全部更新失败',
+          successMessage: (result) => result.message,
+        },
+      ),
+    [checkSourceUpdate, notifyToast, run],
   )
 
   const performSourceUpdate = useCallback(
@@ -1122,8 +1260,8 @@ export function useManifestOperations(
     () => ({
       project: (scope: ProjectScope) => pending.has(pendingKey.project(scope)),
       source: {
-        check: (source: SkillSource | string) =>
-          pending.has(pendingKey.checkSourceUpdate(sourceRef(source))),
+        checkAll: pending.has(pendingKey.checkAllSourceUpdates()),
+        check: (source: SkillSource) => pending.has(pendingKey.checkSourceUpdate(source)),
         update: (source: SkillSource | string) =>
           pending.has(pendingKey.performSourceUpdate(sourceRef(source))),
         delete: (source: SkillSource | string) =>
@@ -1150,6 +1288,7 @@ export function useManifestOperations(
   return useMemo(
     () => ({
       pending: pendingStatus,
+      sourceUpdateChecks,
       project,
       saveConfig,
       scanLocalSkills,
@@ -1161,6 +1300,7 @@ export function useManifestOperations(
       addSource,
       saveSource,
       checkSourceUpdate,
+      checkAllSourceUpdates,
       performSourceUpdate,
       finalizeSourceUpdate,
       cancelSourceUpdate,
@@ -1187,6 +1327,7 @@ export function useManifestOperations(
     }),
     [
       pendingStatus,
+      sourceUpdateChecks,
       project,
       saveConfig,
       scanLocalSkills,
@@ -1198,6 +1339,7 @@ export function useManifestOperations(
       addSource,
       saveSource,
       checkSourceUpdate,
+      checkAllSourceUpdates,
       performSourceUpdate,
       finalizeSourceUpdate,
       cancelSourceUpdate,

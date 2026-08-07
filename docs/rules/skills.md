@@ -222,7 +222,7 @@ Implications:
 - 更新完成后只保留当前已选择且新版本仍存在的 members，不自动选择新发现或此前未选择的 bundles。
 - 更新确认始终展示新增、更新和删除摘要；没有对应变化时明确显示 0 项。
 - 缺失项支持逐项选择、全选、取消全选和不保留。
-- 打开 Skills 页面、编辑现有 source 和普通 projection 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。R-SYNC-006 的同步后 cache 对齐和启动时仅针对 unhealthy cache 的自动补偿不属于该限制。
+- 打开 Skills 页面可以为每个 remote source 启动只读、非阻塞的 Source update check；检查不得修改 live cache、manifest 或 projection，单个 source 的慢响应或失败不得阻塞页面其他功能或其他 source 的检查。自动检查发现可更新项时，在该 source 检查完成后立即显示一次通知，不等待其余 source；已最新、需要修复和检查失败不产生自动通知。编辑现有 source 和普通 projection 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。R-SYNC-006 的同步后 cache 对齐和启动时仅针对 unhealthy cache 的自动补偿不属于该限制。
 - Source cache 是否可用是当前机器的运行时状态，不是 manifest 配置有效性；单个 source 不可用时，其他 source、local skills 和非 Skills 功能保持可用。
 - Remote refs 只在用户首次打开 ref 选择或切换 branch/tag 时按需读取；同一编辑会话内复用结果。
 - 显式 branch 通过该 branch ref 的 remote commit 判断更新，即使存在同名 tag；合法 SemVer tag 只和其他合法 SemVer tag 比较 precedence；非 SemVer tag 只检查同名 tag 是否移动，不回退到 branch HEAD。

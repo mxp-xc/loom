@@ -64,6 +64,10 @@ _Avoid_: custom skill
 在用户保存 desired state 前，发现候选 source member 或 local skill 的动作。
 _Avoid_: import, install
 
+**Source update check**:
+只读比较 Source 当前固定版本与其远端目标版本的后台操作。它可以报告可更新、已最新、需要修复或检查失败，但不修改 live cache、manifest 或 projection。
+_Avoid_: source update, refresh source cache
+
 **Memory**:
 由 Loom 管理的独立仓库级 agent 指令内容。一个 Memory 可分配给多个 Agent，但一个 Agent 同时只能分配一个 Memory。
 _Avoid_: prompt, note
