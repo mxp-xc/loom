@@ -18,7 +18,7 @@ Related rules: [skills](../../rules/skills.md) and [cross-cutting](../../rules/c
 - 每个 source 独立产生检查结果；单个 source 的慢响应或失败不阻塞其他 source。
 - UI 区分至少以下状态：检查中、可更新、已最新、需要修复、检查失败和当前机器不可用。
 - 只有 Source group 参与检查；local skills group 不显示更新状态。
-- 自动检查不显示逐 source toast；结果直接更新对应 Source group。
+- 自动检查发现可更新项时，在对应 source 检查完成后立即显示“<source> 可更新” toast，不等待其他 source；已最新、需要修复和检查失败保持静默，结果仍更新对应 Source group。
 
 ### Check all updates
 
@@ -87,6 +87,7 @@ Web tests cover:
 - manifest 首次加载后自动检查所有 remote sources，不检查 local group；
 - 页面在 deferred update checks 期间仍可展开 group、编辑和触发其他操作；
 - 一个 source 失败时其他 source 仍完成并显示各自状态；
+- 自动检查发现更新时逐 source 立即提示，不等待较慢的 source；无更新项不提示；
 - “检查全部更新”的 pending、禁用、有限并发和单条汇总反馈；
 - `current`、`repair` 和 `error` 能清除旧 update 提示；
 - source identity snapshot 变化只重查对应 source，stale response 不覆盖新状态；

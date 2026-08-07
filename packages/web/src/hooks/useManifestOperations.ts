@@ -37,6 +37,11 @@ export interface OperationNotificationOptions {
   allowConcurrent?: boolean
 }
 
+export interface CheckAllSourceUpdateOptions extends OperationNotificationOptions {
+  notifyUpdatesAsCompleted?: boolean
+  shouldNotifySourceUpdate?: (source: SkillSource) => boolean
+}
+
 export interface SourceScanOptions extends OperationNotificationOptions {
   name?: string
   ref?: string
@@ -750,7 +755,7 @@ export function useManifestOperations(
   )
 
   const checkAllSourceUpdates = useCallback(
-    (sources: SkillSource[], options: OperationNotificationOptions = {}) =>
+    (sources: SkillSource[], options: CheckAllSourceUpdateOptions = {}) =>
       run(
         pendingKey.checkAllSourceUpdates(),
         async () => {
@@ -764,9 +769,18 @@ export function useManifestOperations(
             }
             return next
           })
-          const results = await mapWithConcurrency(sources, 4, (source) =>
-            checkSourceUpdate(source, { notify: false }),
-          )
+          const results = await mapWithConcurrency(sources, 4, async (source) => {
+            const result = await checkSourceUpdate(source, { notify: false })
+            if (
+              options.notifyUpdatesAsCompleted &&
+              result.ok &&
+              result.result?.kind === 'update' &&
+              (options.shouldNotifySourceUpdate?.(source) ?? true)
+            ) {
+              notifyToast(sourceIdentity(source).repoId + ' 可更新')
+            }
+            return result
+          })
           const updates = results.filter(
             (result) => result.ok && result.result?.kind === 'update',
           ).length
@@ -787,7 +801,7 @@ export function useManifestOperations(
           successMessage: (result) => result.message,
         },
       ),
-    [checkSourceUpdate, run],
+    [checkSourceUpdate, notifyToast, run],
   )
 
   const performSourceUpdate = useCallback(

@@ -52,6 +52,13 @@ export default function Skills({ repoPath }: { repoPath: string }) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [groupOrder, setGroupOrder] = useState<string[]>([])
   const checkedSourceSnapshotsRef = useRef(new Map<string, string>())
+  const manifestSourceSnapshotsRef = useRef(new Map<string, string>())
+  manifestSourceSnapshotsRef.current = new Map(
+    manifest?.skills.sources.map((source) => [
+      source.url,
+      repositorySourceUpdateSnapshot(repoPath, source),
+    ]) ?? [],
+  )
 
   const sourceCount = manifest?.skills?.sources?.length ?? 0
   const localCount = manifest?.skills?.skills?.length ?? 0
@@ -148,7 +155,13 @@ export default function Skills({ repoPath }: { repoPath: string }) {
         repositorySourceUpdateSnapshot(repoPath, source),
       )
     }
-    void operations.checkAllSourceUpdates(changedSources, { notify: false })
+    void operations.checkAllSourceUpdates(changedSources, {
+      notify: false,
+      notifyUpdatesAsCompleted: true,
+      shouldNotifySourceUpdate: (source) =>
+        manifestSourceSnapshotsRef.current.get(source.url) ===
+        repositorySourceUpdateSnapshot(repoPath, source),
+    })
   }, [manifest, operations.checkAllSourceUpdates, operations.pending.source.checkAll, repoPath])
 
   return (
