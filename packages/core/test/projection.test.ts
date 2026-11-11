@@ -136,6 +136,30 @@ describe('planProjection', () => {
       }),
     ])
   })
+  it('flattens a single bundle whose name matches the source namespace', () => {
+    const m: Manifest = {
+      ...manifest,
+      skills: {
+        ...manifest.skills,
+        sources: [
+          {
+            ...manifest.skills.sources[0],
+            name: 'writing',
+            members: [{ name: 'writing', entry: 'skills/writing/SKILL.md', agents: ['codex'] }],
+            sourceTree: sourceTreeFor(['skills/writing/SKILL.md']),
+          },
+        ],
+      },
+    }
+    const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
+    expect(p.sourcePlans[0]).toEqual(
+      expect.objectContaining({
+        sourceName: 'writing',
+        projectionBase: 'skills/writing',
+        entries: [{ kind: 'bundle', sourcePath: 'skills/writing', targetPath: '' }],
+      }),
+    )
+  })
   it('uses canonical entry to locate a nested bundle root', () => {
     const m: Manifest = {
       ...manifest,
@@ -194,7 +218,7 @@ describe('planProjection', () => {
     }
     const p = planProjection(m, m.config, new Set(['claude-code', 'codex', 'opencode']))
     expect(p.sourcePlans[0]).toEqual(
-      expect.objectContaining({ sourceName: 'openai-skills', cacheId: 'superpowers' }),
+      expect.objectContaining({ sourceName: 'openai-skills', cacheId: 'obra/superpowers' }),
     )
   })
   it('member without agents is not projected', () => {

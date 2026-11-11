@@ -870,10 +870,52 @@ describe('SkillsApplication', () => {
     expect(git.clone).toHaveBeenCalled()
     const cloneDest = vi.mocked(git.clone).mock.calls[0]?.[1]
     expect(cloneDest).toContain(join(repoPath, 'temp', 'source-edits'))
-    expect(existsSync(join(repoPath, 'remote-cache', 'skills'))).toBe(true)
+    expect(existsSync(join(repoPath, 'remote-cache', 'mattpocock', 'skills'))).toBe(true)
     const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
     expect(parsed.sources[0].name).toBe('openai-skills')
     expect(parsed.sources[0].pinned_commit).toBe('abc123')
+  })
+
+  it('defaults a new source name to the repository name', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    mockRemoteSource({})
+
+    const result = await app.addSource(repoPath, {
+      url: 'https://github.com/emilkowski/skills',
+      ref: 'main',
+    })
+
+    expect(result.source).toMatchObject({ name: 'skills' })
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.sources[0].name).toBe('skills')
+  })
+
+  it('normalizes the default source name derived from the URL', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    mockRemoteSource({})
+
+    const result = await app.addSource(repoPath, {
+      url: 'https://github.com/jackwener/OpenCLI',
+      ref: 'main',
+    })
+
+    expect(result.source).toMatchObject({ name: 'opencli' })
+  })
+
+  it('rejects selecting two bundles that share a skill name', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    mockRemoteSource({ 'a/demo/SKILL.md': '# A', 'b/demo/SKILL.md': '# B' })
+
+    await expect(
+      app.addSource(repoPath, {
+        url: 'https://example.test/source.git',
+        ref: 'main',
+        members: [
+          { name: 'demo', entry: 'a/demo/SKILL.md' },
+          { name: 'demo', entry: 'b/demo/SKILL.md' },
+        ],
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'duplicate_member_name' })
   })
 
   it('rejects duplicate source urls and names', async () => {
@@ -1184,6 +1226,64 @@ describe('SkillsApplication', () => {
       readFile(join(repoPath, 'remote-cache', 'skills', 'removed', 'SKILL.md'), 'utf8'),
     ).resolves.toBe('# Removed')
     expect(projection).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps same-named repositories from different owners in separate caches', async () => {
+    await writeFile(join(repoPath, 'skills.yaml'), 'sources: []\nskills: []\n')
+    mockRemoteSource({})
+
+    await app.addSource(repoPath, {
+      name: 'mattpocock-skills',
+      url: 'https://github.com/mattpocock/skills',
+      ref: 'main',
+    })
+    await app.addSource(repoPath, {
+      name: 'emilkowski-skills',
+      url: 'https://github.com/emilkowski/skills',
+      ref: 'main',
+    })
+
+    expect(existsSync(join(repoPath, 'remote-cache', 'mattpocock', 'skills'))).toBe(true)
+    expect(existsSync(join(repoPath, 'remote-cache', 'emilkowski', 'skills'))).toBe(true)
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.sources.map((source: any) => source.name)).toEqual([
+      'mattpocock-skills',
+      'emilkowski-skills',
+    ])
+  })
+
+  it('rejects an add whose URL-derived cache id belongs to another source', async () => {
+    await writeFile(
+      join(repoPath, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: github-skills',
+        '    url: https://github.com/team/skills',
+        '    ref: main',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+
+    const failure = await app
+      .addSource(repoPath, { url: 'https://mirror.example/team/skills', ref: 'main' })
+      .catch((error) => error)
+
+    expect(failure).toMatchObject({
+      status: 409,
+      code: 'source_cache_exists',
+      details: {
+        cacheId: 'team/skills',
+        sourceUrl: 'https://mirror.example/team/skills',
+        conflictUrl: 'https://github.com/team/skills',
+        conflictName: 'github-skills',
+      },
+    })
+    expect(failure.message).toContain('https://github.com/team/skills')
+    const parsed = yaml.load(await readFile(join(repoPath, 'skills.yaml'), 'utf8')) as any
+    expect(parsed.sources.map((source: any) => source.url)).toEqual([
+      'https://github.com/team/skills',
+    ])
   })
 
   it('validates add selections before replacing an existing cache', async () => {

@@ -19,7 +19,7 @@ import {
 } from '@loom/core'
 import { scanSourceTree, scanSourceTreeWithoutMetadata } from './source-tree.js'
 import { cacheDirFor } from './cache.js'
-import { deriveRepoId } from '@loom/core'
+import { deriveSourceCacheId } from '@loom/core'
 import { dirname, join } from 'node:path'
 import {
   classifySkillMemberChanges,
@@ -103,7 +103,7 @@ export async function prepareSourceUpdate(
   oldMembers: SkillMemberSnapshot[],
   expectedCommit?: string,
 ): Promise<PreparedSourceUpdate> {
-  const cacheDir = cacheDirFor(workspace.repoPath, deriveRepoId(source.url))
+  const cacheDir = cacheDirFor(workspace.repoPath, deriveSourceCacheId(source.url))
   const { stagingDir, candidateDir } = workspace
   try {
     await ensureSourceUpdateChildDirectory(fs, workspace.repoPath, 'remote-cache')

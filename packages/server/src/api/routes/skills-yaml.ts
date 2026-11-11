@@ -383,30 +383,34 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     },
   )
 
-  app.post('/sources', jsonValidator(AddSourceBody, { error: sourceError }), async (c) => {
-    try {
-      const { repo, name, url, ref, type, members, resources } = c.req.valid('json')
-      const result = await runRepo(repo, 'mutation', async (repoPath) => {
-        const added = await skills.addSource(repoPath, {
-          name,
-          url,
-          ref,
-          type,
-          members,
-          resources,
+  app.post(
+    '/sources',
+    jsonValidator(AddSourceBody, { error: sourceError, message: sourceValidationMessage }),
+    async (c) => {
+      try {
+        const { repo, name, url, ref, type, members, resources } = c.req.valid('json')
+        const result = await runRepo(repo, 'mutation', async (repoPath) => {
+          const added = await skills.addSource(repoPath, {
+            name,
+            url,
+            ref,
+            type,
+            members,
+            resources,
+          })
+          await refreshSourceCatalogs(deps, repoPath, added.source)
+          return added
         })
-        await refreshSourceCatalogs(deps, repoPath, added.source)
-        return added
-      })
-      return c.json({ ok: true, source: result.source })
-    } catch (e) {
-      return skillsErrorResponse(c, e, {
-        code: 'write_failed',
-        message: 'Failed to add source',
-        logMessage: 'source add failed',
-      })
-    }
-  })
+        return c.json({ ok: true, source: result.source })
+      } catch (e) {
+        return skillsErrorResponse(c, e, {
+          code: 'write_failed',
+          message: 'Failed to add source',
+          logMessage: 'source add failed',
+        })
+      }
+    },
+  )
 
   app.delete('/sources', jsonValidator(SourceUrlBody, { error: 'invalid_url' }), async (c) => {
     try {
@@ -432,7 +436,10 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
 
   app.post(
     '/sources/reconcile',
-    jsonValidator(ReconcileSourceBody, { error: updateSourceError }),
+    jsonValidator(ReconcileSourceBody, {
+      error: updateSourceError,
+      message: sourceValidationMessage,
+    }),
     async (c) => {
       const body = c.req.valid('json')
       try {
@@ -750,6 +757,20 @@ function updateSourceError(issues: z.ZodIssue[]): string {
   return 'invalid_url'
 }
 
+// Validation failures keep their machine-readable code but carry a readable
+// message so the UI does not have to show a generic 400 text.
+function sourceValidationMessage(issues: z.ZodIssue[]): string {
+  const field = issues[0]?.path[0]
+  if (field === 'name') return 'Source name must match ^[a-z0-9]+(-[a-z0-9]+)*$'
+  if (field === 'ref') return 'Git ref is invalid'
+  if (field === 'repo') return 'Repository is invalid'
+  return 'Repository URL is invalid'
+}
+
+const SKILLS_CODE_MESSAGES: Partial<Record<string, string>> = {
+  invalid_source_name: 'Source name must match ^[a-z0-9]+(-[a-z0-9]+)*$',
+}
+
 type SkillsErrorStatus = 400 | 404 | 409 | 422 | 500
 
 const SKILLS_ERROR_MESSAGES: Record<SkillsErrorStatus, string> = {
@@ -780,8 +801,17 @@ function skillsErrorResponse(
     return c.json(sourceNamespaceCollisionPayload(collision), 409)
   }
   if (error instanceof SkillsApplicationError || error instanceof LocalSkillBoundaryError) {
+    const details = error instanceof SkillsApplicationError ? error.details : undefined
     return c.json(
-      { ok: false, error: error.code, message: SKILLS_ERROR_MESSAGES[error.status] },
+      {
+        ok: false,
+        error: error.code,
+        message:
+          error.code === 'duplicate_member_name'
+            ? error.message
+            : (SKILLS_CODE_MESSAGES[error.code] ?? SKILLS_ERROR_MESSAGES[error.status]),
+        ...(details ? { details } : {}),
+      },
       error.status,
     )
   }

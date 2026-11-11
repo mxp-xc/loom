@@ -62,6 +62,64 @@ export async function resolveSourceCacheRoot(
   return { ...directory, repository }
 }
 
+/**
+ * Resolve the cache directory of a source below the cache root. Cache ids are
+ * relative paths (`owner/repo`) so same-named repositories from different
+ * owners never share a directory.
+ */
+export async function inspectSourceCache(
+  fs: CacheFileSystem,
+  root: SourceCacheRoot,
+  sourceId: string,
+): Promise<StablePhysicalDirectory | null> {
+  const segments = sourceCacheSegments(sourceId)
+  let parent: StablePhysicalDirectory = root
+  for (const segment of segments.slice(0, -1)) {
+    const next = await inspectDirectDirectory(fs, parent, segment, 'source cache directory')
+    if (!next) return null
+    parent = next
+  }
+  return inspectDirectDirectory(fs, parent, segments[segments.length - 1]!, 'source cache')
+}
+
+/**
+ * Ensure every intermediate owner directory exists and return the directory
+ * that must contain the final repository directory.
+ */
+export async function ensureSourceCacheParent(
+  fs: CacheFileSystem,
+  root: SourceCacheRoot,
+  sourceId: string,
+): Promise<StablePhysicalDirectory> {
+  const segments = sourceCacheSegments(sourceId)
+  let parent: StablePhysicalDirectory = root
+  for (const segment of segments.slice(0, -1)) {
+    let next = await inspectDirectDirectory(fs, parent, segment, 'source cache directory')
+    if (next && (await inspect(fs, join(next.path, '.git'), 'inspect source cache directory'))) {
+      throw new SourceCacheBoundaryError(
+        409,
+        'source_cache_collision',
+        'Source cache directory is occupied by another source cache',
+      )
+    }
+    if (!next) {
+      await assertStablePhysicalDirectory(fs, root.repository, 'revalidate repository root')
+      await assertStablePhysicalDirectory(fs, root, 'revalidate source cache root')
+      try {
+        await fs.mkdir(join(parent.path, segment), false)
+      } catch (error) {
+        if (!isAlreadyExists(error)) {
+          throw unavailable('failed to create source cache directory', error)
+        }
+      }
+      next = await inspectDirectDirectory(fs, parent, segment, 'source cache directory')
+      if (!next) throw unavailable('source cache directory is unavailable')
+    }
+    parent = next
+  }
+  return parent
+}
+
 export async function resolveSourceCache(
   fs: CacheFileSystem,
   repoPath: string,
@@ -70,7 +128,7 @@ export async function resolveSourceCache(
   assertSourceCacheId(sourceId)
   const root = await resolveSourceCacheRoot(fs, repoPath)
   if (!root) return null
-  const directory = await inspectDirectDirectory(fs, root, sourceId, 'source cache')
+  const directory = await inspectSourceCache(fs, root, sourceId)
   if (!directory) return null
   const gitDirectory = await inspectDirectDirectory(fs, directory, '.git', 'source cache metadata')
   if (!gitDirectory) throw invalid('source cache metadata is missing')
@@ -87,7 +145,9 @@ export async function prepareSourceCacheDestination(
   assertSourceCacheId(sourceId)
   const root = await resolveSourceCacheRoot(fs, repoPath, true)
   if (!root) throw unavailable('source cache root is unavailable')
-  const destination = join(root.path, sourceId)
+  const segments = sourceCacheSegments(sourceId)
+  const parent = await ensureSourceCacheParent(fs, root, sourceId)
+  const destination = join(parent.path, segments[segments.length - 1]!)
   await assertSourceCacheDestinationAvailable(fs, root, sourceId)
   return { root, destination }
 }
@@ -97,10 +157,11 @@ export async function assertSourceCacheDestinationAvailable(
   root: SourceCacheRoot,
   sourceId: string,
 ): Promise<void> {
-  assertSourceCacheId(sourceId)
+  const segments = sourceCacheSegments(sourceId)
   await assertStablePhysicalDirectory(fs, root.repository, 'revalidate repository root')
   await assertStablePhysicalDirectory(fs, root, 'revalidate source cache root')
-  if (await inspect(fs, join(root.path, sourceId), 'inspect source cache destination')) {
+  const destination = join(root.path, ...segments)
+  if (await inspect(fs, destination, 'inspect source cache destination')) {
     throw new SourceCacheBoundaryError(
       409,
       'source_cache_collision',
@@ -206,8 +267,20 @@ export async function removeStablePhysicalDirectory(
   }
 }
 
+const SAFE_CACHE_SEGMENT = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i
+
+export function sourceCacheSegments(sourceId: string): string[] {
+  assertSourceCacheId(sourceId)
+  return sourceId.split('/')
+}
+
 function assertSourceCacheId(sourceId: string): void {
-  if (!/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i.test(sourceId) || sourceId.includes('..')) {
+  if (
+    !sourceId ||
+    sourceId.startsWith('/') ||
+    sourceId.includes('\\') ||
+    !sourceId.split('/').every((segment) => SAFE_CACHE_SEGMENT.test(segment))
+  ) {
     throw invalid('source cache id is invalid')
   }
 }

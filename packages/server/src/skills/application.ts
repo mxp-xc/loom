@@ -3,7 +3,9 @@ import { dirname, isAbsolute, join, normalize, resolve } from 'node:path'
 import {
   addLocalSkill as addLocalSkillMutation,
   addSource as addSourceMutation,
+  deriveDefaultSourceName,
   deriveRepoId,
+  deriveSourceCacheId,
   normalizeOrder,
   normalizeSourceResources,
   normalizeSkillGroupOrder,
@@ -71,6 +73,7 @@ export class SkillsApplicationError extends Error {
     readonly status: 400 | 404 | 409 | 422,
     readonly code: string,
     message: string,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message)
     this.name = 'SkillsApplicationError'
@@ -386,11 +389,11 @@ export class SkillsApplication {
 
   async addSource(repoPath: string, command: AddSourceCommand): Promise<{ source: SkillSource }> {
     const manifest = await this.readManifest(repoPath)
-    const sourceName = normalizeSourceName(command.name) || deriveRepoId(command.url)
+    const sourceName = normalizeSourceName(command.name) || deriveDefaultSourceName(command.url)
     assertValidSourceName(sourceName)
     assertUniqueSource(manifest, { url: command.url, name: sourceName })
-    const cacheId = deriveRepoId(command.url)
-    assertUniqueCacheId(manifest, cacheId)
+    const cacheId = deriveSourceCacheId(command.url)
+    assertUniqueCacheId(manifest, cacheId, command.url)
     const cacheDir = cacheDirFor(repoPath, cacheId)
     assertNoResourceActionConflicts(command.resources)
     const resources = normalizeSourceResources(command.resources)
@@ -415,7 +418,7 @@ export class SkillsApplication {
       cacheSwapped = true
       const currentManifest = await this.readManifest(repoPath)
       assertUniqueSource(currentManifest, { url: command.url, name: sourceName })
-      assertUniqueCacheId(currentManifest, cacheId)
+      assertUniqueCacheId(currentManifest, cacheId, command.url)
       const result = addSourceMutation(currentManifest, {
         name: sourceName,
         url: command.url,
@@ -489,7 +492,7 @@ export class SkillsApplication {
     }
     assertNoResourceActionConflicts(command.resources)
     const requestedResources = normalizeSourceResources(command.resources ?? source.resources)
-    const cacheDir = cacheDirFor(repoPath, deriveRepoId(source.url))
+    const cacheDir = cacheDirFor(repoPath, deriveSourceCacheId(source.url))
     const cacheExists = await this.fs.exists(cacheDir)
     const refUnchanged =
       (command.ref ?? source.ref) === source.ref &&
@@ -966,9 +969,15 @@ function validateSourceSelection(
   const memberNames = new Set<string>()
   const memberEntries = new Set<string>()
   for (const member of members) {
+    if (memberNames.has(member.name)) {
+      throw new SkillsApplicationError(
+        400,
+        'duplicate_member_name',
+        `Duplicate skill name "${member.name}"; select only one bundle with this name`,
+      )
+    }
     if (
       !SOURCE_NAME_REGEX.test(member.name) ||
-      memberNames.has(member.name) ||
       memberEntries.has(member.entry) ||
       bundles.get(member.entry) !== member.name
     ) {
@@ -1184,12 +1193,19 @@ function assertUniqueSource(
   }
 }
 
-function assertUniqueCacheId(manifest: SkillsManifest, cacheId: string): void {
-  if (!manifest.sources.some((source) => deriveRepoId(source.url) === cacheId)) return
+function assertUniqueCacheId(manifest: SkillsManifest, cacheId: string, url: string): void {
+  const conflict = manifest.sources.find((source) => deriveSourceCacheId(source.url) === cacheId)
+  if (!conflict) return
   throw new SkillsApplicationError(
     409,
     'source_cache_exists',
-    `Source cache id already exists: ${cacheId}`,
+    `Source cache id already exists: ${cacheId} (used by ${conflict.url})`,
+    {
+      cacheId,
+      sourceUrl: url,
+      conflictUrl: conflict.url,
+      conflictName: effectiveSourceName(conflict),
+    },
   )
 }
 

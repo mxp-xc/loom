@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { deriveRepoId } from '@loom/core'
+import { deriveSourceCacheId } from '@loom/core'
 import { createProjectionRoutes } from '../../src/api/routes/projection.js'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 import type { IGit } from '../../src/ports/git.js'
@@ -214,7 +214,7 @@ describe('skill content identity boundary', () => {
   })
 
   async function prepareSource(): Promise<string> {
-    const cacheDir = join(repoPath, 'remote-cache', deriveRepoId(SOURCE_URL))
+    const cacheDir = join(repoPath, 'remote-cache', ...deriveSourceCacheId(SOURCE_URL).split('/'))
     await mkdir(cacheDir, { recursive: true })
     await writeSkillsManifest({
       sources: [

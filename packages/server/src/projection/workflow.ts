@@ -5,7 +5,7 @@ import {
   assertSkillDestinationCollisions,
   buildManifest,
   configuredAgents,
-  deriveRepoId,
+  deriveSourceCacheId,
   hasSourceResourceSelection,
   loadRepoManifest,
   mergeConfig,
@@ -244,7 +244,7 @@ export async function projectSkillChanges(
       continue
     }
     const commit = source.pinned_commit?.trim() || source.ref
-    const cacheId = deriveRepoId(source.url)
+    const cacheId = deriveSourceCacheId(source.url)
     const sourceCache = sourceCaches.get(cacheId)
     if (!sourceCache) throw new Error(`Source cache unavailable: ${source.url}`)
     let cached: SourceProjectionCatalogEntry
@@ -538,7 +538,7 @@ async function annotateSourceMemberMetadata(
 ): Promise<void> {
   await Promise.all(
     sources.map(async (source) => {
-      const cacheId = deriveRepoId(source.url)
+      const cacheId = deriveSourceCacheId(source.url)
       const cacheDir = cacheDirFor(repoPath, cacheId)
       const cacheAvailable = await deps.fs.exists(cacheDir)
       if (!cacheAvailable) {
@@ -645,7 +645,7 @@ async function ensureSourceTrees(
 ): Promise<void> {
   for (const source of sources) {
     const { repoId } = sourceIdentity(source)
-    const cacheId = deriveRepoId(source.url)
+    const cacheId = deriveSourceCacheId(source.url)
     const cache = await captureRepoCacheRoot(deps.fs, repoPath, cacheId)
     if (!cache) {
       const err = new Error(`Source cache unavailable: ${source.url}`)
@@ -715,7 +715,7 @@ async function captureAvailableSourceCaches(
   const caches = new Map<string, AuthorizedSourceCache>()
   for (const source of sources) {
     if (source.availability?.available === false) continue
-    const cacheId = deriveRepoId(source.url)
+    const cacheId = deriveSourceCacheId(source.url)
     const root = await captureRepoCacheRoot(fs, repoPath, cacheId)
     if (!root) {
       const err = new Error(`Source cache unavailable: ${source.url}`)

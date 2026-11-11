@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import * as yaml from 'js-yaml'
 import { join } from 'node:path'
 import { registerRoutes } from '../../src/api/router'
-import { deriveRepoId } from '@loom/core'
+import { deriveSourceCacheId } from '@loom/core'
 import type { ProjectionResult } from '../../src/projection/executor.js'
 import type { PreparedSourceUpdate } from '../../src/remote/update.js'
 import { responseJson, validationError } from '../helpers/http.js'
@@ -610,8 +610,8 @@ describe('source scan', () => {
       'skills: []',
       '',
     ].join('\n')
-    memDirectories.set(`${repo}/remote-cache/superpowers/.git`, `directory:${++memIdentity}`)
-    memFiles[`${repo}/remote-cache/superpowers/.git/HEAD`] = 'ref: refs/heads/main\n'
+    memDirectories.set(`${repo}/remote-cache/obra/superpowers/.git`, `directory:${++memIdentity}`)
+    memFiles[`${repo}/remote-cache/obra/superpowers/.git/HEAD`] = 'ref: refs/heads/main\n'
     platformGit.clone.mockClear()
     platformGit.checkout.mockClear()
     platformGit.fetch.mockClear()
@@ -653,7 +653,7 @@ describe('source scan', () => {
       },
     })
     expect(platformGit.revParse).toHaveBeenCalledWith(
-      expect.stringMatching(/[\\/]remote-cache[\\/]superpowers$/),
+      expect.stringMatching(/[\\/]remote-cache[\\/]obra[\\/]superpowers$/),
       'pinned-commit^{commit}',
     )
     expect(platformGit.clone).not.toHaveBeenCalled()
@@ -909,7 +909,7 @@ describe('source updates', () => {
   it('installs preserved members from pinned Git blobs through the local transaction', async () => {
     const repo = '/tmp/source-preserve-transaction'
     const sourceUrl = 'https://github.com/mattpocock/skills'
-    const cache = `${repo}/remote-cache/${deriveRepoId(sourceUrl)}`
+    const cache = `${repo}/remote-cache/${deriveSourceCacheId(sourceUrl)}`
     memFiles[`${repo}/skills.yaml`] = [
       'sources:',
       `  - url: ${sourceUrl}`,
@@ -998,7 +998,7 @@ describe('source updates', () => {
         '',
       ].join('\n')
       if (cacheDirectoryExists) {
-        memDirectories.set(`${repo}/remote-cache/skills`, `directory:${++memIdentity}`)
+        memDirectories.set(`${repo}/remote-cache/mattpocock/skills`, `directory:${++memIdentity}`)
       }
       projectRepositoryMock.mockClear()
       projectRepositoryMock.mockResolvedValue({ ok: true })
@@ -1066,7 +1066,11 @@ describe('source metadata', () => {
     })
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual(validationError('invalid_url'))
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: 'invalid_url',
+      message: 'Repository URL is invalid',
+    })
   })
 
   it('POST /api/sources atomically stores selected bundles and resources', async () => {
@@ -1141,7 +1145,11 @@ describe('source metadata', () => {
       }),
     })
     expect(invalid.status).toBe(400)
-    expect(await invalid.json()).toMatchObject({ ok: false, error: 'invalid_source_name' })
+    expect(await invalid.json()).toMatchObject({
+      ok: false,
+      error: 'invalid_source_name',
+      message: 'Source name must match ^[a-z0-9]+(-[a-z0-9]+)*$',
+    })
 
     const duplicate = await app.request('/api/sources', {
       method: 'POST',

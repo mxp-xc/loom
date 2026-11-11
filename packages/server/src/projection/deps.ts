@@ -143,7 +143,7 @@ export function createProjectionDeps(
       )
     },
     resolveSourceRoot: (sourcePlan) => {
-      assertSafePathSegment(sourcePlan.cacheId, 'source cache id')
+      assertSafeRelativePath(sourcePlan.cacheId, 'source cache id')
       const authorized = authorizedSourceCaches.get(sourcePlan.cacheId)
       if (authorized) {
         if (
@@ -159,7 +159,7 @@ export function createProjectionDeps(
       return enforceSourceAuthorization ? null : cacheDirFor(repoPath, sourcePlan.cacheId)
     },
     resolveSourceFiles: async (sourcePlan) => {
-      assertSafePathSegment(sourcePlan.cacheId, 'source cache id')
+      assertSafeRelativePath(sourcePlan.cacheId, 'source cache id')
       const authorized = authorizedSourceCaches.get(sourcePlan.cacheId)
       if (
         authorized &&
@@ -335,7 +335,7 @@ function resolveSourceSkillDir(
   assertSafePathSegment(source.repoId, 'source repository id')
   assertSafePathSegment(source.memberName, 'source member name')
   const cacheId = source.cacheId ?? source.repoId
-  assertSafePathSegment(cacheId, 'source cache id')
+  assertSafeRelativePath(cacheId, 'source cache id')
   const authorized = sourceCaches.get(cacheId)
   if (enforceSourceAuthorization && !authorized) {
     throw new Error(`Source cache is not authorized: ${cacheId}`)

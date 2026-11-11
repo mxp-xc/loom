@@ -178,13 +178,14 @@ Implications:
 - 未选择的空父目录自然省略；若省略后产生同名 destination collision，必须保留足以消除冲突的父目录。
 - SkillBundle 内部结构始终完整保留；明确选择的 resource directory 保留自身名称和内部相对结构。
 - source-global resources 只投影到至少选择了该 source 一个 member 的 destination。
+- 某个 destination 只有一个 bundle、没有选中的 resource root，且 bundle 名与 source namespace 名相同时，bundle 内容直接投影到 namespace 根；名字不同或存在资源 root 时仍保留各自目录名。
 - 选择或 source 内容变化导致 projection base 或平铺/嵌套布局改变时，旧路径的清理和新路径的创建属于同一次 desired-state reconcile。
 
 Safety:
 
 - Namespace root 必须有能证明 repo 和 source 归属的 marker；marker 不保存可能包含凭据的原始 Git URL。
 - Marker完整绑定owner repository、source cache identity、source name、实际namespace name、kind和version；任一字段missing、mismatch、malformed或read failure都保留artifact并使需要该destination的projection失败。
-- Source cache id是safe segment，cache root和entry必须是canonical repository内的真实目录；cache escape、ancestor link、junction或identity drift在任何Git read/checkout前fail closed。
+- Source cache id 是安全的相对路径（远端为 `<owner>/<repo>`），每级目录和最终 entry 都必须是 cache root 内的 canonical 真实目录；cache escape、ancestor link、junction 或 identity drift 在任何 Git read/checkout 前 fail closed。
 - 同一 destination 中，local skill destination 不得与 source namespace 重合或位于其下；planner 必须在任何文件系统写入前拒绝冲突。平铺 namespace 与 local skill 同名时同样冲突。不同 destination 之间的同名路径互不构成 collision。
 - 替换或删除现有 namespace 前必须验证 marker ownership；没有 marker、marker 不匹配或 destination collision 时 projection 失败并保留原内容。
 - Namespace staging、替换和跨 destination 执行必须可回滚；全部成功前不能删除 backups 或报告成功。

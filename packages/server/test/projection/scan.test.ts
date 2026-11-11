@@ -986,7 +986,7 @@ describe('loadDisplayManifest', () => {
         '',
       ].join('\n'),
     )
-    await mkdir(join(root, 'remote-cache', 'private-skills'), { recursive: true })
+    await mkdir(join(root, 'remote-cache', 'team', 'private-skills'), { recursive: true })
     const git = sourceTreeGit([])
     git.revParse = vi.fn(async () => {
       throw new Error('not a readable Git cache')

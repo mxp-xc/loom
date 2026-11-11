@@ -200,7 +200,7 @@ describe('scanSourceTree', () => {
     expect(git.show).toHaveBeenCalledTimes(24)
   })
 
-  it('rejects duplicate bundle names derived from different entry paths', async () => {
+  it('keeps bundles that share a name but live in different paths', async () => {
     const entries: GitTreeEntry[] = [
       tree('a', 'a-dir'),
       tree('a/demo', 'a-demo-dir'),
@@ -212,14 +212,19 @@ describe('scanSourceTree', () => {
 
     const git = mockGit(entries)
 
-    await expect(
-      scanSourceTree(git, '/repo', 'HEAD', {
-        url: 'https://example.test/source.git',
-      }),
-    ).rejects.toThrow(
-      'Duplicate source skill member name "demo" from a/demo/SKILL.md and b/demo/SKILL.md',
-    )
-    expect(git.show).not.toHaveBeenCalled()
+    const scanned = await scanSourceTree(git, '/repo', 'HEAD', {
+      url: 'https://example.test/source.git',
+    })
+
+    const bundleNames = (nodes: typeof scanned.nodes): Array<{ name: string; path: string }> =>
+      nodes.flatMap((node) => [
+        ...(node.kind === 'bundle' ? [{ name: node.name, path: node.path }] : []),
+        ...(node.kind === 'container' ? bundleNames(node.children) : []),
+      ])
+    expect(bundleNames(scanned.nodes)).toEqual([
+      { name: 'demo', path: 'a/demo' },
+      { name: 'demo', path: 'b/demo' },
+    ])
   })
 })
 

@@ -265,7 +265,7 @@ export async function captureRepoCacheRoot(
   repoPath: string,
   cacheId: string,
 ): Promise<StableEntry | null> {
-  assertSafePathSegment(cacheId, 'source cache id')
+  assertSafeRelativePath(cacheId, 'source cache id')
   const repo = await captureStableEntry(fs, repoPath, 'directory', 'repository root')
   const cacheParentPath = join(repo.canonicalPath, 'remote-cache')
   const cacheParentEntry = await fs.inspectEntry(cacheParentPath)
@@ -286,19 +286,25 @@ export async function captureRepoCacheRoot(
     throw new Error(`Remote cache root escaped the repository: ${cacheParentPath}`)
   }
 
-  const cachePath = join(cacheParent.canonicalPath, cacheId)
-  const cacheEntry = await fs.inspectEntry(cachePath)
-  if (!cacheEntry) {
-    await revalidateStableEntry(fs, repo, 'repository root')
-    await revalidateStableEntry(fs, cacheParent, 'remote cache root')
-    return null
-  }
-  const cache = await captureStableEntry(fs, cachePath, 'directory', 'source cache')
-  if (
-    cache.canonicalPath !== normalize(cachePath) ||
-    normalize(dirname(cache.canonicalPath)) !== cacheParent.canonicalPath
-  ) {
-    throw new Error(`Source cache is not a real direct child: ${cachePath}`)
+  let parent = cacheParent
+  let cache: StableEntry | null = null
+  for (const segment of cacheId.split('/')) {
+    const cachePath = join(parent.canonicalPath, segment)
+    const cacheEntry = await fs.inspectEntry(cachePath)
+    if (!cacheEntry) {
+      await revalidateStableEntry(fs, repo, 'repository root')
+      await revalidateStableEntry(fs, cacheParent, 'remote cache root')
+      return null
+    }
+    const captured = await captureStableEntry(fs, cachePath, 'directory', 'source cache')
+    if (
+      captured.canonicalPath !== normalize(cachePath) ||
+      normalize(dirname(captured.canonicalPath)) !== parent.canonicalPath
+    ) {
+      throw new Error(`Source cache is not a real child: ${cachePath}`)
+    }
+    cache = captured
+    parent = captured
   }
   await revalidateStableEntry(fs, repo, 'repository root')
   await revalidateStableEntry(fs, cacheParent, 'remote cache root')

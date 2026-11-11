@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { join, normalize } from 'node:path'
+import { dirname, join, normalize } from 'node:path'
 import {
   AgentIdSchema,
   LocalSkillIdSchema,
@@ -643,6 +643,7 @@ export class SourceUpdateSessionStore {
         if (session.createdAt && session.updatedAt) eligible.push(session)
       } catch (err) {
         sessionLogger.error('source update session prune failed', { err, sessionId: id, repoPath })
+        await this.dropUnrecoverableSession(id, repoPath)
       }
     }
 
@@ -665,6 +666,36 @@ export class SourceUpdateSessionStore {
           repoPath,
         })
       }
+    }
+  }
+
+  /**
+   * A session whose persisted state or workspace identity can no longer be
+   * verified can never be finalized; drop its temp workspace so it stops
+   * failing every prune instead of accumulating.
+   */
+  private async dropUnrecoverableSession(id: string, repoPath: string): Promise<void> {
+    const root = join(repoPath, 'temp', 'source-updates')
+    const directory = join(root, id)
+    try {
+      const entry = await this.fs.inspectEntry(directory)
+      if (entry?.kind !== 'directory') return
+      const canonical = normalize(await this.fs.realPath(directory))
+      if (canonical !== normalize(directory) || normalize(dirname(canonical)) !== normalize(root)) {
+        sessionLogger.warn('unrecoverable source update session path is invalid', {
+          sessionId: id,
+          repoPath,
+        })
+        return
+      }
+      await this.fs.removeDir(directory)
+      sessionLogger.warn('dropped unrecoverable source update session', { sessionId: id, repoPath })
+    } catch (err) {
+      sessionLogger.warn('failed to drop unrecoverable source update session', {
+        err,
+        sessionId: id,
+        repoPath,
+      })
     }
   }
 

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { join, normalize } from 'node:path'
-import { deriveRepoId } from '@loom/core'
+import { deriveSourceCacheId } from '@loom/core'
 import type { FileSystemEntry, IFileSystem } from '../ports/fs.js'
 
 export const SOURCE_UPDATE_SESSION_VERSION = 1 as const
@@ -107,7 +107,7 @@ export function deriveSourceUpdateWorkspace(
     stateTemporaryFile: join(sessionRoot, 'session.next.json'),
     ownerFile: join(sessionRoot, SOURCE_UPDATE_OWNER_FILE),
     manifestPath: join(repoPath, 'skills.yaml'),
-    liveCacheDir: join(repoPath, 'remote-cache', deriveRepoId(sourceUrl)),
+    liveCacheDir: join(repoPath, 'remote-cache', ...deriveSourceCacheId(sourceUrl).split('/')),
   }
 }
 

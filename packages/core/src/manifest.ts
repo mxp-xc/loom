@@ -183,6 +183,21 @@ function normalizeMcpManifest(value: unknown, diagnostics: ManifestLoadDiagnosti
 }
 
 export const SOURCE_NAME_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/
+
+/**
+ * Default source name derived from a repository URL when the user does not
+ * provide one. Repository names can contain uppercase letters or characters
+ * that are invalid in a source name, so the derived value is normalized to
+ * `SOURCE_NAME_REGEX` (e.g. `OpenCLI` -> `opencli`).
+ */
+export function deriveDefaultSourceName(url: string): string {
+  const name = deriveRepoId(url)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  if (!name) throw new Error('Repository URL has no usable source name')
+  return name
+}
 const SOURCE_PATH_REGEX = /^(?!\/)(?![A-Za-z]:\/)(?!.*(?:^|\/)\.\.?(?:\/|$))[^\\]+$/
 export const McpServerSchema = z.discriminatedUnion('type', [
   z

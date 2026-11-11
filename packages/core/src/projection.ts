@@ -351,7 +351,7 @@ function planSourceProjection(
   }
 
   const sourceName = sourceIdentity(source).repoId
-  const cacheId = deriveRepoId(source.url)
+  const cacheId = deriveSourceCacheId(source.url)
   const resourceEntries = planResourceEntries(nodes, selectedResourceNodes, resources)
   const resourceRoots = selectedResourceRoots(resources, nodes, selectedResourceNodes)
   const hasResourceSelection = resources.include.length > 0
@@ -384,7 +384,19 @@ function planSourceProjection(
         return { kind: 'bundle', sourcePath: bundle.path, targetPath: '' }
       })
       const rootPaths = [...bundleEntries.map((entry) => entry.sourcePath), ...resourceRoots]
-      const base = rootPaths.includes('') ? '' : projectionBase(rootPaths)
+      // A destination with one bundle and no resources is flattened into the
+      // namespace only when the bundle name matches the namespace name; otherwise
+      // the bundle keeps its own directory (source "foo" with skill "bar" stays
+      // "foo/bar/").
+      const flattenSingleBundle =
+        destinationMembers.length === 1 &&
+        resourceRoots.length === 0 &&
+        destinationMembers[0]!.name === sourceName
+      const base = rootPaths.includes('')
+        ? ''
+        : flattenSingleBundle
+          ? rootPaths[0]!
+          : projectionBase(rootPaths)
       const entries = [...bundleEntries, ...resourceEntries]
         .map((entry) => ({
           ...entry,
@@ -515,7 +527,7 @@ function flattenSourceTree(nodes: SourceTreeNode[]): SourceTreeNode[] {
 }
 
 function relativeToProjectionBase(path: string, base: string): string {
-  if (!path) return ''
+  if (!path || path === base) return ''
   if (!base) return path
   const prefix = `${base}/`
   if (!path.startsWith(prefix)) throw new Error(`Projection root ${path} is outside base ${base}`)
@@ -541,32 +553,64 @@ function isSameOrDescendant(path: string, ancestor: string): boolean {
   return path === ancestor || isDescendant(path, ancestor)
 }
 
-export function deriveRepoId(url: string): string {
+interface RepositoryPath {
+  segments: string[]
+  /** True for remote URLs, where every path segment identifies the repository. */
+  remote: boolean
+}
+
+function repositoryPath(url: string): RepositoryPath {
   const input = url.trim()
   if (!input) throw new Error('Repository URL must not be empty')
 
   let pathname: string
+  let remote = false
   if (/^[a-z][a-z\d+.-]*:\/\//i.test(input)) {
+    const scheme = /^([a-z][a-z\d+.-]*):\/\//i.exec(input)![1]!.toLowerCase()
     const authorityAndPath = input.replace(/^[a-z][a-z\d+.-]*:\/\//i, '')
     if (!authorityAndPath || /\s/.test(authorityAndPath)) {
       throw new Error('Invalid repository URL')
     }
     const pathStart = authorityAndPath.indexOf('/')
     pathname = pathStart === -1 ? '' : authorityAndPath.slice(pathStart)
+    remote = scheme !== 'file' && pathStart !== -1
   } else {
     const scpMatch = input.match(/^(?:[^/@:\s]+@)?[^/:\s]+:(.*)$/)
     pathname = scpMatch ? scpMatch[1] : input
+    remote = Boolean(scpMatch)
   }
 
   const normalized = pathname.split(/[?#]/, 1)[0].replace(/\/+$/, '')
-  const repoId = normalized
-    .split('/')
-    .at(-1)
-    ?.replace(/\.git$/, '')
-  if (!repoId || repoId === '.' || repoId === '..') {
+  const segments = normalized.split('/').filter(Boolean)
+  if (segments.length === 0) throw new Error('Repository URL has no repository name')
+  segments[segments.length - 1] = segments[segments.length - 1]!.replace(/\.git$/, '')
+  if (!segments[segments.length - 1]) {
+    throw new Error('Repository URL has no repository name')
+  }
+  return { segments, remote }
+}
+
+export function deriveRepoId(url: string): string {
+  const repoId = repositoryPath(url).segments.at(-1)!
+  if (repoId === '.' || repoId === '..') {
     throw new Error('Repository URL has no repository name')
   }
   return repoId
+}
+
+/**
+ * Cache identity is the repository path itself, e.g. `owner/repo` for
+ * https://github.com/owner/repo. It keeps same-named repositories from
+ * different owners in distinct cache directories. Local paths and ownerless
+ * URLs fall back to the repository name.
+ */
+export function deriveSourceCacheId(url: string): string {
+  const { segments, remote } = repositoryPath(url)
+  if (!remote) return segments[segments.length - 1]!
+  if (segments.some((segment) => segment === '.' || segment === '..')) {
+    throw new Error('Repository URL has no repository name')
+  }
+  return segments.join('/')
 }
 
 function sourceRepoId(source: SourceIdentityInput): string {
