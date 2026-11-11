@@ -411,6 +411,8 @@ function EditSourceModalContent({ repoPath, source, showToast, onClose, onSaved 
                     loadingLabel="Loading refs…"
                     options={refOptions.map((item) => ({ value: item, label: item }))}
                     placeholder={refsLoading ? '加载中…' : '—'}
+                    searchable
+                    searchPlaceholder="搜索 ref…"
                   />
                 </div>
               </div>

@@ -1177,22 +1177,21 @@ describe('Add Skill modal', () => {
     expect(within(dialog).getByTestId('skills-workbench')).toBeDefined()
     expect(within(dialog).getByTestId('skills-config-pane')).toBeDefined()
     expect(within(dialog).getByTestId('skills-results-pane')).toBeDefined()
-    expect(within(dialog).getByText('Add')).toBeDefined()
-    expect(within(dialog).getByRole('heading', { name: 'Skills' })).toBeDefined()
-    expect(within(dialog).getByRole('button', { name: 'Scan directory' })).toBeDefined()
-
     const localMode = within(dialog).getByRole('button', { name: 'Local skill' })
     const sourceMode = within(dialog).getByRole('button', { name: 'Source' })
-    expect(localMode.getAttribute('aria-pressed')).toBe('true')
-    expect(sourceMode.getAttribute('aria-pressed')).toBe('false')
-
-    fireEvent.click(sourceMode)
-    expect(localMode.getAttribute('aria-pressed')).toBe('false')
     expect(sourceMode.getAttribute('aria-pressed')).toBe('true')
+    expect(localMode.getAttribute('aria-pressed')).toBe('false')
     expect(within(dialog).getByRole('heading', { name: 'New source' })).toBeDefined()
     expect(within(dialog).getByRole('button', { name: 'Refresh repository tree' })).toBeDefined()
     expect(within(dialog).queryByRole('combobox')).toBeNull()
     expect(within(dialog).getByRole('button', { name: 'Repository ref' })).toBeDefined()
+
+    fireEvent.click(localMode)
+    expect(localMode.getAttribute('aria-pressed')).toBe('true')
+    expect(sourceMode.getAttribute('aria-pressed')).toBe('false')
+    expect(within(dialog).getByText('Add')).toBeDefined()
+    expect(within(dialog).getByRole('heading', { name: 'Skills' })).toBeDefined()
+    expect(within(dialog).getByRole('button', { name: 'Scan directory' })).toBeDefined()
   })
 
   it('closes the repository ref dropdown before closing the modal on Escape', async () => {
@@ -1357,6 +1356,7 @@ describe('Add Skill modal', () => {
     } as never)
 
     render(<AddSkillModal open repoPath="/tmp/add-local-filter" onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Local skill' }))
 
     await screen.findByText('alpha-skill')
     fireEvent.click(screen.getByRole('checkbox', { name: 'alpha-skill' }))
@@ -2541,6 +2541,61 @@ describe('Skill source updates', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: '确认 skills 更新' })).toBeNull(),
     )
+  })
+
+  it('closes the update confirmation immediately while cancel is still pending', async () => {
+    vi.mocked(api.update).mockResolvedValueOnce({
+      updates: [{ hasUpdate: true, latestTag: 'v6.1.1', latestCommit: 'bbb' }],
+    } as never)
+    const cancel = deferred<{ ok: boolean }>()
+    vi.mocked(api.cancelSourceUpdate).mockReturnValueOnce(cancel.promise as never)
+
+    render(
+      <SkillSourceListHarness
+        repoPath="/tmp/tag-update-pending"
+        manifest={
+          {
+            skills: {
+              sources: [
+                {
+                  url: 'https://github.com/obra/superpowers.git',
+                  ref: 'v6.0.3',
+                  type: 'tag',
+                  pinned_commit: 'bbb',
+                  members: [],
+                },
+              ],
+              skills: [],
+            },
+            mcp: [],
+            vars: { default: {}, active: {} },
+            config: { agents: [] },
+            errors: [],
+          } as never
+        }
+        showToast={vi.fn()}
+        onOpenDetail={vi.fn()}
+        onOpenScan={vi.fn()}
+        onOpenEdit={vi.fn()}
+        expandedGroups={new Set()}
+        onToggleGroup={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '检查更新 source superpowers' }))
+    fireEvent.click(await screen.findByRole('button', { name: '更新 source superpowers' }))
+    await screen.findByRole('dialog', { name: '确认 skills 更新' })
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    expect(screen.queryByRole('dialog', { name: '确认 skills 更新' })).toBeNull()
+    expect(api.cancelSourceUpdate).toHaveBeenCalledWith({
+      repo: '/tmp/tag-update-pending',
+      sessionId: 'update-1',
+    })
+    await act(async () => {
+      cancel.resolve({ ok: true })
+    })
   })
 
   it('requires confirmation before deleting a source', async () => {

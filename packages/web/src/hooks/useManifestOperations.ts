@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  deriveRepoId,
+  deriveDefaultSourceName,
   normalizeSkillProjectionAssignment,
   sourceIdentity,
   AGENT_IDS,
@@ -615,7 +615,7 @@ export function useManifestOperations(
         async () => {
           const created = (await api.addSource({
             repo: repoPath,
-            name: input.name?.trim() || deriveRepoId(input.url),
+            name: input.name?.trim() || deriveDefaultSourceName(input.url),
             url: input.url,
             ref: input.ref,
             ...(input.type ? { type: input.type } : {}),

@@ -5,7 +5,8 @@ import { IconButton } from '@/components/ui/IconButton'
 import { Dropdown } from '@/components/ui/dropdown'
 import { Check, Folder, FolderOpen, GitFork, RefreshCw } from 'lucide-react'
 import {
-  deriveRepoId,
+  SOURCE_NAME_REGEX,
+  deriveDefaultSourceName,
   type SourceResources,
   type SourceTree,
   type SourceTreeNode,
@@ -19,7 +20,7 @@ function sourceNameFromUrl(url: string): string {
   const trimmed = url.trim()
   if (!trimmed) return ''
   try {
-    return deriveRepoId(trimmed)
+    return deriveDefaultSourceName(trimmed)
   } catch {
     return ''
   }
@@ -40,6 +41,29 @@ interface Props {
 const DEFAULT_LOCAL_DIR = '~/.agents/skills'
 const emptyResources: SourceResources = { include: [], exclude: [] }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function addSourceFailureMessage(error: unknown, fallback: string | undefined): string {
+  if (isRecord(error) && error.code === 'source_cache_exists') {
+    const details = isRecord(error.details) ? error.details : {}
+    const cacheId = typeof details.cacheId === 'string' ? details.cacheId : ''
+    const conflictUrl = typeof details.conflictUrl === 'string' ? details.conflictUrl : ''
+    const conflictName = typeof details.conflictName === 'string' ? details.conflictName : ''
+    const conflicting = conflictName
+      ? conflictUrl
+        ? `${conflictName}（${conflictUrl}）`
+        : conflictName
+      : conflictUrl
+    if (cacheId && conflicting) {
+      return `缓存目录 ${cacheId} 已属于 ${conflicting}；同一个仓库不能重复添加`
+    }
+    return '已有其他 source 使用相同的缓存目录'
+  }
+  return fallback || '添加 source 失败'
+}
+
 function flattenSourceTree(nodes: readonly SourceTreeNode[]): SourceTreeNode[] {
   return nodes.flatMap((node) => [
     node,
@@ -58,7 +82,7 @@ function renameRootBundle(tree: SourceTree | null, name: string): SourceTree | n
 export default function AddSkillModal({ open, repoPath, onClose }: Props) {
   const operations = useManifestOperations(repoPath)
   const { scanLocalSkills, loadSourceRefs, scanSourceTree, addLocalSkills, addSource } = operations
-  const [addTab, setAddTab] = useState<'local' | 'source'>('local')
+  const [addTab, setAddTab] = useState<'local' | 'source'>('source')
   const [addBusy, setAddBusy] = useState(false)
   const [addErr, setAddErr] = useState<string | null>(null)
 
@@ -162,7 +186,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
     if (!open) return
     setAddErr(null)
     setAddBusy(false)
-    setAddTab('local')
+    setAddTab('source')
     setLocalPath(DEFAULT_LOCAL_DIR)
     setLocalSkills([])
     setLocalSelected(new Set())
@@ -300,11 +324,24 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
       setAddErr('url 不能为空')
       return
     }
+    let sourceName = srcName.trim()
+    if (!sourceName) {
+      try {
+        sourceName = deriveDefaultSourceName(srcUrl.trim())
+      } catch {
+        setAddErr('Repository URL 无效')
+        return
+      }
+    }
+    if (!SOURCE_NAME_REGEX.test(sourceName)) {
+      setAddErr('Source name 只能包含小写字母、数字和连字符（-）')
+      return
+    }
     setAddBusy(true)
     setAddErr(null)
     try {
       const res = await addSource({
-        name: srcName.trim() || deriveRepoId(srcUrl.trim()),
+        name: sourceName,
         url: srcUrl.trim(),
         ref: srcRef.trim() || 'HEAD',
         type: srcType,
@@ -317,7 +354,7 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
         resources: srcSelection.resources,
       })
       if (res.ok) onClose()
-      else setAddErr(res.message || '添加 source 失败')
+      else setAddErr(addSourceFailureMessage(res.error, res.message))
     } finally {
       setAddBusy(false)
     }
@@ -494,6 +531,8 @@ export default function AddSkillModal({ open, repoPath, onClose }: Props) {
                 options={refOptions.map((item) => ({ value: item, label: item }))}
                 disabled={srcRefsLoading || !srcUrl.trim()}
                 placeholder={srcRefsLoading ? '加载中…' : '—'}
+                searchable
+                searchPlaceholder="搜索 ref…"
               />
             </div>
           </div>

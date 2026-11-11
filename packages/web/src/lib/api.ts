@@ -135,6 +135,7 @@ async function json<T>(res: Response): Promise<T> {
           | string
         message?: string
         diagnostics?: VarsDiagnostic[]
+        details?: Record<string, unknown>
       }
       const nested = typeof payload.error === 'object' ? payload.error : undefined
       const flatCode = typeof payload.error === 'string' ? payload.error : undefined
@@ -144,7 +145,7 @@ async function json<T>(res: Response): Promise<T> {
         res.status,
         nested?.code ?? flatCode,
         nested?.diagnostics ?? payload.diagnostics,
-        { details: nested },
+        { details: nested ?? payload.details },
       )
     } catch (cause) {
       if (cause instanceof ApiError) throw cause

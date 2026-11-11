@@ -432,20 +432,15 @@ export default function SkillSourceList({
     }
   }
 
-  const cancelReconciliation = async () => {
+  const cancelReconciliation = () => {
     if (!reconciliation) return
-    setReconciliationBusy(true)
+    const sessionId = reconciliation.sessionId
+    // Dismiss immediately: the server-side discard can wait for an in-flight
+    // candidate hydration, and reusing the confirm busy state made the dialog
+    // look like it had been confirmed.
+    setReconciliation(null)
     setReconciliationError(null)
-    try {
-      const result = await operations.cancelSourceUpdate(reconciliation.sessionId)
-      if (!result.ok) {
-        setReconciliationError(result.message ?? '取消 source 更新失败')
-        return
-      }
-      setReconciliation(null)
-    } finally {
-      setReconciliationBusy(false)
-    }
+    void operations.cancelSourceUpdate(sessionId)
   }
 
   const requestDeleteSource = (url: string, label: string) => {
