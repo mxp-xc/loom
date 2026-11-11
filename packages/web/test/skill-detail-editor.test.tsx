@@ -247,4 +247,69 @@ describe('SkillDetailEditor', () => {
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Start editing' }))
     expect(within(dialog).getByRole('textbox', { name: 'SKILL.md 内容' })).toBeDefined()
   })
+
+  it('shows the flat Claude Code folder and nested other destinations for source members', async () => {
+    render(
+      <SkillDetailEditor
+        repoPath="/tmp/source-flat-folder"
+        agents={['claude-code', 'codex']}
+        operations={operations}
+        detail={{
+          skillId: 'superpowers/receiving-code-review',
+          source: 'https://github.com/obra/superpowers.git',
+          sourceName: 'superpowers',
+          memberEntry: 'receiving-code-review/SKILL.md',
+          memberName: 'receiving-code-review',
+          hasResourceSelection: false,
+          path: 'receiving-code-review/SKILL.md',
+          agents: ['claude-code', 'codex'],
+          shared: true,
+        }}
+        showToast={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'superpowers/receiving-code-review',
+    })
+    expect(
+      within(dialog).getByText('~/.claude/skills/superpowers-receiving-code-review'),
+    ).toBeDefined()
+    expect(
+      within(dialog).getByText('~/.codex/skills/superpowers/receiving-code-review'),
+    ).toBeDefined()
+    expect(
+      within(dialog).getByText('~/.agents/skills/superpowers/receiving-code-review'),
+    ).toBeDefined()
+  })
+
+  it('keeps the Claude Code namespace path when the source selects resources', async () => {
+    render(
+      <SkillDetailEditor
+        repoPath="/tmp/source-nested-folder"
+        agents={['claude-code']}
+        operations={operations}
+        detail={{
+          skillId: 'superpowers/receiving-code-review',
+          source: 'https://github.com/obra/superpowers.git',
+          sourceName: 'superpowers',
+          memberEntry: 'receiving-code-review/SKILL.md',
+          memberName: 'receiving-code-review',
+          hasResourceSelection: true,
+          path: 'receiving-code-review/SKILL.md',
+          agents: ['claude-code'],
+        }}
+        showToast={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'superpowers/receiving-code-review',
+    })
+    expect(
+      within(dialog).getByText('~/.claude/skills/superpowers/receiving-code-review'),
+    ).toBeDefined()
+  })
 })

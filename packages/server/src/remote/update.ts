@@ -510,7 +510,7 @@ function projectionEntryMap(
         (entry) =>
           [
             `${skillProjectionDestinationKey(plan.destination)}\0${entry.kind}\0${entry.sourcePath}`,
-            entry,
+            plan.layout === 'flat' ? { ...entry, targetPath: plan.namespace } : entry,
           ] as const,
       ),
     ),

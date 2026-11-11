@@ -1,4 +1,12 @@
-import type { Manifest, AgentId, Config, Memory, SkillSource, SourceTreeNode } from './types.js'
+import type {
+  Manifest,
+  AgentId,
+  Config,
+  Memory,
+  SkillSource,
+  SourceResources,
+  SourceTreeNode,
+} from './types.js'
 import { applicableAgents } from './agents.js'
 import {
   skillProjectionDestinationKey,
@@ -36,12 +44,20 @@ export interface SourceProjectionEntry {
   sourcePath: string
   targetPath: string
 }
+export type SourceProjectionLayout = 'flat' | 'namespace'
+
 export interface SourceProjectionPlan {
   sourceName: string
   sourceUrl: string
   cacheId: string
   commit: string
   destination: SkillProjectionDestination
+  /** Managed directory name under the destination skills root. */
+  namespace: string
+  /** Per-member flat folder for Claude Code, or the per-source namespace. */
+  layout: SourceProjectionLayout
+  /** Whether bundle-external resources keep this source in a namespace. */
+  hasResourceSelection: boolean
   projectionBase: string
   entries: SourceProjectionEntry[]
 }
@@ -49,6 +65,47 @@ export interface PreservedSourceNamespace {
   sourceName: string
   sourceUrl: string
   destination: SkillProjectionDestination
+}
+
+/**
+ * Claude Code only discovers skill folders that are direct children of its
+ * skills root. A source without bundle-external resources therefore projects
+ * every selected member as its own `<source-name>-<member-name>` folder.
+ * Resources need their directory relationship, so any other destination (or a
+ * Claude Code source with selected resources) keeps the per-source namespace.
+ */
+export function sourceProjectionLayout(
+  destination: SkillProjectionDestination,
+  hasResourceSelection: boolean,
+): SourceProjectionLayout {
+  return destination.kind === 'agent' &&
+    destination.agent === 'claude-code' &&
+    !hasResourceSelection
+    ? 'flat'
+    : 'namespace'
+}
+
+export function sourceMemberNamespace(sourceName: string, memberName: string): string {
+  return `${sourceName}-${memberName}`
+}
+
+export function hasSourceResourceSelection(resources?: Partial<SourceResources>): boolean {
+  return normalizeSourceResources(resources).include.length > 0
+}
+
+/**
+ * Skill folder name (relative to the destination skills root) that holds a
+ * source member. The UI uses the same helper so previews match projection.
+ */
+export function sourceMemberFolder(
+  destination: SkillProjectionDestination,
+  sourceName: string,
+  memberName: string,
+  hasResourceSelection: boolean,
+): string {
+  return sourceProjectionLayout(destination, hasResourceSelection) === 'flat'
+    ? sourceMemberNamespace(sourceName, memberName)
+    : `${sourceName}/${memberName}`
 }
 export interface ProjectionPlan {
   links: LinkPlan[]
@@ -141,6 +198,7 @@ export function planProjection(
       return skillProjectionDestinations(assignment, agents)
     }),
   )
+  assertSourceNamespaceUniqueness(sourcePlans)
   assertSkillDestinationCollisions(links, [...sourcePlans, ...preservedSourceNamespaces])
 
   const mcpEntries: McpPlanEntry[] = manifest.mcp.map((m) => ({
@@ -188,14 +246,21 @@ export function planProjection(
   }
 }
 
+export type SourceNamespaceClaim = {
+  destination: SkillProjectionDestination
+  namespace?: string
+  sourceName: string
+}
+
+function sourceNamespaceOf(plan: SourceNamespaceClaim): string {
+  return plan.namespace ?? plan.sourceName
+}
+
 export function assertSkillDestinationCollisions(
   links: Array<Pick<LinkPlan, 'skillId' | 'destinations'>>,
-  sourcePlans: Array<Pick<SourceProjectionPlan, 'sourceName' | 'destination'>>,
+  sourcePlans: SourceNamespaceClaim[],
 ): void {
-  const namespacesByDestination = new Map<
-    SkillProjectionDestinationKey,
-    Array<Pick<SourceProjectionPlan, 'sourceName' | 'destination'>>
-  >()
+  const namespacesByDestination = new Map<SkillProjectionDestinationKey, SourceNamespaceClaim[]>()
   for (const sourcePlan of sourcePlans) {
     const key = skillProjectionDestinationKey(sourcePlan.destination)
     const plans = namespacesByDestination.get(key) ?? []
@@ -208,18 +273,34 @@ export function assertSkillDestinationCollisions(
     for (const destination of link.destinations) {
       const destinationKey = skillProjectionDestinationKey(destination)
       for (const sourcePlan of namespacesByDestination.get(destinationKey) ?? []) {
-        const namespace = normalizeProjectionDestination(sourcePlan.sourceName)
+        const namespace = normalizeProjectionDestination(sourceNamespaceOf(sourcePlan))
         if (
           localPath === namespace ||
           localPath.startsWith(`${namespace}/`) ||
           namespace.startsWith(`${localPath}/`)
         ) {
           throw new Error(
-            `Local skill destination "${link.skillId}" overlaps source namespace "${sourcePlan.sourceName}" for ${destinationKey}`,
+            `Local skill destination "${link.skillId}" overlaps source namespace "${sourceNamespaceOf(sourcePlan)}" for ${destinationKey}`,
           )
         }
       }
     }
+  }
+}
+
+export function assertSourceNamespaceUniqueness(
+  sourcePlans: Array<Pick<SourceProjectionPlan, 'namespace' | 'destination'>>,
+): void {
+  const namespacesByDestination = new Map<SkillProjectionDestinationKey, Set<string>>()
+  for (const sourcePlan of sourcePlans) {
+    const key = skillProjectionDestinationKey(sourcePlan.destination)
+    const namespaces = namespacesByDestination.get(key) ?? new Set<string>()
+    const namespace = normalizeProjectionDestination(sourcePlan.namespace)
+    if (namespaces.has(namespace)) {
+      throw new Error(`Duplicate source namespace "${sourcePlan.namespace}" for ${key}`)
+    }
+    namespaces.add(namespace)
+    namespacesByDestination.set(key, namespaces)
   }
 }
 
@@ -271,35 +352,66 @@ function planSourceProjection(
 
   const sourceName = sourceIdentity(source).repoId
   const cacheId = deriveRepoId(source.url)
-  return [...destinations.values()].map(({ destination, members: destinationMembers }) => {
-    const bundleEntries: SourceProjectionEntry[] = destinationMembers.map((member) => {
-      const bundle = bundles.get(member.entry)!
-      return { kind: 'bundle', sourcePath: bundle.path, targetPath: '' }
-    })
-    const resourceEntries = planResourceEntries(nodes, selectedResourceNodes, resources)
-    const rootPaths = [
-      ...bundleEntries.map((entry) => entry.sourcePath),
-      ...selectedResourceRoots(resources, nodes, selectedResourceNodes),
-    ]
-    const base = rootPaths.includes('') ? '' : projectionBase(rootPaths)
-    const entries = [...bundleEntries, ...resourceEntries]
-      .map((entry) => ({ ...entry, targetPath: relativeToProjectionBase(entry.sourcePath, base) }))
-      .sort(
-        (left, right) =>
-          left.targetPath.localeCompare(right.targetPath, 'en') ||
-          left.kind.localeCompare(right.kind),
-      )
-    assertProjectionDestinations(entries)
-    return {
-      sourceName,
-      sourceUrl: source.url,
-      cacheId,
-      commit: sourceTree.commit,
-      destination,
-      projectionBase: base,
-      entries,
-    }
-  })
+  const resourceEntries = planResourceEntries(nodes, selectedResourceNodes, resources)
+  const resourceRoots = selectedResourceRoots(resources, nodes, selectedResourceNodes)
+  const hasResourceSelection = resources.include.length > 0
+  return [...destinations.values()].flatMap(
+    ({ destination, members: destinationMembers }): SourceProjectionPlan[] => {
+      if (sourceProjectionLayout(destination, hasResourceSelection) === 'flat') {
+        return destinationMembers.map((member) => {
+          const bundle = bundles.get(member.entry)!
+          const entries: SourceProjectionEntry[] = [
+            { kind: 'bundle', sourcePath: bundle.path, targetPath: '' },
+          ]
+          assertProjectionDestinations(entries)
+          return {
+            sourceName,
+            sourceUrl: source.url,
+            cacheId,
+            commit: sourceTree.commit,
+            destination,
+            namespace: sourceMemberNamespace(sourceName, member.name),
+            layout: 'flat' as const,
+            hasResourceSelection,
+            projectionBase: bundle.path,
+            entries,
+          }
+        })
+      }
+
+      const bundleEntries: SourceProjectionEntry[] = destinationMembers.map((member) => {
+        const bundle = bundles.get(member.entry)!
+        return { kind: 'bundle', sourcePath: bundle.path, targetPath: '' }
+      })
+      const rootPaths = [...bundleEntries.map((entry) => entry.sourcePath), ...resourceRoots]
+      const base = rootPaths.includes('') ? '' : projectionBase(rootPaths)
+      const entries = [...bundleEntries, ...resourceEntries]
+        .map((entry) => ({
+          ...entry,
+          targetPath: relativeToProjectionBase(entry.sourcePath, base),
+        }))
+        .sort(
+          (left, right) =>
+            left.targetPath.localeCompare(right.targetPath, 'en') ||
+            left.kind.localeCompare(right.kind),
+        )
+      assertProjectionDestinations(entries)
+      return [
+        {
+          sourceName,
+          sourceUrl: source.url,
+          cacheId,
+          commit: sourceTree.commit,
+          destination,
+          namespace: sourceName,
+          layout: 'namespace' as const,
+          hasResourceSelection,
+          projectionBase: base,
+          entries,
+        },
+      ]
+    },
+  )
 }
 
 function planUnavailableSourceNamespaces(

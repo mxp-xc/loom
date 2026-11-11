@@ -1,6 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { sourceIdentity, type AgentId, type SkillSource } from '@loom/core'
+import {
+  hasSourceResourceSelection,
+  sourceIdentity,
+  sourceMemberNamespace,
+  sourceProjectionLayout,
+  type AgentId,
+  type SkillSource,
+} from '@loom/core'
 import { agentConfigDir, agentSkillsDir, runtimeAgentPathContext } from '../adapters/paths.js'
 import type { IFileSystem } from '../ports/fs.js'
 import {
@@ -14,11 +21,17 @@ import { inspectManagedSourceNamespace } from '../projection/executor.js'
 export interface SourceNamespaceBackupResult {
   agent: AgentId
   sourceName: string
+  namespace: string
   backupName: string
 }
 
 export interface SourceNamespaceBackupOptions {
   preserveBackupOnProjectionError?: (err: unknown) => boolean
+  /**
+   * Colliding folder name reported by projection. Defaults to the nested
+   * source namespace; flat Claude Code collisions pass `<source>-<member>`.
+   */
+  namespace?: string
 }
 
 export async function backupUserOwnedSourceNamespace(
@@ -29,14 +42,26 @@ export async function backupUserOwnedSourceNamespace(
   project: () => Promise<void>,
   options: SourceNamespaceBackupOptions = {},
 ): Promise<SourceNamespaceBackupResult> {
-  if (!(source.members ?? []).some((member) => (member.agents ?? []).includes(agent))) {
+  const pathContext = runtimeAgentPathContext(deps.home)
+  const sourceName = sourceIdentity(source).repoId
+  const desiredMembers = (source.members ?? []).filter((member) =>
+    (member.agents ?? []).includes(agent),
+  )
+  const layout = sourceProjectionLayout(
+    { kind: 'agent', agent },
+    hasSourceResourceSelection(source.resources),
+  )
+  const candidateNamespaces =
+    layout === 'flat'
+      ? new Set(desiredMembers.map((member) => sourceMemberNamespace(sourceName, member.name)))
+      : new Set(desiredMembers.length > 0 ? [sourceName] : [])
+  const namespaceName = options.namespace ?? sourceName
+  if (!candidateNamespaces.has(namespaceName)) {
     throw new Error('Source namespace collision is no longer part of desired state')
   }
 
-  const pathContext = runtimeAgentPathContext(deps.home)
-  const sourceName = sourceIdentity(source).repoId
   const skillsDir = agentSkillsDir(agent, pathContext)
-  const namespace = join(skillsDir, sourceName)
+  const namespace = join(skillsDir, namespaceName)
   const skillsChain = await captureAgentDirectoryChain(
     deps.fs,
     agent,
@@ -48,6 +73,7 @@ export async function backupUserOwnedSourceNamespace(
     ownerRepo: repoPath,
     sourceKey: createHash('sha256').update(source.url).digest('hex'),
     sourceName,
+    namespace: namespaceName,
   })
   if (ownership.state !== 'unowned' || !ownership.destination) {
     throw new Error('Source namespace collision changed before it could be resolved')
@@ -66,7 +92,7 @@ export async function backupUserOwnedSourceNamespace(
     backupChain,
     `${agent} skill backup destination`,
   )
-  const backupName = `${sourceName}-${randomUUID()}`
+  const backupName = `${namespaceName}-${randomUUID()}`
   const backupPath = join(backupRoot, backupName)
 
   await revalidateSafeDirectoryChain(deps.fs, skillsChain, `${agent} skills destination`)
@@ -107,5 +133,5 @@ export async function backupUserOwnedSourceNamespace(
     throw err
   }
 
-  return { agent, sourceName, backupName }
+  return { agent, sourceName, namespace: namespaceName, backupName }
 }

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { AgentChip } from '@/components/ui/AgentChip'
 import { IconButton } from '@/components/ui/IconButton'
 import { Check, Code2, Copy, FileText, LoaderCircle } from 'lucide-react'
+import { sourceMemberFolder, type SkillProjectionDestination } from '@loom/core'
 import { agentColor, agentName, agentShort, agentSkillPath, type AgentId } from '@/lib/agents'
 import type { SkillDetail } from './types'
 import type { ManifestOperations } from '@/hooks/useManifestOperations'
@@ -158,6 +159,16 @@ export default function SkillDetailEditor({
   }
 
   const activeAgents = detail ? agents.filter((agent) => detail.agents.includes(agent)).length : 0
+  const projectedFolder = (destination: SkillProjectionDestination): string => {
+    if (!detail) return ''
+    if (!detail.source || !detail.sourceName || !detail.memberName) return detail.skillId
+    return sourceMemberFolder(
+      destination,
+      detail.sourceName,
+      detail.memberName,
+      detail.hasResourceSelection === true,
+    )
+  }
   const isLocal = Boolean(detail && !detail.source)
   const savedState = detail?.source ? 'Read only' : saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'
   const savedTone = saving ? 'saving' : dirty ? 'dirty' : 'saved'
@@ -285,7 +296,12 @@ export default function SkillDetailEditor({
                           <span className={styles.agentBadge}>{agentShort[agent]}</span>
                           <div>
                             <strong>{agentName[agent]}</strong>
-                            <code>{agentSkillPath(agent, detail.skillId)}</code>
+                            <code>
+                              {agentSkillPath(
+                                agent,
+                                projectedFolder({ kind: 'agent', agent } as const),
+                              )}
+                            </code>
                           </div>
                           <span className={styles.agentState}>{active ? 'linked' : 'off'}</span>
                         </div>
@@ -299,7 +315,7 @@ export default function SkillDetailEditor({
                       <span className={styles.sharedBadge}>通用</span>
                       <div>
                         <strong>通用 Skills</strong>
-                        <code>{`~/.agents/skills/${detail.skillId}`}</code>
+                        <code>{`~/.agents/skills/${projectedFolder({ kind: 'shared' })}`}</code>
                       </div>
                       <span className={styles.agentState}>{detail.shared ? 'linked' : 'off'}</span>
                     </div>

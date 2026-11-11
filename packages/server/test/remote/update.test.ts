@@ -457,6 +457,48 @@ describe('compareProjectionPaths', () => {
       },
     ])
   })
+
+  it('reports flat Claude Code folders for removed members', () => {
+    const source: SkillSource = {
+      url: 'https://example.test/skills.git',
+      ref: 'main',
+      members: [
+        { name: 'alpha', entry: 'group/alpha/SKILL.md', agents: ['claude-code'] },
+        { name: 'beta', entry: 'other/beta/SKILL.md', agents: ['claude-code'] },
+      ],
+    }
+    const bundle = (name: string, path: string) => ({
+      kind: 'bundle' as const,
+      name,
+      path,
+      entry: `${path}/SKILL.md`,
+      mode: '040000',
+      oid: `${name}-oid`,
+    })
+    const previousTree = {
+      commit: 'old',
+      diagnostics: [],
+      nodes: [bundle('alpha', 'group/alpha'), bundle('beta', 'other/beta')],
+    }
+    const nextTree = {
+      commit: 'new',
+      diagnostics: [],
+      nodes: [bundle('alpha', 'group/alpha')],
+    }
+
+    expect(
+      compareProjectionPaths(source, previousTree, nextTree, [
+        { name: 'alpha', entry: 'group/alpha/SKILL.md' },
+      ]),
+    ).toEqual([
+      {
+        destination: { kind: 'agent', agent: 'claude-code' },
+        kind: 'bundle',
+        sourcePath: 'other/beta',
+        previousTargetPath: 'skills-beta',
+      },
+    ])
+  })
 })
 
 describe('detectResourceBoundaryChanges', () => {

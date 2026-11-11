@@ -8,13 +8,14 @@ import {
   loadRepoManifest,
   mergeConfig,
   skillProjectionDestinationKey,
+  sourceIdentity,
   validateManifest,
   type Config,
   type SkillProjectionDestination,
   type SkillsManifest,
 } from '@loom/core'
 import { z } from 'zod'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { SkillsApplication, SkillsApplicationError } from '../../skills/application.js'
 import { logger } from '../../lib/logger.js'
 import { jsonValidator } from '../request-validation.js'
@@ -187,6 +188,8 @@ const ResolveSourceNamespaceCollisionBody = z
     repo: RepoField,
     sourceUrl: NonEmptyString,
     agent: AgentIdSchema,
+    /** Colliding managed folder; omitted legacy clients resolve `<source-name>`. */
+    namespace: NonEmptyString.optional(),
   })
   .strict()
 
@@ -520,7 +523,7 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
     '/skills/source-namespace-collisions/resolve',
     jsonValidator(ResolveSourceNamespaceCollisionBody, { error: 'invalid_collision_resolution' }),
     async (c) => {
-      const { repo, sourceUrl, agent } = c.req.valid('json')
+      const { repo, sourceUrl, agent, namespace } = c.req.valid('json')
       try {
         const result = await runSkillsMutation(repo, async (repoPath, scopedDeps) => {
           const manifest = await readSkillsManifest(scopedDeps.fs, repoPath)
@@ -538,11 +541,17 @@ export function createSkillsYamlRoutes(deps: RouteDeps): Hono {
               if (!projected.ok) throw projected.failure.originalError
             },
             {
+              ...(namespace ? { namespace } : {}),
               preserveBackupOnProjectionError: (err) => {
                 const nextCollision = findSourceNamespaceCollision(err)
                 return Boolean(
                   nextCollision &&
-                  (nextCollision.agent !== agent || nextCollision.sourceUrl !== source.url),
+                  !(
+                    nextCollision.agent === agent &&
+                    nextCollision.sourceUrl === source.url &&
+                    basename(nextCollision.namespace) ===
+                      (namespace ?? sourceIdentity(source).repoId)
+                  ),
                 )
               },
             },

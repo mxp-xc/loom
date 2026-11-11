@@ -1007,6 +1007,128 @@ describe('loadDisplayManifest', () => {
   })
 })
 
+describe('projectRepository Claude Code flat source skills', () => {
+  it('projects selected members as flat folders and cleans them when disabled', async () => {
+    await writeFile(
+      join(root, 'config.yaml'),
+      'agents: [claude-code]\nprojection:\n  strategy: copy\n',
+    )
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: source-a',
+        '    url: https://example.test/source-a.git',
+        '    ref: main',
+        '    pinned_commit: abc123',
+        '    members:',
+        '      - name: selected-a',
+        '        entry: skills/selected-a/SKILL.md',
+        '        agents: [claude-code]',
+        '      - name: selected-b',
+        '        entry: skills/selected-b/SKILL.md',
+        '        agents: [claude-code]',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    for (const name of ['selected-a', 'selected-b']) {
+      const sourceRoot = join(root, 'remote-cache', 'source-a', 'skills', name)
+      await mkdir(sourceRoot, { recursive: true })
+      await writeFile(join(sourceRoot, 'SKILL.md'), `# ${name}\n`)
+    }
+    const projectDeps = deps(
+      sourceTreeGit([
+        treeEntry('skills/selected-a/SKILL.md', 'selected-a'),
+        treeEntry('skills/selected-b/SKILL.md', 'selected-b'),
+      ]),
+    )
+
+    await expect(projectRepository(projectDeps, root, { scope: 'skills' })).resolves.toEqual({
+      ok: true,
+    })
+    await expect(
+      projectDeps.fs.readFile(join(root, '.claude', 'skills', 'source-a-selected-a', 'SKILL.md')),
+    ).resolves.toBe('# selected-a\n')
+    await expect(
+      projectDeps.fs.readFile(join(root, '.claude', 'skills', 'source-a-selected-b', 'SKILL.md')),
+    ).resolves.toBe('# selected-b\n')
+    await expect(projectDeps.fs.exists(join(root, '.claude', 'skills', 'source-a'))).resolves.toBe(
+      false,
+    )
+
+    await writeFile(join(root, 'config.yaml'), 'agents: []\nprojection:\n  strategy: copy\n')
+    await expect(projectRepository(projectDeps, root, { scope: 'skills' })).resolves.toEqual({
+      ok: true,
+    })
+    await expect(
+      projectDeps.fs.exists(join(root, '.claude', 'skills', 'source-a-selected-a')),
+    ).resolves.toBe(false)
+    await expect(
+      projectDeps.fs.exists(join(root, '.claude', 'skills', 'source-a-selected-b')),
+    ).resolves.toBe(false)
+  })
+
+  it('keeps the nested namespace and warns when resources are selected', async () => {
+    await writeFile(
+      join(root, 'config.yaml'),
+      'agents: [claude-code]\nprojection:\n  strategy: copy\n',
+    )
+    await writeFile(
+      join(root, 'skills.yaml'),
+      [
+        'sources:',
+        '  - name: source-a',
+        '    url: https://example.test/source-a.git',
+        '    ref: main',
+        '    pinned_commit: abc123',
+        '    members:',
+        '      - name: selected',
+        '        entry: skills/selected/SKILL.md',
+        '        agents: [claude-code]',
+        '    resources:',
+        '      include:',
+        '        - path: shared',
+        '          kind: directory',
+        '      exclude: []',
+        'skills: []',
+        '',
+      ].join('\n'),
+    )
+    await mkdir(join(root, 'remote-cache', 'source-a', 'skills', 'selected'), { recursive: true })
+    await mkdir(join(root, 'remote-cache', 'source-a', 'shared'), { recursive: true })
+    await writeFile(
+      join(root, 'remote-cache', 'source-a', 'skills', 'selected', 'SKILL.md'),
+      '# s\n',
+    )
+    await writeFile(join(root, 'remote-cache', 'source-a', 'shared', 'guide.md'), '# guide\n')
+    const projectDeps = deps(
+      sourceTreeGit([
+        treeEntry('skills/selected/SKILL.md', 'selected'),
+        treeEntry('shared/guide.md', 'guide'),
+      ]),
+    )
+
+    await expect(projectRepository(projectDeps, root, { scope: 'skills' })).resolves.toEqual({
+      ok: true,
+      warnings: [
+        expect.objectContaining({
+          code: 'nested-skill-layout',
+          sourceName: 'source-a',
+        }),
+      ],
+    })
+    await expect(
+      projectDeps.fs.exists(
+        join(root, '.claude', 'skills', 'source-a', 'skills', 'selected', 'SKILL.md'),
+      ),
+    ).resolves.toBe(true)
+    await expect(
+      projectDeps.fs.exists(join(root, '.claude', 'skills', 'source-a', 'shared', 'guide.md')),
+    ).resolves.toBe(true)
+  })
+})
+
 function deps(git: IGit): ProjectionWorkflowDeps {
   return {
     fs: new NodeFileSystem(),

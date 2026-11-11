@@ -6,12 +6,15 @@ import {
   buildManifest,
   configuredAgents,
   deriveRepoId,
+  hasSourceResourceSelection,
   loadRepoManifest,
   mergeConfig,
   planProjection,
   planSourceProjectionForDestinations,
   skillProjectionDestinationKey,
   sourceIdentity,
+  sourceMemberNamespace,
+  sourceProjectionLayout,
   type AgentId,
   type Config,
   type LocalSkill,
@@ -380,11 +383,21 @@ function assertTargetedSkillDestinationCollisions(
   }))
   const sourcePlans = manifest.skills.sources.flatMap((source) => {
     const sourceName = sourceIdentity(source).repoId
-    return affectedDestinations
-      .filter((destination) =>
-        (source.members ?? []).some((member) => memberSelectsDestination(member, destination)),
+    const hasResourceSelection = hasSourceResourceSelection(source.resources)
+    return affectedDestinations.flatMap((destination) => {
+      const members = (source.members ?? []).filter((member) =>
+        memberSelectsDestination(member, destination),
       )
-      .map((destination) => ({ sourceName, destination }))
+      if (members.length === 0) return []
+      if (sourceProjectionLayout(destination, hasResourceSelection) === 'flat') {
+        return members.map((member) => ({
+          sourceName,
+          namespace: sourceMemberNamespace(sourceName, member.name),
+          destination,
+        }))
+      }
+      return [{ sourceName, destination }]
+    })
   })
   assertSkillDestinationCollisions(links, sourcePlans)
 }

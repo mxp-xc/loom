@@ -145,4 +145,41 @@ describe('backupUserOwnedSourceNamespace', () => {
 
     expect(await readFile(join(namespace, 'SKILL.md'), 'utf8')).toBe('# user copy')
   })
+
+  it('backs up a flat member folder when projection reports its namespace', async () => {
+    const fs = new NodeFileSystem()
+    const claudeSource = {
+      ...source,
+      members: source.members?.map((member) => ({ ...member, agents: ['claude-code' as const] })),
+    }
+    const flat = join(home, '.claude', 'skills', 'playwright-cli-playwright-cli')
+    await mkdir(flat, { recursive: true })
+    await writeFile(join(flat, 'SKILL.md'), '# flat user copy')
+
+    const result = await backupUserOwnedSourceNamespace(
+      { fs, home },
+      repoPath,
+      claudeSource,
+      'claude-code',
+      async () => undefined,
+      { namespace: 'playwright-cli-playwright-cli' },
+    )
+
+    expect(result.namespace).toBe('playwright-cli-playwright-cli')
+    expect(result.backupName.startsWith('playwright-cli-playwright-cli-')).toBe(true)
+    await expect(fs.exists(flat)).resolves.toBe(false)
+    expect(
+      await readFile(join(home, '.claude', 'skill-backups', result.backupName, 'SKILL.md'), 'utf8'),
+    ).toBe('# flat user copy')
+  })
+
+  it('rejects a namespace that the source cannot project', async () => {
+    const fs = new NodeFileSystem()
+
+    await expect(
+      backupUserOwnedSourceNamespace({ fs, home }, repoPath, source, 'codex', async () => {}, {
+        namespace: 'unrelated-folder',
+      }),
+    ).rejects.toThrow('no longer part of desired state')
+  })
 })

@@ -88,7 +88,8 @@ export type ManagedSkillArtifacts = Partial<
 >
 
 export interface ProjectionWarning {
-  code: 'source-unavailable'
+  /** `nested-skill-layout`: a Claude Code source kept its nested namespace. */
+  code: 'source-unavailable' | 'nested-skill-layout'
   sourceName: string
   sourceUrl: string
   message: string
@@ -305,7 +306,7 @@ export async function executeProjection(
         },
       }
     }
-    const warnings = preparedSkills?.warnings ?? []
+    const warnings = [...(preparedSkills?.warnings ?? []), ...(preparedSources?.warnings ?? [])]
     return warnings.length > 0 ? { ok: true, warnings } : { ok: true }
   } catch (originalError) {
     const rollbackFailures: { path: string; err: unknown }[] = []
@@ -1338,6 +1339,7 @@ interface PreparedSourceNamespaces {
   desired: Set<string>
   preservedSourceKeysByDestination: Map<SkillProjectionDestinationKey, Set<string>>
   cleanups: PreparedSourceCleanup[]
+  warnings: ProjectionWarning[]
 }
 
 async function prepareSourceNamespaces(
@@ -1364,6 +1366,8 @@ async function prepareSourceNamespaces(
   }
   const pathContext = deps.pathContext ?? runtimeAgentPathContext()
   const desired = new Set<string>()
+  const warnings: ProjectionWarning[] = []
+  const warnedNestedLayout = new Set<string>()
   const preservedSourceKeysByDestination = new Map<SkillProjectionDestinationKey, Set<string>>()
   for (const preserved of targets ? [] : (plan.preservedSourceNamespaces ?? [])) {
     assertSafeNamespaceSegment(preserved.sourceName, 'preserved source namespace')
@@ -1374,21 +1378,15 @@ async function prepareSourceNamespaces(
     )
     const destinationKey = skillProjectionDestinationKey(preserved.destination)
     const skillsDir = resolveSkillDestinationRoot(preserved.destination, pathContext)
+    // Preserved sources are unavailable: keep every managed namespace for this
+    // source key (nested legacy namespace and flat per-member folders) without
+    // requiring the current layout to still match.
     await captureSkillDestinationDirectoryChain(
       deps.fs,
       preserved.destination,
       skillsDir,
       pathContext,
     )
-    const namespace = join(skillsDir, preserved.sourceName)
-    const ownership = await inspectManagedSourceNamespace(deps.fs, namespace, {
-      ownerRepo: deps.ownerRepo,
-      sourceKey: sha256(preserved.sourceUrl),
-    })
-    if (ownership.state === 'unowned') {
-      throw new Error(`Preserved source namespace is not owned: ${namespace}`)
-    }
-    desired.add(namespace)
     const sourceKeys = preservedSourceKeysByDestination.get(destinationKey) ?? new Set<string>()
     sourceKeys.add(sha256(preserved.sourceUrl))
     preservedSourceKeysByDestination.set(destinationKey, sourceKeys)
@@ -1398,11 +1396,32 @@ async function prepareSourceNamespaces(
   const namespaces: PreparedSourceNamespace[] = []
   for (const sourcePlan of plan.sourcePlans ?? []) {
     assertSafeNamespaceSegment(sourcePlan.sourceName, 'source namespace')
+    assertSafeNamespaceSegment(sourcePlan.namespace, 'source namespace')
     assertSkillDestinationAvailable(
       sourcePlan.destination,
       deps.installedAgents,
       'Source namespace',
     )
+    const nestedInNamespace =
+      sourcePlan.layout === 'namespace' &&
+      sourcePlan.hasResourceSelection &&
+      sourcePlan.entries.some((entry) => entry.kind === 'bundle' && entry.targetPath !== '')
+    if (
+      nestedInNamespace &&
+      sourcePlan.destination.kind === 'agent' &&
+      sourcePlan.destination.agent === 'claude-code'
+    ) {
+      const warningKey = `${skillProjectionDestinationKey(sourcePlan.destination)}\0${sourcePlan.sourceUrl}`
+      if (!warnedNestedLayout.has(warningKey)) {
+        warnedNestedLayout.add(warningKey)
+        warnings.push({
+          code: 'nested-skill-layout',
+          sourceName: sourcePlan.sourceName,
+          sourceUrl: sourcePlan.sourceUrl,
+          message: `Claude Code only discovers direct child skill folders. Source "${sourcePlan.sourceName}" selects bundle-external resources, so its skills keep the nested source namespace and may not be recognized.`,
+        })
+      }
+    }
     const resolvedRoot = deps.resolveSourceRoot?.(sourcePlan)
     if (!resolvedRoot) throw new Error(`Source cache unavailable: ${sourcePlan.sourceUrl}`)
     const sourceRoot =
@@ -1444,7 +1463,7 @@ async function prepareSourceNamespaces(
       skillsDir,
       pathContext,
     )
-    const namespace = join(skillsDir, sourcePlan.sourceName)
+    const namespace = join(skillsDir, sourcePlan.namespace)
     const transactionRoot = dirname(sourceTransactionPath(namespace, 'staging', 'preflight'))
     const transactionChain = await captureSkillDestinationDirectoryChain(
       deps.fs,
@@ -1456,6 +1475,7 @@ async function prepareSourceNamespaces(
       ownerRepo: deps.ownerRepo!,
       sourceKey: sha256(sourcePlan.sourceUrl),
       sourceName: sourcePlan.sourceName,
+      namespace: sourcePlan.namespace,
     })
     if (ownership.state === 'unowned') {
       if (sourcePlan.destination.kind === 'agent') {
@@ -1469,7 +1489,7 @@ async function prepareSourceNamespaces(
       throw new Error(`refuse to overwrite user-owned source namespace: ${namespace}`)
     }
     if (desired.has(namespace)) {
-      throw new Error(`Duplicate source namespace destination: ${sourcePlan.sourceName}`)
+      throw new Error(`Duplicate source namespace destination: ${sourcePlan.namespace}`)
     }
     desired.add(namespace)
     namespaces.push({
@@ -1501,7 +1521,7 @@ async function prepareSourceNamespaces(
           preservedSourceKeysByDestination,
         )
     : []
-  return { namespaces, desired, preservedSourceKeysByDestination, cleanups }
+  return { namespaces, desired, preservedSourceKeysByDestination, cleanups, warnings }
 }
 
 async function validateSourceMaterialization(
@@ -1935,7 +1955,7 @@ async function writeSourceMarker(
       ownerRepo,
       sourceKey: sha256(plan.sourceUrl),
       sourceName: plan.sourceName,
-      namespace: plan.sourceName,
+      namespace: plan.namespace,
     }) + '\n',
   )
 }
@@ -1954,7 +1974,12 @@ export interface ManagedSourceNamespaceInspection {
 export async function inspectManagedSourceNamespace(
   fs: IFileSystem,
   namespace: string,
-  expected: { ownerRepo?: string; sourceKey?: string; sourceName?: string } = {},
+  expected: {
+    ownerRepo?: string
+    sourceKey?: string
+    sourceName?: string
+    namespace?: string
+  } = {},
 ): Promise<ManagedSourceNamespaceInspection> {
   const namespaceEntry = await fs.inspectEntry(namespace)
   if (!namespaceEntry) return { path: namespace, state: 'absent', destination: null }
@@ -2002,7 +2027,8 @@ export async function inspectManagedSourceNamespace(
     markerNamespace === basename(namespace) &&
     (!expected.ownerRepo || ownerRepo === expected.ownerRepo) &&
     (!expected.sourceKey || sourceKey === expected.sourceKey) &&
-    (!expected.sourceName || sourceName === expected.sourceName)
+    (!expected.sourceName || sourceName === expected.sourceName) &&
+    (!expected.namespace || markerNamespace === expected.namespace)
   return {
     path: namespace,
     state: valid ? 'owned' : 'unowned',
@@ -2039,6 +2065,7 @@ async function revalidateManagedSourceNamespace(
     ownerRepo: expected.ownerRepo,
     sourceKey: expected.sourceKey,
     sourceName: expected.sourceName,
+    namespace: expected.namespace,
   })
   if (
     current.state !== 'owned' ||
@@ -2112,7 +2139,7 @@ async function prepareTargetedSourceNamespaces(
   pathContext: AgentPathContext,
 ): Promise<PreparedSourceCleanup[]> {
   const cleanups: PreparedSourceCleanup[] = []
-  const visited = new Set<string>()
+  const queuedNamespaces = new Set<string>()
   for (const target of targets) {
     assertSafeNamespaceSegment(target.sourceName, 'source namespace')
     for (const destination of uniqueSkillDestinations(target.destinations)) {
@@ -2128,33 +2155,42 @@ async function prepareTargetedSourceNamespaces(
         continue
       }
       const skillsDir = resolveSkillDestinationRoot(destination, pathContext)
-      const namespace = join(skillsDir, target.sourceName)
-      if (desired.has(namespace) || visited.has(namespace)) continue
-      visited.add(namespace)
       const destinationChain = await captureSkillDestinationDirectoryChain(
         fs,
         destination,
         skillsDir,
         pathContext,
       )
-      const ownership = await inspectManagedSourceNamespace(fs, namespace, {
-        ownerRepo,
-        sourceKey: sha256(target.sourceUrl),
-        sourceName: target.sourceName,
-      })
-      if (ownership.state !== 'owned') continue
-      const transactionChain = await captureSkillDestinationDirectoryChain(
-        fs,
-        destination,
-        dirname(sourceTransactionPath(namespace, 'backup', 'preflight')),
-        pathContext,
-      )
-      await revalidateSafeDirectoryChain(
-        fs,
-        destinationChain,
-        describeSkillDestination(destination),
-      )
-      cleanups.push({ namespace, destinationChain, transactionChain, ownership })
+      const skillsEntry = await fs.inspectEntry(skillsDir)
+      if (!skillsEntry) continue
+      if (skillsEntry.kind !== 'directory') {
+        throw new Error(`Agent skills root is not a real directory: ${skillsDir}`)
+      }
+      // A source can own several top-level directories now (legacy nested
+      // namespace plus one flat folder per member), so scan direct children
+      // and only clean entries whose marker proves the same source key.
+      for (const entry of await fs.readDir(skillsDir)) {
+        const namespace = join(skillsDir, entry)
+        if (desired.has(namespace) || queuedNamespaces.has(namespace)) continue
+        const ownership = await inspectManagedSourceNamespace(fs, namespace, {
+          ownerRepo,
+          sourceKey: sha256(target.sourceUrl),
+        })
+        if (ownership.state !== 'owned') continue
+        queuedNamespaces.add(namespace)
+        const transactionChain = await captureSkillDestinationDirectoryChain(
+          fs,
+          destination,
+          dirname(sourceTransactionPath(namespace, 'backup', 'preflight')),
+          pathContext,
+        )
+        await revalidateSafeDirectoryChain(
+          fs,
+          destinationChain,
+          describeSkillDestination(destination),
+        )
+        cleanups.push({ namespace, destinationChain, transactionChain, ownership })
+      }
     }
   }
   return cleanups

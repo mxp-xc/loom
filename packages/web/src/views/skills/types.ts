@@ -13,7 +13,12 @@ export interface ScanMember {
 export interface SkillDetail {
   skillId: string
   source?: string
+  /** Source identity used for per-destination projection path previews. */
+  sourceName?: string
   memberEntry?: string
+  memberName?: string
+  /** True when the source projects bundle-external resources (nested layout). */
+  hasResourceSelection?: boolean
   path?: string
   agents: AgentId[]
   shared?: boolean

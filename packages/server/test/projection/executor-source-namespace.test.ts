@@ -5,6 +5,10 @@ import { basename, join } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { AgentId, Manifest, ProjectionPlan, SourceProjectionPlan } from '@loom/core'
 import { executeProjection, type ProjectionDeps } from '../../src/projection/executor.js'
+import {
+  findSourceNamespaceCollision,
+  sourceNamespaceCollisionPayload,
+} from '../../src/projection/errors.js'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 
 let home: string
@@ -41,6 +45,9 @@ function sourcePlan(overrides: Partial<SourceProjectionPlan> = {}): SourceProjec
     cacheId: 'workflow-source',
     commit: 'commit-oid',
     destination: { kind: 'agent', agent: 'claude-code' },
+    namespace: 'workflow-source',
+    layout: 'namespace',
+    hasResourceSelection: false,
     projectionBase: '',
     entries: [],
     ...overrides,
@@ -921,5 +928,215 @@ describe('source namespace projection', () => {
 
     expect(result).toEqual({ ok: true })
     expect(await readFile(join(namespace, 'existing.md'), 'utf8')).toBe('keep me')
+  })
+
+  it('projects a flat Claude Code member folder and removes the legacy nested namespace', async () => {
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
+    const legacy = join(home, '.claude', 'skills', 'workflow-source')
+    await mkdir(legacy, { recursive: true })
+    await writeFile(join(legacy, '.loom-projection.json'), JSON.stringify(sourceMarker()))
+    await writeFile(join(legacy, 'old.md'), 'old')
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            namespace: 'workflow-source-skill',
+            layout: 'flat',
+            entries: [{ kind: 'bundle', sourcePath: 'skill', targetPath: '' }],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result).toEqual({ ok: true })
+    const flat = join(home, '.claude', 'skills', 'workflow-source-skill')
+    expect(await readFile(join(flat, 'SKILL.md'), 'utf8')).toBe('skill')
+    expect(JSON.parse(await readFile(join(flat, '.loom-projection.json'), 'utf8'))).toMatchObject({
+      kind: 'skill-source',
+      sourceName: 'workflow-source',
+      namespace: 'workflow-source-skill',
+    })
+    expect(await new NodeFileSystem().exists(legacy)).toBe(false)
+  })
+
+  it('warns when Claude Code keeps a nested namespace for bundle-external resources', async () => {
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await mkdir(join(cacheRoot, 'shared'), { recursive: true })
+    await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
+    await writeFile(join(cacheRoot, 'shared', 'guide.md'), 'guide')
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            hasResourceSelection: true,
+            entries: [
+              { kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' },
+              { kind: 'resource-directory', sourcePath: 'shared', targetPath: 'shared' },
+            ],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      warnings: [
+        expect.objectContaining({
+          code: 'nested-skill-layout',
+          sourceName: 'workflow-source',
+        }),
+      ],
+    })
+  })
+
+  it('reports the flat folder when a Claude Code namespace collides with a user directory', async () => {
+    const userOwned = join(home, '.claude', 'skills', 'workflow-source-skill')
+    await mkdir(userOwned, { recursive: true })
+    await writeFile(join(userOwned, 'notes.md'), 'mine')
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            namespace: 'workflow-source-skill',
+            layout: 'flat',
+            entries: [{ kind: 'bundle', sourcePath: 'skill', targetPath: '' }],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    const collision = findSourceNamespaceCollision(result.failure.originalError)
+    expect(collision?.namespace).toBe(userOwned)
+    expect(sourceNamespaceCollisionPayload(collision!).diagnostics[0]).toMatchObject({
+      sourceName: 'workflow-source',
+      namespace: 'workflow-source-skill',
+    })
+    expect(await readFile(join(userOwned, 'notes.md'), 'utf8')).toBe('mine')
+  })
+
+  it('targeted cleanup removes every managed folder for the source key', async () => {
+    const skillsDir = join(home, '.claude', 'skills')
+    const first = join(skillsDir, 'workflow-source-skill-a')
+    const second = join(skillsDir, 'workflow-source-skill-b')
+    const unrelated = join(skillsDir, 'other-source-skill')
+    const otherTarget = join(skillsDir, 'second-source-skill')
+    await mkdir(first, { recursive: true })
+    await mkdir(second, { recursive: true })
+    await mkdir(unrelated, { recursive: true })
+    await mkdir(otherTarget, { recursive: true })
+    await writeFile(
+      join(first, '.loom-projection.json'),
+      JSON.stringify({ ...sourceMarker(), namespace: 'workflow-source-skill-a' }),
+    )
+    await writeFile(
+      join(second, '.loom-projection.json'),
+      JSON.stringify({ ...sourceMarker(), namespace: 'workflow-source-skill-b' }),
+    )
+    await writeFile(
+      join(unrelated, '.loom-projection.json'),
+      JSON.stringify({
+        ...sourceMarker('https://example.com/other.git'),
+        sourceName: 'other-source',
+        namespace: 'other-source-skill',
+      }),
+    )
+    await writeFile(join(unrelated, 'keep.md'), 'keep')
+    await writeFile(
+      join(otherTarget, '.loom-projection.json'),
+      JSON.stringify({
+        ...sourceMarker('https://example.com/second-source.git'),
+        sourceName: 'second-source',
+        namespace: 'second-source-skill',
+      }),
+    )
+
+    const result = await executeProjection(
+      projectionPlan([], 'copy'),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+      {
+        skillsTarget: {
+          sources: [
+            {
+              sourceName: 'workflow-source',
+              sourceUrl: 'https://example.com/workflow-source.git',
+              destinations: [{ kind: 'agent', agent: 'claude-code' }],
+            },
+            {
+              sourceName: 'second-source',
+              sourceUrl: 'https://example.com/second-source.git',
+              destinations: [{ kind: 'agent', agent: 'claude-code' }],
+            },
+          ],
+          locals: [],
+        },
+      },
+    )
+
+    expect(result).toEqual({ ok: true })
+    const fs = new NodeFileSystem()
+    expect(await fs.exists(first)).toBe(false)
+    expect(await fs.exists(second)).toBe(false)
+    expect(await fs.exists(otherTarget)).toBe(false)
+    expect(await fs.exists(join(unrelated, 'keep.md'))).toBe(true)
+  })
+
+  it('preserves flat managed folders of a renamed unavailable source', async () => {
+    const flat = join(home, '.claude', 'skills', 'previous-source-name-skill')
+    await mkdir(flat, { recursive: true })
+    await writeFile(
+      join(flat, '.loom-projection.json'),
+      JSON.stringify({
+        ...sourceMarker(),
+        sourceName: 'previous-source-name',
+        namespace: 'previous-source-name-skill',
+      }),
+    )
+    await writeFile(join(flat, 'SKILL.md'), 'keep me')
+
+    const result = await executeProjection(
+      {
+        ...projectionPlan([], 'copy'),
+        preservedSourceNamespaces: [
+          {
+            sourceName: 'workflow-source',
+            sourceUrl: 'https://example.com/workflow-source.git',
+            destination: { kind: 'agent', agent: 'claude-code' },
+          },
+        ],
+      },
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result).toEqual({ ok: true })
+    expect(await readFile(join(flat, 'SKILL.md'), 'utf8')).toBe('keep me')
   })
 })

@@ -540,11 +540,17 @@ export const api = {
       next: SkillProjectionAssignment
     }>
   }) => post('/skills/agents/batch', body).then(json),
-  resolveSourceNamespaceCollision: (body: { repo: string; sourceUrl: string; agent: AgentId }) =>
+  resolveSourceNamespaceCollision: (body: {
+    repo: string
+    sourceUrl: string
+    agent: AgentId
+    namespace?: string
+  }) =>
     post('/skills/source-namespace-collisions/resolve', body).then(json) as Promise<{
       ok: true
       agent: AgentId
       sourceName: string
+      namespace: string
       backupName: string
     }>,
   reorderSkillGroups: (body: { repo: string; ids: string[] }) =>

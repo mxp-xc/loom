@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   formatSourceMemberSkillId,
+  hasSourceResourceSelection,
   parseSourceMemberSkillId,
   planProjection,
   resolveSkillNaming,
   sourceIdentity,
+  sourceMemberFolder,
+  sourceProjectionLayout,
 } from '../src/projection'
 import type { Manifest } from '../src/types'
 
@@ -747,5 +750,233 @@ describe('source identity helpers', () => {
     expect(parseSourceMemberSkillId('superpowers/brainstorming', source)).toBe('brainstorming')
     expect(parseSourceMemberSkillId('superpowers-brainstorming', source)).toBe('brainstorming')
     expect(parseSourceMemberSkillId('custom-name', source)).toBe('custom-name')
+  })
+})
+
+describe('Claude Code flat source skill folders', () => {
+  function claudeSource(
+    name = 'openai-skills',
+    members: Array<Record<string, unknown>> = [
+      {
+        name: 'brainstorming',
+        entry: 'skills/brainstorming/SKILL.md',
+        agents: ['claude-code'],
+      },
+      { name: 'tdd', entry: 'skills/tdd/SKILL.md', agents: ['claude-code'] },
+    ],
+  ) {
+    return {
+      name,
+      url: 'https://example.test/superpowers.git',
+      ref: 'main',
+      members,
+      sourceTree: sourceTreeFor(['skills/brainstorming/SKILL.md', 'skills/tdd/SKILL.md']),
+    }
+  }
+
+  function manifestWith(source: unknown): Manifest {
+    return {
+      ...manifest,
+      skills: { sources: [source as never], skills: [] },
+      config: { ...manifest.config, agents: ['claude-code'] },
+    }
+  }
+
+  it('projects each selected member as a flat namespace', () => {
+    const m = manifestWith(claudeSource())
+    const plan = planProjection(m, m.config, new Set(['claude-code']))
+
+    expect(plan.sourcePlans).toEqual([
+      expect.objectContaining({
+        sourceName: 'openai-skills',
+        namespace: 'openai-skills-brainstorming',
+        layout: 'flat',
+        hasResourceSelection: false,
+        entries: [{ kind: 'bundle', sourcePath: 'skills/brainstorming', targetPath: '' }],
+      }),
+      expect.objectContaining({
+        sourceName: 'openai-skills',
+        namespace: 'openai-skills-tdd',
+        layout: 'flat',
+        hasResourceSelection: false,
+        entries: [{ kind: 'bundle', sourcePath: 'skills/tdd', targetPath: '' }],
+      }),
+    ])
+  })
+
+  it('keeps the nested source namespace when bundle-external resources are selected', () => {
+    const source = {
+      ...claudeSource('openai-skills', [
+        {
+          name: 'brainstorming',
+          entry: 'skills/brainstorming/SKILL.md',
+          agents: ['claude-code'],
+        },
+      ]),
+      resources: { include: [{ path: 'shared', kind: 'directory' as const }], exclude: [] },
+      sourceTree: {
+        commit: 'aaa',
+        diagnostics: [],
+        nodes: [
+          ...sourceTreeFor(['skills/brainstorming/SKILL.md']).nodes,
+          {
+            kind: 'container' as const,
+            name: 'shared',
+            path: 'shared',
+            mode: '040000',
+            oid: 'shared',
+            children: [
+              {
+                kind: 'resource' as const,
+                name: 'guide.md',
+                path: 'shared/guide.md',
+                mode: '100644',
+                oid: 'guide',
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const m = manifestWith(source)
+    const plan = planProjection(m, m.config, new Set(['claude-code']))
+
+    expect(plan.sourcePlans).toHaveLength(1)
+    expect(plan.sourcePlans[0]).toEqual(
+      expect.objectContaining({
+        namespace: 'openai-skills',
+        layout: 'namespace',
+        hasResourceSelection: true,
+      }),
+    )
+  })
+
+  it('keeps other destinations nested even without resources', () => {
+    const source = claudeSource('openai-skills', [
+      { name: 'brainstorming', entry: 'skills/brainstorming/SKILL.md', agents: ['codex'] },
+    ])
+    const m: Manifest = {
+      ...manifest,
+      skills: { sources: [source as never], skills: [] },
+      config: { ...manifest.config, agents: ['codex'] },
+    }
+    const plan = planProjection(m, m.config, new Set(['codex']))
+
+    expect(plan.sourcePlans[0]).toEqual(
+      expect.objectContaining({ namespace: 'openai-skills', layout: 'namespace' }),
+    )
+  })
+
+  it('rejects a local skill that overlaps a flat member folder', () => {
+    const m: Manifest = {
+      ...manifestWith(
+        claudeSource('openai-skills', [
+          {
+            name: 'brainstorming',
+            entry: 'skills/brainstorming/SKILL.md',
+            agents: ['claude-code'],
+          },
+        ]),
+      ),
+      skills: {
+        sources: [
+          claudeSource('openai-skills', [
+            {
+              name: 'brainstorming',
+              entry: 'skills/brainstorming/SKILL.md',
+              agents: ['claude-code'],
+            },
+          ]) as never,
+        ],
+        skills: [{ id: 'openai-skills-brainstorming', agents: ['claude-code'] }],
+      },
+    }
+
+    expect(() => planProjection(m, m.config, new Set(['claude-code']))).toThrow(
+      'Local skill destination "openai-skills-brainstorming" overlaps source namespace "openai-skills-brainstorming" for agent:claude-code',
+    )
+  })
+
+  it('allows a local skill that only shares the source-name prefix', () => {
+    const m: Manifest = {
+      ...manifestWith(
+        claudeSource('openai-skills', [
+          {
+            name: 'brainstorming',
+            entry: 'skills/brainstorming/SKILL.md',
+            agents: ['claude-code'],
+          },
+        ]),
+      ),
+      skills: {
+        sources: [
+          claudeSource('openai-skills', [
+            {
+              name: 'brainstorming',
+              entry: 'skills/brainstorming/SKILL.md',
+              agents: ['claude-code'],
+            },
+          ]) as never,
+        ],
+        skills: [{ id: 'openai-skills', agents: ['claude-code'] }],
+      },
+    }
+
+    expect(() => planProjection(m, m.config, new Set(['claude-code']))).not.toThrow()
+  })
+
+  it('rejects two sources whose flat names collide', () => {
+    const m: Manifest = {
+      ...manifest,
+      skills: {
+        sources: [
+          {
+            name: 'a-b',
+            url: 'https://example.test/one.git',
+            ref: 'main',
+            members: [{ name: 'c', entry: 'skills/c/SKILL.md', agents: ['claude-code'] }],
+            sourceTree: sourceTreeFor(['skills/c/SKILL.md']),
+          },
+          {
+            name: 'a',
+            url: 'https://example.test/two.git',
+            ref: 'main',
+            members: [{ name: 'b-c', entry: 'skills/b-c/SKILL.md', agents: ['claude-code'] }],
+            sourceTree: sourceTreeFor(['skills/b-c/SKILL.md']),
+          },
+        ],
+        skills: [],
+      },
+      config: { ...manifest.config, agents: ['claude-code'] },
+    }
+
+    expect(() => planProjection(m, m.config, new Set(['claude-code']))).toThrow(
+      'Duplicate source namespace "a-b-c" for agent:claude-code',
+    )
+  })
+})
+
+describe('source projection folder helpers', () => {
+  it('selects flat only for Claude Code without resource selection', () => {
+    expect(sourceProjectionLayout({ kind: 'agent', agent: 'claude-code' }, false)).toBe('flat')
+    expect(sourceProjectionLayout({ kind: 'agent', agent: 'claude-code' }, true)).toBe('namespace')
+    expect(sourceProjectionLayout({ kind: 'agent', agent: 'codex' }, false)).toBe('namespace')
+    expect(sourceProjectionLayout({ kind: 'shared' }, false)).toBe('namespace')
+    expect(hasSourceResourceSelection({ include: [] })).toBe(false)
+    expect(hasSourceResourceSelection({ include: [{ path: 'shared', kind: 'directory' }] })).toBe(
+      true,
+    )
+  })
+
+  it('renders the same folder names used by projection', () => {
+    expect(
+      sourceMemberFolder({ kind: 'agent', agent: 'claude-code' }, 'superpowers', 'tdd', false),
+    ).toBe('superpowers-tdd')
+    expect(sourceMemberFolder({ kind: 'agent', agent: 'codex' }, 'superpowers', 'tdd', false)).toBe(
+      'superpowers/tdd',
+    )
+    expect(sourceMemberFolder({ kind: 'shared' }, 'superpowers', 'tdd', true)).toBe(
+      'superpowers/tdd',
+    )
   })
 })

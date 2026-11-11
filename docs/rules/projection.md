@@ -160,37 +160,41 @@ Tests:
 - packages/web/test/mcp-preview.test.ts
 - packages/server/test/projection/mcp-merge.test.ts
 
-## R-PROJECTION-006 Remote source 按 source namespace 整体 reconcile
+## R-PROJECTION-006 Remote source 按 managed namespace 整体 reconcile
 
 Status: active
 Applies to: remote source skills projection
 
 Rule:
-每个 remote source 投影到 `<skills-destination>/<source-name>/` 独立 namespace。Projection planner 对每个 destination 收集该 source 的 selected bundle roots 和 selected resource roots，移除它们的最长共同父路径前缀后保留其余目录结构；executor 将该 namespace 作为一个 managed unit 整体替换。
+Remote source 的 projection unit 是 managed namespace。Claude Code destination 在 source 没有 bundle 外 resource selection 时，把每个 selected member 投影为 `<skills-destination>/<source-name>-<member-name>/` 平铺 namespace；其他 destination，或存在 bundle 外 resource selection 的 source，投影为 `<skills-destination>/<source-name>/`。Projection planner 对每个 destination 收集该 namespace 的 selected bundle roots 和 selected resource roots，移除它们的最长共同父路径前缀后保留其余目录结构；executor 将每个 namespace 作为一个 managed unit 整体替换。
 
 Implications:
 
+- Claude Code 只发现 skills root 的直接子目录；平铺 namespace 直接把 bundle 内容放在 `<source-name>-<member-name>/` 根，marker 也写在该目录。
+- 平铺 namespace 名由 `source name` 和 member name 以 `-` 拼接；同一 destination 内不得重复，且不能与 local skill destination 同名。
+- 存在 bundle 外 resource selection 时，Claude Code 仍使用 `<source-name>/` namespace 以保留资源目录关系，并返回 `nested-skill-layout` warning；该 source 的 nested skill 可能不被 Claude Code 发现。
+- 其他 destination 始终使用 `<source-name>/` namespace；不同 destination 的 members 可以不同，因此各自计算 projection base。
 - 最长共同父路径只移除 selected roots 共同的未选择祖先，不能移除 selected root 自身名称。
 - 未选择的空父目录自然省略；若省略后产生同名 destination collision，必须保留足以消除冲突的父目录。
 - SkillBundle 内部结构始终完整保留；明确选择的 resource directory 保留自身名称和内部相对结构。
-- 不同 destination 的 members 可以不同，因此各自计算 projection base；source-global resources 只投影到至少选择了该 source 一个 member 的 destination。
-- 选择或 source 内容变化导致 projection base 改变时，旧路径的清理和新路径的创建属于同一次 desired-state reconcile。
+- source-global resources 只投影到至少选择了该 source 一个 member 的 destination。
+- 选择或 source 内容变化导致 projection base 或平铺/嵌套布局改变时，旧路径的清理和新路径的创建属于同一次 desired-state reconcile。
 
 Safety:
 
 - Namespace root 必须有能证明 repo 和 source 归属的 marker；marker 不保存可能包含凭据的原始 Git URL。
 - Marker完整绑定owner repository、source cache identity、source name、实际namespace name、kind和version；任一字段missing、mismatch、malformed或read failure都保留artifact并使需要该destination的projection失败。
 - Source cache id是safe segment，cache root和entry必须是canonical repository内的真实目录；cache escape、ancestor link、junction或identity drift在任何Git read/checkout前fail closed。
-- 同一 destination 中，local skill destination 不得与 source namespace 重合或位于其下；planner 必须在任何文件系统写入前拒绝冲突。不同 destination 之间的同名路径互不构成 collision。
+- 同一 destination 中，local skill destination 不得与 source namespace 重合或位于其下；planner 必须在任何文件系统写入前拒绝冲突。平铺 namespace 与 local skill 同名时同样冲突。不同 destination 之间的同名路径互不构成 collision。
 - 替换或删除现有 namespace 前必须验证 marker ownership；没有 marker、marker 不匹配或 destination collision 时 projection 失败并保留原内容。
 - Namespace staging、替换和跨 destination 执行必须可回滚；全部成功前不能删除 backups 或报告成功。
 - Executor 只物化 SourceTree commit 中的 tracked files；cache checkout 中的未跟踪文件不得进入 namespace。
 - Projection 前必须将 Loom 管理的 source cache checkout 对齐到 plan 的 SourceTree commit；cache 漂移时只能使用本地已有 Git 对象恢复，不得隐式 fetch。
-- 当前机器缺少或无法读取某个 source cache 时，projection 跳过该 source、保留其已有 managed namespace，并继续 reconcile 其他 source 与 local skills；结果必须暴露 source-specific warning。
+- 当前机器缺少或无法读取某个 source cache 时，projection 跳过该 source、保留其 ownerRepo 与 sourceKey 能证明归属的全部 managed namespace（包括旧嵌套 namespace 和已有平铺 member folder），并继续 reconcile 其他 source 与 local skills；结果必须暴露 source-specific warning。
 - Link projection 必须区分 file/directory link；稀疏目录不得用覆盖 excludes 的整目录 link。Copy 必须保持二进制内容。
 - Source 改名后的 orphan cleanup 只能删除 marker 能证明属于同一 repo/source 的旧 namespace。
 - Orphan cleanup 只枚举 Skills root 的 direct children，不递归进入 namespace，也不跟随 child links。
-- Targeted source cleanup 只检查明确的 `source + destination` namespace；不枚举或清理无关 source namespace。
+- Targeted source cleanup 可以枚举 Skills root 的直接子目录，但只能删除 marker 同时匹配 ownerRepo 和明确目标 sourceKey 的 namespace；不得清理无关 source 或 user-owned artifact。
 - Targeted projection 热路径不检查 cache health、checkout、fetch 或读取 bundle metadata。冷 catalog miss 只允许对目标 source 读取一次 pinned Git tree；warm hit 不启动 Git。
 - Source cache health 在服务启动后异步检查并缓存；startup 只在短 read lease 内读取 manifest/revision 快照，Git health/tree 扫描在 lease 外执行。Source 失效后完成的旧 revision 结果不得写回 catalog。
 - Check update 先检查本地 health，unhealthy 时直接要求 Repair，不先访问 remote。
@@ -199,12 +203,18 @@ Examples:
 
 - 选择 `folder/skill-dir1`、`folder/skill-dir2` 和 `folder/shared` 时，agent 省略共同祖先 `folder`，保留三个 selected roots 的相对结构。
 - `team-a/skill` 与 `team-b/skill` 同时选择时，agent 保留 `team-a` 和 `team-b`，避免两个 `skill` 冲突。
+- source `superpowers` 的 member `tdd` 在 Claude Code 且未选择资源时投影为 `~/.claude/skills/superpowers-tdd/`；在 Codex 下投影为 `~/.codex/skills/superpowers/tdd/`。
+- source `superpowers` 选择了 `shared/` resource 时，Claude Code 保留 `~/.claude/skills/superpowers/skills/tdd/` 并返回 `nested-skill-layout` warning。
 
 Tests:
 
 - packages/core/test/projection.test.ts
 - packages/server/test/projection/executor.test.ts
 - packages/server/test/projection/executor-source-namespace.test.ts
+- packages/server/test/projection/scan.test.ts
+- packages/server/test/remote/update.test.ts
+- packages/server/test/skills/source-namespace-collision.test.ts
+- packages/web/test/skill-detail-editor.test.tsx
 
 ## R-PROJECTION-007 Destination 与 source identity 必须在 apply 时仍有效
 
