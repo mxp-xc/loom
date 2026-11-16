@@ -1568,30 +1568,29 @@ async function validateSourceMaterialization(
       if (destinations.has(key)) throw new Error(`Projection destination collision: ${targetPath}`)
       destinations.add(key)
     }
-    if (
-      strategy === 'link' &&
-      entry.kind !== 'resource-file' &&
-      entry.sourcePath &&
-      entry.targetPath &&
-      !directoryLinks.has(entry.sourcePath)
-    ) {
+    if (strategy === 'link' && entry.kind !== 'resource-file') {
+      // Codex skips file-level SKILL.md links, so every bundle must remain a directory link.
+      if (entry.kind === 'bundle') {
+        const skillEntry = entry.sourcePath ? `${entry.sourcePath}/SKILL.md` : 'SKILL.md'
+        if (!entryFiles.includes(skillEntry)) {
+          throw new Error(`Source bundle requires tracked SKILL.md: ${entry.sourcePath || '.'}`)
+        }
+        if (!entry.targetPath && plan.entries.length !== 1) {
+          throw new Error('A bundle at the namespace root must be its only projection entry')
+        }
+      }
       const tree = await captureCompleteTrackedDirectory(
         fs,
         sourceFiles,
         entry.sourcePath,
         entryFiles,
       )
+      if (entry.kind === 'bundle' && !tree) {
+        throw new Error(
+          `Skill source contains untracked content; cannot link whole directory: ${entry.sourcePath || '.'}`,
+        )
+      }
       if (tree) directoryLinks.set(entry.sourcePath, tree)
-    }
-  }
-  if (strategy === 'link' && plan.entries.length === 1) {
-    const entry = plan.entries[0]!
-    if (entry.kind === 'bundle' && entry.sourcePath === '' && entry.targetPath === '') {
-      if (!sourceFiles.paths.includes('SKILL.md')) throw new Error('Root bundle requires SKILL.md')
-      const tree = await captureCompleteTrackedDirectory(fs, sourceFiles, '', sourceFiles.paths)
-      if (!tree)
-        throw new Error('Root skill source contains untracked content; cannot link whole directory')
-      directoryLinks.set('', tree)
     }
   }
   return directoryLinks
@@ -1768,18 +1767,27 @@ async function replaceSourceNamespace(
       prepared.transactionChain,
       `${describeSkillDestination(plan.destination)} source namespace transaction directory`,
     )
-    const rootLink = strategy === 'link' ? directoryLinks.get('') : undefined
-    if (rootLink) {
-      await revalidateSafeDirectoryTree(fs, rootLink, 'root skill source')
-      const result = await fs.createLink(rootLink.root.canonicalPath, staging)
-      if (result.fallback) throw new Error('Root skill source requires directory link support')
-      await revalidateSafeDirectoryTree(fs, rootLink, 'root skill source')
+    const namespaceBundle =
+      plan.entries.length === 1 &&
+      plan.entries[0]!.kind === 'bundle' &&
+      plan.entries[0]!.targetPath === ''
+        ? plan.entries[0]
+        : undefined
+    const namespaceLink =
+      strategy === 'link' && namespaceBundle
+        ? directoryLinks.get(namespaceBundle.sourcePath)
+        : undefined
+    if (namespaceLink) {
+      await revalidateSafeDirectoryTree(fs, namespaceLink, 'namespace skill bundle')
+      const result = await fs.createLink(namespaceLink.root.canonicalPath, staging)
+      if (result.fallback) throw new Error('Skill source requires directory link support')
+      await revalidateSafeDirectoryTree(fs, namespaceLink, 'namespace skill bundle')
     } else {
       await fs.mkdir(staging, false)
     }
     const trackedFiles = sourceFiles.paths
     const materializedDestinations = new Set<string>()
-    for (const entry of rootLink ? [] : plan.entries) {
+    for (const entry of namespaceLink ? [] : plan.entries) {
       const entryFiles = trackedFilesForEntry(entry, trackedFiles)
       if (entryFiles.length === 0) {
         throw new Error(`Tracked source content unavailable: ${entry.sourcePath || '.'}`)
@@ -1808,7 +1816,7 @@ async function replaceSourceNamespace(
         materializedDestinations.add(destination)
         return { sourcePath, targetPath }
       })
-      const directoryTree = entry.sourcePath ? directoryLinks.get(entry.sourcePath) : undefined
+      const directoryTree = directoryLinks.get(entry.sourcePath)
       if (strategy === 'link' && entry.targetPath && directoryTree) {
         await revalidateSafeDirectoryTree(
           fs,
@@ -1851,7 +1859,7 @@ async function replaceSourceNamespace(
         }
       }
     }
-    if (!rootLink) await writeSourceMarker(fs, staging, plan, ownerRepo)
+    if (!namespaceLink) await writeSourceMarker(fs, staging, plan, ownerRepo)
 
     if (strategy === 'link') {
       await revalidateStableRelativeFiles(fs, sourceFiles, `source cache ${plan.cacheId}`)
@@ -1917,7 +1925,7 @@ async function replaceSourceNamespace(
       fs,
       namespace,
       prepared.linkMarker,
-      rootLink
+      namespaceLink
         ? JSON.stringify({
             version: 1,
             managedBy: 'loom',
@@ -1927,7 +1935,7 @@ async function replaceSourceNamespace(
             sourceName: plan.sourceName,
             namespace: plan.namespace,
             linkIdentity: installed.identity,
-            linkTarget: rootLink.root.canonicalPath,
+            linkTarget: namespaceLink.root.canonicalPath,
           }) + '\n'
         : null,
       journal,
