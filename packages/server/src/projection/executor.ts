@@ -1325,6 +1325,7 @@ interface PreparedSourceNamespace {
   destinationChain: SafeDirectoryChain
   transactionChain: SafeDirectoryChain
   ownership: ManagedSourceNamespaceInspection
+  linkMarker: StableFileSnapshot
 }
 
 interface PreparedSourceCleanup {
@@ -1332,6 +1333,7 @@ interface PreparedSourceCleanup {
   destinationChain: SafeDirectoryChain
   transactionChain: SafeDirectoryChain
   ownership: ManagedSourceNamespaceInspection
+  linkMarker: StableFileSnapshot
 }
 
 interface PreparedSourceNamespaces {
@@ -1492,6 +1494,7 @@ async function prepareSourceNamespaces(
       throw new Error(`Duplicate source namespace destination: ${sourcePlan.namespace}`)
     }
     desired.add(namespace)
+    const linkMarker = await readSourceLinkMarker(deps.fs, namespace, ownership)
     namespaces.push({
       plan: sourcePlan,
       sourceFiles: stableSourceFiles,
@@ -1500,6 +1503,7 @@ async function prepareSourceNamespaces(
       destinationChain,
       transactionChain,
       ownership,
+      linkMarker,
     })
   }
   const cleanups = deps.ownerRepo
@@ -1580,6 +1584,16 @@ async function validateSourceMaterialization(
       if (tree) directoryLinks.set(entry.sourcePath, tree)
     }
   }
+  if (strategy === 'link' && plan.entries.length === 1) {
+    const entry = plan.entries[0]!
+    if (entry.kind === 'bundle' && entry.sourcePath === '' && entry.targetPath === '') {
+      if (!sourceFiles.paths.includes('SKILL.md')) throw new Error('Root bundle requires SKILL.md')
+      const tree = await captureCompleteTrackedDirectory(fs, sourceFiles, '', sourceFiles.paths)
+      if (!tree)
+        throw new Error('Root skill source contains untracked content; cannot link whole directory')
+      directoryLinks.set('', tree)
+    }
+  }
   return directoryLinks
 }
 
@@ -1602,6 +1616,7 @@ async function captureCompleteTrackedDirectory(
     fs,
     directoryRoot,
     `tracked source directory ${directory}`,
+    directory === '' ? ['.git'] : [],
   )
   const expectedFiles = new Set(trackedFiles)
   const expectedDirectories = new Set([directory])
@@ -1692,7 +1707,16 @@ async function projectSourceNamespaces(
         path: cleanup.namespace,
         backupPath,
         backupIdentity: backup.identity,
+        ...(cleanup.ownership.destination?.kind === 'link'
+          ? {
+              sourceLinkMarker: {
+                path: sourceLinkMarkerPath(cleanup.namespace),
+                content: cleanup.linkMarker.content!,
+              },
+            }
+          : {}),
       })
+      await updateSourceLinkMarker(deps.fs, cleanup.namespace, cleanup.linkMarker, null, journal)
     } catch (err) {
       deps.logger?.error('failed to clean orphaned source namespace', {
         err,
@@ -1744,10 +1768,18 @@ async function replaceSourceNamespace(
       prepared.transactionChain,
       `${describeSkillDestination(plan.destination)} source namespace transaction directory`,
     )
-    await fs.mkdir(staging, false)
+    const rootLink = strategy === 'link' ? directoryLinks.get('') : undefined
+    if (rootLink) {
+      await revalidateSafeDirectoryTree(fs, rootLink, 'root skill source')
+      const result = await fs.createLink(rootLink.root.canonicalPath, staging)
+      if (result.fallback) throw new Error('Root skill source requires directory link support')
+      await revalidateSafeDirectoryTree(fs, rootLink, 'root skill source')
+    } else {
+      await fs.mkdir(staging, false)
+    }
     const trackedFiles = sourceFiles.paths
     const materializedDestinations = new Set<string>()
-    for (const entry of plan.entries) {
+    for (const entry of rootLink ? [] : plan.entries) {
       const entryFiles = trackedFilesForEntry(entry, trackedFiles)
       if (entryFiles.length === 0) {
         throw new Error(`Tracked source content unavailable: ${entry.sourcePath || '.'}`)
@@ -1819,7 +1851,7 @@ async function replaceSourceNamespace(
         }
       }
     }
-    await writeSourceMarker(fs, staging, plan, ownerRepo)
+    if (!rootLink) await writeSourceMarker(fs, staging, plan, ownerRepo)
 
     if (strategy === 'link') {
       await revalidateStableRelativeFiles(fs, sourceFiles, `source cache ${plan.cacheId}`)
@@ -1837,6 +1869,14 @@ async function replaceSourceNamespace(
         path: namespace,
         backupPath,
         backupIdentity: backupEntry.identity,
+        ...(prepared.ownership.destination?.kind === 'link'
+          ? {
+              sourceLinkMarker: {
+                path: sourceLinkMarkerPath(namespace),
+                content: prepared.linkMarker.content!,
+              },
+            }
+          : {}),
       }
       journal.undos.push(restoreUndo)
     }
@@ -1873,6 +1913,25 @@ async function replaceSourceNamespace(
       restoreUndo!.installedKind = installed.kind
       restoreUndo!.installedIdentity = installed.identity
     }
+    await updateSourceLinkMarker(
+      fs,
+      namespace,
+      prepared.linkMarker,
+      rootLink
+        ? JSON.stringify({
+            version: 1,
+            managedBy: 'loom',
+            kind: SOURCE_MARKER_KIND,
+            ownerRepo,
+            sourceKey: sha256(plan.sourceUrl),
+            sourceName: plan.sourceName,
+            namespace: plan.namespace,
+            linkIdentity: installed.identity,
+            linkTarget: rootLink.root.canonicalPath,
+          }) + '\n'
+        : null,
+      journal,
+    )
   } catch (error) {
     try {
       await fs.removeDir(staging)
@@ -1940,6 +1999,63 @@ function sourceFileBelongsToEntry(
   return !entry.sourcePath || sourcePath.startsWith(`${entry.sourcePath}/`)
 }
 
+/** Keeps ownership outside the linked source so projection never writes into the cache. */
+function sourceLinkMarkerPath(namespace: string): string {
+  return join(
+    dirname(dirname(namespace)),
+    '.loom-projection-transactions',
+    `${basename(namespace)}.source-link.json`,
+  )
+}
+
+/** Rejects detached metadata instead of treating it as permission to replace a user file. */
+async function readSourceLinkMarker(
+  fs: IFileSystem,
+  namespace: string,
+  ownership: ManagedSourceNamespaceInspection,
+): Promise<StableFileSnapshot> {
+  const marker = await readOptionalStableFile(
+    fs,
+    sourceLinkMarkerPath(namespace),
+    'source link marker',
+  )
+  if (marker.entry && ownership.destination?.kind !== 'link') {
+    throw new Error(`Source link marker has no matching managed link: ${namespace}`)
+  }
+  return marker
+}
+
+/** Updates link ownership in the same rollback journal as the namespace swap. */
+async function updateSourceLinkMarker(
+  fs: IFileSystem,
+  namespace: string,
+  snapshot: StableFileSnapshot,
+  content: string | null,
+  journal: ProjectionJournal,
+): Promise<void> {
+  const path = sourceLinkMarkerPath(namespace)
+  await revalidateFileSnapshot(fs, path, snapshot, 'source link marker')
+  if (content === null && !snapshot.entry) return
+  const undo: Extract<UndoAction, { kind: 'restoreSourceMarker' }> = {
+    kind: 'restoreSourceMarker',
+    path,
+    backup: snapshot.content,
+  }
+  journal.undos.push(undo)
+  if (content === null) {
+    await fs.removeEntryIfIdentity(path, snapshot.entry!.identity)
+    undo.installedIdentity = snapshot.entry!.identity
+  } else {
+    const installed = await atomicReplaceTextFile(
+      fs,
+      path,
+      content,
+      snapshot.entry?.identity ?? null,
+    )
+    undo.installedIdentity = installed.identity
+  }
+}
+
 async function writeSourceMarker(
   fs: IFileSystem,
   namespace: string,
@@ -1963,7 +2079,7 @@ async function writeSourceMarker(
 export interface ManagedSourceNamespaceInspection {
   path: string
   state: ManagedArtifactOwnership
-  destination: StableEntry | null
+  destination: StableEntry | (Omit<StableEntry, 'kind'> & { kind: 'link' }) | null
   marker?: StableFileSnapshot
   ownerRepo?: string
   sourceKey?: string
@@ -1983,16 +2099,23 @@ export async function inspectManagedSourceNamespace(
 ): Promise<ManagedSourceNamespaceInspection> {
   const namespaceEntry = await fs.inspectEntry(namespace)
   if (!namespaceEntry) return { path: namespace, state: 'absent', destination: null }
-  if (namespaceEntry.kind !== 'directory') {
+  if (namespaceEntry.kind !== 'directory' && namespaceEntry.kind !== 'link') {
     return { path: namespace, state: 'unowned', destination: null }
   }
-  const destination = await captureStableEntry(
-    fs,
-    namespace,
-    'directory',
-    `source namespace ${namespace}`,
-  )
-  const markerPath = join(namespace, COPY_MARKER)
+  const destination =
+    namespaceEntry.kind === 'link'
+      ? { ...namespaceEntry, kind: 'link' as const, path: namespace, canonicalPath: namespace }
+      : await captureStableEntry(fs, namespace, 'directory', `source namespace ${namespace}`)
+  const markerPath =
+    namespaceEntry.kind === 'link' ? sourceLinkMarkerPath(namespace) : join(namespace, COPY_MARKER)
+  if (namespaceEntry.kind === 'link') {
+    await captureSafeDirectoryChain(
+      fs,
+      dirname(dirname(namespace)),
+      dirname(markerPath),
+      'source link marker directory',
+    )
+  }
   const markerEntry = await fs.inspectEntry(markerPath)
   if (markerEntry?.kind !== 'file') {
     return { path: namespace, state: 'unowned', destination }
@@ -2017,6 +2140,11 @@ export async function inspectManagedSourceNamespace(
   const actualNamespace = typeof value.namespace === 'string' ? value.namespace : undefined
   const markerNamespace = actualNamespace ?? sourceName
   const valid =
+    (namespaceEntry.kind !== 'link' ||
+      (value.linkIdentity === namespaceEntry.identity &&
+        typeof value.linkTarget === 'string' &&
+        isAbsolute(value.linkTarget) &&
+        (await fs.readLink(namespace)) === value.linkTarget)) &&
     value.version === 1 &&
     value.managedBy === 'loom' &&
     value.kind === SOURCE_MARKER_KIND &&
@@ -2054,7 +2182,14 @@ async function revalidateManagedSourceNamespace(
   if (expected.state !== 'owned' || !expected.destination || !expected.marker) {
     throw new Error(`Source namespace is not owned: ${expected.path}`)
   }
-  await revalidateStableEntry(fs, expected.destination, `source namespace ${expected.path}`)
+  if (expected.destination.kind === 'directory') {
+    await revalidateStableEntry(fs, expected.destination, `source namespace ${expected.path}`)
+  } else {
+    const current = await fs.inspectEntry(expected.path)
+    if (current?.kind !== 'link' || current.identity !== expected.destination.identity) {
+      throw new Error(`Source namespace link changed after preflight: ${expected.path}`)
+    }
+  }
   await revalidateFileSnapshot(
     fs,
     expected.marker.entry!.path,
@@ -2119,7 +2254,13 @@ async function prepareOrphanedSourceNamespaces(
         dirname(sourceTransactionPath(namespace, 'backup', 'preflight')),
         pathContext,
       )
-      cleanups.push({ namespace, destinationChain, transactionChain, ownership })
+      cleanups.push({
+        namespace,
+        destinationChain,
+        transactionChain,
+        ownership,
+        linkMarker: await readSourceLinkMarker(fs, namespace, ownership),
+      })
     }
     await revalidateSafeDirectoryChain(fs, destinationChain, describeSkillDestination(destination))
   }
@@ -2189,7 +2330,13 @@ async function prepareTargetedSourceNamespaces(
           destinationChain,
           describeSkillDestination(destination),
         )
-        cleanups.push({ namespace, destinationChain, transactionChain, ownership })
+        cleanups.push({
+          namespace,
+          destinationChain,
+          transactionChain,
+          ownership,
+          linkMarker: await readSourceLinkMarker(fs, namespace, ownership),
+        })
       }
     }
   }
@@ -2374,7 +2521,23 @@ export async function applyUndo(u: UndoAction, fs: IFileSystem): Promise<void> {
       if (await fs.inspectEntry(u.path)) {
         throw new Error(`cannot restore projection backup over an existing artifact: ${u.path}`)
       }
-      await fs.moveNoReplace(u.backupPath, u.path, u.backupIdentity)
+      const restored = await fs.moveNoReplace(u.backupPath, u.path, u.backupIdentity)
+      if (u.sourceLinkMarker && restored.kind === 'link') {
+        const marker = await readStableFile(
+          fs,
+          u.sourceLinkMarker.path,
+          'restored source link marker',
+        )
+        if (marker.content !== u.sourceLinkMarker.content) {
+          throw new Error(`Source link marker changed before rollback: ${u.sourceLinkMarker.path}`)
+        }
+        await atomicReplaceTextFile(
+          fs,
+          u.sourceLinkMarker.path,
+          JSON.stringify({ ...JSON.parse(marker.content), linkIdentity: restored.identity }) + '\n',
+          marker.entry.identity,
+        )
+      }
     }
   } else if (u.kind === 'restoreMemory') {
     await restoreProjectedFile(u, fs)
@@ -2384,7 +2547,7 @@ export async function applyUndo(u: UndoAction, fs: IFileSystem): Promise<void> {
 }
 
 async function restoreProjectedFile(
-  undo: Extract<UndoAction, { kind: 'restoreMcp' | 'restoreMemory' }>,
+  undo: Extract<UndoAction, { kind: 'restoreMcp' | 'restoreMemory' | 'restoreSourceMarker' }>,
   fs: IFileSystem,
 ): Promise<void> {
   if (!undo.installedIdentity) return

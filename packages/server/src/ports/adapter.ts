@@ -19,7 +19,10 @@ export type UndoAction =
       backupIdentity?: string
       installedKind?: 'directory' | 'link'
       installedIdentity?: string
+      /** Link moves may recreate the inode; restore its external ownership binding. */
+      sourceLinkMarker?: { path: string; content: string }
     }
+  | { kind: 'restoreSourceMarker'; path: string; backup: string | null; installedIdentity?: string }
   | { kind: 'restoreMcp'; path: string; backup: string | null; installedIdentity?: string }
   | { kind: 'restoreMemory'; path: string; backup: string | null; installedIdentity?: string }
 export interface ProjectionFailure {

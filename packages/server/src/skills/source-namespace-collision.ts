@@ -75,7 +75,7 @@ export async function backupUserOwnedSourceNamespace(
     sourceName,
     namespace: namespaceName,
   })
-  if (ownership.state !== 'unowned' || !ownership.destination) {
+  if (ownership.state !== 'unowned' || ownership.destination?.kind !== 'directory') {
     throw new Error('Source namespace collision changed before it could be resolved')
   }
 

@@ -183,13 +183,14 @@ Implications:
 
 Safety:
 
-- Namespace root 必须有能证明 repo 和 source 归属的 marker；marker 不保存可能包含凭据的原始 Git URL。
+- 普通 namespace root 使用目录内 marker 证明 repo 和 source 归属；整目录链接使用 destination 的 Skills root 父目录下 `.loom-projection-transactions/<namespace>.source-link.json`，额外绑定 link identity 和绝对 target。不得通过链接在 source cache 内写 marker；marker 不保存可能包含凭据的原始 Git URL。
+- Link strategy 对单个根 bundle（source 根直接包含普通 `SKILL.md`，bundle 映射到 namespace 根）直接创建指向真实 source 根的目录链接，保证 `SKILL.md` 与 `agents/openai.yaml` 保持普通文件。该链接的替换、关闭、改名、targeted cleanup 和 rollback 遵循同一 namespace ownership 契约；link identity 或 target 不匹配时保留 artifact。
 - Marker完整绑定owner repository、source cache identity、source name、实际namespace name、kind和version；任一字段missing、mismatch、malformed或read failure都保留artifact并使需要该destination的projection失败。
 - Source cache id 是安全的相对路径（远端为 `<owner>/<repo>`），每级目录和最终 entry 都必须是 cache root 内的 canonical 真实目录；cache escape、ancestor link、junction 或 identity drift 在任何 Git read/checkout 前 fail closed。
 - 同一 destination 中，local skill destination 不得与 source namespace 重合或位于其下；planner 必须在任何文件系统写入前拒绝冲突。平铺 namespace 与 local skill 同名时同样冲突。不同 destination 之间的同名路径互不构成 collision。
 - 替换或删除现有 namespace 前必须验证 marker ownership；没有 marker、marker 不匹配或 destination collision 时 projection 失败并保留原内容。
 - Namespace staging、替换和跨 destination 执行必须可回滚；全部成功前不能删除 backups 或报告成功。
-- Executor 只物化 SourceTree commit 中的 tracked files；cache checkout 中的未跟踪文件不得进入 namespace。
+- Executor 只物化 SourceTree commit 中的 tracked files；cache checkout 中的未跟踪内容不得进入 namespace。单根 bundle 的整目录链接会暴露 cache 根的 `.git` 管理元数据（不遍历、不复制）；除此之外必须与选中 tracked 内容完整匹配，存在未跟踪内容时明确失败，不退化为文件级链接或默认复制。Copy strategy 仍只复制 tracked files。
 - Projection 前必须将 Loom 管理的 source cache checkout 对齐到 plan 的 SourceTree commit；cache 漂移时只能使用本地已有 Git 对象恢复，不得隐式 fetch。
 - 当前机器缺少或无法读取某个 source cache 时，projection 跳过该 source、保留其 ownerRepo 与 sourceKey 能证明归属的全部 managed namespace（包括旧嵌套 namespace 和已有平铺 member folder），并继续 reconcile 其他 source 与 local skills；结果必须暴露 source-specific warning。
 - Link projection 必须区分 file/directory link；稀疏目录不得用覆盖 excludes 的整目录 link。Copy 必须保持二进制内容。
