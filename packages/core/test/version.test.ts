@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { compareVersion } from '../src/version'
+import { compareVersion, sortTagsByVersion } from '../src/version'
 
 describe('compareVersion', () => {
   it('hasUpdate when remote has newer tag', () => {
@@ -157,5 +157,39 @@ describe('compareVersion', () => {
       { tags: { 'v5.1.4': 'aaa', 'v5.1.5': 'bbb' }, head: 'aaa' },
     )
     expect(r.hasUpdate).toBe(false)
+  })
+})
+
+describe('sortTagsByVersion', () => {
+  it('orders version tags by precedence instead of lexicographically', () => {
+    const tags = ['v0.3.0', 'v0.2.2', 'v0.2.1', 'v0.18.1', 'v0.18.0', 'v0.17.0']
+
+    expect(sortTagsByVersion(tags)).toEqual([
+      'v0.18.1',
+      'v0.18.0',
+      'v0.17.0',
+      'v0.3.0',
+      'v0.2.2',
+      'v0.2.1',
+    ])
+  })
+
+  it('orders prereleases below the matching stable version', () => {
+    const tags = ['v2.0.0-beta.2', 'v2.0.0', 'v2.0.0-beta.10']
+
+    expect(sortTagsByVersion(tags)).toEqual(['v2.0.0', 'v2.0.0-beta.10', 'v2.0.0-beta.2'])
+  })
+
+  it('places non-SemVer tags after version tags', () => {
+    const tags = ['nightly', 'v1.0.0', 'release-2']
+
+    expect(sortTagsByVersion(tags)).toEqual(['v1.0.0', 'release-2', 'nightly'])
+  })
+
+  it('does not mutate the input list', () => {
+    const tags = ['v1.0.0', 'v1.1.0']
+
+    expect(sortTagsByVersion(tags)).toEqual(['v1.1.0', 'v1.0.0'])
+    expect(tags).toEqual(['v1.0.0', 'v1.1.0'])
   })
 })

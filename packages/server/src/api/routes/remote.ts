@@ -15,6 +15,7 @@ import {
   SkillSourceSchema,
   deriveRepoId,
   deriveSourceCacheId,
+  sortTagsByVersion,
   summarizeSourceTree,
   type AgentId,
   type SkillSource,
@@ -1132,7 +1133,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
       return c.json({
         ok: true,
         branches: Object.keys(result.branches),
-        tags: Object.keys(result.tags).sort().reverse(),
+        tags: sortTagsByVersion(Object.keys(result.tags)),
       })
     } catch (e) {
       remoteLogger.error('source refs failed', { err: e })

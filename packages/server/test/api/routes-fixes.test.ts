@@ -6,6 +6,7 @@ import { registerRoutes } from '../../src/api/router'
 import { deriveSourceCacheId } from '@loom/core'
 import type { ProjectionResult } from '../../src/projection/executor.js'
 import type { PreparedSourceUpdate } from '../../src/remote/update.js'
+import type { GitRemoteRefs } from '../../src/ports/git.js'
 import { responseJson, validationError } from '../helpers/http.js'
 
 const logFns = vi.hoisted(() => ({
@@ -47,7 +48,7 @@ const platformGit = vi.hoisted(() => ({
     },
   ]),
   show: vi.fn(async () => '# Review'),
-  lsRemote: vi.fn(async () => {
+  lsRemote: vi.fn<() => Promise<GitRemoteRefs>>(async () => {
     throw new TypeError('remote unavailable')
   }),
 }))
@@ -720,6 +721,27 @@ describe('source scan', () => {
       message: 'failed to scan source',
     })
     expect(logFns.error).toHaveBeenCalledWith('source scan failed', { err })
+  })
+
+  it('POST /api/sources/refs orders tags by version precedence', async () => {
+    platformGit.lsRemote.mockResolvedValueOnce({
+      tags: { 'v0.3.0': 'c', 'v0.18.0': 'b', 'v0.18.1': 'a' },
+      branches: { main: 'a' },
+      head: 'a',
+    })
+
+    const res = await app.request('/api/sources/refs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://github.com/vercel-labs/portless' }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await responseJson<{ tags: string[] }>(res)).toMatchObject({
+      ok: true,
+      branches: ['main'],
+      tags: ['v0.18.1', 'v0.18.0', 'v0.3.0'],
+    })
   })
 
   it('POST /api/sources/refs logs refs failures', async () => {

@@ -230,6 +230,7 @@ Implications:
 - 打开 Skills 页面可以为每个 remote source 启动只读、非阻塞的 Source update check；检查不得修改 live cache、manifest 或 projection，单个 source 的慢响应或失败不得阻塞页面其他功能或其他 source 的检查。自动检查发现可更新项时，在该 source 检查完成后立即显示一次通知，不等待其余 source；已最新、需要修复和检查失败不产生自动通知。编辑现有 source 和普通 projection 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。R-SYNC-006 的同步后 cache 对齐和启动时仅针对 unhealthy cache 的自动补偿不属于该限制。
 - Source cache 是否可用是当前机器的运行时状态，不是 manifest 配置有效性；单个 source 不可用时，其他 source、local skills 和非 Skills 功能保持可用。
 - Remote refs 只在用户首次打开 ref 选择或切换 branch/tag 时按需读取；同一编辑会话内复用结果。
+- Remote tag ref 按 SemVer precedence 降序展示；非 SemVer tag 排在 SemVer tag 之后并按名称降序。不得按字典序排列（字典序会把 `v0.3.0` 排在 `v0.18.1` 前面）。
 - 显式 branch 通过该 branch ref 的 remote commit 判断更新，即使存在同名 tag；合法 SemVer tag 只和其他合法 SemVer tag 比较 precedence；非 SemVer tag 只检查同名 tag 是否移动，不回退到 branch HEAD。
 - 远端 SourceTree 只在用户选择其他 ref 或主动刷新时读取。
 - 初始编辑和未主动扫描的同 ref/type 保存必须基于当前 pinned commit，不得隐式拉取远端或替换 live cache。
@@ -258,6 +259,7 @@ Examples:
 
 Tests:
 
+- packages/core/test/version.test.ts
 - packages/server/test/remote/update.test.ts
 - packages/server/test/skills/reconciliation.test.ts
 - packages/server/test/skills/application.test.ts
