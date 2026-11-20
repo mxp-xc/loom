@@ -14,7 +14,6 @@ Loom 是 Bun workspace monorepo。共享且无 IO 的领域逻辑在 `packages/c
 
 ## 构建、测试与本地开发
 
-- `bun dev`：同时启动 API 与 Web，并自动选择可用端口。
 - `bun dev:api`：只启动 server package。
 - `bun --cwd packages/web dev`：只启动 Vite 前端。
 - `bun run test`：运行全部 Vitest 项目并保留原始输出，适合性能分析和异常排障。

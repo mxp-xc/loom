@@ -16,29 +16,18 @@ bun install
 bun dev
 ```
 
-`bun dev` 会同时启动 API 与 Web，并自动选择可用端口。终端会输出前端访问地址，默认优先使用：
-
-- Web：`http://127.0.0.1:4180`
-- API：`http://127.0.0.1:4310`
-
-如果端口被占用，开发脚本会自动换到可用端口。也可以显式设置：
-
-```bash
-LOOM_PORT=4310 LOOM_WEB_PORT=4180 bun dev
-```
-
 ## 常用命令
 
-| 命令                         | 用途                  |
-| ---------------------------- | --------------------- |
-| `bun dev`                    | 同时启动 API 与 Web   |
-| `bun dev:api`                | 只启动 server package |
-| `bun --cwd packages/web dev` | 只启动 Vite 前端      |
-| `bun run test`               | 运行全部 Vitest 测试  |
-| `bun run test <path>`        | 按文件或路径过滤测试  |
-| `bun run test -t "name"`     | 按用例名过滤测试      |
-| `bun run format:check`       | 检查 Prettier 格式    |
-| `bun run format`             | 自动格式化            |
+| 命令                         | 用途                          |
+| ---------------------------- | ----------------------------- |
+| `bun dev`                    | 通过 portless 启动 API 与 Web |
+| `bun dev:api`                | 只启动 server package         |
+| `bun --cwd packages/web dev` | 只启动 Vite 前端              |
+| `bun run test`               | 运行全部 Vitest 测试          |
+| `bun run test <path>`        | 按文件或路径过滤测试          |
+| `bun run test -t "name"`     | 按用例名过滤测试              |
+| `bun run format:check`       | 检查 Prettier 格式            |
+| `bun run format`             | 自动格式化                    |
 
 默认验证跑 `bun run test` 即可，通常不需要跑 build 脚本。
 
