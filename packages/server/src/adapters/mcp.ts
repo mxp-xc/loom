@@ -52,7 +52,21 @@ function fromNativeEntry(id: string, value: unknown): McpFragment {
     value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {}
-  const type = raw.type === 'sse' || raw.type === 'http' ? raw.type : 'stdio'
+  const url =
+    typeof raw.url === 'string'
+      ? raw.url
+      : typeof raw.serverUrl === 'string'
+        ? raw.serverUrl
+        : typeof raw.httpUrl === 'string'
+          ? raw.httpUrl
+          : undefined
+  const explicitType =
+    raw.type === 'sse' || raw.type === 'http'
+      ? raw.type
+      : raw.transport === 'sse' || raw.transport === 'http'
+        ? raw.transport
+        : undefined
+  const type = explicitType ?? (url ? 'http' : 'stdio')
   return {
     id,
     type,
@@ -61,7 +75,7 @@ function fromNativeEntry(id: string, value: unknown): McpFragment {
       ? raw.args.filter((item): item is string => typeof item === 'string')
       : undefined,
     env: stringRecord(raw.env),
-    url: typeof raw.url === 'string' ? raw.url : undefined,
+    url,
     headers: stringRecord(raw.headers),
     agents: [],
   }

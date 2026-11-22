@@ -7,7 +7,7 @@ import type {
   SourceResources,
   SourceTreeNode,
 } from './types.js'
-import { applicableAgents } from './agents.js'
+import { applicableAgents, getAgent } from './agents.js'
 import {
   skillProjectionDestinationKey,
   skillProjectionDestinations,
@@ -68,21 +68,19 @@ export interface PreservedSourceNamespace {
 }
 
 /**
- * Claude Code only discovers skill folders that are direct children of its
- * skills root. A source without bundle-external resources therefore projects
- * every selected member as its own `<source-name>-<member-name>` folder.
- * Resources need their directory relationship, so any other destination (or a
- * Claude Code source with selected resources) keeps the per-source namespace.
+ * Agents whose skills root only discovers direct child folders cannot see
+ * nested source namespaces. A source without bundle-external resources
+ * therefore projects every selected member as its own
+ * `<source-name>-<member-name>` folder. Resources need their directory
+ * relationship, so those sources keep the per-source namespace.
  */
 export function sourceProjectionLayout(
   destination: SkillProjectionDestination,
   hasResourceSelection: boolean,
 ): SourceProjectionLayout {
-  return destination.kind === 'agent' &&
-    destination.agent === 'claude-code' &&
-    !hasResourceSelection
-    ? 'flat'
-    : 'namespace'
+  const directChildrenOnly =
+    destination.kind === 'agent' && getAgent(destination.agent).skills?.directChildrenOnly === true
+  return directChildrenOnly && !hasResourceSelection ? 'flat' : 'namespace'
 }
 
 export function sourceMemberNamespace(sourceName: string, memberName: string): string {

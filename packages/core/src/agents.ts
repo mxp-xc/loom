@@ -26,7 +26,11 @@ export interface AgentDefinition {
   }
   command: string
   configDir: AgentConfigDirSpec
-  skills?: { path: AgentPathSpec }
+  skills?: {
+    path: AgentPathSpec
+    /** Skills root only discovers direct child folders; keep source members flat. */
+    directChildrenOnly?: boolean
+  }
   memory?: { path: AgentPathSpec }
   mcp?: {
     path: AgentPathSpec
@@ -113,7 +117,10 @@ export const AGENTS = defineAgentCatalog([
       overrideEnv: 'CLAUDE_CONFIG_DIR',
       fallback: { root: 'home', segments: ['.claude'] },
     },
-    skills: { path: { root: 'config', segments: ['skills'] } },
+    skills: {
+      path: { root: 'config', segments: ['skills'] },
+      directChildrenOnly: true,
+    },
     memory: { path: { root: 'config', segments: ['CLAUDE.md'] } },
     mcp: {
       path: { root: 'home', segments: ['.claude.json'] },
@@ -135,7 +142,7 @@ export const AGENTS = defineAgentCatalog([
       overrideEnv: 'CODEX_HOME',
       fallback: { root: 'home', segments: ['.codex'] },
     },
-    skills: { path: { root: 'config', segments: ['skills'] } },
+    skills: { path: { root: 'config', segments: ['skills'] }, directChildrenOnly: false },
     memory: { path: { root: 'config', segments: ['AGENTS.md'] } },
     mcp: {
       path: { root: 'config', segments: ['config.toml'] },
@@ -157,13 +164,37 @@ export const AGENTS = defineAgentCatalog([
       overrideEnv: 'OPENCODE_CONFIG_DIR',
       fallback: { root: 'xdg-config', segments: ['opencode'] },
     },
-    skills: { path: { root: 'config', segments: ['skills'] } },
+    skills: { path: { root: 'config', segments: ['skills'] }, directChildrenOnly: false },
     memory: { path: { root: 'config', segments: ['AGENTS.md'] } },
     mcp: {
       path: { root: 'config', segments: ['opencode.json'] },
       codec: 'json-object',
       rootKey: 'mcp',
       importSuffix: 'oc',
+    },
+  },
+  {
+    id: 'antigravity',
+    display: {
+      name: 'Antigravity',
+      short: 'AG',
+      color: '#3186ff',
+      icon: { kind: 'asset', key: 'antigravity' },
+    },
+    command: 'agy',
+    configDir: {
+      fallback: { root: 'home', segments: ['.gemini', 'config'] },
+    },
+    skills: {
+      path: { root: 'config', segments: ['skills'] },
+      directChildrenOnly: true,
+    },
+    memory: { path: { root: 'config', segments: ['AGENTS.md'] } },
+    mcp: {
+      path: { root: 'config', segments: ['mcp_config.json'] },
+      codec: 'json-object',
+      rootKey: 'mcpServers',
+      importSuffix: 'ag',
     },
   },
 ] as const)

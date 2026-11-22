@@ -46,6 +46,43 @@ describe('scanMcpImports', () => {
     expect(fs.readFile).not.toHaveBeenCalledWith('/home/tester/.claude.json')
   })
 
+  it('imports Antigravity remote servers configured with serverUrl', async () => {
+    files['/home/tester/.gemini/config/mcp_config.json'] = JSON.stringify({
+      mcpServers: {
+        docs: {
+          serverUrl: 'https://example.com/mcp',
+          headers: { Authorization: 'Bearer token' },
+        },
+      },
+    })
+
+    const result = await scanMcpImports({ fs, repoPath: '/repo', sources: ['antigravity'], logger })
+
+    expect(result.sources).toEqual([
+      {
+        agent: 'antigravity',
+        path: '/home/tester/.gemini/config/mcp_config.json',
+        status: 'ready',
+        diagnostics: [],
+      },
+    ])
+    expect(simplifyItems(result)).toEqual([
+      {
+        id: 'docs',
+        finalId: 'docs',
+        sourceAgents: ['antigravity'],
+        agents: ['antigravity'],
+        status: 'ready',
+        selectedByDefault: true,
+        type: 'http',
+        command: undefined,
+        url: 'https://example.com/mcp',
+      },
+    ])
+    expect(result.items[0].server?.headers).toEqual({ Authorization: 'Bearer token' })
+    expect(result.items[0].ignoredFields).toEqual([])
+  })
+
   it('merges same definitions by source agents and renames conflicting definitions', async () => {
     files['/home/tester/.claude.json'] = JSON.stringify({
       mcpServers: {
@@ -79,6 +116,7 @@ describe('scanMcpImports', () => {
       ['claude-code', 'ready'],
       ['codex', 'ready'],
       ['opencode', 'ready'],
+      ['antigravity', 'missing_file'],
     ])
     expect(simplifyItems(result)).toEqual([
       {
@@ -127,6 +165,7 @@ describe('scanMcpImports', () => {
       ['claude-code', 'ready'],
       ['codex', 'parse_failed'],
       ['opencode', 'missing_file'],
+      ['antigravity', 'missing_file'],
     ])
     expect(logger.error).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error), source: 'codex' }),

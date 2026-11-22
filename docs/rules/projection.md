@@ -166,13 +166,13 @@ Status: active
 Applies to: remote source skills projection
 
 Rule:
-Remote source 的 projection unit 是 managed namespace。Claude Code destination 在 source 没有 bundle 外 resource selection 时，把每个 selected member 投影为 `<skills-destination>/<source-name>-<member-name>/` 平铺 namespace；其他 destination，或存在 bundle 外 resource selection 的 source，投影为 `<skills-destination>/<source-name>/`。Projection planner 对每个 destination 收集该 namespace 的 selected bundle roots 和 selected resource roots，移除它们的最长共同父路径前缀后保留其余目录结构；executor 将每个 namespace 作为一个 managed unit 整体替换。
+Remote source 的 projection unit 是 managed namespace。只发现 skills root 直接子目录的 destination（Claude Code、Antigravity）在 source 没有 bundle 外 resource selection 时，把每个 selected member 投影为 `<skills-destination>/<source-name>-<member-name>/` 平铺 namespace；其他 destination，或存在 bundle 外 resource selection 的 source，投影为 `<skills-destination>/<source-name>/`。Projection planner 对每个 destination 收集该 namespace 的 selected bundle roots 和 selected resource roots，移除它们的最长共同父路径前缀后保留其余目录结构；executor 将每个 namespace 作为一个 managed unit 整体替换。
 
 Implications:
 
-- Claude Code 只发现 skills root 的直接子目录；平铺 namespace 直接把 bundle 内容放在 `<source-name>-<member-name>/` 根；普通目录使用内部 marker，整目录链接使用外置 marker。
+- Claude Code 和 Antigravity 只发现 skills root 的直接子目录；平铺 namespace 直接把 bundle 内容放在 `<source-name>-<member-name>/` 根；普通目录使用内部 marker，整目录链接使用外置 marker。
 - 平铺 namespace 名由 `source name` 和 member name 以 `-` 拼接；同一 destination 内不得重复，且不能与 local skill destination 同名。
-- 存在 bundle 外 resource selection 时，Claude Code 仍使用 `<source-name>/` namespace 以保留资源目录关系，并返回 `nested-skill-layout` warning；该 source 的 nested skill 可能不被 Claude Code 发现。
+- 存在 bundle 外 resource selection 时，Claude Code 和 Antigravity 仍使用 `<source-name>/` namespace 以保留资源目录关系，并返回 `nested-skill-layout` warning；该 source 的 nested skill 可能不被对应 agent 发现。
 - 其他 destination 始终使用 `<source-name>/` namespace；不同 destination 的 members 可以不同，因此各自计算 projection base。
 - 最长共同父路径只移除 selected roots 共同的未选择祖先，不能移除 selected root 自身名称。
 - 未选择的空父目录自然省略；若省略后产生同名 destination collision，必须保留足以消除冲突的父目录。
@@ -205,8 +205,8 @@ Examples:
 
 - 选择 `folder/skill-dir1`、`folder/skill-dir2` 和 `folder/shared` 时，agent 省略共同祖先 `folder`，保留三个 selected roots 的相对结构。
 - `team-a/skill` 与 `team-b/skill` 同时选择时，agent 保留 `team-a` 和 `team-b`，避免两个 `skill` 冲突。
-- source `superpowers` 的 member `tdd` 在 Claude Code 且未选择资源时投影为 `~/.claude/skills/superpowers-tdd/`；在 Codex 下投影为 `~/.codex/skills/superpowers/tdd/`。
-- source `superpowers` 选择了 `shared/` resource 时，Claude Code 保留 `~/.claude/skills/superpowers/skills/tdd/` 并返回 `nested-skill-layout` warning。
+- source `superpowers` 的 member `tdd` 在 Claude Code 或 Antigravity 且未选择资源时投影为 `<agent skills root>/superpowers-tdd/`；在 Codex 下投影为 `~/.codex/skills/superpowers/tdd/`。
+- source `superpowers` 选择了 `shared/` resource 时，Claude Code 保留 `~/.claude/skills/superpowers/skills/tdd/` 并返回 `nested-skill-layout` warning；Antigravity 同理保留 `<name>/...` namespace。
 
 Tests:
 

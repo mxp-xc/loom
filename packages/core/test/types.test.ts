@@ -2,8 +2,8 @@ import { describe, it, expect, expectTypeOf } from 'vitest'
 import type { AgentId, Manifest, McpServer, Config, SkillSource } from '../src/types'
 
 describe('types', () => {
-  it('AgentId is the three supported agents', () => {
-    expectTypeOf<AgentId>().toEqualTypeOf<'claude-code' | 'codex' | 'opencode'>()
+  it('AgentId matches the supported agent catalog', () => {
+    expectTypeOf<AgentId>().toEqualTypeOf<'claude-code' | 'codex' | 'opencode' | 'antigravity'>()
   })
   it('McpServer stdio has command/args/env, agents optional', () => {
     const m: McpServer = {

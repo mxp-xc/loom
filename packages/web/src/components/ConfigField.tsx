@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { agentIds, agentName } from '@/lib/agents'
+import { agentIds, agentName, agentShort } from '@/lib/agents'
 import { IconButton } from '@/components/ui/IconButton'
 import { AgentChip } from '@/components/ui/AgentChip'
 import { Check, Eraser, X } from 'lucide-react'
@@ -63,7 +63,9 @@ export const FIELD_SCHEMA: FieldSchema[] = [
     group: 'Projection',
     control: 'chips',
     helpByLevel: {
-      effective: '投影目标 agent。CC=Claude Code, CX=Codex, OC=OpenCode',
+      effective:
+        '投影目标 agent。' +
+        agentIds.map((agent) => `${agentShort[agent]}=${agentName[agent]}`).join(', '),
       local: '当前继承仓库级值。点左圆点或编辑可创建本地覆盖',
     },
   },

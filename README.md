@@ -1,6 +1,6 @@
 # Loom
 
-Loom 是一个仓库级 agent 配置管理工具。它把仓库中的期望配置整理成 manifest，并投影到不同 agent 的原生配置位置，当前支持 Claude Code、Codex 和 OpenCode。
+Loom 是一个仓库级 agent 配置管理工具。它把仓库中的期望配置整理成 manifest，并投影到不同 agent 的原生配置位置，当前支持 Claude Code、Codex、OpenCode 和 Antigravity。
 
 Loom 主要管理四类内容：
 
@@ -63,6 +63,7 @@ Projection 会把 Loom 管理的内容写入 agent 原生位置：
 - Claude Code：skills 目录、`CLAUDE.md`、MCP 配置。
 - Codex：skills 目录、`AGENTS.md`、`config.toml`。
 - OpenCode：skills 目录、`AGENTS.md`、`opencode.json`。
+- Antigravity：skills 目录、`AGENTS.md`、`mcp_config.json`。
 
 可通过环境变量覆盖部分本机路径：
 

@@ -18,6 +18,7 @@ import {
   renderText,
   renderTextWithResolvedVars,
   LocalSkillIdSchema,
+  getAgent,
   skillProjectionDestinationKey,
   type LayeredVarsResolution,
   type VarsContext,
@@ -1408,11 +1409,9 @@ async function prepareSourceNamespaces(
       sourcePlan.layout === 'namespace' &&
       sourcePlan.hasResourceSelection &&
       sourcePlan.entries.some((entry) => entry.kind === 'bundle' && entry.targetPath !== '')
-    if (
-      nestedInNamespace &&
-      sourcePlan.destination.kind === 'agent' &&
-      sourcePlan.destination.agent === 'claude-code'
-    ) {
+    const destinationAgent =
+      sourcePlan.destination.kind === 'agent' ? getAgent(sourcePlan.destination.agent) : null
+    if (nestedInNamespace && destinationAgent?.skills?.directChildrenOnly === true) {
       const warningKey = `${skillProjectionDestinationKey(sourcePlan.destination)}\0${sourcePlan.sourceUrl}`
       if (!warnedNestedLayout.has(warningKey)) {
         warnedNestedLayout.add(warningKey)
@@ -1420,7 +1419,7 @@ async function prepareSourceNamespaces(
           code: 'nested-skill-layout',
           sourceName: sourcePlan.sourceName,
           sourceUrl: sourcePlan.sourceUrl,
-          message: `Claude Code only discovers direct child skill folders. Source "${sourcePlan.sourceName}" selects bundle-external resources, so its skills keep the nested source namespace and may not be recognized.`,
+          message: `${destinationAgent.display.name} only discovers direct child skill folders. Source "${sourcePlan.sourceName}" selects bundle-external resources, so its skills keep the nested source namespace and may not be recognized.`,
         })
       }
     }

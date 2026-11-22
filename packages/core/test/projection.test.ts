@@ -981,9 +981,11 @@ describe('Claude Code flat source skill folders', () => {
 })
 
 describe('source projection folder helpers', () => {
-  it('selects flat only for Claude Code without resource selection', () => {
+  it('selects flat only for agents that discover direct child folders', () => {
     expect(sourceProjectionLayout({ kind: 'agent', agent: 'claude-code' }, false)).toBe('flat')
     expect(sourceProjectionLayout({ kind: 'agent', agent: 'claude-code' }, true)).toBe('namespace')
+    expect(sourceProjectionLayout({ kind: 'agent', agent: 'antigravity' }, false)).toBe('flat')
+    expect(sourceProjectionLayout({ kind: 'agent', agent: 'antigravity' }, true)).toBe('namespace')
     expect(sourceProjectionLayout({ kind: 'agent', agent: 'codex' }, false)).toBe('namespace')
     expect(sourceProjectionLayout({ kind: 'shared' }, false)).toBe('namespace')
     expect(hasSourceResourceSelection({ include: [] })).toBe(false)
@@ -995,6 +997,9 @@ describe('source projection folder helpers', () => {
   it('renders the same folder names used by projection', () => {
     expect(
       sourceMemberFolder({ kind: 'agent', agent: 'claude-code' }, 'superpowers', 'tdd', false),
+    ).toBe('superpowers-tdd')
+    expect(
+      sourceMemberFolder({ kind: 'agent', agent: 'antigravity' }, 'superpowers', 'tdd', false),
     ).toBe('superpowers-tdd')
     expect(sourceMemberFolder({ kind: 'agent', agent: 'codex' }, 'superpowers', 'tdd', false)).toBe(
       'superpowers/tdd',
