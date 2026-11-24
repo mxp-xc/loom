@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -71,6 +72,63 @@ describe('reconcileSourceCachesAfterSync', () => {
     })
     expect(git.clone).not.toHaveBeenCalled()
     expect(git.checkout).not.toHaveBeenCalled()
+  })
+
+  it('migrates a legacy repository-named cache into the owner-qualified layout', async () => {
+    const url = 'https://example.test/team/migrated.git'
+    await writeManifest([
+      {
+        name: 'migrated',
+        url,
+        ref: 'main',
+        type: 'branch',
+        pinned_commit: FIRST_PIN,
+        members: [],
+      },
+    ])
+    await mkdir(join(cachePath('migrated'), '.git'), { recursive: true })
+    await writeFile(join(cachePath('migrated'), 'commit.txt'), FIRST_PIN)
+    await writeFile(join(cachePath('migrated'), 'origin.txt'), url)
+    const git = mockGit()
+
+    const result = await reconcileSourceCachesAfterSync({ fs: new NodeFileSystem(), git }, repoPath)
+
+    expect(result).toMatchObject({ restored: [], unchanged: [url], unavailable: [] })
+    expect(git.clone).not.toHaveBeenCalled()
+    await expect(
+      readFile(join(repoPath, 'remote-cache', 'team', 'migrated', 'commit.txt'), 'utf8'),
+    ).resolves.toBe(FIRST_PIN)
+    expect(existsSync(cachePath('migrated'))).toBe(false)
+  })
+
+  it('leaves a legacy cache that belongs to another repository untouched', async () => {
+    const url = 'https://example.test/team/migrated.git'
+    await writeManifest([
+      {
+        name: 'migrated',
+        url,
+        ref: 'main',
+        type: 'branch',
+        pinned_commit: FIRST_PIN,
+        members: [],
+      },
+    ])
+    await mkdir(join(cachePath('migrated'), '.git'), { recursive: true })
+    await writeFile(join(cachePath('migrated'), 'commit.txt'), OLD_PIN)
+    await writeFile(
+      join(cachePath('migrated'), 'origin.txt'),
+      'https://example.test/other/migrated.git',
+    )
+    const git = mockGit()
+
+    const result = await reconcileSourceCachesAfterSync({ fs: new NodeFileSystem(), git }, repoPath)
+
+    expect(result.restored).toEqual([url])
+    expect(git.clone).toHaveBeenCalledTimes(1)
+    await expect(
+      readFile(join(repoPath, 'remote-cache', 'team', 'migrated', 'commit.txt'), 'utf8'),
+    ).resolves.toBe(FIRST_PIN)
+    await expect(readFile(join(cachePath('migrated'), 'commit.txt'), 'utf8')).resolves.toBe(OLD_PIN)
   })
 
   it('keeps one failed source unchanged while restoring the remaining sources', async () => {
@@ -440,6 +498,13 @@ function mockGit(options: { failingUrl?: string } = {}): IGit {
       await writeFile(join(path, 'commit.txt'), ref)
     }),
     revParseHead: vi.fn(async (path: string) => readFile(join(path, 'commit.txt'), 'utf8')),
+    getRemoteUrl: vi.fn(async (path: string) => {
+      try {
+        return await readFile(join(path, 'origin.txt'), 'utf8')
+      } catch {
+        return null
+      }
+    }),
     readTree: vi.fn(async () => []),
   } as Partial<IGit> as IGit
 }

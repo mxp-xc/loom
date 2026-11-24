@@ -1,5 +1,5 @@
 import { normalize, resolve } from 'node:path'
-import { deriveRepoId, type SkillSource } from '@loom/core'
+import { deriveSourceCacheId, type SkillSource } from '@loom/core'
 import type { IFileSystem } from '../ports/fs.js'
 import type { IGit } from '../ports/git.js'
 import { SourceProjectionCatalog } from '../projection/source-catalog.js'
@@ -92,7 +92,7 @@ export async function inspectSourceCacheHealth(
   source: Pick<SkillSource, 'url' | 'ref' | 'pinned_commit'>,
 ): Promise<SourceCacheHealth> {
   try {
-    const cache = await resolveSourceCache(fs, repoPath, deriveRepoId(source.url))
+    const cache = await resolveSourceCache(fs, repoPath, deriveSourceCacheId(source.url))
     if (!cache) return { healthy: false, reason: 'missing' }
     const expectedCommit = source.pinned_commit?.trim()
     if (!expectedCommit) return { healthy: false, reason: 'invalid' }
@@ -118,7 +118,7 @@ export async function warmSourceProjectionCatalog(
   source: SkillSource,
   expectedRevision = catalog.revision(repoPath, source.url),
 ): Promise<void> {
-  const cache = await resolveSourceCache(fs, repoPath, deriveRepoId(source.url))
+  const cache = await resolveSourceCache(fs, repoPath, deriveSourceCacheId(source.url))
   if (!cache) throw new Error(`Source cache unavailable: ${source.url}`)
   const commit = source.pinned_commit?.trim() || source.ref
   await catalog.getOrLoad(

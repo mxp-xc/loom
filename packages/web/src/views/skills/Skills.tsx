@@ -10,8 +10,10 @@ import { ErrorState, WarningState } from '@/components/ErrorFeedback'
 import {
   applicableAgents,
   formatSourceMemberSkillId,
+  hasSourceResourceSelection,
   normalizeOrder,
   normalizeSkillGroupOrder,
+  sourceIdentity,
   type SkillSource,
 } from '@loom/core'
 import { api } from '@/lib/api'
@@ -95,7 +97,10 @@ export default function Skills({ repoPath }: { repoPath: string }) {
     return {
       skillId: formatSourceMemberSkillId(source, member.name, manifest.config),
       source: source.url,
+      sourceName: sourceIdentity(source).repoId,
       memberEntry: member.entry,
+      memberName: member.name,
+      hasResourceSelection: hasSourceResourceSelection(source.resources),
       path: member.path ?? member.entry,
       agents: member.agents ?? [],
       shared: member.shared === true,

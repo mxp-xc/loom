@@ -49,6 +49,7 @@
 | `--cc` | `#D97757` | Claude Code |
 | `--cx` | `#06B6D4` | Codex       |
 | `--oc` | `#8B5CF6` | OpenCode    |
+| `--ag` | `#3186FF` | Antigravity |
 
 ### 语义色
 

@@ -38,12 +38,14 @@ describe('agent paths', () => {
   it('skills dir = configDir/skills', () => {
     expect(agentSkillsDir('claude-code')).toBe(join(home, '.claude', 'skills'))
     expect(agentSkillsDir('codex')).toBe(join(home, '.codex', 'skills'))
+    expect(agentSkillsDir('antigravity')).toBe(join(home, '.gemini', 'config', 'skills'))
   })
   it('mcp file: claude ~/.claude.json, codex config.toml, opencode <configDir>/opencode.json', () => {
     expect(agentMcpFile('claude-code')).toBe(join(home, '.claude.json'))
     expect(agentMcpFile('codex')).toBe(join(home, '.codex', 'config.toml'))
     vi.stubEnv('OPENCODE_CONFIG_DIR', join(home, 'opencode'))
     expect(agentMcpFile('opencode')).toBe(join(home, 'opencode', 'opencode.json'))
+    expect(agentMcpFile('antigravity')).toBe(join(home, '.gemini', 'config', 'mcp_config.json'))
   })
   it('opencode config dir is ~/.config/opencode on darwin (not Library/Application Support)', () => {
     vi.stubEnv('OPENCODE_CONFIG_DIR', undefined)
@@ -55,9 +57,10 @@ describe('agent paths', () => {
     expect(agentMemoryFile('claude-code').endsWith('CLAUDE.md')).toBe(true)
     expect(agentMemoryFile('codex').endsWith('AGENTS.md')).toBe(true)
     expect(agentMemoryFile('opencode').endsWith('AGENTS.md')).toBe(true)
+    expect(agentMemoryFile('antigravity')).toBe(join(home, '.gemini', 'config', 'AGENTS.md'))
   })
   it('agentMemoryFile lives under agentConfigDir', () => {
-    for (const a of ['claude-code', 'codex', 'opencode'] as const) {
+    for (const a of ['claude-code', 'codex', 'opencode', 'antigravity'] as const) {
       const f = agentMemoryFile(a)
       const d = agentConfigDir(a)
       expect(f.startsWith(d)).toBe(true)

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun scripts/dev.mjs",
+    "dev": "portless run --name loom bun scripts/dev.mjs",
     "dev:api": "bun --watch --no-clear-screen packages/server/src/index.ts",
     "start": "bun --cwd packages/server start",
     "test": "vitest run",

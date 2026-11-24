@@ -877,6 +877,9 @@ describe('executeProjection', () => {
       cacheId: 'superpowers',
       commit: 'planned-commit',
       destination: { kind: 'agent', agent: 'claude-code' },
+      namespace: 'openai-skills',
+      layout: 'namespace',
+      hasResourceSelection: false,
       projectionBase: '',
       entries: [],
     }
@@ -909,6 +912,9 @@ describe('executeProjection', () => {
       cacheId: 'superpowers',
       commit: 'planned-commit',
       destination: { kind: 'agent', agent: 'claude-code' },
+      namespace: 'openai-skills',
+      layout: 'namespace',
+      hasResourceSelection: false,
       projectionBase: '',
       entries: [],
     }
@@ -940,6 +946,9 @@ describe('executeProjection', () => {
       cacheId: 'superpowers',
       commit: 'planned-commit',
       destination: { kind: 'agent', agent: 'claude-code' },
+      namespace: 'openai-skills',
+      layout: 'namespace',
+      hasResourceSelection: false,
       projectionBase: '',
       entries: [],
     }

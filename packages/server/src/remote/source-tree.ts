@@ -294,17 +294,14 @@ function validateBundleNames(
   directories: readonly TreeDirectory[],
   source: SourceTreeSource,
 ): void {
-  const names = new Map<string, string>()
+  // Names may repeat across different directories; the tree path identifies a
+  // bundle, and the UI shows it next to the name. Selection still requires a
+  // unique member name, which is enforced when the source is saved.
   for (const directory of directories) {
     const entry = childPath(directory.path, 'SKILL.md')
     const name = bundleName(directory, source)
     if (!SKILL_NAME.test(name))
       throw new Error(`Invalid source skill member name "${name}" at ${entry}`)
-    const duplicate = names.get(name)
-    if (duplicate) {
-      throw new Error(`Duplicate source skill member name "${name}" from ${duplicate} and ${entry}`)
-    }
-    names.set(name, entry)
   }
 }
 

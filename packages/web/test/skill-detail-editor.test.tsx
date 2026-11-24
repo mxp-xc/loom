@@ -80,7 +80,7 @@ describe('SkillDetailEditor', () => {
     const dialog = await screen.findByRole('dialog', { name: 'production-skill' })
     expect(within(dialog).getByTestId('skill-metadata-pane')).toBeDefined()
     expect(within(dialog).getByTestId('skill-document-pane')).toBeDefined()
-    expect(within(dialog).getAllByText('1 of 4')).toHaveLength(2)
+    expect(within(dialog).getAllByText(`1 of ${agentIds.length + 1}`)).toHaveLength(2)
     expect(within(dialog).getByRole('tab', { name: 'Preview' })).toBeDefined()
     expect(within(dialog).getByRole('tab', { name: 'Source' })).toBeDefined()
     expect(
@@ -160,7 +160,7 @@ describe('SkillDetailEditor', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'mixed-skill' })
     const projectedLinks = within(dialog).getByText('Projected links').closest('section')!
-    expect(within(projectedLinks).getByText('2 of 4')).toBeDefined()
+    expect(within(projectedLinks).getByText(`2 of ${agentIds.length + 1}`)).toBeDefined()
   })
 
   it('keeps one content frame while SKILL.md is loading', async () => {
@@ -246,5 +246,70 @@ describe('SkillDetailEditor', () => {
     const dialog = await screen.findByRole('dialog', { name: 'empty-local-skill' })
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Start editing' }))
     expect(within(dialog).getByRole('textbox', { name: 'SKILL.md 内容' })).toBeDefined()
+  })
+
+  it('shows the flat Claude Code folder and nested other destinations for source members', async () => {
+    render(
+      <SkillDetailEditor
+        repoPath="/tmp/source-flat-folder"
+        agents={['claude-code', 'codex']}
+        operations={operations}
+        detail={{
+          skillId: 'superpowers/receiving-code-review',
+          source: 'https://github.com/obra/superpowers.git',
+          sourceName: 'superpowers',
+          memberEntry: 'receiving-code-review/SKILL.md',
+          memberName: 'receiving-code-review',
+          hasResourceSelection: false,
+          path: 'receiving-code-review/SKILL.md',
+          agents: ['claude-code', 'codex'],
+          shared: true,
+        }}
+        showToast={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'superpowers/receiving-code-review',
+    })
+    expect(
+      within(dialog).getByText('~/.claude/skills/superpowers-receiving-code-review'),
+    ).toBeDefined()
+    expect(
+      within(dialog).getByText('~/.codex/skills/superpowers/receiving-code-review'),
+    ).toBeDefined()
+    expect(
+      within(dialog).getByText('~/.agents/skills/superpowers/receiving-code-review'),
+    ).toBeDefined()
+  })
+
+  it('keeps the Claude Code namespace path when the source selects resources', async () => {
+    render(
+      <SkillDetailEditor
+        repoPath="/tmp/source-nested-folder"
+        agents={['claude-code']}
+        operations={operations}
+        detail={{
+          skillId: 'superpowers/receiving-code-review',
+          source: 'https://github.com/obra/superpowers.git',
+          sourceName: 'superpowers',
+          memberEntry: 'receiving-code-review/SKILL.md',
+          memberName: 'receiving-code-review',
+          hasResourceSelection: true,
+          path: 'receiving-code-review/SKILL.md',
+          agents: ['claude-code'],
+        }}
+        showToast={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'superpowers/receiving-code-review',
+    })
+    expect(
+      within(dialog).getByText('~/.claude/skills/superpowers/receiving-code-review'),
+    ).toBeDefined()
   })
 })

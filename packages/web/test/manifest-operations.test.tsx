@@ -56,6 +56,7 @@ vi.mock('../src/lib/api', () => ({
       ok: true,
       agent: 'codex',
       sourceName: 'playwright-cli',
+      namespace: 'playwright-cli',
       backupName: 'playwright-cli-backup',
     })),
     updateMcpAgents: vi.fn(async () => ({ ok: true })),
@@ -283,6 +284,7 @@ describe('useManifestOperations', () => {
         ok: true,
         agent: 'codex',
         sourceName: 'superpowers',
+        namespace: 'superpowers',
         backupName: 'superpowers-backup',
       })
 

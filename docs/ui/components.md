@@ -58,11 +58,11 @@ Utility、toolbar、row action 默认使用 `IconButton`：只显示 lucide 图�
 
 `AgentChip` 用于 Agent Catalog 中的 registered agents。Agent chip 使用 26px 圆形轮廓和品牌 mask icon；完整名称来自 `aria-label`/tooltip，不能只靠颜色或缩写识别。`default` 等非 agent scope 使用对应页面的显式 scope control，不借用真实 agent。
 
-| 状态    | 语义与样式                                                             |
-| ------- | ---------------------------------------------------------------------- |
-| `on`    | agent 色图标 + 轻度 agent 色表面，表示当前 item/scope 已选择           |
-| `off`   | 中性低对比表面，表示未选择                                             |
-| `mixed` | agent 色文字、淡色表面和边框，表示 bulk scope 仅部分选择；可附 `count` |
+| 状态    | 语义与样式                                                                              |
+| ------- | --------------------------------------------------------------------------------------- |
+| `on`    | agent 色图标 + 轻度 agent 色表面，表示当前 item/scope 已选择                            |
+| `off`   | 中性低对比表面，表示未选择                                                              |
+| `mixed` | agent 色文字、淡色表面和边框，表示 bulk scope 仅部分选择；同时显示 `count`（当前/总数） |
 
 交互 chip 使用原生 `button`，以 `aria-pressed=true/false/mixed` 暴露状态；只读 chip 渲染为 `span`。需要避免 row click 时使用 `stopPropagation`，而不是在父组件依赖 DOM 文本判断。
 

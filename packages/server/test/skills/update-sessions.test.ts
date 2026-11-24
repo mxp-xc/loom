@@ -551,6 +551,23 @@ describe('SourceUpdateSessionStore', () => {
     })
   })
 
+  it('drops an unrecoverable session instead of failing prune on every call', async () => {
+    const repoPath = await createRepo('loom-update-prune-unrecoverable-')
+    const fs = new NodeFileSystem()
+    const store = new SourceUpdateSessionStore(fs, { ttlMs: Number.POSITIVE_INFINITY })
+    const session = await createSession(store, fs, repoPath)
+    // Recreate the workspace so its recorded directory identity no longer matches.
+    const copy = `${session.sessionRoot}-copy`
+    await fs.copyDir(session.sessionRoot, copy)
+    await fs.removeDir(session.sessionRoot)
+    await fs.move(copy, session.sessionRoot)
+
+    const restarted = new SourceUpdateSessionStore(fs, { ttlMs: Number.POSITIVE_INFINITY })
+    await restarted.prune(repoPath)
+
+    expect(await fs.inspectEntry(session.sessionRoot)).toBeNull()
+  })
+
   it('prunes the oldest prepared sessions to the per-repository capacity', async () => {
     const repoPath = await createRepo('loom-update-prune-capacity-')
     const fs = new NodeFileSystem()

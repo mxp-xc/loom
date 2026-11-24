@@ -1,3 +1,4 @@
+import { basename } from 'node:path'
 import type { AgentId } from '@loom/core'
 
 export class SourceNamespaceCollisionError extends Error {
@@ -40,6 +41,7 @@ export function sourceNamespaceCollisionPayload(error: SourceNamespaceCollisionE
         agent: error.agent,
         sourceName: error.sourceName,
         sourceUrl: error.sourceUrl,
+        namespace: basename(error.namespace),
       },
     ],
   }

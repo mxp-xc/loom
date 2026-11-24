@@ -47,4 +47,17 @@ describe('SourceNamespaceCollisionDialog', () => {
       true,
     )
   })
+
+  it('names the flat folder that caused the collision', () => {
+    render(
+      <SourceNamespaceCollisionDialog
+        collision={{ ...collision, namespace: 'playwright-cli-playwright-cli' }}
+        busy={false}
+        onClose={vi.fn()}
+        onResolve={vi.fn(async () => undefined)}
+      />,
+    )
+
+    expect(screen.getByText('playwright-cli-playwright-cli')).toBeTruthy()
+  })
 })

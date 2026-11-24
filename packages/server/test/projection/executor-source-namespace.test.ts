@@ -5,6 +5,10 @@ import { basename, join } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { AgentId, Manifest, ProjectionPlan, SourceProjectionPlan } from '@loom/core'
 import { executeProjection, type ProjectionDeps } from '../../src/projection/executor.js'
+import {
+  findSourceNamespaceCollision,
+  sourceNamespaceCollisionPayload,
+} from '../../src/projection/errors.js'
 import { NodeFileSystem } from '../../src/platform/node/fs.js'
 
 let home: string
@@ -41,6 +45,9 @@ function sourcePlan(overrides: Partial<SourceProjectionPlan> = {}): SourceProjec
     cacheId: 'workflow-source',
     commit: 'commit-oid',
     destination: { kind: 'agent', agent: 'claude-code' },
+    namespace: 'workflow-source',
+    layout: 'namespace',
+    hasResourceSelection: false,
     projectionBase: '',
     entries: [],
     ...overrides,
@@ -198,49 +205,291 @@ describe('source namespace projection', () => {
   })
 
   it.each(['copy', 'link'] as const)(
-    'materializes a root bundle without exposing Git metadata for %s strategy',
+    'projects a complete root bundle using %s and reconciles its ownership',
     async (strategy) => {
       await mkdir(join(cacheRoot, '.git'), { recursive: true })
-      await mkdir(join(cacheRoot, 'references'), { recursive: true })
-      await writeFile(join(cacheRoot, '.git', 'config'), 'private cache metadata')
+      await mkdir(join(cacheRoot, 'agents'), { recursive: true })
+      await writeFile(join(cacheRoot, '.git', 'config'), 'cache metadata')
       await writeFile(join(cacheRoot, 'SKILL.md'), 'root bundle')
-      await writeFile(join(cacheRoot, 'references', 'guide.md'), 'guide')
+      await writeFile(join(cacheRoot, 'agents', 'openai.yaml'), 'interface: {}')
+      const fs = new NodeFileSystem()
+      const plan = projectionPlan(
+        [sourcePlan({ entries: [{ kind: 'bundle', sourcePath: '', targetPath: '' }] })],
+        strategy,
+      )
+      const projectionDeps = { ...deps(() => cacheRoot), fs }
+      const run = (next = plan) =>
+        executeProjection(
+          next,
+          manifest,
+          { env: {}, activeProfile: {}, defaultProfile: {} },
+          projectionDeps,
+          'skills',
+        )
+      const namespace = join(home, '.claude', 'skills', 'workflow-source')
+      await mkdir(namespace, { recursive: true })
+      await writeFile(join(namespace, '.loom-projection.json'), JSON.stringify(sourceMarker()))
+      await writeFile(join(namespace, 'SKILL.md'), 'old projection')
+      expect(await run()).toEqual({ ok: true })
+      expect(await fs.isLink(namespace)).toBe(strategy === 'link')
+      if (strategy === 'link')
+        expect(await fs.readLink(namespace)).toBe(await fs.realPath(cacheRoot))
+      expect(await fs.isLink(join(namespace, 'SKILL.md'))).toBe(false)
+      expect(await fs.isLink(join(namespace, 'agents', 'openai.yaml'))).toBe(false)
+      expect(await readFile(join(namespace, 'SKILL.md'), 'utf8')).toBe('root bundle')
+      expect(await fs.exists(join(cacheRoot, '.loom-projection.json'))).toBe(false)
+      expect(await fs.exists(join(namespace, '.git/config'))).toBe(strategy === 'link')
+      expect(await run()).toEqual({ ok: true })
+      expect(await run(projectionPlan([], strategy))).toEqual({ ok: true })
+      expect(await fs.inspectEntry(namespace)).toBeNull()
+      expect(await readFile(join(cacheRoot, 'SKILL.md'), 'utf8')).toBe('root bundle')
+    },
+  )
 
-      const fs = new RecordingFileLinkFileSystem()
-      const result = await executeProjection(
+  it.each(['namespace', 'flat'] as const)(
+    'links a nested source bundle with %s layout at the namespace root and preserves sibling isolation',
+    async (layout) => {
+      const bundle = join(cacheRoot, 'skills', 'taste-skill')
+      await mkdir(join(bundle, 'agents'), { recursive: true })
+      await writeFile(
+        join(bundle, 'SKILL.md'),
+        '---\nname: design-taste-frontend\ndescription: Test skill\n---\n',
+      )
+      await writeFile(join(bundle, 'agents', 'openai.yaml'), 'interface: {}')
+      await writeFile(join(cacheRoot, 'README.md'), 'unselected sibling')
+      const fs = new NodeFileSystem()
+      const namespaceName = layout === 'flat' ? 'workflow-source-taste-skill' : 'workflow-source'
+      const namespace = join(home, '.claude', 'skills', namespaceName)
+      const plan = projectionPlan(
+        [
+          sourcePlan({
+            layout,
+            namespace: namespaceName,
+            entries: [{ kind: 'bundle', sourcePath: 'skills/taste-skill', targetPath: '' }],
+          }),
+        ],
+        'link',
+      )
+      const run = (next = plan) =>
+        executeProjection(
+          next,
+          manifest,
+          { env: {}, activeProfile: {}, defaultProfile: {} },
+          deps(() => cacheRoot),
+          'skills',
+        )
+      expect(await run()).toEqual({ ok: true })
+      expect(await fs.isLink(namespace)).toBe(true)
+      expect(await fs.readLink(namespace)).toBe(await fs.realPath(bundle))
+      expect(await fs.isLink(join(namespace, 'SKILL.md'))).toBe(false)
+      expect(await fs.isLink(join(namespace, 'agents/openai.yaml'))).toBe(false)
+      expect(await fs.exists(join(namespace, 'README.md'))).toBe(false)
+      expect(await fs.exists(join(bundle, '.loom-projection.json'))).toBe(false)
+      expect(await run()).toEqual({ ok: true })
+      expect(await run(projectionPlan([], 'link'))).toEqual({ ok: true })
+      expect(await fs.inspectEntry(namespace)).toBeNull()
+      expect(await readFile(join(bundle, 'agents/openai.yaml'), 'utf8')).toBe('interface: {}')
+    },
+  )
+
+  it('rejects untracked content in a root directory link without replacing the old projection', async () => {
+    await writeFile(join(cacheRoot, 'SKILL.md'), 'skill')
+    await writeFile(join(cacheRoot, 'untracked.txt'), 'private')
+    const namespace = join(home, '.claude', 'skills', 'workflow-source')
+    await mkdir(namespace, { recursive: true })
+    await writeFile(join(namespace, '.loom-projection.json'), JSON.stringify(sourceMarker()))
+    await writeFile(join(namespace, 'SKILL.md'), 'old')
+    const result = await executeProjection(
+      projectionPlan(
+        [sourcePlan({ entries: [{ kind: 'bundle', sourcePath: '', targetPath: '' }] })],
+        'link',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      {
+        ...deps(() => cacheRoot),
+        resolveSourceFiles: async () => ['SKILL.md'],
+      },
+      'skills',
+    )
+    expect(result.ok).toBe(false)
+    expect(await readFile(join(namespace, 'SKILL.md'), 'utf8')).toBe('old')
+  })
+
+  it.each([
+    { previousStrategy: 'copy', sourcePath: '' },
+    { previousStrategy: 'link', sourcePath: '' },
+    { previousStrategy: 'copy', sourcePath: 'skills/taste-skill' },
+    { previousStrategy: 'link', sourcePath: 'skills/taste-skill' },
+  ] as const)(
+    'rolls back $previousStrategy bundle $sourcePath and its marker after a later state failure',
+    async ({ previousStrategy, sourcePath }) => {
+      const bundle = join(cacheRoot, sourcePath)
+      await mkdir(bundle, { recursive: true })
+      await writeFile(join(bundle, 'SKILL.md'), 'skill')
+      const namespace = join(home, '.claude', 'skills', 'workflow-source')
+      const fs = new NodeFileSystem()
+      const projectionDeps = { ...deps(() => cacheRoot), fs }
+      const plans = [sourcePlan({ entries: [{ kind: 'bundle', sourcePath, targetPath: '' }] })]
+      const run = (plan: ProjectionPlan, fail = false) =>
+        executeProjection(
+          plan,
+          manifest,
+          { env: {}, activeProfile: {}, defaultProfile: {} },
+          {
+            ...projectionDeps,
+            ...(fail
+              ? {
+                  setManagedSkillArtifacts: vi
+                    .fn()
+                    .mockRejectedValueOnce(new Error('state failure'))
+                    .mockResolvedValue(undefined),
+                }
+              : {}),
+          },
+          'skills',
+        )
+      expect(await run(projectionPlan(plans, previousStrategy))).toEqual({ ok: true })
+      const before = await fs.inspectEntry(namespace)
+      const markerPath = join(
+        home,
+        '.claude',
+        '.loom-projection-transactions',
+        'workflow-source.source-link.json',
+      )
+      const markerBefore = (await fs.exists(markerPath)) ? await readFile(markerPath, 'utf8') : null
+      for (const next of [
+        projectionPlan(plans, previousStrategy === 'copy' ? 'link' : 'copy'),
+        projectionPlan([], 'link'),
+      ]) {
+        const result = await run(next, true)
+        expect(result.ok).toBe(false)
+        if (!result.ok) expect(result.failure.rollbackReport.rollbackFailures).toEqual([])
+        expect((await fs.inspectEntry(namespace))?.kind).toBe(before?.kind)
+        expect(await readFile(join(namespace, 'SKILL.md'), 'utf8')).toBe('skill')
+        const markerAfter = (await fs.exists(markerPath))
+          ? JSON.parse(await readFile(markerPath, 'utf8'))
+          : null
+        expect(markerAfter).toEqual(
+          markerBefore
+            ? {
+                ...JSON.parse(markerBefore),
+                linkIdentity: (await fs.inspectEntry(namespace))!.identity,
+              }
+            : null,
+        )
+        expect((await run(projectionPlan(plans, previousStrategy))).ok).toBe(true)
+      }
+    },
+  )
+
+  it('preserves a replacement user link when its identity no longer matches the source marker', async () => {
+    await writeFile(join(cacheRoot, 'SKILL.md'), 'skill')
+    const namespace = join(home, '.claude', 'skills', 'workflow-source')
+    const fs = new NodeFileSystem()
+    const plans = [sourcePlan({ entries: [{ kind: 'bundle', sourcePath: '', targetPath: '' }] })]
+    const run = (plan: ProjectionPlan) =>
+      executeProjection(
+        plan,
+        manifest,
+        { env: {}, activeProfile: {}, defaultProfile: {} },
+        deps(() => cacheRoot),
+        'skills',
+      )
+    expect(await run(projectionPlan(plans, 'link'))).toEqual({ ok: true })
+    await rename(namespace, `${namespace}.original`)
+    await symlink(cacheRoot, namespace, process.platform === 'win32' ? 'junction' : 'dir')
+    const replacement = await fs.inspectEntry(namespace)
+    expect((await run(projectionPlan(plans, 'link'))).ok).toBe(false)
+    expect(await run(projectionPlan([], 'link'))).toEqual({ ok: true })
+    expect(await fs.inspectEntry(namespace)).toEqual(replacement)
+  })
+
+  it('recognizes a managed source link after the filesystem device identity changes', async () => {
+    await writeFile(join(cacheRoot, 'SKILL.md'), 'skill')
+    const namespace = join(home, '.claude', 'skills', 'workflow-source')
+    const plans = [sourcePlan({ entries: [{ kind: 'bundle', sourcePath: '', targetPath: '' }] })]
+    const run = () =>
+      executeProjection(
+        projectionPlan(plans, 'link'),
+        manifest,
+        { env: {}, activeProfile: {}, defaultProfile: {} },
+        deps(() => cacheRoot),
+        'skills',
+      )
+    expect(await run()).toEqual({ ok: true })
+    const markerPath = join(
+      home,
+      '.claude',
+      '.loom-projection-transactions',
+      'workflow-source.source-link.json',
+    )
+    const marker = JSON.parse(await readFile(markerPath, 'utf8')) as { linkIdentity: string }
+    const [device, inode] = marker.linkIdentity.split(':')
+    expect(device).toBeTruthy()
+    expect(inode).toBeTruthy()
+    await writeFile(
+      markerPath,
+      JSON.stringify({ ...marker, linkIdentity: `${Number(device) + 1}:${inode}` }) + '\n',
+    )
+
+    expect(await run()).toEqual({ ok: true })
+    expect((await new NodeFileSystem().inspectEntry(namespace))?.kind).toBe('link')
+  })
+
+  it('renames and removes a shared root link through targeted source reconciliation', async () => {
+    await writeFile(join(cacheRoot, 'SKILL.md'), 'skill')
+    const fs = new NodeFileSystem()
+    const destination = { kind: 'shared' } as const
+    const entries = [{ kind: 'bundle', sourcePath: '', targetPath: '' }] as const
+    const run = (name: string, enabled: boolean) =>
+      executeProjection(
         projectionPlan(
-          [
-            sourcePlan({
-              entries: [{ kind: 'bundle', sourcePath: '', targetPath: '' }],
-            }),
-          ],
-          strategy,
+          enabled
+            ? [
+                sourcePlan({
+                  sourceName: name,
+                  namespace: name,
+                  destination,
+                  entries: [...entries],
+                }),
+              ]
+            : [],
+          'link',
         ),
         manifest,
         { env: {}, activeProfile: {}, defaultProfile: {} },
-        { ...deps(() => cacheRoot), fs },
+        deps(() => cacheRoot),
         'skills',
+        {
+          skillsTarget: {
+            sources: [
+              {
+                sourceName: name,
+                sourceUrl: 'https://example.com/workflow-source.git',
+                destinations: [destination],
+              },
+            ],
+            locals: [],
+          },
+        },
       )
-
-      const namespace = join(home, '.claude', 'skills', 'workflow-source')
-      expect(result).toEqual({ ok: true })
-      expect(await readFile(join(namespace, 'SKILL.md'), 'utf8')).toBe('root bundle')
-      expect(await readFile(join(namespace, 'references', 'guide.md'), 'utf8')).toBe('guide')
-      expect(await fs.isLink(namespace)).toBe(false)
-      if (strategy === 'link') {
-        await expectFileLinkOrFallbackCopy(
-          fs,
-          join(cacheRoot, 'SKILL.md'),
-          join(namespace, 'SKILL.md'),
-        )
-      } else {
-        expect(await fs.isLink(join(namespace, 'SKILL.md'))).toBe(false)
-      }
-      await expect(readFile(join(namespace, '.git', 'config'), 'utf8')).rejects.toMatchObject({
-        code: 'ENOENT',
-      })
-    },
-  )
+    expect(await run('workflow-source', true)).toEqual({ ok: true })
+    expect(await run('renamed', true)).toEqual({ ok: true })
+    expect(await fs.inspectEntry(join(home, '.agents/skills/workflow-source'))).toBeNull()
+    expect(await fs.isLink(join(home, '.agents/skills/renamed'))).toBe(true)
+    expect(
+      await fs.exists(
+        join(home, '.agents/.loom-projection-transactions/workflow-source.source-link.json'),
+      ),
+    ).toBe(false)
+    expect(await run('renamed', false)).toEqual({ ok: true })
+    expect(await fs.inspectEntry(join(home, '.agents/skills/renamed'))).toBeNull()
+    expect(
+      await fs.exists(join(home, '.agents/.loom-projection-transactions/renamed.source-link.json')),
+    ).toBe(false)
+    expect(await readFile(join(cacheRoot, 'SKILL.md'), 'utf8')).toBe('skill')
+  })
 
   it('preserves selected root structure under the source namespace', async () => {
     await mkdir(join(cacheRoot, 'skill-dir1', 'shared'), { recursive: true })
@@ -292,7 +541,7 @@ describe('source namespace projection', () => {
   })
 
   it.each(['copy', 'link'] as const)(
-    'materializes only tracked files for %s source directories',
+    'preserves tracked-file isolation with %s source directories',
     async (strategy) => {
       await mkdir(join(cacheRoot, 'skill', 'references'), { recursive: true })
       await mkdir(join(cacheRoot, 'shared'), { recursive: true })
@@ -333,18 +582,76 @@ describe('source namespace projection', () => {
 
       const namespace = join(home, '.claude', 'skills', 'workflow-source')
       const fs = new NodeFileSystem()
+      if (strategy === 'link') {
+        expect(result.ok).toBe(false)
+        expect(await fs.inspectEntry(namespace)).toBeNull()
+        return
+      }
       expect(result).toEqual({ ok: true })
       expect(await fs.exists(join(namespace, 'skill', 'SKILL.md'))).toBe(true)
       expect(await fs.exists(join(namespace, 'skill', 'references', 'tracked.md'))).toBe(true)
       expect(await fs.exists(join(namespace, 'shared', 'tracked.md'))).toBe(true)
       expect(await fs.exists(join(namespace, 'skill', 'references', 'untracked.md'))).toBe(false)
       expect(await fs.exists(join(namespace, 'shared', 'untracked.md'))).toBe(false)
-      if (strategy === 'link') {
-        expect(await fs.isLink(join(namespace, 'skill'))).toBe(false)
-        expect(await fs.isLink(join(namespace, 'shared'))).toBe(false)
-      }
     },
   )
+
+  it('links a source-root bundle retained under a named namespace child', async () => {
+    await writeFile(join(cacheRoot, 'SKILL.md'), 'skill')
+    const result = await executeProjection(
+      projectionPlan(
+        [sourcePlan({ entries: [{ kind: 'bundle', sourcePath: '', targetPath: 'bundle' }] })],
+        'link',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+    const bundle = join(home, '.claude/skills/workflow-source/bundle')
+    const fs = new NodeFileSystem()
+    expect(result).toEqual({ ok: true })
+    expect(await fs.isLink(bundle)).toBe(true)
+    expect(await fs.isLink(join(bundle, 'SKILL.md'))).toBe(false)
+    expect(await fs.readLink(bundle)).toBe(await fs.realPath(cacheRoot))
+  })
+
+  it('keeps sparse resource directories as tracked file links alongside complete bundles', async () => {
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await mkdir(join(cacheRoot, 'shared'))
+    await writeFile(join(cacheRoot, 'skill/SKILL.md'), 'skill')
+    await writeFile(join(cacheRoot, 'shared/tracked.md'), 'resource')
+    await writeFile(join(cacheRoot, 'shared/untracked.md'), 'private')
+    const fs = new NodeFileSystem()
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            entries: [
+              { kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' },
+              { kind: 'resource-directory', sourcePath: 'shared', targetPath: 'shared' },
+            ],
+          }),
+        ],
+        'link',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      {
+        ...deps(() => cacheRoot),
+        fs,
+        resolveSourceFiles: async () => ['skill/SKILL.md', 'shared/tracked.md'],
+      },
+      'skills',
+    )
+    const namespace = join(home, '.claude/skills/workflow-source')
+    expect(result).toEqual({ ok: true })
+    expect(await fs.isLink(join(namespace, 'skill'))).toBe(true)
+    expect(await fs.isLink(join(namespace, 'skill/SKILL.md'))).toBe(false)
+    expect(await fs.isLink(join(namespace, 'shared'))).toBe(false)
+    expect(await readFile(join(namespace, 'shared/tracked.md'), 'utf8')).toBe('resource')
+    expect(await fs.exists(join(namespace, 'shared/untracked.md'))).toBe(false)
+  })
 
   it('links complete directories and attempts file links when link strategy is selected', async () => {
     await mkdir(join(cacheRoot, 'skill', 'references'), { recursive: true })
@@ -921,5 +1228,215 @@ describe('source namespace projection', () => {
 
     expect(result).toEqual({ ok: true })
     expect(await readFile(join(namespace, 'existing.md'), 'utf8')).toBe('keep me')
+  })
+
+  it('projects a flat Claude Code member folder and removes the legacy nested namespace', async () => {
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
+    const legacy = join(home, '.claude', 'skills', 'workflow-source')
+    await mkdir(legacy, { recursive: true })
+    await writeFile(join(legacy, '.loom-projection.json'), JSON.stringify(sourceMarker()))
+    await writeFile(join(legacy, 'old.md'), 'old')
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            namespace: 'workflow-source-skill',
+            layout: 'flat',
+            entries: [{ kind: 'bundle', sourcePath: 'skill', targetPath: '' }],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result).toEqual({ ok: true })
+    const flat = join(home, '.claude', 'skills', 'workflow-source-skill')
+    expect(await readFile(join(flat, 'SKILL.md'), 'utf8')).toBe('skill')
+    expect(JSON.parse(await readFile(join(flat, '.loom-projection.json'), 'utf8'))).toMatchObject({
+      kind: 'skill-source',
+      sourceName: 'workflow-source',
+      namespace: 'workflow-source-skill',
+    })
+    expect(await new NodeFileSystem().exists(legacy)).toBe(false)
+  })
+
+  it('warns when Claude Code keeps a nested namespace for bundle-external resources', async () => {
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await mkdir(join(cacheRoot, 'shared'), { recursive: true })
+    await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
+    await writeFile(join(cacheRoot, 'shared', 'guide.md'), 'guide')
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            hasResourceSelection: true,
+            entries: [
+              { kind: 'bundle', sourcePath: 'skill', targetPath: 'skill' },
+              { kind: 'resource-directory', sourcePath: 'shared', targetPath: 'shared' },
+            ],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      warnings: [
+        expect.objectContaining({
+          code: 'nested-skill-layout',
+          sourceName: 'workflow-source',
+        }),
+      ],
+    })
+  })
+
+  it('reports the flat folder when a Claude Code namespace collides with a user directory', async () => {
+    const userOwned = join(home, '.claude', 'skills', 'workflow-source-skill')
+    await mkdir(userOwned, { recursive: true })
+    await writeFile(join(userOwned, 'notes.md'), 'mine')
+    await mkdir(join(cacheRoot, 'skill'), { recursive: true })
+    await writeFile(join(cacheRoot, 'skill', 'SKILL.md'), 'skill')
+
+    const result = await executeProjection(
+      projectionPlan(
+        [
+          sourcePlan({
+            namespace: 'workflow-source-skill',
+            layout: 'flat',
+            entries: [{ kind: 'bundle', sourcePath: 'skill', targetPath: '' }],
+          }),
+        ],
+        'copy',
+      ),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    const collision = findSourceNamespaceCollision(result.failure.originalError)
+    expect(collision?.namespace).toBe(userOwned)
+    expect(sourceNamespaceCollisionPayload(collision!).diagnostics[0]).toMatchObject({
+      sourceName: 'workflow-source',
+      namespace: 'workflow-source-skill',
+    })
+    expect(await readFile(join(userOwned, 'notes.md'), 'utf8')).toBe('mine')
+  })
+
+  it('targeted cleanup removes every managed folder for the source key', async () => {
+    const skillsDir = join(home, '.claude', 'skills')
+    const first = join(skillsDir, 'workflow-source-skill-a')
+    const second = join(skillsDir, 'workflow-source-skill-b')
+    const unrelated = join(skillsDir, 'other-source-skill')
+    const otherTarget = join(skillsDir, 'second-source-skill')
+    await mkdir(first, { recursive: true })
+    await mkdir(second, { recursive: true })
+    await mkdir(unrelated, { recursive: true })
+    await mkdir(otherTarget, { recursive: true })
+    await writeFile(
+      join(first, '.loom-projection.json'),
+      JSON.stringify({ ...sourceMarker(), namespace: 'workflow-source-skill-a' }),
+    )
+    await writeFile(
+      join(second, '.loom-projection.json'),
+      JSON.stringify({ ...sourceMarker(), namespace: 'workflow-source-skill-b' }),
+    )
+    await writeFile(
+      join(unrelated, '.loom-projection.json'),
+      JSON.stringify({
+        ...sourceMarker('https://example.com/other.git'),
+        sourceName: 'other-source',
+        namespace: 'other-source-skill',
+      }),
+    )
+    await writeFile(join(unrelated, 'keep.md'), 'keep')
+    await writeFile(
+      join(otherTarget, '.loom-projection.json'),
+      JSON.stringify({
+        ...sourceMarker('https://example.com/second-source.git'),
+        sourceName: 'second-source',
+        namespace: 'second-source-skill',
+      }),
+    )
+
+    const result = await executeProjection(
+      projectionPlan([], 'copy'),
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+      {
+        skillsTarget: {
+          sources: [
+            {
+              sourceName: 'workflow-source',
+              sourceUrl: 'https://example.com/workflow-source.git',
+              destinations: [{ kind: 'agent', agent: 'claude-code' }],
+            },
+            {
+              sourceName: 'second-source',
+              sourceUrl: 'https://example.com/second-source.git',
+              destinations: [{ kind: 'agent', agent: 'claude-code' }],
+            },
+          ],
+          locals: [],
+        },
+      },
+    )
+
+    expect(result).toEqual({ ok: true })
+    const fs = new NodeFileSystem()
+    expect(await fs.exists(first)).toBe(false)
+    expect(await fs.exists(second)).toBe(false)
+    expect(await fs.exists(otherTarget)).toBe(false)
+    expect(await fs.exists(join(unrelated, 'keep.md'))).toBe(true)
+  })
+
+  it('preserves flat managed folders of a renamed unavailable source', async () => {
+    const flat = join(home, '.claude', 'skills', 'previous-source-name-skill')
+    await mkdir(flat, { recursive: true })
+    await writeFile(
+      join(flat, '.loom-projection.json'),
+      JSON.stringify({
+        ...sourceMarker(),
+        sourceName: 'previous-source-name',
+        namespace: 'previous-source-name-skill',
+      }),
+    )
+    await writeFile(join(flat, 'SKILL.md'), 'keep me')
+
+    const result = await executeProjection(
+      {
+        ...projectionPlan([], 'copy'),
+        preservedSourceNamespaces: [
+          {
+            sourceName: 'workflow-source',
+            sourceUrl: 'https://example.com/workflow-source.git',
+            destination: { kind: 'agent', agent: 'claude-code' },
+          },
+        ],
+      },
+      manifest,
+      { env: {}, activeProfile: {}, defaultProfile: {} },
+      deps(() => cacheRoot),
+      'skills',
+    )
+
+    expect(result).toEqual({ ok: true })
+    expect(await readFile(join(flat, 'SKILL.md'), 'utf8')).toBe('keep me')
   })
 })

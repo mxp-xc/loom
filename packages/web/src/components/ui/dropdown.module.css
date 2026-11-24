@@ -57,6 +57,37 @@
   box-shadow: var(--shadow-popover);
 }
 
+.search {
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font:
+    12px 'JetBrains Mono',
+    monospace;
+}
+
+.search:focus-visible {
+  border-color: color-mix(in srgb, var(--primary) 70%, var(--border));
+  outline: none;
+}
+
+.search::-webkit-search-cancel-button {
+  filter: invert(0.6);
+}
+
+.menuEmpty {
+  padding: 10px 8px;
+  color: var(--muted);
+  font:
+    11px 'JetBrains Mono',
+    monospace;
+  text-align: center;
+}
+
 .menuStatus {
   display: flex;
   min-height: 32px;

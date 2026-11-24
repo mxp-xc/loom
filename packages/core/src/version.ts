@@ -12,6 +12,23 @@ export interface VersionStatus {
   latestCommit: string
 }
 
+/**
+ * Order tag refs for display: valid SemVer tags by precedence descending,
+ * followed by non-SemVer tags sorted by name descending. This keeps version
+ * pickers aligned with release order instead of lexicographic string order
+ * (where `v0.3.0` would sort above `v0.18.1`).
+ */
+export function sortTagsByVersion(tags: readonly string[]): string[] {
+  return [...tags].sort((a, b) => {
+    const versionA = valid(a)
+    const versionB = valid(b)
+    if (versionA && versionB) return compare(versionB, versionA)
+    if (versionA) return -1
+    if (versionB) return 1
+    return a < b ? 1 : a > b ? -1 : 0
+  })
+}
+
 export function compareVersion(
   local: Pick<SkillSource, 'ref' | 'pinned_commit' | 'type'>,
   remote: RemoteRef,

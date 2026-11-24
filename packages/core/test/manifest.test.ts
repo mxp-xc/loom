@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { loadRepoManifest, validateManifest, mergeConfig, buildManifest } from '../src/manifest'
+import {
+  deriveDefaultSourceName,
+  loadRepoManifest,
+  validateManifest,
+  mergeConfig,
+  buildManifest,
+} from '../src/manifest'
 import type { RepoManifest, Config } from '../src/types'
 
 const files = {
@@ -10,6 +16,15 @@ const files = {
   'vars/default.yaml': 'browsers_path: ~/.cache/ms-playwright\n',
   'config.yaml': 'profile: local\nagents: [claude-code, codex]\nprojection:\n  strategy: link\n',
 }
+
+describe('deriveDefaultSourceName', () => {
+  it('normalizes derived repository names into valid source names', () => {
+    expect(deriveDefaultSourceName('https://github.com/jackwener/OpenCLI')).toBe('opencli')
+    expect(deriveDefaultSourceName('https://github.com/owner/My_Repo')).toBe('my-repo')
+    expect(deriveDefaultSourceName('https://github.com/obra/superpowers.git')).toBe('superpowers')
+    expect(deriveDefaultSourceName('git@github.com:mxp-xc/agents.git')).toBe('agents')
+  })
+})
 
 describe('loadRepoManifest', () => {
   it('parses skills/mcp/vars/config from file map', () => {

@@ -14,7 +14,7 @@ import {
 
 describe('Agent Catalog', () => {
   it('derives ids, schema and lookup from one ordered definition list', () => {
-    expect(AGENT_IDS).toEqual(['claude-code', 'codex', 'opencode'])
+    expect(AGENT_IDS).toEqual(['claude-code', 'codex', 'opencode', 'antigravity'])
     expect(AGENTS.map((agent) => agent.id)).toEqual(AGENT_IDS)
     expect(AgentIdSchema.safeParse('codex').success).toBe(true)
     expect(AgentIdSchema.safeParse('other').success).toBe(false)
@@ -66,6 +66,11 @@ describe('Agent Catalog', () => {
       configDir: { overrideEnv: 'OPENCODE_CONFIG_DIR' },
       mcp: { rootKey: 'mcp', codec: 'json-object', importSuffix: 'oc' },
     })
+    expect(getAgent('antigravity')).toMatchObject({
+      command: 'agy',
+      configDir: { fallback: { root: 'home', segments: ['.gemini', 'config'] } },
+      mcp: { rootKey: 'mcpServers', codec: 'json-object', importSuffix: 'ag' },
+    })
   })
 
   it('formats capability paths from each agent config fallback root', () => {
@@ -77,6 +82,12 @@ describe('Agent Catalog', () => {
     )
     expect(formatAgentFallbackPath('opencode', getAgent('opencode').mcp.path)).toBe(
       '~/.config/opencode/opencode.json',
+    )
+    expect(formatAgentFallbackPath('antigravity', getAgent('antigravity').skills.path)).toBe(
+      '~/.gemini/config/skills',
+    )
+    expect(formatAgentFallbackPath('antigravity', getAgent('antigravity').mcp.path)).toBe(
+      '~/.gemini/config/mcp_config.json',
     )
   })
 

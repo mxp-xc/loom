@@ -14,6 +14,8 @@ import {
   LocalSkillIdSchema,
   SkillSourceSchema,
   deriveRepoId,
+  deriveSourceCacheId,
+  sortTagsByVersion,
   summarizeSourceTree,
   type AgentId,
   type SkillSource,
@@ -946,7 +948,11 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
                   'Source revision does not match the registered source',
                 )
               }
-              const cache = await resolveSourceCache(deps.fs, repoPath, deriveRepoId(source.url))
+              const cache = await resolveSourceCache(
+                deps.fs,
+                repoPath,
+                deriveSourceCacheId(source.url),
+              )
               if (!cache) {
                 const err = new Error('Registered source cache is missing')
                 remoteLogger.error('cached source tree unavailable', {
@@ -1068,7 +1074,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
           (repoPath) => [repoPath],
           async (repoPath) => {
             const source = await requireRegisteredSource(deps, repoPath, url)
-            const sourceId = deriveRepoId(source.url)
+            const sourceId = deriveSourceCacheId(source.url)
             // Read the tracked commit tree from the local cache. Clone only when the
             // cache was removed; corrupt caches are repaired through the update flow.
             let cache = await resolveSourceCache(deps.fs, repoPath, sourceId)
@@ -1127,7 +1133,7 @@ export function createRemoteRoutes(deps: RouteDeps): Hono {
       return c.json({
         ok: true,
         branches: Object.keys(result.branches),
-        tags: Object.keys(result.tags).sort().reverse(),
+        tags: sortTagsByVersion(Object.keys(result.tags)),
       })
     } catch (e) {
       remoteLogger.error('source refs failed', { err: e })

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { dirname, join, normalize, relative, sep } from 'node:path'
-import { deriveRepoId, type SkillSource } from '@loom/core'
+import { deriveSourceCacheId, type SkillSource } from '@loom/core'
 import type { IFileSystem } from '../ports/fs.js'
 import type { IGit } from '../ports/git.js'
 import type { LoggerPort } from '../ports/logger.js'
@@ -151,14 +151,22 @@ export async function readPinnedLocalArchive(
     join(repository.path, 'remote-cache'),
     'resolve remote source cache root',
   )
-  const cache = await requireStableDirectory(
-    fs,
-    join(cacheRoot.path, deriveRepoId(source.url)),
-    'resolve remote source cache',
-  )
-  if (normalize(dirname(cache.path)) !== cacheRoot.path) {
-    throw boundary(422, 'invalid_source_cache', 'Remote source cache escaped its owned root')
+  let cacheParent = cacheRoot
+  for (const segment of deriveSourceCacheId(source.url).split('/')) {
+    if (!segment || segment === '.' || segment === '..') {
+      throw boundary(422, 'invalid_source_cache', 'Remote source cache id is invalid')
+    }
+    const directory = await requireStableDirectory(
+      fs,
+      join(cacheParent.path, segment),
+      'resolve remote source cache',
+    )
+    if (normalize(dirname(directory.path)) !== cacheParent.path) {
+      throw boundary(422, 'invalid_source_cache', 'Remote source cache escaped its owned root')
+    }
+    cacheParent = directory
   }
+  const cache = cacheParent
   const entries = await git.readTree(cache.path, commit)
   const skillEntry = entries.find((entry) => entry.path === normalizedEntry)
   if (!skillEntry || skillEntry.type !== 'blob' || !REGULAR_BLOB_MODES.has(skillEntry.mode)) {

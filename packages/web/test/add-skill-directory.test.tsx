@@ -42,6 +42,7 @@ describe('AddSkillModal directory picker', () => {
   it('passes nested skill resources to the external import operation', async () => {
     const onClose = vi.fn()
     render(<AddSkillModal open repoPath="/repo" onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Local skill' }))
     const input = document.querySelector<HTMLInputElement>('input[type="file"]')!
 
     fireEvent.change(input, {
@@ -76,6 +77,7 @@ describe('AddSkillModal directory picker', () => {
     const cause = new Error('permission denied')
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     render(<AddSkillModal open repoPath="/repo" onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Local skill' }))
     const input = document.querySelector<HTMLInputElement>('input[type="file"]')!
 
     fireEvent.change(input, {

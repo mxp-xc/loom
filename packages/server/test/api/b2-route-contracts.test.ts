@@ -157,6 +157,40 @@ describe('Skills route failure contract', () => {
     },
   )
 
+  it('passes structured source cache conflict details to the client', async () => {
+    const error = new SkillsApplicationError(409, 'source_cache_exists', 'secret cache path', {
+      cacheId: 'skills',
+      sourceUrl: 'https://github.com/emilkowski/skills',
+      conflictUrl: 'https://github.com/mattpocock/skills',
+      conflictName: 'mattpocock-skills',
+    })
+    vi.spyOn(SkillsApplication.prototype as never, 'addSource' as never).mockRejectedValueOnce(
+      error,
+    )
+
+    const response = await request(app(), '/api/sources', 'POST', {
+      repo: 'default',
+      url: 'https://github.com/emilkowski/skills',
+      ref: 'main',
+    })
+    const result = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(result).toEqual({
+      ok: false,
+      error: 'source_cache_exists',
+      message: 'Skills state conflict',
+      details: {
+        cacheId: 'skills',
+        sourceUrl: 'https://github.com/emilkowski/skills',
+        conflictUrl: 'https://github.com/mattpocock/skills',
+        conflictName: 'mattpocock-skills',
+      },
+    })
+    expect(JSON.stringify(result)).not.toContain('secret')
+    expectLoggedOnce('source add failed', error)
+  })
+
   it('maps unexpected failures to a safe HTTP 500 response', async () => {
     const error = new Error(`secret scan failure at ${repoPath}`)
     vi.spyOn(SkillsApplication.prototype, 'scanLocalSkills').mockRejectedValueOnce(error)

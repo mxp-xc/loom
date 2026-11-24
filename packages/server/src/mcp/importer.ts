@@ -243,7 +243,11 @@ function normalizeSourceEntry(
   const raw = asRecord(value)
   const ignoredFields = collectIgnoredFields(container, id, raw)
   const diagnostics: McpImportDiagnostic[] = []
-  const rawType = raw.type ?? raw.transport ?? 'stdio'
+  const urlKey = (['url', 'serverUrl', 'httpUrl'] as const).find((key) => raw[key] !== undefined)
+  const url = urlKey
+    ? stringField(raw[urlKey], pathFor(container, id, urlKey), ignoredFields)
+    : undefined
+  const rawType = raw.type ?? raw.transport ?? (url ? 'http' : 'stdio')
   const type = typeof rawType === 'string' ? rawType : 'stdio'
   if (!SUPPORTED_TYPES.has(type as McpType)) {
     return {
@@ -260,7 +264,6 @@ function normalizeSourceEntry(
 
   const server: McpServer = { id, type: type as McpType }
   const command = stringField(raw.command, pathFor(container, id, 'command'), ignoredFields)
-  const url = stringField(raw.url, pathFor(container, id, 'url'), ignoredFields)
   const args = stringArrayField(raw.args, pathFor(container, id, 'args'), ignoredFields)
   const env = stringRecordField(raw.env, pathFor(container, id, 'env'), ignoredFields)
   const headers = stringRecordField(raw.headers, pathFor(container, id, 'headers'), ignoredFields)
@@ -280,7 +283,7 @@ function normalizeSourceEntry(
       diagnostics.push({
         code: 'missing_url',
         message: server.type + ' MCP server 缺少 url',
-        field: pathFor(container, id, 'url'),
+        field: pathFor(container, id, urlKey ?? 'url'),
       })
     } else server.url = url
     if (env) server.env = env
@@ -462,7 +465,17 @@ function collectIgnoredFields(
   id: string,
   raw: Record<string, unknown>,
 ): string[] {
-  const allowed = new Set(['type', 'transport', 'command', 'args', 'env', 'url', 'headers'])
+  const allowed = new Set([
+    'type',
+    'transport',
+    'command',
+    'args',
+    'env',
+    'url',
+    'serverUrl',
+    'httpUrl',
+    'headers',
+  ])
   return Object.keys(raw)
     .filter((key) => !allowed.has(key))
     .map((key) => pathFor(container, id, key))

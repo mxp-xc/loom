@@ -46,7 +46,8 @@ export default function SourceNamespaceCollisionDialog({
           <div style={{ minWidth: 0 }}>
             <p style={{ margin: 0, color: 'var(--bright)', fontSize: 14, lineHeight: 1.5 }}>
               {agentName[collision?.agent ?? 'codex']} 中已有同名目录{' '}
-              <strong>{collision?.sourceName}</strong>，但它不是 Loom 创建的。
+              <strong>{collision?.namespace ?? collision?.sourceName}</strong>，但它不是 Loom
+              创建的。
             </p>
             <p
               style={{

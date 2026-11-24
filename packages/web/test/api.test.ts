@@ -57,6 +57,41 @@ describe('API errors', () => {
     expect(error.diagnostics).toHaveLength(1)
   })
 
+  it('preserves flat error details for structured conflict messages', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ok: false,
+              error: 'source_cache_exists',
+              message: 'Skills state conflict',
+              details: {
+                cacheId: 'skills',
+                conflictUrl: 'https://github.com/mattpocock/skills',
+                conflictName: 'mattpocock-skills',
+              },
+            }),
+            { status: 409, statusText: 'Conflict' },
+          ),
+      ),
+    )
+
+    const error = await api.update('default', []).catch((cause) => cause)
+    if (!(error instanceof ApiError)) throw error
+    expect(error).toMatchObject({
+      status: 409,
+      code: 'source_cache_exists',
+      message: 'Skills state conflict',
+    })
+    expect(error.details).toEqual({
+      cacheId: 'skills',
+      conflictUrl: 'https://github.com/mattpocock/skills',
+      conflictName: 'mattpocock-skills',
+    })
+  })
+
   it('falls back for non-JSON errors', async () => {
     vi.stubGlobal(
       'fetch',

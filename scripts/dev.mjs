@@ -2,6 +2,7 @@
 // Dev wrapper: allocates a free port for the API server when LOOM_PORT is
 // unset, then launches the backend + frontend directly with bun. Lets
 // multiple worktree dev servers run in parallel without port collisions.
+// Under portless (`bun dev`) the assigned PORT becomes the web port.
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:net'
@@ -78,10 +79,19 @@ function tagged(name, color, cmd, cwd) {
 async function main() {
   const port = await resolvePort('LOOM_PORT', 4310)
   process.env.LOOM_PORT = port
-  const webPort = await resolvePort('LOOM_WEB_PORT', 4180)
+  // Portless assigns PORT and forwards the proxy host to it; keep it authoritative
+  // over the local default so the route never points at a stale port. Only trust
+  // PORT when PORTLESS_URL proves we are actually running behind portless.
+  const webPort =
+    process.env.LOOM_WEB_PORT ??
+    (process.env.PORTLESS_URL ? process.env.PORT : undefined) ??
+    (await resolvePort('LOOM_WEB_PORT', 4180))
   process.env.LOOM_WEB_PORT = webPort
   console.log(`\x1b[35m[dev]\x1b[0m API server port: ${port}`)
   console.log(`\x1b[35m[dev]\x1b[0m Web server port: ${webPort}  →  http://127.0.0.1:${webPort}`)
+  if (process.env.PORTLESS_URL) {
+    console.log(`\x1b[35m[dev]\x1b[0m Domain: ${process.env.PORTLESS_URL}`)
+  }
 
   // Bun runs TypeScript natively — no tsx, no node, no pnpm in the chain.
   const children = [

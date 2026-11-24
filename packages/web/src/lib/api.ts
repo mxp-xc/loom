@@ -135,6 +135,7 @@ async function json<T>(res: Response): Promise<T> {
           | string
         message?: string
         diagnostics?: VarsDiagnostic[]
+        details?: Record<string, unknown>
       }
       const nested = typeof payload.error === 'object' ? payload.error : undefined
       const flatCode = typeof payload.error === 'string' ? payload.error : undefined
@@ -144,7 +145,7 @@ async function json<T>(res: Response): Promise<T> {
         res.status,
         nested?.code ?? flatCode,
         nested?.diagnostics ?? payload.diagnostics,
-        { details: nested },
+        { details: nested ?? payload.details },
       )
     } catch (cause) {
       if (cause instanceof ApiError) throw cause
@@ -540,11 +541,17 @@ export const api = {
       next: SkillProjectionAssignment
     }>
   }) => post('/skills/agents/batch', body).then(json),
-  resolveSourceNamespaceCollision: (body: { repo: string; sourceUrl: string; agent: AgentId }) =>
+  resolveSourceNamespaceCollision: (body: {
+    repo: string
+    sourceUrl: string
+    agent: AgentId
+    namespace?: string
+  }) =>
     post('/skills/source-namespace-collisions/resolve', body).then(json) as Promise<{
       ok: true
       agent: AgentId
       sourceName: string
+      namespace: string
       backupName: string
     }>,
   reorderSkillGroups: (body: { repo: string; ids: string[] }) =>

@@ -5,13 +5,16 @@ import {
   assertSkillDestinationCollisions,
   buildManifest,
   configuredAgents,
-  deriveRepoId,
+  deriveSourceCacheId,
+  hasSourceResourceSelection,
   loadRepoManifest,
   mergeConfig,
   planProjection,
   planSourceProjectionForDestinations,
   skillProjectionDestinationKey,
   sourceIdentity,
+  sourceMemberNamespace,
+  sourceProjectionLayout,
   type AgentId,
   type Config,
   type LocalSkill,
@@ -241,7 +244,7 @@ export async function projectSkillChanges(
       continue
     }
     const commit = source.pinned_commit?.trim() || source.ref
-    const cacheId = deriveRepoId(source.url)
+    const cacheId = deriveSourceCacheId(source.url)
     const sourceCache = sourceCaches.get(cacheId)
     if (!sourceCache) throw new Error(`Source cache unavailable: ${source.url}`)
     let cached: SourceProjectionCatalogEntry
@@ -380,11 +383,21 @@ function assertTargetedSkillDestinationCollisions(
   }))
   const sourcePlans = manifest.skills.sources.flatMap((source) => {
     const sourceName = sourceIdentity(source).repoId
-    return affectedDestinations
-      .filter((destination) =>
-        (source.members ?? []).some((member) => memberSelectsDestination(member, destination)),
+    const hasResourceSelection = hasSourceResourceSelection(source.resources)
+    return affectedDestinations.flatMap((destination) => {
+      const members = (source.members ?? []).filter((member) =>
+        memberSelectsDestination(member, destination),
       )
-      .map((destination) => ({ sourceName, destination }))
+      if (members.length === 0) return []
+      if (sourceProjectionLayout(destination, hasResourceSelection) === 'flat') {
+        return members.map((member) => ({
+          sourceName,
+          namespace: sourceMemberNamespace(sourceName, member.name),
+          destination,
+        }))
+      }
+      return [{ sourceName, destination }]
+    })
   })
   assertSkillDestinationCollisions(links, sourcePlans)
 }
@@ -525,7 +538,7 @@ async function annotateSourceMemberMetadata(
 ): Promise<void> {
   await Promise.all(
     sources.map(async (source) => {
-      const cacheId = deriveRepoId(source.url)
+      const cacheId = deriveSourceCacheId(source.url)
       const cacheDir = cacheDirFor(repoPath, cacheId)
       const cacheAvailable = await deps.fs.exists(cacheDir)
       if (!cacheAvailable) {
@@ -632,7 +645,7 @@ async function ensureSourceTrees(
 ): Promise<void> {
   for (const source of sources) {
     const { repoId } = sourceIdentity(source)
-    const cacheId = deriveRepoId(source.url)
+    const cacheId = deriveSourceCacheId(source.url)
     const cache = await captureRepoCacheRoot(deps.fs, repoPath, cacheId)
     if (!cache) {
       const err = new Error(`Source cache unavailable: ${source.url}`)
@@ -702,7 +715,7 @@ async function captureAvailableSourceCaches(
   const caches = new Map<string, AuthorizedSourceCache>()
   for (const source of sources) {
     if (source.availability?.available === false) continue
-    const cacheId = deriveRepoId(source.url)
+    const cacheId = deriveSourceCacheId(source.url)
     const root = await captureRepoCacheRoot(fs, repoPath, cacheId)
     if (!root) {
       const err = new Error(`Source cache unavailable: ${source.url}`)

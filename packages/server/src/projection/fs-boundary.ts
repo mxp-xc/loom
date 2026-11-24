@@ -27,6 +27,8 @@ export interface SafeDirectoryChain {
 export interface StableDirectoryTree {
   root: StableEntry
   entries: StableEntry[]
+  /** Root-only metadata excluded from traversal; never applied to descendants. */
+  ignoredRootNames?: readonly string[]
 }
 
 export interface StableRelativeFiles {
@@ -265,7 +267,7 @@ export async function captureRepoCacheRoot(
   repoPath: string,
   cacheId: string,
 ): Promise<StableEntry | null> {
-  assertSafePathSegment(cacheId, 'source cache id')
+  assertSafeRelativePath(cacheId, 'source cache id')
   const repo = await captureStableEntry(fs, repoPath, 'directory', 'repository root')
   const cacheParentPath = join(repo.canonicalPath, 'remote-cache')
   const cacheParentEntry = await fs.inspectEntry(cacheParentPath)
@@ -286,19 +288,25 @@ export async function captureRepoCacheRoot(
     throw new Error(`Remote cache root escaped the repository: ${cacheParentPath}`)
   }
 
-  const cachePath = join(cacheParent.canonicalPath, cacheId)
-  const cacheEntry = await fs.inspectEntry(cachePath)
-  if (!cacheEntry) {
-    await revalidateStableEntry(fs, repo, 'repository root')
-    await revalidateStableEntry(fs, cacheParent, 'remote cache root')
-    return null
-  }
-  const cache = await captureStableEntry(fs, cachePath, 'directory', 'source cache')
-  if (
-    cache.canonicalPath !== normalize(cachePath) ||
-    normalize(dirname(cache.canonicalPath)) !== cacheParent.canonicalPath
-  ) {
-    throw new Error(`Source cache is not a real direct child: ${cachePath}`)
+  let parent = cacheParent
+  let cache: StableEntry | null = null
+  for (const segment of cacheId.split('/')) {
+    const cachePath = join(parent.canonicalPath, segment)
+    const cacheEntry = await fs.inspectEntry(cachePath)
+    if (!cacheEntry) {
+      await revalidateStableEntry(fs, repo, 'repository root')
+      await revalidateStableEntry(fs, cacheParent, 'remote cache root')
+      return null
+    }
+    const captured = await captureStableEntry(fs, cachePath, 'directory', 'source cache')
+    if (
+      captured.canonicalPath !== normalize(cachePath) ||
+      normalize(dirname(captured.canonicalPath)) !== parent.canonicalPath
+    ) {
+      throw new Error(`Source cache is not a real child: ${cachePath}`)
+    }
+    cache = captured
+    parent = captured
   }
   await revalidateStableEntry(fs, repo, 'repository root')
   await revalidateStableEntry(fs, cacheParent, 'remote cache root')
@@ -309,6 +317,7 @@ export async function captureSafeDirectoryTree(
   fs: IFileSystem,
   root: StableEntry,
   description: string,
+  ignoredRootNames: readonly string[] = [],
 ): Promise<StableDirectoryTree> {
   await revalidateStableEntry(fs, root, description)
   const entries: StableEntry[] = []
@@ -318,6 +327,7 @@ export async function captureSafeDirectoryTree(
     if (depth > MAX_SOURCE_DEPTH) throw new Error(`${description} exceeds maximum depth`)
     const names = (await fs.readDir(directory.path)).sort()
     for (const name of names) {
+      if (depth === 0 && ignoredRootNames.includes(name)) continue
       if (name.includes('/') || name.includes('\\') || !name) {
         throw new Error(`${description} contains an invalid entry name`)
       }
@@ -350,7 +360,7 @@ export async function captureSafeDirectoryTree(
   }
 
   await visit(root, 0)
-  return { root, entries }
+  return { root, entries, ignoredRootNames }
 }
 
 export async function revalidateSafeDirectoryTree(
@@ -358,7 +368,7 @@ export async function revalidateSafeDirectoryTree(
   tree: StableDirectoryTree,
   description: string,
 ): Promise<void> {
-  const current = await captureSafeDirectoryTree(fs, tree.root, description)
+  const current = await captureSafeDirectoryTree(fs, tree.root, description, tree.ignoredRootNames)
   assertSameEntries(tree.entries, current.entries, description)
 }
 

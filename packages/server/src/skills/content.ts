@@ -1,6 +1,7 @@
 import { dirname, join, normalize } from 'node:path'
 import {
   deriveRepoId,
+  deriveSourceCacheId,
   SkillSourceSchema,
   type SkillSource,
   type SourceTreeBundleNode,
@@ -66,7 +67,7 @@ export async function readSkillContent(
       )
     }
 
-    const cacheDir = await resolveSourceCache(fs, repoPath, deriveRepoId(source.url))
+    const cacheDir = await resolveSourceCache(fs, repoPath, deriveSourceCacheId(source.url))
     const sourceTree = await scanSourceTree(git, cacheDir, commit, source)
     const bundle = flattenSourceTree(sourceTree.nodes).find(
       (node): node is SourceTreeBundleNode =>
@@ -129,7 +130,7 @@ function indexSources(sources: unknown[]): Map<string, SkillSource> {
     }
     const source = parsed.data
     const name = source.name ?? deriveRepoId(source.url)
-    const cacheId = deriveRepoId(source.url)
+    const cacheId = deriveSourceCacheId(source.url)
     if (byUrl.has(source.url) || names.has(name) || cacheIds.has(cacheId)) {
       throw invalidManifest(`Ambiguous source identity at sources[${index}]`)
     }
@@ -165,26 +166,33 @@ async function resolveSourceCache(
     throw new SkillContentError(422, 'invalid_source_cache', 'Source cache is invalid')
   }
 
-  const cachePath = join(canonicalRoot, cacheId)
-  const before = await fs.inspectEntry(cachePath)
-  if (!before) {
-    throw new SkillContentError(404, 'source_cache_unavailable', 'Source cache is unavailable')
+  let parent = canonicalRoot
+  for (const segment of cacheId.split('/')) {
+    if (!segment || segment === '.' || segment === '..' || segment.includes('\\')) {
+      throw new SkillContentError(422, 'invalid_source_cache', 'Source cache is invalid')
+    }
+    const cachePath = join(parent, segment)
+    const before = await fs.inspectEntry(cachePath)
+    if (!before) {
+      throw new SkillContentError(404, 'source_cache_unavailable', 'Source cache is unavailable')
+    }
+    if (before.kind !== 'directory') {
+      throw new SkillContentError(422, 'invalid_source_cache', 'Source cache is invalid')
+    }
+    const canonicalCache = normalize(await fs.realPath(cachePath))
+    const after = await fs.inspectEntry(cachePath)
+    const confirmedCanonical = normalize(await fs.realPath(cachePath))
+    if (
+      dirname(canonicalCache) !== parent ||
+      after?.kind !== 'directory' ||
+      after.identity !== before.identity ||
+      confirmedCanonical !== canonicalCache
+    ) {
+      throw new SkillContentError(422, 'invalid_source_cache', 'Source cache is invalid')
+    }
+    parent = canonicalCache
   }
-  if (before.kind !== 'directory') {
-    throw new SkillContentError(422, 'invalid_source_cache', 'Source cache is invalid')
-  }
-  const canonicalCache = normalize(await fs.realPath(cachePath))
-  const after = await fs.inspectEntry(cachePath)
-  const confirmedCanonical = normalize(await fs.realPath(cachePath))
-  if (
-    dirname(canonicalCache) !== canonicalRoot ||
-    after?.kind !== 'directory' ||
-    after.identity !== before.identity ||
-    confirmedCanonical !== canonicalCache
-  ) {
-    throw new SkillContentError(422, 'invalid_source_cache', 'Source cache is invalid')
-  }
-  return canonicalCache
+  return parent
 }
 
 function mapContentError(

@@ -1,5 +1,5 @@
 import type { GitRefType, IGit } from '../ports/git.js'
-import type { IFileSystem } from '../ports/fs.js'
+import type { FileSystemEntry, IFileSystem } from '../ports/fs.js'
 import type {
   AgentId,
   SkillProjectionDestination,
@@ -19,7 +19,7 @@ import {
 } from '@loom/core'
 import { scanSourceTree, scanSourceTreeWithoutMetadata } from './source-tree.js'
 import { cacheDirFor } from './cache.js'
-import { deriveRepoId } from '@loom/core'
+import { deriveSourceCacheId } from '@loom/core'
 import { dirname, join } from 'node:path'
 import {
   classifySkillMemberChanges,
@@ -103,7 +103,7 @@ export async function prepareSourceUpdate(
   oldMembers: SkillMemberSnapshot[],
   expectedCommit?: string,
 ): Promise<PreparedSourceUpdate> {
-  const cacheDir = cacheDirFor(workspace.repoPath, deriveRepoId(source.url))
+  const cacheDir = cacheDirFor(workspace.repoPath, deriveSourceCacheId(source.url))
   const { stagingDir, candidateDir } = workspace
   try {
     await ensureSourceUpdateChildDirectory(fs, workspace.repoPath, 'remote-cache')
@@ -113,7 +113,7 @@ export async function prepareSourceUpdate(
       stagingDir,
       'previous source snapshot',
     )
-    const candidateEntry = await inspectOptionalOwnedDirectory(
+    let candidateEntry = await inspectOptionalOwnedDirectory(
       fs,
       candidateDir,
       'candidate source cache',
@@ -140,12 +140,34 @@ export async function prepareSourceUpdate(
     let sourceTree: SourceTree
     if (cacheEntry && previousTree) {
       await assertOwnedDirectory(fs, cacheDir, cacheEntry.identity, 'previous source cache')
-      await git.clone(cacheDir, candidateDir, false)
-      await assertOwnedDirectory(fs, cacheDir, cacheEntry.identity, 'previous source cache')
-      await git.addOrUpdateRemote(candidateDir, source.url)
-      await git.fetchRef(candidateDir, newRef, refType, { filter: 'blob:none' })
-      sourceTree = await scanSourceTreeWithoutMetadata(git, candidateDir, 'FETCH_HEAD', source)
-      metadataOnlyCandidate = true
+      let seededFromCache = true
+      try {
+        await git.clone(cacheDir, candidateDir, false)
+      } catch (err) {
+        if (!isUncloneableSourceCacheError(err)) throw err
+        // Shallow or partially fetched caches cannot always be cloned locally:
+        // upload-pack refuses to lazily fetch their missing promisor objects.
+        // Rebuild the candidate from the remote instead of failing the update.
+        updateLogger.warn('previous source cache cannot seed update candidate', {
+          err,
+          source: source.url,
+          cacheDir,
+        })
+        seededFromCache = false
+        candidateEntry = await resetCandidateDirectory(fs, candidateDir)
+      }
+      if (seededFromCache) {
+        await assertOwnedDirectory(fs, cacheDir, cacheEntry.identity, 'previous source cache')
+        await git.addOrUpdateRemote(candidateDir, source.url)
+        await git.fetchRef(candidateDir, newRef, refType, { filter: 'blob:none' })
+        sourceTree = await scanSourceTreeWithoutMetadata(git, candidateDir, 'FETCH_HEAD', source)
+        metadataOnlyCandidate = true
+      } else {
+        await git.clone(source.url, candidateDir, false)
+        await git.fetchRef(candidateDir, newRef, refType)
+        await git.checkout(candidateDir, 'FETCH_HEAD')
+        sourceTree = await scanSourceTree(git, candidateDir, 'HEAD', source)
+      }
     } else {
       await git.clone(source.url, candidateDir, false)
       await git.fetchRef(candidateDir, newRef, refType)
@@ -268,6 +290,26 @@ async function resolveUpdateRefType(
   if (newRef.startsWith('refs/tags/')) return 'tag'
   const remote = await git.lsRemote(source.url)
   return Object.hasOwn(remote.tags, newRef) ? 'tag' : 'branch'
+}
+
+function isUncloneableSourceCacheError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  return /lazy fetching disabled|from promisor remote|repository corruption on the remote side/i.test(
+    message,
+  )
+}
+
+async function resetCandidateDirectory(
+  fs: IFileSystem,
+  candidateDir: string,
+): Promise<FileSystemEntry> {
+  if ((await fs.readDir(candidateDir)).length > 0) {
+    await fs.removeDir(candidateDir)
+    await fs.mkdir(candidateDir, false)
+  }
+  const entry = await inspectOptionalOwnedDirectory(fs, candidateDir, 'candidate source cache')
+  if (!entry) throw new Error('Source update candidate is unavailable after reset')
+  return entry
 }
 
 async function snapshotPinnedMembers(
@@ -510,7 +552,7 @@ function projectionEntryMap(
         (entry) =>
           [
             `${skillProjectionDestinationKey(plan.destination)}\0${entry.kind}\0${entry.sourcePath}`,
-            entry,
+            plan.layout === 'flat' ? { ...entry, targetPath: plan.namespace } : entry,
           ] as const,
       ),
     ),

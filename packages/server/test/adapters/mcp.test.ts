@@ -50,3 +50,31 @@ describe.each(agentsSupporting('mcp'))('GenericMcpAdapter(%s)', (agent: AgentId)
     })
   })
 })
+
+describe('GenericMcpAdapter antigravity native schema', () => {
+  it('reads serverUrl entries as remote and writes them back without losing the transport', async () => {
+    const fs = new NodeFileSystem()
+    const adapter = createAgentMcpAdapter('antigravity', context)
+    await fs.mkdir(dirname(adapter.path), true)
+    await fs.writeFile(
+      adapter.path,
+      JSON.stringify({
+        mcpServers: { docs: { serverUrl: 'https://example.com/mcp' } },
+      }),
+    )
+
+    await expect(adapter.readMcp(fs)).resolves.toMatchObject({
+      docs: { id: 'docs', type: 'http', url: 'https://example.com/mcp' },
+    })
+
+    await adapter.writeMcp(fs, await adapter.readMcp(fs))
+
+    const document = JSON.parse(await fs.readFile(adapter.path)) as {
+      mcpServers: Record<string, unknown>
+    }
+    expect(document.mcpServers.docs).toMatchObject({
+      type: 'http',
+      url: 'https://example.com/mcp',
+    })
+  })
+})

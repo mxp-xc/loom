@@ -14,9 +14,15 @@ import { GitUnbornHeadError, readGitHead } from './git-head.js'
 
 const execFileAsync = promisify(execFile)
 
+// A stalled remote transfer must fail instead of holding a repository lease
+// open indefinitely. Git aborts a transfer that stays below 1KB/s for 30s.
+const NETWORK_LIMIT_CONFIG = ['http.lowSpeedLimit=1000', 'http.lowSpeedTime=30']
+
 export class NodeGit implements IGit {
   private git(path?: string): SimpleGit {
-    return simpleGit(path)
+    // Do not replace the child environment: git needs HOME to read the user's
+    // proxy configuration, and dropping it silently forces direct connections.
+    return simpleGit({ baseDir: path, config: NETWORK_LIMIT_CONFIG })
   }
 
   async init(repoPath: string): Promise<void> {
@@ -127,10 +133,24 @@ export class NodeGit implements IGit {
   }
 
   async showBytes(repoPath: string, ref: string, path: string): Promise<Uint8Array> {
-    const { stdout } = await execFileAsync('git', ['-C', repoPath, 'show', `${ref}:${path}`], {
-      encoding: 'buffer',
-      maxBuffer: 16 * 1024 * 1024,
-    })
+    const { stdout } = await execFileAsync(
+      'git',
+      [
+        '-c',
+        'http.lowSpeedLimit=1000',
+        '-c',
+        'http.lowSpeedTime=30',
+        '-C',
+        repoPath,
+        'show',
+        `${ref}:${path}`,
+      ],
+      {
+        encoding: 'buffer',
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      },
+    )
     return stdout
   }
 

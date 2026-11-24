@@ -153,7 +153,7 @@ Implications:
 Safety:
 
 - SourceTree 只包含目标 commit 中受 Git 管理的 entries，不跟随 symlink、不拉取 submodule，也不包含 checkout 中的未跟踪内容。
-- 同一 source 内 member `entry` 和 `name` 分别唯一；冲突必须明确报错，不能静默覆盖。
+- 扫描允许不同路径下的 bundle 使用相同 `name`，由 UI 展示 path 区分；同一 source 已选择的 member `entry` 和 `name` 仍须唯一，保存时冲突必须明确报错，不能静默覆盖。
 - `entry` 是规范化的 source-relative `SKILL.md` 路径，不能为绝对路径或包含父目录跳转。
 - Member name 仍需满足 skill id 命名约束。
 - Root-level `SKILL.md` 的 member name 使用 source name；其他 bundle 使用其所在目录 basename。
@@ -177,14 +177,17 @@ Status: active
 Applies to: remote sources, skills projection, skills UI
 
 Rule:
-每个 source 都有稳定的 `name`。新增 source 时如果用户没有提供 `name`，系统使用 URL 派生仓库名作为默认值并持久化到 `skills.yaml`。`name` 用于 UI 展示和 source member projection namespace；remote cache identity 仍由 source URL 派生。
+每个 source 都有稳定的 `name`。新增 source 时如果用户没有提供 `name`，系统使用 URL 派生仓库名作为默认值并持久化到 `skills.yaml`；派生结果会规范化为合法 name（小写，非法字符替换为 `-`），例如 `OpenCLI` → `opencli`。`name` 用于 UI 展示和 source member projection namespace（Claude Code、Antigravity 无资源选择时是 `<name>-<member>` 的目录前缀，其他 destination 是 namespace 根名）；remote cache identity 由 source URL 的路径派生，远端 URL 使用 `<owner>/<repo>`，本地路径或无 owner 的 URL 退化为仓库名。
 
 Implications:
 
 - 保存 source 时必须写入 `name`，旧配置缺失 `name` 时运行时回退到 `deriveRepoId(url)`。
 - 同一个 `skills.yaml` 内 source `url` 和 source `name` 都不能重复。
 - 修改 `name` 后必须重新投影 skills，因为 desired projection namespace 已变化。
+- `name` 是 projection 前缀：Claude Code 和 Antigravity 在 source 没有 bundle 外 resource selection 时为每个 member 使用 `<name>-<member>` 平铺目录；其他 destination 或存在资源选择时使用 `<name>/...` namespace。
 - 查找 `remote-cache`、刷新 source、读取 source 内容时不能使用 `name` 作为 cache id。
+- 不同 URL 派生出同一个 cache id 时（例如同 owner、同仓库名但域名不同），新增 source 必须拒绝，不得复用或覆盖已有 cache；错误必须指出冲突的 source，UI 必须展示该原因而不是通用的状态冲突提示。
+- 早期版本把 cache 放在 `remote-cache/<repo>`；只含仓库名的旧目录必须在确认其 Git remote 与 source URL 一致后迁移到 `remote-cache/<owner>/<repo>`，remote 不一致时保留原目录并重建。
 
 Safety:
 
@@ -194,8 +197,9 @@ Safety:
 
 Examples:
 
-- `name: openai-skills` 且 member `brainstorming` 在 `skill_naming: dir` 下投影为 `openai-skills/brainstorming`。
-- 同一个 URL 的 cache 仍位于 `remote-cache/<deriveRepoId(url)>`，改名不会触发新的 cache 目录。
+- `name: openai-skills` 且 member `brainstorming` 在 Claude Code 或 Antigravity 无资源选择时投影为 `openai-skills-brainstorming`；在 Codex、OpenCode 或 Shared destination 下投影为 `openai-skills/brainstorming`。
+- `https://github.com/mattpocock/skills` 的 cache 位于 `remote-cache/mattpocock/skills`，改名不会触发新的 cache 目录。
+- `mattpocock/skills` 与 `emilkowski/skills` 可以同时存在，各自使用自己的 owner 目录。
 
 Tests:
 
@@ -206,6 +210,7 @@ Tests:
 - packages/server/test/projection/executor.test.ts
 - packages/web/test/manifest-operations.test.tsx
 - packages/web/test/skills-view.test.tsx
+- packages/web/test/add-source-modal.test.tsx
 
 ## R-SKILLS-007 Source member 缺失必须确认 reconcile
 
@@ -225,6 +230,7 @@ Implications:
 - 打开 Skills 页面可以为每个 remote source 启动只读、非阻塞的 Source update check；检查不得修改 live cache、manifest 或 projection，单个 source 的慢响应或失败不得阻塞页面其他功能或其他 source 的检查。自动检查发现可更新项时，在该 source 检查完成后立即显示一次通知，不等待其余 source；已最新、需要修复和检查失败不产生自动通知。编辑现有 source 和普通 projection 不得访问远端；编辑内容初始只读取 live cache 中的 pinned commit，cache 缺失时明确报错，不自动拉取或修复。R-SYNC-006 的同步后 cache 对齐和启动时仅针对 unhealthy cache 的自动补偿不属于该限制。
 - Source cache 是否可用是当前机器的运行时状态，不是 manifest 配置有效性；单个 source 不可用时，其他 source、local skills 和非 Skills 功能保持可用。
 - Remote refs 只在用户首次打开 ref 选择或切换 branch/tag 时按需读取；同一编辑会话内复用结果。
+- Remote tag ref 按 SemVer precedence 降序展示；非 SemVer tag 排在 SemVer tag 之后并按名称降序。不得按字典序排列（字典序会把 `v0.3.0` 排在 `v0.18.1` 前面）。
 - 显式 branch 通过该 branch ref 的 remote commit 判断更新，即使存在同名 tag；合法 SemVer tag 只和其他合法 SemVer tag 比较 precedence；非 SemVer tag 只检查同名 tag 是否移动，不回退到 branch HEAD。
 - 远端 SourceTree 只在用户选择其他 ref 或主动刷新时读取。
 - 初始编辑和未主动扫描的同 ref/type 保存必须基于当前 pinned commit，不得隐式拉取远端或替换 live cache。
@@ -253,6 +259,7 @@ Examples:
 
 Tests:
 
+- packages/core/test/version.test.ts
 - packages/server/test/remote/update.test.ts
 - packages/server/test/skills/reconciliation.test.ts
 - packages/server/test/skills/application.test.ts

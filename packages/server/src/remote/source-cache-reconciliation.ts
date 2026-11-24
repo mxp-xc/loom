@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import { deriveRepoId, loadRepoManifest, validateManifest, type SkillSource } from '@loom/core'
+import {
+  deriveRepoId,
+  deriveSourceCacheId,
+  loadRepoManifest,
+  validateManifest,
+  type SkillSource,
+} from '@loom/core'
 import { readSkillsProjectionFiles } from '../api/repo-config.js'
 import { logger } from '../lib/logger.js'
 import type { FileSystemEntry, IFileSystem } from '../ports/fs.js'
@@ -11,10 +17,13 @@ import {
   assertAuthorizedSourceCache,
   assertStablePhysicalDirectory,
   createSourceCacheStaging,
+  ensureSourceCacheParent,
   inspectDirectDirectory,
+  inspectSourceCache,
   removeStablePhysicalDirectory,
   resolveSourceCache,
   resolveSourceCacheRoot,
+  sourceCacheSegments,
   type SourceCacheRoot,
   type StablePhysicalDirectory,
 } from './cache-boundary.js'
@@ -86,6 +95,8 @@ export async function reconcileSourceCachesAfterSync(
     unavailable: [],
   }
 
+  await migrateLegacySourceCaches(deps, repoPath, manifest.sources)
+
   for (const source of manifest.sources) {
     const pinnedCommit = source.pinned_commit?.trim() ?? ''
     if (!PINNED_COMMIT.test(pinnedCommit)) {
@@ -139,13 +150,80 @@ export async function reconcileSourceCachesAfterSync(
   return result
 }
 
+/**
+ * Move caches created before cache ids were owner-qualified
+ * (`remote-cache/<repo>`) into the current layout (`remote-cache/<owner>/<repo>`).
+ */
+async function migrateLegacySourceCaches(
+  deps: SourceCacheReconciliationDeps,
+  repoPath: string,
+  sources: readonly SkillSource[],
+): Promise<void> {
+  const root = await resolveSourceCacheRoot(deps.fs, repoPath)
+  if (!root) return
+  for (const source of sources) {
+    try {
+      await migrateLegacySourceCache(deps, root, source)
+    } catch (err) {
+      reconciliationLogger.warn('legacy source cache migration failed', {
+        err,
+        repoPath,
+        sourceUrl: source.url,
+      })
+    }
+  }
+}
+
+async function migrateLegacySourceCache(
+  deps: SourceCacheReconciliationDeps,
+  root: SourceCacheRoot,
+  source: SkillSource,
+): Promise<void> {
+  const legacyId = deriveRepoId(source.url)
+  const cacheId = deriveSourceCacheId(source.url)
+  if (legacyId === cacheId) return
+  const legacy = await inspectDirectDirectory(deps.fs, root, legacyId, 'legacy source cache')
+  if (!legacy) return
+  if (await inspectSourceCache(deps.fs, root, cacheId)) return
+  const remoteUrl = await deps.git.getRemoteUrl(legacy.path).catch(() => null)
+  if (!sameRemote(remoteUrl, source.url)) {
+    reconciliationLogger.warn('legacy source cache belongs to another repository', {
+      sourceUrl: source.url,
+      legacyCache: legacy.path,
+      remoteUrl,
+    })
+    return
+  }
+  const destination = join(root.path, ...sourceCacheSegments(cacheId))
+  await ensureSourceCacheParent(deps.fs, root, cacheId)
+  await deps.fs.moveDirectoryAtomic(legacy.path, destination, legacy.identity)
+  reconciliationLogger.info('migrated legacy source cache', {
+    sourceUrl: source.url,
+    from: legacy.path,
+    to: destination,
+  })
+}
+
+function sameRemote(left: string | null, right: string): boolean {
+  if (!left) return false
+  return normalizeRemote(left) === normalizeRemote(right)
+}
+
+function normalizeRemote(url: string): string {
+  return url
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\.git$/, '')
+    .toLowerCase()
+}
+
 async function restoreSourceCache(
   deps: SourceCacheReconciliationDeps,
   repoPath: string,
   source: SkillSource,
   pinnedCommit: string,
 ): Promise<void> {
-  const sourceId = deriveRepoId(source.url)
+  const sourceId = deriveSourceCacheId(source.url)
   const root = await resolveSourceCacheRoot(deps.fs, repoPath, true)
   if (!root) throw new SourceCacheReconciliationHardError('Source cache root is unavailable')
   const owner: ReconciliationOwner = {
@@ -245,12 +323,12 @@ async function completeSwap(
 ): Promise<void> {
   await assertOwner(deps.fs, workspace, journal)
   const sourceId = journal.sourceId
-  const livePath = join(root.path, sourceId)
+  const livePath = join(root.path, ...sourceCacheSegments(sourceId))
   const candidatePath = join(workspace.path, 'candidate')
   const backupPath = join(workspace.path, 'backup')
 
   try {
-    let live = await inspectDirectDirectory(deps.fs, root, sourceId, 'live source cache')
+    let live = await inspectSourceCache(deps.fs, root, sourceId)
     let candidate = await inspectDirectDirectory(
       deps.fs,
       workspace,
@@ -278,8 +356,9 @@ async function completeSwap(
         live = null
       }
       if (!candidate) throw hard('Source cache reconciliation candidate is unavailable')
+      await ensureSourceCacheParent(deps.fs, root, sourceId)
       await deps.fs.moveDirectoryAtomic(candidatePath, livePath, journal.candidateIdentity)
-      live = await requireChildDirectory(deps.fs, root, sourceId, 'promoted source cache')
+      live = await requireSourceCache(deps.fs, root, sourceId, 'promoted source cache')
       candidate = null
     }
 
@@ -349,16 +428,11 @@ async function rollbackSwap(
   journal: ReconciliationJournal,
 ): Promise<unknown[]> {
   const errors: unknown[] = []
-  const livePath = join(root.path, journal.sourceId)
+  const livePath = join(root.path, ...sourceCacheSegments(journal.sourceId))
   const candidatePath = join(workspace.path, 'candidate')
   const backupPath = join(workspace.path, 'backup')
   try {
-    const live = await inspectDirectDirectory(
-      fs,
-      root,
-      journal.sourceId,
-      'live source cache rollback',
-    )
+    const live = await inspectSourceCache(fs, root, journal.sourceId)
     const candidate = await inspectDirectDirectory(
       fs,
       workspace,
@@ -372,12 +446,7 @@ async function rollbackSwap(
       throw hard('Live source cache was replaced during rollback')
     }
 
-    const currentLive = await inspectDirectDirectory(
-      fs,
-      root,
-      journal.sourceId,
-      'restored live cache',
-    )
+    const currentLive = await inspectSourceCache(fs, root, journal.sourceId)
     const backup = await inspectDirectDirectory(
       fs,
       workspace,
@@ -389,6 +458,7 @@ async function rollbackSwap(
         if (!backup || backup.identity !== journal.liveIdentity) {
           throw hard('Previous source cache cannot be restored')
         }
+        await ensureSourceCacheParent(fs, root, journal.sourceId)
         await fs.moveDirectoryAtomic(backupPath, livePath, journal.liveIdentity)
       } else if (currentLive.identity !== journal.liveIdentity) {
         throw hard('Restored source cache identity changed')
@@ -504,6 +574,17 @@ async function requireChildDirectory(
   description: string,
 ): Promise<StablePhysicalDirectory> {
   const directory = await inspectDirectDirectory(fs, parent, name, description)
+  if (!directory) throw new Error(`${description} is unavailable`)
+  return directory
+}
+
+async function requireSourceCache(
+  fs: IFileSystem,
+  root: SourceCacheRoot,
+  sourceId: string,
+  description: string,
+): Promise<StablePhysicalDirectory> {
+  const directory = await inspectSourceCache(fs, root, sourceId)
   if (!directory) throw new Error(`${description} is unavailable`)
   return directory
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  deriveRepoId,
+  deriveDefaultSourceName,
   normalizeSkillProjectionAssignment,
   sourceIdentity,
   AGENT_IDS,
@@ -121,6 +121,8 @@ export interface SourceNamespaceCollision {
   agent: AgentId
   sourceName: string
   sourceUrl: string
+  /** Colliding managed folder, e.g. `<source-name>` or `<source-name>-<skill>`. */
+  namespace?: string
 }
 
 type ProjectScope = 'skills' | 'mcp' | 'memory' | 'all'
@@ -212,16 +214,22 @@ function sourceNamespaceCollisionFromError(error: unknown): SourceNamespaceColli
     (candidate) => isRecord(candidate) && candidate.code === 'source_namespace_collision',
   )
   if (!isRecord(diagnostic)) return null
-  const { agent, sourceName, sourceUrl } = diagnostic
+  const { agent, sourceName, sourceUrl, namespace } = diagnostic
   if (
     typeof agent !== 'string' ||
     !AGENT_IDS.some((candidate) => candidate === agent) ||
     typeof sourceName !== 'string' ||
-    typeof sourceUrl !== 'string'
+    typeof sourceUrl !== 'string' ||
+    (namespace !== undefined && typeof namespace !== 'string')
   ) {
     return null
   }
-  return { agent: agent as AgentId, sourceName, sourceUrl }
+  return {
+    agent: agent as AgentId,
+    sourceName,
+    sourceUrl,
+    ...(namespace ? { namespace } : {}),
+  }
 }
 
 function sourceRef(source: SkillSource | string): string {
@@ -607,7 +615,7 @@ export function useManifestOperations(
         async () => {
           const created = (await api.addSource({
             repo: repoPath,
-            name: input.name?.trim() || deriveRepoId(input.url),
+            name: input.name?.trim() || deriveDefaultSourceName(input.url),
             url: input.url,
             ref: input.ref,
             ...(input.type ? { type: input.type } : {}),
@@ -1145,6 +1153,9 @@ export function useManifestOperations(
           repo: repoPath,
           sourceUrl: sourceNamespaceCollision.sourceUrl,
           agent: sourceNamespaceCollision.agent,
+          ...(sourceNamespaceCollision.namespace
+            ? { namespace: sourceNamespaceCollision.namespace }
+            : {}),
         }),
       {
         failureMessage: '解决 Skill 目录冲突失败',
