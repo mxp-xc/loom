@@ -405,6 +405,38 @@ describe('source namespace projection', () => {
     expect(await fs.inspectEntry(namespace)).toEqual(replacement)
   })
 
+  it('recognizes a managed source link after the filesystem device identity changes', async () => {
+    await writeFile(join(cacheRoot, 'SKILL.md'), 'skill')
+    const namespace = join(home, '.claude', 'skills', 'workflow-source')
+    const plans = [sourcePlan({ entries: [{ kind: 'bundle', sourcePath: '', targetPath: '' }] })]
+    const run = () =>
+      executeProjection(
+        projectionPlan(plans, 'link'),
+        manifest,
+        { env: {}, activeProfile: {}, defaultProfile: {} },
+        deps(() => cacheRoot),
+        'skills',
+      )
+    expect(await run()).toEqual({ ok: true })
+    const markerPath = join(
+      home,
+      '.claude',
+      '.loom-projection-transactions',
+      'workflow-source.source-link.json',
+    )
+    const marker = JSON.parse(await readFile(markerPath, 'utf8')) as { linkIdentity: string }
+    const [device, inode] = marker.linkIdentity.split(':')
+    expect(device).toBeTruthy()
+    expect(inode).toBeTruthy()
+    await writeFile(
+      markerPath,
+      JSON.stringify({ ...marker, linkIdentity: `${Number(device) + 1}:${inode}` }) + '\n',
+    )
+
+    expect(await run()).toEqual({ ok: true })
+    expect((await new NodeFileSystem().inspectEntry(namespace))?.kind).toBe('link')
+  })
+
   it('renames and removes a shared root link through targeted source reconciliation', async () => {
     await writeFile(join(cacheRoot, 'SKILL.md'), 'skill')
     const fs = new NodeFileSystem()

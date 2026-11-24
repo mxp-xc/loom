@@ -2148,7 +2148,7 @@ export async function inspectManagedSourceNamespace(
   const markerNamespace = actualNamespace ?? sourceName
   const valid =
     (namespaceEntry.kind !== 'link' ||
-      (value.linkIdentity === namespaceEntry.identity &&
+      (sameLinkIdentityAfterDeviceChange(value.linkIdentity, namespaceEntry.identity) &&
         typeof value.linkTarget === 'string' &&
         isAbsolute(value.linkTarget) &&
         (await fs.readLink(namespace)) === value.linkTarget)) &&
@@ -2174,6 +2174,21 @@ export async function inspectManagedSourceNamespace(
     sourceName,
     namespace: actualNamespace,
   }
+}
+
+/**
+ * macOS may report a different device id for the same filesystem after a
+ * remount. Persisted link markers survive restarts, so compare the inode part
+ * when the device changes instead of rejecting Loom's own link as unowned.
+ */
+function sameLinkIdentityAfterDeviceChange(recorded: unknown, current: string): boolean {
+  if (typeof recorded !== 'string' || recorded.length === 0) return false
+  if (recorded === current) return true
+  const recordedParts = recorded.split(':')
+  const currentParts = current.split(':')
+  if (recordedParts.length < 2 || currentParts.length < 2) return false
+  if (recordedParts.slice(0, -1).join(':') === currentParts.slice(0, -1).join(':')) return false
+  return recordedParts.at(-1) === currentParts.at(-1)
 }
 
 async function revalidateManagedSourceNamespace(
