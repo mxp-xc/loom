@@ -441,11 +441,12 @@ describe('MCP workbench view', () => {
     )
 
     render(<Mcp repoPath="/tmp/mcp-view" />)
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: '全部 MCP servers 应用到 Codex：部分已应用',
-      }),
-    )
+    const codexBulk = await screen.findByRole('button', {
+      name: '全部 MCP servers 应用到 Codex：部分已应用',
+    })
+    expect(codexBulk.getAttribute('data-has-count')).toBe('true')
+    expect(codexBulk.textContent).toContain('1/2')
+    fireEvent.click(codexBulk)
 
     await waitFor(() => expect(api.updateMcpAgents).toHaveBeenCalledTimes(1))
     releaseFirst()

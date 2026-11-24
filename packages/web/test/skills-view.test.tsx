@@ -959,6 +959,8 @@ describe('Skills page', () => {
       name: 'openai-skills Codex：部分已选择',
     })
     expect(sourceBulkCodex).toBeDefined()
+    expect(sourceBulkCodex.getAttribute('data-has-count')).toBe('true')
+    expect(sourceBulkCodex.textContent).toContain('1/3')
     fireEvent.click(sourceBulkCodex)
 
     await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
@@ -1033,7 +1035,10 @@ describe('Skills page', () => {
       </TestRouter>,
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Codex：部分已选择' }))
+    const globalChip = await screen.findByRole('button', { name: 'Codex：部分已选择' })
+    expect(globalChip.getAttribute('data-has-count')).toBe('true')
+    expect(globalChip.textContent).toContain('2/3')
+    fireEvent.click(globalChip)
 
     await waitFor(() => expect(api.updateSkillAgentsBatch).toHaveBeenCalledTimes(1))
     expect(api.project).not.toHaveBeenCalled()

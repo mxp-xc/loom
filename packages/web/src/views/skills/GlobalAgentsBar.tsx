@@ -67,6 +67,7 @@ export default function GlobalAgentsBar({ manifest, agents, operations }: Props)
               state={state}
               label={`${agentName[agent]}：${status}`}
               tooltip={tooltip}
+              count={state === 'mixed' ? `${count}/${skills.length}` : undefined}
               disabled={operations.pending.skills.agents}
               onClick={() => void operations.setAllSkillAgents(manifest, agent)}
             />

@@ -619,6 +619,7 @@ export default function SkillSourceList({
                               state={state}
                               label={`${repoId} ${agentName[agent]}：${status}`}
                               tooltip={`${repoId}：${tooltip}`}
+                              count={state === 'mixed' ? `${count}/${total}` : undefined}
                               disabled={disabled}
                               onClick={() => void operations.setSourceSkillAgents(src, agent)}
                             />

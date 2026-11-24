@@ -2235,13 +2235,15 @@ function GlobalAgentsBar({
               const state = count === 0 ? 'off' : count === servers.length ? 'on' : 'mixed'
               const status =
                 state === 'on' ? '全部已应用' : state === 'mixed' ? '部分已应用' : '全部未应用'
+              const countLabel = state === 'mixed' ? ` ${count}/${servers.length}` : ''
               return (
                 <AgentChip
                   key={agent}
                   agent={agent}
                   state={state}
                   label={`全部 MCP servers 应用到 ${agentName[agent]}：${status}`}
-                  tooltip={`${agentName[agent]}：${status}，点击批量切换`}
+                  tooltip={`${agentName[agent]}：${status}${countLabel}，点击批量切换`}
+                  count={state === 'mixed' ? `${count}/${servers.length}` : undefined}
                   onClick={() => void operations.setAllMcpAgents(servers, agent)}
                   disabled={operations.pending.mcp.allAgents(agent)}
                   stopPropagation
