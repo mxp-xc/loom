@@ -11,9 +11,9 @@ import {
   hydrateSourceUpdateCandidate,
   prepareSourceUpdate,
 } from '../../src/remote/update'
-import { deriveRepoId, type SkillSource } from '@loom/core'
+import { deriveRepoId, deriveSourceCacheId, type SkillSource } from '@loom/core'
 import type { SkillMemberSnapshot } from '../../src/skills/reconciliation'
-import { createBareRepo } from '../helpers/git'
+import { createBareRepo, testGit } from '../helpers/git'
 import { createSourceUpdateWorkspace } from '../../src/skills/source-update-workspace.js'
 
 const updateLog = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }))
@@ -191,6 +191,76 @@ describe('prepareSourceUpdate', () => {
     expect(await git.status(workspace.candidateDir)).toEqual({ dirty: false })
     expect(await git.revParseHead(cacheDir)).toBe(liveCommit)
     await rm(repoPath, { recursive: true, force: true })
+  })
+
+  it('rebuilds the candidate from the remote when a shallow partial cache cannot be cloned', async () => {
+    const partialBare = await createBareRepo([
+      {
+        message: 'v1',
+        files: {
+          'skills/alpha/SKILL.md': '---\nname: alpha\n---\nv1\n',
+          'skills/alpha/guide.md': 'guide v1',
+        },
+        tags: ['v1'],
+      },
+      {
+        message: 'v2',
+        files: {
+          'skills/alpha/SKILL.md': '---\nname: alpha\n---\nv2\n',
+          'skills/alpha/guide.md': 'guide v2',
+        },
+        tags: ['v2'],
+      },
+    ])
+    const repoPath = await realpath(await mkdtemp(join(tmpdir(), 'updrepo-partial-cache-')))
+    const git = new NodeGit()
+    const fs = new NodeFileSystem()
+    try {
+      await testGit().raw(['--git-dir', partialBare, 'config', 'uploadpack.allowFilter', 'true'])
+      const sourceUrl = `file://${partialBare}`
+      const cacheDir = join(repoPath, 'remote-cache', ...deriveSourceCacheId(sourceUrl).split('/'))
+      await testGit().raw(['clone', '--filter=blob:none', '--no-checkout', sourceUrl, cacheDir])
+      await git.checkout(cacheDir, 'v1')
+      await git.fetchRef(cacheDir, 'v1', 'tag')
+      const liveCommit = await git.revParseHead(cacheDir)
+      const workspace = await createSourceUpdateWorkspace(fs, repoPath, sourceUrl)
+      const clone = vi.spyOn(git, 'clone')
+
+      const prepared = await prepareSourceUpdate(
+        git,
+        fs,
+        {
+          url: sourceUrl,
+          ref: 'v1',
+          type: 'tag',
+          pinned_commit: liveCommit,
+          members: [{ name: 'alpha', entry: 'skills/alpha/SKILL.md' }],
+        },
+        'v2',
+        workspace,
+        [{ name: 'alpha', entry: 'skills/alpha/SKILL.md', path: 'skills/alpha/SKILL.md' }],
+      )
+
+      expect(clone.mock.calls.map(([url]) => url)).toEqual([cacheDir, sourceUrl])
+      expect(prepared.pinned_commit).toBe(await git.revParse(partialBare, 'v2^{commit}'))
+      await hydrateSourceUpdateCandidate(
+        git,
+        fs,
+        workspace,
+        prepared.pinned_commit,
+        prepared.candidateIdentity,
+      )
+      expect(await git.status(workspace.candidateDir)).toEqual({ dirty: false })
+      expect(await fs.readFile(join(workspace.candidateDir, 'skills', 'alpha', 'guide.md'))).toBe(
+        'guide v2',
+      )
+      expect(await git.revParseHead(cacheDir)).toBe(liveCommit)
+    } finally {
+      await Promise.all([
+        rm(repoPath, { recursive: true, force: true }),
+        rm(partialBare, { recursive: true, force: true }),
+      ])
+    }
   })
 
   it('rejects a dirty hydrated candidate without changing the live cache', async () => {
